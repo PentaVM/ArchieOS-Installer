@@ -34,18 +34,21 @@
 //! [`AuthorizedCall::credential_ref`] carries that name to the transport, which brokers
 //! it at the moment of sending. Nothing in this crate can produce the secret itself.
 //!
+//! * [`transport`] — streamable HTTP, which re-checks the parts of the gate's decision
+//!   that are about where bytes go, and brokers a credential per call.
+//!
 //! # Not yet here
 //!
-//! The transports. `stdio` and streamable HTTP carry these types; neither is
-//! implemented, and this crate deliberately ships no stub that resembles one — a fake
-//! transport that returns plausible results is indistinguishable from a working
-//! integration right up until the demo.
+//! The `stdio` transport. These types carry over it unchanged, and this crate ships no
+//! stub resembling one — a fake transport returning plausible results is
+//! indistinguishable from a working integration right up until the demo.
 
 #![forbid(unsafe_code)]
 
 pub mod gate;
 pub mod manifest;
 pub mod protocol;
+pub mod transport;
 
 pub use gate::{
     Admission, AuthorizedCall, CallReceipt, CallerAuthority, McpGate, Refusal, ToolProposal,
@@ -58,3 +61,4 @@ pub use protocol::{
     ProtocolError, ReadResourceParams, ResourceDescriptor, ResourcesListResult, ToolDescriptor,
     ToolsListResult, PROTOCOL_VERSION,
 };
+pub use transport::{HttpTransport, TransportError};
