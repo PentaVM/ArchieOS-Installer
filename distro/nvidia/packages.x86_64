@@ -1,0 +1,5 @@
+# Optional NVIDIA host profile. Append this file to the ArchISO package list only for
+# hardware known to support the current open kernel modules.
+nvidia-open
+nvidia-utils
+nvidia-container-toolkit
