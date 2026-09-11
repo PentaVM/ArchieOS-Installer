@@ -34,7 +34,9 @@ pub mod time;
 pub use capability::{Capability, CapabilitySet};
 pub use error::{Result, TypeError};
 pub use ids::{AgentId, JobId, LeaseId, ModelId, ModuleId, NodeId, TaskId, TraceId};
-pub use model::{Availability, Locality, ModelDescriptor, PrivacyGrade, ProviderKind, TokenCost};
+pub use model::{
+    Availability, DataRetention, Locality, ModelDescriptor, PrivacyGrade, ProviderKind, TokenCost,
+};
 pub use model_role::{CompatibilityStatus, ModelRole};
 pub use module::{
     DeviceAdapterClass, DeviceAdapterManifest, DeviceAdapterOperation, DeviceAdapterOrigin,

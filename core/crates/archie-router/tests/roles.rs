@@ -12,8 +12,8 @@
 use archie_registry::ModelRegistry;
 use archie_router::{Router, RoutingRequest, Weights};
 use archie_types::{
-    Availability, Capability, Locality, ModelDescriptor, ModelId, ModelRole, PrivacyGrade,
-    ProviderKind, TokenCost,
+    Availability, Capability, DataRetention, Locality, ModelDescriptor, ModelId, ModelRole,
+    PrivacyGrade, ProviderKind, TokenCost,
 };
 use std::collections::BTreeMap;
 
@@ -29,6 +29,7 @@ fn model_for(id: &str, roles: &[ModelRole], quality: u8) -> ModelDescriptor {
         max_output_tokens: 4096,
         capabilities: roles.iter().map(|r| r.capability()).collect(),
         max_privacy_grade: PrivacyGrade::Restricted,
+        retention: DataRetention::Unknown,
         availability: Availability::Ready,
         cost: TokenCost::FREE,
         latency_ema_ms: Some(400),

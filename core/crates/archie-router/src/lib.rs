@@ -574,7 +574,7 @@ impl RemoteHarness {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use archie_types::{Availability, ProviderKind, TokenCost};
+    use archie_types::{Availability, DataRetention, ProviderKind, TokenCost};
 
     fn model(id: &str, provider: ProviderKind, locality: Locality, quality: u8) -> ModelDescriptor {
         ModelDescriptor {
@@ -587,6 +587,7 @@ mod tests {
             max_output_tokens: 2048,
             capabilities: vec![Capability::parse("compute.inference").unwrap()],
             max_privacy_grade: PrivacyGrade::Restricted,
+            retention: DataRetention::Unknown,
             availability: Availability::Ready,
             cost: TokenCost::FREE,
             latency_ema_ms: Some(500),
@@ -613,6 +614,9 @@ mod tests {
             quality,
         );
         m.max_privacy_grade = PrivacyGrade::Internal;
+        // A cloud model cleared for internal work has had its retention checked; an
+        // unverified one is exercised separately, where it is expected to lose.
+        m.retention = DataRetention::ZeroVerified;
         m.context_window = 200_000;
         m.max_output_tokens = 8192;
         m.cost = TokenCost {

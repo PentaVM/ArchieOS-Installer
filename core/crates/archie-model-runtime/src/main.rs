@@ -2,8 +2,8 @@ use archie_model_runtime::{
     ChatMessage, ChatRequest, InferenceClient, MessageRole, ProviderEndpoint,
 };
 use archie_types::{
-    Availability, Capability, Locality, ModelDescriptor, ModelId, PrivacyGrade, ProviderKind,
-    TokenCost,
+    Availability, Capability, DataRetention, Locality, ModelDescriptor, ModelId, PrivacyGrade,
+    ProviderKind, TokenCost,
 };
 use clap::{Parser, ValueEnum};
 use std::collections::BTreeMap;
@@ -64,6 +64,12 @@ struct Args {
     model: Option<String>,
     #[arg(long, value_enum, default_value = "internal")]
     privacy: PrivacyArg,
+    /// Assert that zero data retention has been verified for this account and
+    /// endpoint. Without it a cloud provider may only receive public data, because an
+    /// unverified retention posture is indistinguishable from one that keeps the
+    /// prompt.
+    #[arg(long)]
+    zero_retention_verified: bool,
     #[arg(long)]
     list_models: bool,
     #[arg(long)]
@@ -124,6 +130,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             PrivacyGrade::Internal
         } else {
             PrivacyGrade::Restricted
+        },
+        retention: if args.zero_retention_verified {
+            DataRetention::ZeroVerified
+        } else {
+            DataRetention::Unknown
         },
         availability: Availability::Ready,
         cost: TokenCost::FREE,

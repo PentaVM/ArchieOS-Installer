@@ -389,7 +389,7 @@ impl InferenceClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use archie_types::{Availability, Capability, ModelId, TokenCost};
+    use archie_types::{Availability, Capability, DataRetention, ModelId, TokenCost};
     use std::collections::BTreeMap;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
@@ -428,6 +428,7 @@ mod tests {
             max_output_tokens: 2048,
             capabilities: vec![Capability::known("compute.inference")],
             max_privacy_grade: PrivacyGrade::Restricted,
+            retention: DataRetention::ZeroVerified,
             availability: Availability::Ready,
             cost: TokenCost::FREE,
             latency_ema_ms: None,

@@ -7,8 +7,8 @@ use archie_registry::{
 };
 use archie_state::TrustState;
 use archie_types::{
-    Accelerator, AcceleratorKind, Availability, Capability, CpuInfo, DeviceAdapterClass,
-    DeviceAdapterManifest, DeviceAdapterOperation, DeviceAdapterOrigin,
+    Accelerator, AcceleratorKind, Availability, Capability, CpuInfo, DataRetention,
+    DeviceAdapterClass, DeviceAdapterManifest, DeviceAdapterOperation, DeviceAdapterOrigin,
     DeviceAdapterResourceBudget, HealthCheck, LinkClass, Locality, MemoryInfo, ModelDescriptor,
     ModelId, ModuleId, ModuleManifest, ModulePermission, NetworkInterface, NodeDescriptor,
     NodeHealth, NodeId, NodeLoad, NodeProfile, PrivacyGrade, ProviderKind, Timestamp, TokenCost,
@@ -214,6 +214,7 @@ fn model(id: &str, provider: ProviderKind, locality: Locality) -> ModelDescripto
         max_output_tokens: 2048,
         capabilities: vec![Capability::parse("compute.inference").unwrap()],
         max_privacy_grade: PrivacyGrade::Restricted,
+        retention: DataRetention::Unknown,
         availability: Availability::Ready,
         cost: TokenCost::FREE,
         latency_ema_ms: None,

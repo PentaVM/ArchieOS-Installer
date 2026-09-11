@@ -47,21 +47,40 @@ pub enum PrivacyGrade {
     Sensitive,
     /// Must not leave this machine.
     Restricted,
+    /// Must not reach a model at all — not even one running on this machine.
+    ///
+    /// Every other grade answers *where* inference may happen. This one answers
+    /// *whether*, and the answer is no. Passwords, API keys, private keys and raw
+    /// tokens have no semantic contribution to make to a prompt: a model that has
+    /// been told a password reasons no better for it, and the disclosure cannot be
+    /// withdrawn. Such material is held in the vault and reaches the outbound request
+    /// through a credential broker at the execution boundary, never through context.
+    Secret,
 }
 
 impl PrivacyGrade {
     /// The most permissive locality allowed for data of this grade.
-    pub fn max_permitted_locality(&self) -> Locality {
+    ///
+    /// `None` means no locality is permitted at all: the data may not reach a model
+    /// even locally. Callers must treat `None` as a refusal, not as "unconstrained" —
+    /// which is why this returns an `Option` rather than defaulting to [`Locality::Local`].
+    pub fn max_permitted_locality(&self) -> Option<Locality> {
         match self {
-            Self::Public | Self::Internal => Locality::Cloud,
-            Self::Sensitive => Locality::Fabric,
-            Self::Restricted => Locality::Local,
+            Self::Public | Self::Internal => Some(Locality::Cloud),
+            Self::Sensitive => Some(Locality::Fabric),
+            Self::Restricted => Some(Locality::Local),
+            Self::Secret => None,
         }
     }
 
     /// Whether data of this grade may be sent to `locality`.
     pub fn permits(&self, locality: Locality) -> bool {
-        locality <= self.max_permitted_locality()
+        matches!(self.max_permitted_locality(), Some(max) if locality <= max)
+    }
+
+    /// Whether data of this grade may reach a model anywhere.
+    pub fn reaches_models(&self) -> bool {
+        self.max_permitted_locality().is_some()
     }
 
     pub fn as_str(&self) -> &'static str {
@@ -70,7 +89,53 @@ impl PrivacyGrade {
             Self::Internal => "internal",
             Self::Sensitive => "sensitive",
             Self::Restricted => "restricted",
+            Self::Secret => "secret",
         }
+    }
+}
+
+/// What a provider does with the data a request discloses to it.
+///
+/// # Offered is not verified
+///
+/// A provider advertising zero data retention and *this deployment* having confirmed
+/// it are different facts, and only the second one is a safety property. Configuring
+/// an endpoint does not establish it; an operator (or a provisioning step that checked
+/// the account's actual setting) does. So the default is [`DataRetention::Unknown`],
+/// and unknown is treated exactly like [`DataRetention::Retains`] — the failure mode of
+/// guessing wrong here is an unrecallable disclosure.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum DataRetention {
+    /// Nothing has been established. Treated as [`DataRetention::Retains`].
+    #[default]
+    Unknown,
+    /// The provider keeps request data — for training, abuse monitoring, or logs.
+    Retains,
+    /// Zero retention, verified for this deployment rather than read off a brochure.
+    ZeroVerified,
+}
+
+impl DataRetention {
+    /// Whether a third party holding this posture may receive non-public data.
+    pub fn admits_private_disclosure(&self) -> bool {
+        matches!(self, Self::ZeroVerified)
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Retains => "retains",
+            Self::ZeroVerified => "zero-verified",
+        }
+    }
+}
+
+impl fmt::Display for DataRetention {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 
@@ -208,6 +273,11 @@ pub struct ModelDescriptor {
     pub capabilities: Vec<Capability>,
     /// The most sensitive grade of data permitted to reach this model.
     pub max_privacy_grade: PrivacyGrade,
+    /// What the serving party does with request data. Only consulted for providers
+    /// that disclose to a third party; local and fabric inference never leaves the
+    /// operator's control, so retention there is the operator's own business.
+    #[serde(default)]
+    pub retention: DataRetention,
 
     pub availability: Availability,
     pub cost: TokenCost,
@@ -225,11 +295,29 @@ pub struct ModelDescriptor {
 impl ModelDescriptor {
     /// Whether this model may legally receive data of `grade`.
     ///
-    /// Two independent gates: the model's own clearance, and the physical locality.
-    /// Both must pass — a "restricted-cleared" model that happens to run in the cloud
-    /// is still disqualified for restricted data.
+    /// Three independent gates: the model's own clearance, the physical locality, and
+    /// — for third parties only — verified retention. All must pass. A
+    /// "restricted-cleared" model that happens to run in the cloud is still
+    /// disqualified for restricted data, and a cloud model of unknown retention is
+    /// disqualified for anything that is not already public.
+    ///
+    /// [`PrivacyGrade::Secret`] fails the locality gate for every model everywhere,
+    /// which is the property the whole grade exists for.
     pub fn permits_privacy(&self, grade: PrivacyGrade) -> bool {
-        grade <= self.max_privacy_grade && grade.permits(self.locality)
+        grade <= self.max_privacy_grade
+            && grade.permits(self.locality)
+            && self.retention_admits(grade)
+    }
+
+    /// Whether this model's retention posture admits data of `grade`.
+    ///
+    /// Local and fabric inference stays inside the operator's control, so retention is
+    /// not consulted. For a third party, anything above [`PrivacyGrade::Public`]
+    /// requires [`DataRetention::ZeroVerified`].
+    pub fn retention_admits(&self, grade: PrivacyGrade) -> bool {
+        grade == PrivacyGrade::Public
+            || !self.locality.discloses_to_third_party()
+            || self.retention.admits_private_disclosure()
     }
 
     pub fn provides(&self, required: &Capability) -> bool {
@@ -269,6 +357,7 @@ mod tests {
             max_output_tokens: 2048,
             capabilities: vec![Capability::known("compute.inference")],
             max_privacy_grade: PrivacyGrade::Restricted,
+            retention: DataRetention::Unknown,
             availability: Availability::Ready,
             cost: TokenCost::FREE,
             latency_ema_ms: None,
@@ -303,7 +392,12 @@ mod tests {
     fn cloud_model_is_disqualified_for_restricted_data_despite_clearance() {
         // The model claims it may hold restricted data, but it lives in the cloud.
         // Locality must veto the clearance, not the other way round.
-        let m = model("cloud.gpt", ProviderKind::OpenAi, Locality::Cloud);
+        //
+        // Retention is verified here so that this test keeps failing for the reason it
+        // was written for: with an unverified provider the internal case below would
+        // pass for the wrong reason, and the locality veto would go unexercised.
+        let mut m = model("cloud.gpt", ProviderKind::OpenAi, Locality::Cloud);
+        m.retention = DataRetention::ZeroVerified;
         assert_eq!(m.max_privacy_grade, PrivacyGrade::Restricted);
         assert!(!m.permits_privacy(PrivacyGrade::Restricted));
         assert!(!m.permits_privacy(PrivacyGrade::Sensitive));
@@ -351,6 +445,80 @@ mod tests {
         assert!(TokenCost::FREE.is_free());
         // Absurd inputs must not panic on overflow.
         let _ = cost.estimate_micros(u64::MAX, u64::MAX);
+    }
+
+    #[test]
+    fn secret_data_reaches_no_model_anywhere() {
+        // The other grades answer "where". This one answers "whether", and no
+        // locality — not even this machine — is an answer to it.
+        assert!(!PrivacyGrade::Secret.reaches_models());
+        for locality in [Locality::Local, Locality::Fabric, Locality::Cloud] {
+            assert!(!PrivacyGrade::Secret.permits(locality));
+        }
+        // Including against a model that declares itself cleared for secrets, which is
+        // the case a single-gate implementation would wave through.
+        let mut m = model("local.qwen3", ProviderKind::LlamaCpp, Locality::Local);
+        m.max_privacy_grade = PrivacyGrade::Secret;
+        assert!(!m.permits_privacy(PrivacyGrade::Secret));
+    }
+
+    #[test]
+    fn every_other_grade_still_reaches_a_model_somewhere() {
+        // Guards against the Secret arm being written in a way that swallows its
+        // neighbours — a refusal that refuses everything is not a privacy control.
+        for grade in [
+            PrivacyGrade::Public,
+            PrivacyGrade::Internal,
+            PrivacyGrade::Sensitive,
+            PrivacyGrade::Restricted,
+        ] {
+            assert!(grade.reaches_models(), "{grade} must remain servable");
+            assert!(grade.permits(Locality::Local));
+        }
+    }
+
+    #[test]
+    fn unverified_cloud_retention_blocks_private_data_but_not_public() {
+        let mut cloud = model("cloud.big", ProviderKind::OpenAi, Locality::Cloud);
+        cloud.max_privacy_grade = PrivacyGrade::Internal;
+
+        for retention in [DataRetention::Unknown, DataRetention::Retains] {
+            cloud.retention = retention;
+            assert!(
+                !cloud.permits_privacy(PrivacyGrade::Internal),
+                "{retention} must not receive internal data"
+            );
+            // Public data is public: retention is irrelevant to it.
+            assert!(cloud.permits_privacy(PrivacyGrade::Public));
+        }
+
+        cloud.retention = DataRetention::ZeroVerified;
+        assert!(cloud.permits_privacy(PrivacyGrade::Internal));
+    }
+
+    #[test]
+    fn retention_is_not_consulted_for_inference_the_operator_already_controls() {
+        // Retention describes what a *third party* does. A local model of "unknown"
+        // retention is not a disclosure at all, and treating it as one would push work
+        // to the cloud in the name of privacy.
+        for locality in [Locality::Local, Locality::Fabric] {
+            let mut m = model("m", ProviderKind::Vllm, locality);
+            m.retention = DataRetention::Unknown;
+            assert!(m.permits_privacy(PrivacyGrade::Sensitive));
+        }
+    }
+
+    #[test]
+    fn retention_defaults_to_unknown_when_a_manifest_omits_it() {
+        // An older manifest that predates this field must not be read as a zero
+        // retention claim nobody made.
+        let mut m = model("cloud.big", ProviderKind::OpenAi, Locality::Cloud);
+        m.retention = DataRetention::ZeroVerified;
+        let mut json: serde_json::Value = serde_json::to_value(&m).unwrap();
+        json.as_object_mut().unwrap().remove("retention");
+        let parsed: ModelDescriptor = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.retention, DataRetention::Unknown);
+        assert!(!parsed.permits_privacy(PrivacyGrade::Internal));
     }
 
     #[test]
