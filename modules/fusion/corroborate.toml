@@ -1,0 +1,23 @@
+# Turning observations into events.
+#
+# Clusters observations in time and space, counts INDEPENDENT sources, and records where
+# sources disagree instead of averaging them. An event may not claim `corroborated` state
+# with fewer than two independent sources — the schema enforces it, and this module is
+# what supplies the count.
+id = "fusion.corroborate"
+version = "0.1.0"
+description = "Temporal-spatial clustering, independent-source counting, and disagreement recording"
+priority = 310
+
+required_capabilities = ["fusion.corroboration", "compute.cpu"]
+dependencies = ["fusion.normalize", "core.memory"]
+permissions = ["read-knowledge", "write-knowledge"]
+
+[worker]
+kind = "python"
+module = "workers.fusion.corroborate"
+entrypoint = "main"
+
+[health_check]
+kind = "heartbeat"
+interval_seconds = 60

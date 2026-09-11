@@ -1,0 +1,20 @@
+# Generates candidate hypotheses from the knowledge frontier.
+#
+# Output is always flagged ARCHIE_HYPOTHESIS and never enters the canonical record
+# without passing the verifier.
+id = "cognition.hypothesis-generator"
+version = "0.1.0"
+description = "Hypothesis generation from the knowledge frontier"
+priority = 140
+
+required_capabilities = ["compute.inference"]
+dependencies = ["core.memory", "cognition.critic"]
+permissions = ["read-knowledge"]
+
+[worker]
+kind = "python"
+module = "workers.hypothesis"
+entrypoint = "main"
+
+[health_check]
+kind = "none"

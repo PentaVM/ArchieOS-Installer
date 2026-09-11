@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://archie.os/protocols/claim.schema.json",
+  "title": "Claim",
+  "description": "Something Archie believes, with the evidence and the qualifications attached.\n\nArchie's source of truth is this store, not a model's weights, and that only works if the store is honest about how well established each thing is. Two orthogonal axes do that work, and collapsing them into one confidence number is the mistake this schema exists to prevent:\n\n`stage` records how far verification has come, and only ever moves forward one step at a time. `flags` record qualifications that can attach at any stage — a canonical claim can be an approximation, a reproduced claim can be domain-limited. Those are not alternatives to being well established, so they cannot live on the same axis.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "statement", "stage", "created_at", "provenance"],
+
+  "properties": {
+    "id": { "type": "string", "maxLength": 256 },
+
+    "statement": {
+      "type": "string",
+      "maxLength": 8000,
+      "description": "The assertion in plain language. If a model wrote it, provenance.transformations records the step and names the model."
+    },
+
+    "stage": {
+      "enum": [
+        "ingested",
+        "parsed",
+        "source_asserted",
+        "internally_consistent",
+        "cross_source_supported",
+        "independently_reproduced",
+        "formally_verified",
+        "empirically_reproduced",
+        "canonical"
+      ],
+      "description": "Ordered weakest to strongest. Each stage requires evidence the previous one did not have, so a claim advances one step at a time; jumping stages means that evidence was never gathered. `cross_source_supported` additionally requires at least two independent sources."
+    },
+
+    "flags": {
+      "type": "array",
+      "uniqueItems": true,
+      "description": "Qualifications orthogonal to the stage. `retracted` and `disputed` make a claim unusable without a human looking, whatever stage it reached.",
+      "items": {
+        "enum": [
+          "disputed",
+          "superseded",
+          "retracted",
+          "conjectural",
+          "approximation",
+          "domain_limited",
+          "user_override",
+          "archie_hypothesis"
+        ]
+      }
+    },
+
+    "evidence_refs": {
+      "type": "array",
+      "description": "Observations, events, simulation runs and sources supporting this claim.",
+      "items": { "type": "string", "maxLength": 256 }
+    },
+
+    "independent_sources": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Distinct primary sources behind the claim, after republication is collapsed. Tracked separately from the evidence count for the same reason events track it separately: twelve republications of one wire story are one source."
+    },
+
+    "domain": {
+      "type": "object",
+      "description": "Where the claim holds. Required in spirit whenever `domain_limited` is flagged — a bound nobody wrote down is a bound nobody can respect.",
+      "additionalProperties": false,
+      "properties": {
+        "description": { "type": "string", "maxLength": 2000 },
+        "bounds": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["unit"],
+            "properties": {
+              "minimum": { "type": "number" },
+              "maximum": { "type": "number" },
+              "unit": { "type": "string", "maxLength": 32 }
+            }
+          }
+        }
+      }
+    },
+
+    "uncertainty": {
+      "type": "object",
+      "description": "The error bound, where one exists. Present instead of a confidence percentage: a stated tolerance is checkable and a percentage is not.",
+      "additionalProperties": false,
+      "properties": {
+        "value": { "type": "number", "minimum": 0 },
+        "unit": { "type": "string", "maxLength": 32 },
+        "kind": { "enum": ["absolute", "relative", "standard_deviation", "interval"] }
+      }
+    },
+
+    "superseded_by": {
+      "type": "string",
+      "maxLength": 256,
+      "description": "The claim that replaced this one. The original is retained: a correction is only legible next to what it corrected."
+    },
+
+    "contradicts": {
+      "type": "array",
+      "description": "Claims this one is inconsistent with. Recorded on both sides rather than resolved automatically — a contradiction between two well-evidenced claims is a research finding, not a data-quality problem.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["claim_id"],
+        "properties": {
+          "claim_id": { "type": "string", "maxLength": 256 },
+          "note": { "type": "string", "maxLength": 2000 },
+          "detected_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" },
+
+    "provenance": { "$ref": "https://archie.os/protocols/provenance.schema.json" }
+  },
+
+  "allOf": [
+    {
+      "$comment": "The stage named for cross-source support must actually have it, or the stage is a label somebody applied rather than a fact about the evidence.",
+      "if": {
+        "properties": {
+          "stage": {
+            "enum": [
+              "cross_source_supported",
+              "independently_reproduced",
+              "formally_verified",
+              "empirically_reproduced",
+              "canonical"
+            ]
+          }
+        },
+        "required": ["stage"]
+      },
+      "then": {
+        "properties": { "independent_sources": { "minimum": 2 } },
+        "required": ["independent_sources"]
+      }
+    },
+    {
+      "$comment": "A superseded claim must say what replaced it, or the reader is left with a dead end.",
+      "if": {
+        "properties": { "flags": { "contains": { "const": "superseded" } } },
+        "required": ["flags"]
+      },
+      "then": { "required": ["superseded_by"] }
+    }
+  ],
+
+  "$defs": {
+    "userOverride": {
+      "title": "User override",
+      "description": "An operator asserting something the record contradicts, within a scope.\n\nAn override is an OVERLAY, never an edit. Inside its scope the effective premise is what the operator asserted; the canonical claim is unchanged and remains citable against the override. That distinction is what keeps a working assumption from quietly becoming the truth:\n\n    canonical         X\n    project override  assume not-X\n    effective         not-X   (in that project only)\n    canonical record  X       (unchanged, still verifiable)\n\nWhere scopes overlap, the narrowest wins — the person who set it was closest to the problem.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim_id", "scope", "asserts", "authority", "created_at"],
+      "properties": {
+        "claim_id": { "type": "string", "maxLength": 256 },
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": { "enum": ["project", "session", "global"] },
+            "project_id": { "type": "string", "maxLength": 256 },
+            "session_id": { "type": "string", "maxLength": 256 }
+          }
+        },
+        "asserts": {
+          "type": "string",
+          "maxLength": 8000,
+          "description": "What to assume instead, inside the scope."
+        },
+        "authority": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "Who decided. An override with no author cannot be reviewed later."
+        },
+        "rationale": {
+          "type": "string",
+          "maxLength": 4000,
+          "description": "Why. Usually the only thing that makes the override intelligible six months on, and mandatory for a global one."
+        },
+        "created_at": { "type": "string", "format": "date-time" },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Optional. A working assumption that outlives its project is a trap."
+        }
+      },
+      "allOf": [
+        {
+          "$comment": "Changing what Archie assumes everywhere needs a stated reason.",
+          "if": {
+            "properties": { "scope": { "properties": { "kind": { "const": "global" } }, "required": ["kind"] } },
+            "required": ["scope"]
+          },
+          "then": { "required": ["rationale"] }
+        }
+      ]
+    }
+  }
+}

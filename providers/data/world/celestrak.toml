@@ -1,0 +1,30 @@
+id = "celestrak.elements"
+title = "CelesTrak orbital element sets"
+description = "Two-line element sets for tracked objects; the standard public source for orbit propagation and pass prediction."
+homepage = "https://celestrak.org/"
+capability = "world.orbital"
+records = ["entity", "observation"]
+
+[access]
+transport = "https"
+authentication = "none"
+access_class = "attribution-required"
+attribution = "CelesTrak"
+
+[cadence]
+poll_seconds = 21600
+min_poll_seconds = 3600
+
+[cadence.backoff]
+strategy = "exponential"
+initial_seconds = 300
+max_seconds = 7200
+jitter = true
+
+[coverage]
+geographic = "global"
+latency_seconds = 43200
+known_gaps = [
+  "TLE accuracy degrades with age; propagation error grows to kilometres within days of epoch.",
+  "Classified and unregistered objects are absent by construction.",
+]

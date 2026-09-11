@@ -1,0 +1,26 @@
+[Unit]
+Description=ArchieOS graphical installation wizard (live USB only)
+After=systemd-user-sessions.service systemd-logind.service
+Wants=systemd-logind.service
+ConditionPathExists=/run/archiso
+ConditionPathExists=/dev/dri/card0
+ConditionKernelCommandLine=archie.install=1
+Conflicts=getty@tty2.service
+
+[Service]
+Type=simple
+User=root
+PAMName=login
+TTYPath=/dev/tty2
+StandardInput=tty-force
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+ExecStart=/usr/bin/archie-wizard-session
+Restart=no
+UMask=0077
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=graphical.target

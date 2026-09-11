@@ -1,0 +1,17 @@
+# Structured physics knowledge: equations, dimensional analysis, limiting cases.
+id = "science.physics"
+version = "0.1.0"
+description = "Equation graph, dimensional analysis, symbolic manipulation, limiting cases"
+priority = 200
+
+required_capabilities = ["compute.cpu", "storage.knowledge"]
+dependencies = ["core.memory"]
+permissions = ["read-knowledge", "write-knowledge"]
+
+[worker]
+kind = "python"
+module = "workers.physics"
+entrypoint = "main"
+
+[health_check]
+kind = "none"

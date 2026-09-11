@@ -1,0 +1,51 @@
+[Unit]
+Description=ARCHIE Analytical Cortex deterministic context compiler
+Documentation=file:/usr/share/doc/archie-os/RFC-009-ANALYTICAL-CORTEX.md
+Requires=archie-cortex.socket
+After=archie-cortex.socket
+
+[Service]
+Type=simple
+User=archie-cortex
+Group=archie-cortex
+ExecStart=/usr/bin/archie-cortexd --graph-snapshot /var/lib/archie/knowledge/graph/current.acg
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=10s
+KillSignal=SIGTERM
+UMask=0077
+Nice=10
+CPUQuota=30%
+MemoryMax=384M
+TasksMax=32
+LimitNOFILE=256
+OOMScoreAdjust=250
+
+# The socket is the only ingress. It is systemd-owned and the daemon verifies the
+# peer's UID is the dedicated archied account before parsing any request.
+Sockets=archie-cortex.socket
+PrivateNetwork=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX
+ReadOnlyPaths=/etc/archie/cortex /var/lib/archie/knowledge
+ReadWritePaths=/var/lib/archie/cortex /var/cache/archie/cortex
+
+[Install]
+Also=archie-cortex.socket

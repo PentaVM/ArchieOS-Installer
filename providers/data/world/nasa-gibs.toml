@@ -1,0 +1,32 @@
+# A composite, not a live feed. VIIRS Black Marble is NASA's "best available cloud-free
+# pixel" product over its own compositing window, so a single tile does not carry a
+# single capture time the way an earthquake or an aircraft position does — which is why
+# this manifest names no latency_seconds rather than inventing one.
+id = "nasa.gibs.blackmarble"
+title = "NASA GIBS VIIRS Black Marble night lights"
+description = "Global night-lights composite imagery, served as WMTS tiles with no account required."
+homepage = "https://nasa-gibs.github.io/gibs-api-docs/"
+capability = "world.imagery"
+records = ["observation"]
+
+[access]
+transport = "https"
+authentication = "none"
+access_class = "public"
+
+[cadence]
+poll_seconds = 86400
+min_poll_seconds = 86400
+
+[cadence.backoff]
+strategy = "exponential"
+initial_seconds = 300
+max_seconds = 21600
+jitter = true
+
+[coverage]
+geographic = "global"
+known_gaps = [
+  "This is a periodic composite over NASA's own compositing window, not a live capture; the age of the pixel under any given tile is not disclosed per-tile.",
+  "Moonlight, cloud cover and sensor saturation from active fires or gas flares all distort the signal. A dark pixel is not evidence of no activity, and a bright one is not always a settlement.",
+]

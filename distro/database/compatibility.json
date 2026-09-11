@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "reviewed_at": "2026-09-06",
+  "postgres_major": 18,
+  "timescaledb_version": "2.29.2",
+  "pgvector_version": "0.8.6",
+  "deployment_status": "UNVERIFIED",
+  "local_validation": {
+    "status": "PASS",
+    "postgres_version": "18.4",
+    "scope": "Isolated Windows cluster: Timescale hypertable aggregation, pgvector nearest-neighbor/dimension checks and positive/negative preflight. Core cutover and remote deployment remain unverified."
+  },
+  "sources": {
+    "timescaledb": "https://github.com/timescale/timescaledb/blob/2.29.2/CMakeLists.txt",
+    "timescaledb_release": "https://github.com/timescale/timescaledb/releases/tag/2.29.2",
+    "pgvector": "https://github.com/pgvector/pgvector/tree/v0.8.6"
+  },
+  "scope": "Reviewed combination exercised in an isolated local cluster; no live-state migration, production benchmark or failover certification is implied."
+}

@@ -1,0 +1,75 @@
+[Unit]
+Description=ARCHIE Artificial Reasoning, Control and Hierarchical Intelligence Engine
+Documentation=file:/usr/share/doc/archie-os/README.md
+Wants=network-online.target
+Requires=archie-database.service
+After=network-online.target archie-database.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+# Type=notify, not simple. Under simple, systemd considers the daemon started the instant
+# it is exec'd — before identity, state, fabric or topology exist — so everything ordered
+# After=archied.service raced it. archied now sends READY=1 at the exact moment the boot
+# report reaches ARCHIE READY and the control endpoint is bound.
+Type=notify
+NotifyAccess=main
+# Boot does real work: probing hardware, opening the state store, resolving the topology.
+# Generous enough for a slow disk, short enough that a genuinely stuck boot is caught.
+TimeoutStartSec=120
+
+# The daemon pets this from the same loop that serves the fabric and the control
+# endpoint, so a wedged main loop stops petting and gets restarted. A dedicated timer
+# thread would keep petting while the daemon was useless, which is the failure a
+# watchdog exists to catch.
+WatchdogSec=60
+
+User=archie
+Group=archie
+ExecStart=/usr/bin/archied
+Restart=on-failure
+RestartSec=2s
+RestartPreventExitStatus=78
+TimeoutStopSec=10s
+KillSignal=SIGTERM
+
+RuntimeDirectory=archie
+RuntimeDirectoryMode=0750
+StateDirectory=archie
+StateDirectoryMode=0750
+LogsDirectory=archie
+LogsDirectoryMode=0750
+ConfigurationDirectory=archie
+UMask=0007
+
+Environment=RUST_LOG=info
+StandardOutput=journal+console
+StandardError=journal+console
+SyslogIdentifier=archied
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+TasksMax=256
+LimitNOFILE=8192
+OOMScoreAdjust=-250
+
+[Install]
+WantedBy=multi-user.target

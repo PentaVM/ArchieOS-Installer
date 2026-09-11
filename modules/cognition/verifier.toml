@@ -1,0 +1,22 @@
+# Numerical, symbolic, formal and reproduction checks.
+#
+# The verifier is what moves a claim along the lifecycle. It may not author claims, only
+# test them.
+id = "cognition.verifier"
+version = "0.1.0"
+description = "Numerical, symbolic, formal and reproduction verification of claims"
+priority = 130
+
+required_capabilities = ["compute.cpu"]
+optional_capabilities = ["compute.inference"]
+dependencies = ["core.memory"]
+permissions = ["read-knowledge", "write-knowledge"]
+
+[worker]
+kind = "python"
+module = "workers.verifier"
+entrypoint = "main"
+
+[health_check]
+kind = "heartbeat"
+interval_seconds = 60

@@ -1,0 +1,5 @@
+enable archied.service
+enable archie-worldd.service
+enable archie-displayd.service
+enable archie-display.service
+enable archie-executord.service

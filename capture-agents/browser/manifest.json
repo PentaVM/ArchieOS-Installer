@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Archie Capture",
+  "version": "0.1.0",
+  "description": "Records the owner's own web activity — searches and navigation — and sends it only to their node.",
+  "permissions": ["webNavigation", "storage", "alarms"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Archie Capture"
+  }
+}

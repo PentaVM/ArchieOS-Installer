@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { font: 13px system-ui, sans-serif; width: 280px; padding: 12px; }
+      input { width: 100%; margin: 4px 0 10px; padding: 6px; box-sizing: border-box; }
+      button { padding: 6px 10px; }
+      p { color: #444; }
+    </style>
+  </head>
+  <body>
+    <p>
+      Records your own web activity — searches and navigation — and sends it only to your
+      node. No page content, no form fields, no passwords.
+    </p>
+    <label>Your node's capture URL</label>
+    <input id="url" placeholder="https://your-node.local:port/capture" />
+    <label>Pairing token</label>
+    <input id="token" placeholder="token from the node" />
+    <button id="save">Pair this browser</button>
+    <p id="status"></p>
+    <script src="popup.js"></script>
+  </body>
+</html>

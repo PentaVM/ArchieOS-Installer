@@ -1,0 +1,27 @@
+# Safe live/default ArchieOS node configuration.
+# The installer or operator chooses a durable role explicitly after installation.
+
+[node]
+profile = "dev-vm"
+extra_capabilities = []
+
+[fabric]
+transport = "udp"
+bind = "0.0.0.0:7654"
+seeds = []
+multicast_group = "239.255.42.1"
+announce_interval_ms = 5000
+peer_timeout_ms = 20000
+peer_forget_ms = 3600000
+
+[scheduler]
+slots_per_node = 4
+reserved_active_slots = 1
+
+[policy]
+safety_boundary_present = false
+max_lease_lifetime_ms = 3600000
+
+[modules]
+disabled = []
+grant_permissions = []

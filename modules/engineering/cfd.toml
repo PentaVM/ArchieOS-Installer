@@ -1,0 +1,23 @@
+# Field solves: CFD, thermal, combustion, turbomachinery.
+#
+# Runs a real solver and records what it would take to distrust the result — mesh
+# statistics, y+, solver version, a configuration digest, and the drift of the monitored
+# quantity over the final iterations. Residuals can fall while the answer still moves.
+id = "engineering.cfd"
+version = "0.1.0"
+description = "OpenFOAM/SU2 field solves with full reproducibility and convergence provenance"
+priority = 500
+
+required_capabilities = ["simulation.cfd", "compute.cpu"]
+optional_capabilities = ["simulation.thermal", "simulation.combustion", "simulation.turbomachinery", "compute.cuda"]
+dependencies = ["core.nova"]
+permissions = ["read-knowledge", "write-knowledge", "spawn-workers"]
+
+[worker]
+kind = "python"
+module = "workers.engineering.cfd"
+entrypoint = "main"
+
+[health_check]
+kind = "heartbeat"
+interval_seconds = 120

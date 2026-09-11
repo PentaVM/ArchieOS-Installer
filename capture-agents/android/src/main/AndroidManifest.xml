@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Archie capture agent.
+
+  It requests exactly two capabilities beyond the notification listener: internet, to reach
+  the owner's node, and biometric, to confirm the owner is present. It asks for no contacts,
+  no SMS read permission, no storage — the notification stream is the source, and a narrower
+  set of permissions is a narrower thing to trust.
+
+  The NotificationListenerService is bound by the system only after the owner grants it in
+  Settings > Notifications > Notification access. That grant is the owner's explicit,
+  revocable consent to the whole agent, in the OS's own words.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="os.archie.capture">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <!-- Foreground service so the listener survives the system trimming background apps;
+         the owner sees a persistent notification that capture is running, which is honest:
+         they always know it is on. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
+    <application
+        android:label="Archie Capture"
+        android:allowBackup="false">
+
+        <service
+            android:name=".NotificationCaptureService"
+            android:label="Archie Capture"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <activity
+            android:name=".PairingActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

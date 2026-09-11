@@ -1,0 +1,26 @@
+# Publicly observable hosts and internet background noise.
+#
+# Reads Shodan, Censys and GreyNoise observations of the public internet. The records are
+# rendered with provenance and aggregation, never as a target list — and the capability
+# family is one of only two that require an explicit human grant, because pulling these
+# under the operator's own terms of service is their decision to make.
+#
+# This module performs no scanning of its own, and there is no capability in the taxonomy
+# that would let it.
+id = "cyber.exposure"
+version = "0.1.0"
+description = "Third-party observations of publicly reachable hosts and scanner background noise"
+priority = 450
+
+required_capabilities = ["cyber.exposure", "network.internet"]
+dependencies = ["core.sentry"]
+permissions = ["read-knowledge", "write-knowledge", "network-internet", "read-secrets"]
+
+[worker]
+kind = "python"
+module = "workers.cyber.exposure"
+entrypoint = "main"
+
+[health_check]
+kind = "heartbeat"
+interval_seconds = 900

@@ -1,0 +1,11 @@
+# The observatory session account.
+#
+# Separate from `archie` on purpose: the native GPU client must not read the node's
+# private key or open the control socket. It reaches Archie only through
+# archie-displayd's bounded read-only loopback projection.
+#
+# Type Name           ID GECOS                        Home            Shell
+u archie-display      -  "ArchieOS observatory"       /var/lib/archie-display /usr/bin/nologin
+m archie-display video
+m archie-display render
+m archie-display input

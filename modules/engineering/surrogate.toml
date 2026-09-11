@@ -1,0 +1,26 @@
+# Surrogate-accelerated design search.
+#
+# A trained surrogate proposes and a real solver confirms. That loop is only honest if a
+# cheap prediction can never be mistaken for a solved field, so every surrogate run
+# records its model version, what it was calibrated against, and whether the operating
+# point was inside the training domain. Extrapolation is where surrogates fail silently.
+#
+# A surrogate result may inform a design. It may never satisfy a safety review.
+id = "engineering.surrogate"
+version = "0.1.0"
+description = "Neural surrogate evaluation and multi-objective optimization over a design space"
+priority = 510
+
+required_capabilities = ["simulation.surrogate", "compute.cpu"]
+optional_capabilities = ["simulation.optimization", "compute.cuda"]
+dependencies = ["engineering.cfd"]
+permissions = ["read-knowledge", "write-knowledge", "spawn-workers"]
+
+[worker]
+kind = "python"
+module = "workers.engineering.surrogate"
+entrypoint = "main"
+
+[health_check]
+kind = "heartbeat"
+interval_seconds = 120

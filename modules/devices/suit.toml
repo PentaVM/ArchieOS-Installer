@@ -1,0 +1,22 @@
+# Suit integration.
+#
+# Declares device-actuate, which requires an explicit human grant AND a verified safety
+# boundary. On any node lacking either, this module is refused — by design, and visibly.
+id = "devices.suit"
+version = "0.1.0"
+description = "Exosuit telemetry and validated motion command bridge"
+priority = 300
+
+required_capabilities = ["bus.can", "sensor.imu"]
+dependencies = ["core.sentry"]
+permissions = ["read-telemetry", "device-communicate", "device-actuate"]
+profiles = ["edge-gateway", "workstation"]
+
+[worker]
+kind = "python"
+module = "workers.suit"
+entrypoint = "main"
+
+[health_check]
+kind = "heartbeat"
+interval_seconds = 1

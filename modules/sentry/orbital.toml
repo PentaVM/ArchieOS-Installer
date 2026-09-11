@@ -1,0 +1,19 @@
+# TLE propagation, pass prediction, and space weather.
+id = "sentry.orbital"
+version = "0.1.0"
+description = "Satellite element sets, pass prediction, and space weather indices"
+priority = 410
+
+required_capabilities = ["world.orbital", "network.internet"]
+optional_capabilities = ["world.spaceweather"]
+dependencies = ["core.sentry"]
+permissions = ["read-knowledge", "write-knowledge", "network-internet"]
+
+[worker]
+kind = "python"
+module = "workers.sentry.orbital"
+entrypoint = "main"
+
+[health_check]
+kind = "heartbeat"
+interval_seconds = 300

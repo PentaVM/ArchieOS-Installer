@@ -1,0 +1,20 @@
+# Backend-agnostic parametric CAD generation.
+#
+# Requires cad.parametric, which a node advertises only when a CAD backend is actually
+# installed. On a node without one this module stays installed and unloaded, and says so.
+id = "engineering.cad"
+version = "0.1.0"
+description = "Parametric CAD generation and iteration"
+priority = 210
+
+required_capabilities = ["cad.parametric"]
+dependencies = ["core.nova"]
+permissions = ["read-knowledge", "spawn-workers"]
+
+[worker]
+kind = "python"
+module = "workers.cad"
+entrypoint = "main"
+
+[health_check]
+kind = "none"

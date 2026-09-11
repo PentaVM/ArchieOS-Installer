@@ -1,0 +1,25 @@
+[package]
+name = "archie-executord"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "ArchieOS task execution supervisor"
+
+[[bin]]
+name = "archie-executord"
+path = "src/main.rs"
+
+[lib]
+name = "archie_executord"
+path = "src/lib.rs"
+
+[dependencies]
+archie-execution.workspace = true
+archie-observability.workspace = true
+archie-task-runner.workspace = true
+archie-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing-subscriber.workspace = true
+tracing.workspace = true

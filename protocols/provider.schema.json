@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://archie.os/protocols/provider.schema.json",
+  "title": "Provider manifest",
+  "description": "A declarative description of one upstream data source. Providers are declared, never hard-coded: adding a feed is writing one of these, and a provider that cannot be described here is a provider Archie will not fetch.\n\nThe manifest carries no credentials. It names the secret it needs; the secret itself lives in the node's secret store and never reaches the manifest, the renderer, or a log line.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "title", "capability", "access", "cadence", "records"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*(\\.[a-z][a-z0-9_-]*)*$",
+      "maxLength": 128,
+      "description": "Stable identifier, e.g. `usgs.earthquakes`. Referenced by every record this provider produces."
+    },
+    "title": { "type": "string", "maxLength": 256 },
+    "description": { "type": "string", "maxLength": 2000 },
+    "homepage": { "type": "string", "maxLength": 4096 },
+
+    "capability": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*(\\.[a-z][a-z0-9_-]*)+$",
+      "description": "The Archie capability this provider satisfies, e.g. `world.seismic`. A node without that capability will not load the provider, which is how an operator turns whole domains on and off."
+    },
+
+    "access": {
+      "type": "object",
+      "description": "How the provider is reached and under what terms.",
+      "additionalProperties": false,
+      "required": ["transport", "authentication", "access_class"],
+      "properties": {
+        "transport": { "enum": ["https", "websocket", "mqtt", "file", "s3"] },
+        "authentication": {
+          "enum": ["none", "api_key", "oauth2", "basic", "client_certificate"],
+          "description": "`none` is the preferred case and covers most authoritative government feeds."
+        },
+        "secret_handle": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "maxLength": 128,
+          "description": "NAME of the secret required, never the secret. Resolved at fetch time from the node's secret store. Required whenever `authentication` is not `none`; a manifest that needs a credential and does not name one cannot be satisfied."
+        },
+        "access_class": {
+          "enum": ["public", "attribution_required", "research_only", "licensed", "restricted"]
+        },
+        "terms_url": { "type": "string", "maxLength": 4096 },
+        "attribution": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "Rendered wherever this provider's records are displayed, when the access class requires it."
+        }
+      }
+    },
+
+    "cadence": {
+      "type": "object",
+      "description": "How often to poll, and what the provider permits. Archie treats a quota as a hard limit, not a target: exceeding one is how an operator loses access to a feed they depend on.",
+      "additionalProperties": false,
+      "required": ["poll_seconds"],
+      "properties": {
+        "poll_seconds": { "type": "integer", "minimum": 1 },
+        "min_poll_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Floor imposed by the provider's terms. The scheduler may never poll faster, whatever the configuration says."
+        },
+        "quota": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requests": { "type": "integer", "minimum": 1 },
+            "per_seconds": { "type": "integer", "minimum": 1 },
+            "burst": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "backoff": {
+          "type": "object",
+          "description": "What to do when the provider errors or rate-limits. Every provider gets a backoff policy: a feed that fails must not become a feed that hammers.",
+          "additionalProperties": false,
+          "properties": {
+            "strategy": { "enum": ["exponential", "linear", "fixed"] },
+            "initial_seconds": { "type": "integer", "minimum": 1 },
+            "max_seconds": { "type": "integer", "minimum": 1 },
+            "jitter": { "type": "boolean" }
+          }
+        }
+      }
+    },
+
+    "coverage": {
+      "type": "object",
+      "description": "What this provider can and cannot see. Stating the limits is what stops an absence of data being read as an absence of events.",
+      "additionalProperties": false,
+      "properties": {
+        "geographic": {
+          "enum": ["global", "regional", "national", "local"],
+          "description": "A regional provider reporting nothing outside its region is not evidence that nothing happened there."
+        },
+        "regions": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 128 }
+        },
+        "known_gaps": {
+          "type": "array",
+          "description": "Documented blind spots, e.g. 'ADS-B coverage is sparse over open ocean' or 'military aircraft frequently disable transponders'. Rendered alongside the layer.",
+          "items": { "type": "string", "maxLength": 512 }
+        },
+        "latency_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Typical delay between the phenomenon and the provider publishing it."
+        }
+      }
+    },
+
+    "records": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Which normalized record types this provider yields. A provider that cannot be mapped onto the normalized model does not get an ad-hoc passthrough; the model is extended instead, so the renderer never receives arbitrary provider JSON.",
+      "items": {
+        "enum": [
+          "observation",
+          "entity",
+          "track",
+          "event",
+          "claim",
+          "alert",
+          "metric",
+          "timeseries",
+          "vulnerability",
+          "cyber_indicator",
+          "network_prefix",
+          "autonomous_system",
+          "market_instrument",
+          "person_public_profile",
+          "organization"
+        ]
+      }
+    },
+
+    "state": {
+      "enum": ["available", "no_credentials", "rate_limited", "degraded", "failed", "disabled"],
+      "description": "Runtime state, reported to the display so a dark layer is explained rather than merely dark. `no_credentials` is the ordinary state of an optional provider on a node whose operator has not configured it, and is not an error."
+    },
+
+    "notes": { "type": "string", "maxLength": 4000 }
+  },
+
+  "allOf": [
+    {
+      "$comment": "A provider that authenticates must name the secret it needs. Without this rule a manifest can silently depend on an ambient credential, which is how a key ends up in an environment variable nobody documented.",
+      "if": {
+        "properties": {
+          "access": {
+            "properties": { "authentication": { "not": { "const": "none" } } },
+            "required": ["authentication"]
+          }
+        },
+        "required": ["access"]
+      },
+      "then": {
+        "properties": {
+          "access": { "required": ["secret_handle"] }
+        }
+      }
+    }
+  ]
+}

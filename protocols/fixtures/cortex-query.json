@@ -1,0 +1,13 @@
+{
+  "request_id": "fixture:query",
+  "question": "unrelated",
+  "active_project_id": "",
+  "snapshot_id": "fixture:graph",
+  "permitted_sensitivities": [
+    "local_restricted"
+  ],
+  "token_budget": 1024,
+  "maximum_items": 8,
+  "maximum_expansion_hops": 1,
+  "requested_at_ms": 1000
+}

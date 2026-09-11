@@ -1,0 +1,24 @@
+[package]
+name = "archied"
+description = "The ArchieOS daemon."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "archied"
+path = "src/main.rs"
+
+[dependencies]
+archie-core.workspace = true
+archie-observability.workspace = true
+archie-state.workspace = true
+archie-types.workspace = true
+clap.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "sync", "io-util", "signal"] }
+tracing.workspace = true
+
+[dev-dependencies]
+archie-state = { workspace = true, features = ["test-support"] }
+serde_json.workspace = true

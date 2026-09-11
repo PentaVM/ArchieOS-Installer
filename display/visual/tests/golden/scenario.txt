@@ -1,0 +1,268 @@
+archie-visual-probe — the observatory's decisions, without a screen
+
+=== startup: the registry arrives
+  mode      Cerebra
+  tier      NORMAL    (light load)   62 fps cap, msaa 2, <=1500 nodes, post off
+  camera    resting    eye (   0.0   26.0   44.0)  fov 45
+  scene     11 nodes, 11 drawn, 0 aggregated, 7 edges
+    node               shape       detail      data        sev  alpha   glow moves  where
+  + node-c             octahedron  simplified  live          2   1.00   0.60   yes  
+  + science.physics    cube        full        live          1   1.00   0.30   yes  
+  + local.reasoner     capsule     simplified  live          0   1.00   0.00   yes  
+  + local.embedder     capsule     simplified  live          0   1.00   0.00   yes  
+  + node-b             octahedron  simplified  live          0   1.00   0.00   yes  
+  + sentry.world       cube        simplified  live          0   1.00   0.00   yes  
+  + core.memory        cube        simplified  live          0   1.00   0.00   yes  
+  + core.policy        cube        simplified  live          0   1.00   0.00   yes  
+  + cortex.context     cube        simplified  live          0   1.00   0.00   yes  
+  + sentry.vision      cube        simplified  live          0   1.00   0.00   yes  
+  + core.archie        cube        simplified  live          0   1.00   0.00   yes  
+  events    core.archie:appeared core.memory:appeared core.policy:appeared sentry.world:appeared sentry.vision:appeared cortex.context:appeared science.physics:appeared node-b:appeared node-c:appeared local.reasoner:appeared local.embedder:appeared 
+
+=== settled: entries have played, nothing is happening
+  mode      Cerebra
+  tier      NORMAL    (light load)   62 fps cap, msaa 2, <=1500 nodes, post off
+  camera    resting    eye (   0.0   26.0   44.0)  fov 45
+  scene     11 nodes, 11 drawn, 0 aggregated, 7 edges
+    node               shape       detail      data        sev  alpha   glow moves  where
+    node-c             octahedron  simplified  live          2   1.00   0.60   yes  
+    science.physics    cube        full        live          1   1.00   0.30   yes  
+    local.reasoner     capsule     simplified  live          0   1.00   0.00   yes  
+    local.embedder     capsule     simplified  live          0   1.00   0.00   yes  
+    node-b             octahedron  simplified  live          0   1.00   0.00   yes  
+    sentry.world       cube        simplified  live          0   1.00   0.00   yes  
+    core.memory        cube        simplified  live          0   1.00   0.00   yes  
+    core.policy        cube        simplified  live          0   1.00   0.00   yes  
+    cortex.context     cube        simplified  live          0   1.00   0.00   yes  
+    sentry.vision      cube        simplified  live          0   1.00   0.00   yes  
+    core.archie        cube        simplified  live          0   1.00   0.00   yes  
+
+=== a module goes invalid
+  mode      Cerebra
+  tier      NORMAL    (light load)   62 fps cap, msaa 2, <=1500 nodes, post off
+  camera    resting    eye (   0.0   26.0   44.0)  fov 45
+  scene     11 nodes, 11 drawn, 0 aggregated, 7 edges
+    node               shape       detail      data        sev  alpha   glow moves  where
+    sentry.vision      cube        simplified  live          3   1.00   0.90   yes  
+    node-c             octahedron  simplified  live          2   1.00   0.60   yes  
+    science.physics    cube        full        live          1   1.00   0.30   yes  
+    local.reasoner     capsule     simplified  live          0   1.00   0.00   yes  
+    local.embedder     capsule     simplified  live          0   1.00   0.00   yes  
+    node-b             octahedron  simplified  live          0   1.00   0.00   yes  
+    sentry.world       cube        simplified  live          0   1.00   0.00   yes  
+    core.memory        cube        simplified  live          0   1.00   0.00   yes  
+    core.policy        cube        simplified  live          0   1.00   0.00   yes  
+    cortex.context     cube        simplified  live          0   1.00   0.00   yes  
+    core.archie        cube        simplified  live          0   1.00   0.00   yes  
+  events    sentry.vision:severity 
+
+=== the machine saturates: the display yields
+  mode      Cerebra
+  tier      CONSERVE  (cpu saturated)   30 fps cap, msaa 0, <=400 nodes, post off
+  camera    resting    eye (   0.0   26.0   44.0)  fov 45
+  scene     11 nodes, 11 drawn, 0 aggregated, 7 edges
+    node               shape       detail      data        sev  alpha   glow moves  where
+    sentry.vision      cube        simplified  live          3   1.00   0.00    no  
+    node-c             octahedron  simplified  live          2   1.00   0.00    no  
+    science.physics    cube        full        live          1   1.00   0.00    no  
+    local.reasoner     capsule     simplified  live          0   1.00   0.00    no  
+    local.embedder     capsule     simplified  live          0   1.00   0.00    no  
+    node-b             octahedron  simplified  live          0   1.00   0.00    no  
+    sentry.world       cube        simplified  live          0   1.00   0.00    no  
+    core.memory        cube        simplified  live          0   1.00   0.00    no  
+    core.policy        cube        simplified  live          0   1.00   0.00    no  
+    cortex.context     cube        simplified  live          0   1.00   0.00    no  
+    core.archie        cube        simplified  live          0   1.00   0.00    no  
+
+=== it goes quiet: the richer tier is not granted yet
+  mode      Cerebra
+  tier      CONSERVE  (cpu saturated)   30 fps cap, msaa 0, <=400 nodes, post off
+  camera    resting    eye (   0.0   26.0   44.0)  fov 45
+  scene     11 nodes, 11 drawn, 0 aggregated, 7 edges
+    node               shape       detail      data        sev  alpha   glow moves  where
+    sentry.vision      cube        simplified  lagging       3   0.82   0.00    no  
+    node-c             octahedron  simplified  lagging       2   0.82   0.00    no  
+    science.physics    cube        full        lagging       1   0.82   0.00    no  
+    local.reasoner     capsule     simplified  lagging       0   0.82   0.00    no  
+    local.embedder     capsule     simplified  lagging       0   0.82   0.00    no  
+    node-b             octahedron  simplified  lagging       0   0.82   0.00    no  
+    sentry.world       cube        simplified  lagging       0   0.82   0.00    no  
+    core.memory        cube        simplified  lagging       0   0.82   0.00    no  
+    core.policy        cube        simplified  lagging       0   0.82   0.00    no  
+    cortex.context     cube        simplified  lagging       0   0.82   0.00    no  
+    core.archie        cube        simplified  lagging       0   0.82   0.00    no  
+
+=== five seconds of quiet later: ULTRA
+  mode      Cerebra
+  tier      ULTRA     (idle)   62 fps cap, msaa 4, <=4000 nodes, post on
+  camera    resting    eye (   0.0   26.0   44.0)  fov 45
+  scene     11 nodes, 11 drawn, 0 aggregated, 7 edges
+    node               shape       detail      data        sev  alpha   glow moves  where
+    sentry.vision      cube        simplified  lagging       3   0.82   0.90   yes  
+    node-c             octahedron  simplified  lagging       2   0.82   0.60   yes  
+    science.physics    cube        full        lagging       1   0.82   0.30   yes  
+    local.reasoner     capsule     simplified  lagging       0   0.82   0.00   yes  
+    local.embedder     capsule     simplified  lagging       0   0.82   0.00   yes  
+    node-b             octahedron  simplified  lagging       0   0.82   0.00   yes  
+    sentry.world       cube        simplified  lagging       0   0.82   0.00   yes  
+    core.memory        cube        simplified  lagging       0   0.82   0.00   yes  
+    core.policy        cube        simplified  lagging       0   0.82   0.00   yes  
+    cortex.context     cube        simplified  lagging       0   0.82   0.00   yes  
+    core.archie        cube        simplified  lagging       0   0.82   0.00   yes  
+
+=== the snapshot is four minutes old: motion stops
+  mode      Cerebra
+  tier      ULTRA     (idle)   62 fps cap, msaa 4, <=4000 nodes, post on
+  camera    resting    eye (   0.0   26.0   44.0)  fov 45
+  scene     11 nodes, 11 drawn, 0 aggregated, 7 edges
+    node               shape       detail      data        sev  alpha   glow moves  where
+    sentry.vision      cube        simplified  expired       3   0.22   0.00    no  
+    node-c             octahedron  simplified  expired       2   0.22   0.00    no  
+    science.physics    cube        full        expired       1   0.22   0.00    no  
+    local.reasoner     capsule     simplified  expired       0   0.22   0.00    no  
+    local.embedder     capsule     simplified  expired       0   0.22   0.00    no  
+    node-b             octahedron  simplified  expired       0   0.22   0.00    no  
+    sentry.world       cube        simplified  expired       0   0.22   0.00    no  
+    core.memory        cube        simplified  expired       0   0.22   0.00    no  
+    core.policy        cube        simplified  expired       0   0.22   0.00    no  
+    cortex.context     cube        simplified  expired       0   0.22   0.00    no  
+    core.archie        cube        simplified  expired       0   0.22   0.00    no  
+  events    core.archie:freshness core.memory:freshness core.policy:freshness sentry.world:freshness sentry.vision:freshness cortex.context:freshness science.physics:freshness node-b:freshness node-c:freshness local.reasoner:freshness local.embedder:freshness 
+
+=== the operator inspects the broken module
+  mode      Cerebra
+  tier      ULTRA     (idle)   62 fps cap, msaa 4, <=4000 nodes, post on
+  camera    moving     eye (  -0.1   26.0   43.9)  fov 45  on sentry.vision
+  scene     11 nodes, 11 drawn, 0 aggregated, 7 edges
+    node               shape       detail      data        sev  alpha   glow moves  where
+    sentry.vision      cube        inspect     live          3   1.00   0.90   yes  
+    node-c             octahedron  simplified  live          2   1.00   0.60   yes  
+    science.physics    cube        full        live          1   1.00   0.30   yes  
+    local.reasoner     capsule     simplified  live          0   1.00   0.00   yes  
+    local.embedder     capsule     simplified  live          0   1.00   0.00   yes  
+    node-b             octahedron  simplified  live          0   1.00   0.00   yes  
+    sentry.world       cube        simplified  live          0   1.00   0.00   yes  
+    core.memory        cube        simplified  live          0   1.00   0.00   yes  
+    core.policy        cube        simplified  live          0   1.00   0.00   yes  
+    cortex.context     cube        simplified  live          0   1.00   0.00   yes  
+    core.archie        cube        simplified  live          0   1.00   0.00   yes  
+
+=== the camera has arrived
+  mode      Cerebra
+  tier      ULTRA     (idle)   62 fps cap, msaa 4, <=4000 nodes, post on
+  camera    focused    eye ( -32.9   10.2   -0.3)  fov 38  on sentry.vision
+  scene     11 nodes, 11 drawn, 0 aggregated, 7 edges
+    node               shape       detail      data        sev  alpha   glow moves  where
+    sentry.vision      cube        inspect     live          3   1.00   0.90   yes  
+    node-c             octahedron  simplified  live          2   1.00   0.60   yes  
+    science.physics    cube        simplified  live          1   1.00   0.30   yes  
+    local.reasoner     capsule     full        live          0   1.00   0.00   yes  
+    local.embedder     capsule     simplified  live          0   1.00   0.00   yes  
+    node-b             octahedron  simplified  live          0   1.00   0.00   yes  
+    sentry.world       cube        simplified  live          0   1.00   0.00   yes  
+    core.memory        cube        full        live          0   1.00   0.00   yes  
+    core.policy        cube        simplified  live          0   1.00   0.00   yes  
+    cortex.context     cube        simplified  live          0   1.00   0.00   yes  
+    core.archie        cube        simplified  live          0   1.00   0.00   yes  
+
+=== everything else vanishes from the payload: grace, not death
+  mode      Cerebra
+  tier      ULTRA     (idle)   62 fps cap, msaa 4, <=4000 nodes, post on
+  camera    focused    eye ( -32.9   10.2   -0.3)  fov 38  on sentry.vision
+  scene     11 nodes, 11 drawn, 0 aggregated, 7 edges
+  payload   0 dropped, 2 defects, 0 unknown fields
+    node               shape       detail      data        sev  alpha   glow moves  where
+  - sentry.vision      cube        inspect     live          3   0.55   0.90   yes  
+  - node-c             octahedron  simplified  live          2   0.55   0.60   yes  
+  - science.physics    cube        simplified  live          1   0.55   0.30   yes  
+  - local.reasoner     capsule     full        live          0   0.55   0.00   yes  
+  - local.embedder     capsule     simplified  live          0   0.55   0.00   yes  
+  - node-b             octahedron  simplified  live          0   0.55   0.00   yes  
+  - sentry.world       cube        simplified  live          0   0.55   0.00   yes  
+  - core.memory        cube        full        live          0   0.55   0.00   yes  
+  - core.policy        cube        simplified  live          0   0.55   0.00   yes  
+  - cortex.context     cube        simplified  live          0   0.55   0.00   yes  
+    core.archie        cube        simplified  live          0   1.00   0.00   yes  
+  events    core.memory:departed core.policy:departed cortex.context:departed local.embedder:departed local.reasoner:departed node-b:departed node-c:departed science.physics:departed sentry.vision:departed sentry.world:departed 
+
+=== grace expired: the camera let go of what it was watching
+  mode      Cerebra
+  tier      ULTRA     (idle)   62 fps cap, msaa 4, <=4000 nodes, post on
+  camera    resting    eye (   0.0   26.0   44.0)  fov 45
+  scene     1 nodes, 1 drawn, 0 aggregated, 0 edges
+  payload   0 dropped, 2 defects, 0 unknown fields
+    node               shape       detail      data        sev  alpha   glow moves  where
+    core.archie        cube        simplified  lagging       0   0.82   0.00   yes  
+
+=== a payload with two unusable records and one unknown state
+  mode      Cerebra
+  tier      ULTRA     (idle)   62 fps cap, msaa 4, <=4000 nodes, post on
+  camera    resting    eye (   0.0   26.0   44.0)  fov 45
+  scene     2 nodes, 2 drawn, 0 aggregated, 0 edges
+  payload   2 dropped, 5 defects, 0 unknown fields
+    node               shape       detail      data        sev  alpha   glow moves  where
+  + future.thing       cube        simplified  live          1   1.00   0.30   yes  
+    core.archie        cube        simplified  live          0   1.00   0.00   yes  
+  events    future.thing:appeared 
+
+=== a world batch lands: four quakes, one from a fallback source
+  mode      Cerebra
+  tier      ULTRA     (idle)   62 fps cap, msaa 4, <=4000 nodes, post on
+  camera    resting    eye (   0.0   26.0   44.0)  fov 45
+  scene     6 nodes, 6 drawn, 0 aggregated, 0 edges
+  payload   2 dropped, 5 defects, 0 unknown fields
+    node               shape       detail      data        sev  alpha   glow moves  where
+  + us.aleutian        sphere      simplified  live          4   1.00   0.90   yes  51.9N 176.7W
+  + us.tokyo           sphere      simplified  live          3   1.00   0.90   yes  35.7N 139.7E
+  + us.andes           sphere      simplified  live          2   1.00   0.60   yes  33.5S 70.7W
+  + relay.iceland      sphere      simplified  live          1   0.78   0.30   yes  64.1N 21.9W (second-hand)
+  + future.thing       cube        simplified  live          1   1.00   0.30   yes  
+    core.archie        cube        simplified  live          0   1.00   0.00   yes  
+  events    us.tokyo:appeared us.andes:appeared us.aleutian:appeared relay.iceland:appeared 
+
+=== the operator asks for the world view
+  mode      Cerebra  ->  Watcher  (0%)
+  tier      ULTRA     (idle)   62 fps cap, msaa 4, <=4000 nodes, post on
+  camera    moving     eye (   0.0   26.0   44.0)  fov 45
+  scene     6 nodes, 6 drawn, 0 aggregated, 0 edges
+  payload   2 dropped, 5 defects, 0 unknown fields
+    node               shape       detail      data        sev  alpha   glow moves  where
+  + us.aleutian        sphere      simplified  live          4   1.00   0.90   yes  51.9N 176.7W
+  + us.tokyo           sphere      simplified  live          3   1.00   0.90   yes  35.7N 139.7E
+  + us.andes           sphere      simplified  live          2   1.00   0.60   yes  33.5S 70.7W
+  + relay.iceland      sphere      simplified  live          1   0.78   0.30   yes  64.1N 21.9W (second-hand)
+  + future.thing       cube        simplified  live          1   1.00   0.30   yes  
+    core.archie        cube        simplified  live          0   1.00   0.00   yes  
+
+=== arrived in Watcher
+  mode      Watcher
+  tier      ULTRA     (idle)   62 fps cap, msaa 4, <=4000 nodes, post on
+  camera    resting    eye (   0.0    9.6   95.7)  fov 32
+  scene     6 nodes, 4 drawn, 0 aggregated, 0 edges
+  payload   2 dropped, 5 defects, 0 unknown fields
+    node               shape       detail      data        sev  alpha   glow moves  where
+    us.aleutian        sphere      silhouette  live          4   1.00   0.90   yes  51.9N 176.7W
+    us.tokyo           sphere      silhouette  live          3   1.00   0.90   yes  35.7N 139.7E
+    us.andes           sphere      silhouette  live          2   1.00   0.60   yes  33.5S 70.7W
+    relay.iceland      sphere      simplified  live          1   0.78   0.30   yes  64.1N 21.9W (second-hand)
+
+=== the kernel reader goes silent: the tier backs off
+  mode      Watcher
+  tier      NORMAL    (telemetry stale)   62 fps cap, msaa 2, <=1500 nodes, post off
+  camera    resting    eye (   0.0    9.6   95.7)  fov 32
+  scene     6 nodes, 4 drawn, 0 aggregated, 0 edges
+  payload   2 dropped, 5 defects, 0 unknown fields
+    node               shape       detail      data        sev  alpha   glow moves  where
+    us.aleutian        sphere      silhouette  stale         4   0.45   0.00    no  51.9N 176.7W
+    us.tokyo           sphere      silhouette  stale         3   0.45   0.00    no  35.7N 139.7E
+    us.andes           sphere      silhouette  stale         2   0.45   0.00    no  33.5S 70.7W
+    relay.iceland      sphere      simplified  stale         1   0.35   0.00    no  64.1N 21.9W (second-hand)
+
+=== timeline
+  19 entries spanning 0ms..35516ms, 0 evicted, 0 out of order
+  at       -1ms  -> nothing recorded yet
+  at     1000ms  -> entry 608ms, NORMAL, 11 nodes, worst severity 2
+  at     2500ms  -> entry 2000ms, NORMAL, 11 nodes, worst severity 3
+  at    11500ms  -> entry 11000ms, ULTRA, 11 nodes, worst severity 3
+  at   999999ms  -> entry 35516ms, NORMAL, 6 nodes, worst severity 4
+

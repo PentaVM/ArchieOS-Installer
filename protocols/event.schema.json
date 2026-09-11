@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://archie.os/protocols/event.schema.json",
+  "title": "Event",
+  "description": "A real-world occurrence that Archie believes happened, assembled from observations.\n\nAn Event is a CONCLUSION. Every one of them points back at the observations that produced it, and an Event with a single supporting observation is exactly as weak as that one report — the schema keeps that visible rather than letting a lone rumour inherit the authority of the globe it is drawn on.\n\nNo single upstream database is canonical. ACLED, UCDP and GDELT will disagree about the same day in the same town; the model records the disagreement instead of picking a winner.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "category", "state", "first_seen", "last_updated", "supporting_observations", "provenance"],
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "title": { "type": "string", "maxLength": 512 },
+    "summary": {
+      "type": "string",
+      "maxLength": 4000,
+      "description": "If a language model wrote this, provenance.transformations records a `summarize` step naming the model. A summary is never treated as observation."
+    },
+
+    "category": {
+      "enum": [
+        "conflict",
+        "disaster",
+        "seismic",
+        "wildfire",
+        "weather",
+        "space",
+        "aviation",
+        "maritime",
+        "infrastructure",
+        "cyber",
+        "market",
+        "political",
+        "public_health"
+      ]
+    },
+
+    "state": {
+      "enum": ["suspected", "developing", "corroborated", "resolved", "retracted", "superseded"],
+      "description": "`suspected` is where everything starts. Reaching `corroborated` requires independent sources in provenance.corroboration. `retracted` events are kept and shown as retracted — deleting them would erase the fact that Archie once believed something wrong."
+    },
+
+    "severity": {
+      "enum": ["informational", "low", "moderate", "high", "severe"],
+      "description": "Archie's own assessment, distinct from any provider's. `severity_basis` must say how it was reached."
+    },
+    "severity_basis": {
+      "type": "string",
+      "maxLength": 1000,
+      "description": "Why this severity. Required whenever severity is set: an unexplained score is a number nobody can argue with, which is the opposite of useful."
+    },
+
+    "first_seen": { "type": "string", "format": "date-time" },
+    "last_updated": { "type": "string", "format": "date-time" },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "occurred_until": { "type": "string", "format": "date-time" },
+
+    "location": { "$ref": "https://archie.os/protocols/observation.schema.json#/$defs/location" },
+
+    "supporting_observations": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The observations this event was built from. Minimum one, and the count is shown to the reader: an event standing on one report must not look like an event standing on twelve.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["observation_id", "relation"],
+        "properties": {
+          "observation_id": { "type": "string", "format": "uuid" },
+          "relation": {
+            "enum": ["establishes", "supports", "refines", "contradicts"],
+            "description": "A contradicting observation stays attached to the event. Evidence against is evidence."
+          },
+          "weight": { "enum": ["primary", "secondary", "peripheral"] }
+        }
+      }
+    },
+
+    "independent_source_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Distinct INDEPENDENT sources behind this event. Wire-service republication is collapsed before counting; twelve outlets carrying one agency story count as one. This number, not the observation count, is what corroboration means."
+    },
+
+    "disagreements": {
+      "type": "array",
+      "description": "Where sources conflict about the same occurrence — casualty counts, attribution, timing. Recorded rather than averaged: the spread between two databases is often the most informative thing on the screen.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field", "positions"],
+        "properties": {
+          "field": { "type": "string", "maxLength": 128 },
+          "positions": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["source", "value"],
+              "properties": {
+                "source": { "type": "string", "maxLength": 128 },
+                "value": { "type": "string", "maxLength": 1000 }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["entity_id", "role"],
+        "properties": {
+          "entity_id": { "type": "string", "maxLength": 256 },
+          "role": { "enum": ["subject", "actor", "target", "operator", "location", "mentioned"] }
+        }
+      }
+    },
+
+    "related_events": {
+      "type": "array",
+      "description": "Cross-domain links, which are the point of fusion. A cable cut connects to an outage connects to a market move; the relation type says what kind of connection is being asserted, and `correlation` explicitly does not mean cause.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["event_id", "relation"],
+        "properties": {
+          "event_id": { "type": "string", "format": "uuid" },
+          "relation": {
+            "enum": ["precedes", "follows", "correlates_with", "escalation_of", "duplicate_of", "contradicts"],
+            "description": "There is deliberately no `causes`. Archie may observe that two things co-occur; asserting causation from correlated feeds is exactly the error this model exists to prevent."
+          },
+          "basis": { "type": "string", "maxLength": 1000 }
+        }
+      }
+    },
+
+    "detector_findings": {
+      "type": "array",
+      "description": "Detector outputs that fired on this event.",
+      "items": { "type": "string", "format": "uuid" }
+    },
+
+    "knowledge_links": {
+      "type": "array",
+      "description": "Claims in Archie's long-term knowledge that this event bears on. This is the differentiator over a live map: the globe knows what Archie already believed about this place, and can show whether today contradicts it.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["claim_id", "relation"],
+        "properties": {
+          "claim_id": { "type": "string", "maxLength": 256 },
+          "relation": { "enum": ["supports", "contradicts", "refines", "prompts_review"] }
+        }
+      }
+    },
+
+    "provenance": { "$ref": "https://archie.os/protocols/provenance.schema.json" }
+  },
+
+  "allOf": [
+    {
+      "$comment": "A severity without a stated basis is a number nobody can argue with.",
+      "if": { "required": ["severity"] },
+      "then": { "required": ["severity_basis"] }
+    },
+    {
+      "$comment": "Corroborated means more than one independent source actually said so.",
+      "if": { "properties": { "state": { "const": "corroborated" } }, "required": ["state"] },
+      "then": {
+        "properties": { "independent_source_count": { "minimum": 2 } },
+        "required": ["independent_source_count"]
+      }
+    }
+  ]
+}

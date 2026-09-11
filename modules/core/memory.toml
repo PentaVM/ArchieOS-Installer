@@ -1,0 +1,22 @@
+# Librarian: retrieval, provenance, knowledge graph, archival, supersession.
+#
+# Archie's source of truth is this module's store, never the weights of whatever model
+# happens to be answering.
+id = "core.memory"
+version = "0.1.0"
+description = "Librarian: retrieval, provenance, knowledge graph, archival, supersession"
+priority = 20
+
+required_capabilities = ["storage.knowledge"]
+optional_capabilities = ["storage.vector"]
+dependencies = ["core.archie"]
+permissions = ["read-knowledge", "write-knowledge"]
+
+[worker]
+kind = "python"
+module = "workers.librarian"
+entrypoint = "main"
+
+[health_check]
+kind = "heartbeat"
+interval_seconds = 30

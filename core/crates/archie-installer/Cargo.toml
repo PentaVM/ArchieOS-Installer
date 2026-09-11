@@ -1,0 +1,29 @@
+[package]
+name = "archie-installer"
+description = "The ArchieOS installer: what it decides, kept apart from what it does."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "archie-install"
+path = "src/main.rs"
+
+[dependencies]
+archie-core.workspace = true
+archie-fabric.workspace = true
+archie-types.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+sha2.workspace = true
+hex.workspace = true
+fs2.workspace = true
+md-5 = "0.10.6"
+
+[[bin]]
+name = "archie-map-fetch"
+path = "src/bin/map-fetch.rs"

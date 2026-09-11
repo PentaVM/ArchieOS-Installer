@@ -1,0 +1,29 @@
+[Unit]
+Description=ArchieOS PostgreSQL 18 and TimescaleDB
+Requires=archie-postgres-init.service
+After=archie-postgres-init.service
+Before=archie-database.service archied.service
+
+[Service]
+Type=simple
+User=postgres
+Group=postgres
+StateDirectory=archie-postgres
+StateDirectoryMode=0700
+RuntimeDirectory=archie-postgres
+RuntimeDirectoryMode=0700
+ExecStart=/usr/bin/postgres -D /var/lib/archie-postgres
+ExecStartPost=/usr/lib/archie/wait-postgres
+Restart=on-failure
+TimeoutStartSec=120
+TimeoutStopSec=120
+KillSignal=SIGINT
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_UNIX AF_INET
+
+[Install]
+WantedBy=multi-user.target

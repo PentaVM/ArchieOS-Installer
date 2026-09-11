@@ -1,0 +1,14 @@
+[package]
+name = "archie-geofabric"
+description = "The geospatial provider graph: what each 3D source is, what Archie may do with it, and which one serves a given scale."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

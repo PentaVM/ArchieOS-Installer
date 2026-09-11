@@ -1,0 +1,22 @@
+# Physical internet and energy infrastructure as a reference layer.
+#
+# Mostly static geography: submarine cables, landing points, IXPs, generation and
+# transmission. Its value is as the substrate other layers are read against — a cable
+# route only means something next to an outage.
+id = "sentry.infrastructure"
+version = "0.1.0"
+description = "Submarine cables, landing points, IXPs and energy infrastructure reference geography"
+priority = 430
+
+required_capabilities = ["world.infrastructure"]
+optional_capabilities = ["network.internet"]
+dependencies = ["core.sentry"]
+permissions = ["read-knowledge", "write-knowledge"]
+
+[worker]
+kind = "python"
+module = "workers.sentry.infrastructure"
+entrypoint = "main"
+
+[health_check]
+kind = "none"

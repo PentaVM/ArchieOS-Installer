@@ -1,0 +1,61 @@
+# Rust
+target/
+**/target/
+Cargo.lock.bak
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+
+# Build output
+dist/
+build/
+out/
+*.iso
+!distro/archiso/**
+
+# Runtime state — must never be committed
+*.db
+*.db-shm
+*.db-wal
+.archie/
+run/
+var/
+
+# Secrets — never commit key material
+*.key
+!**/*.key.example
+secrets/
+.env
+.env.*
+!.env.example
+node_modules/
+.next/
+.vercel/
+.dashboard-local/
+playwright-report/
+test-results/
+*.tsbuildinfo
+
+# Model runtimes and NVIDIA tooling
+.cache/ngc/
+.cache/nim/
+models-cache/
+model-store/
+*.safetensors
+*.gguf
+*.engine
+*.plan
+*.onnx
+*.trt
+nvidia-container.log
+
+# Editor / OS
+.DS_Store
+*.swp

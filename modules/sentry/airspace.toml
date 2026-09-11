@@ -1,0 +1,22 @@
+# Airspace restrictions and GNSS interference.
+#
+# Named for the domain, not for NOTAM: EASA CZIB, FAA and national publishers all assert
+# restrictions, and a module named after one feed cannot accept the second.
+id = "sentry.airspace"
+version = "0.1.0"
+description = "Airspace restrictions, conflict-zone bulletins, and GNSS interference regions"
+priority = 420
+
+required_capabilities = ["world.airspace", "network.internet"]
+optional_capabilities = ["world.gnss"]
+dependencies = ["core.sentry"]
+permissions = ["read-knowledge", "write-knowledge", "network-internet"]
+
+[worker]
+kind = "python"
+module = "workers.sentry.airspace"
+entrypoint = "main"
+
+[health_check]
+kind = "heartbeat"
+interval_seconds = 600

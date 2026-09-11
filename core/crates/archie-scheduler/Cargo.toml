@@ -1,0 +1,19 @@
+[package]
+name = "archie-scheduler"
+description = "Placement, priority queues, and preemption with mandatory checkpointing."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+archie-types.workspace = true
+archie-registry.workspace = true
+archie-observability.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+archie-state.workspace = true
+hex.workspace = true

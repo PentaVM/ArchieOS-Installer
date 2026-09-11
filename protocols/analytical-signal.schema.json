@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://archie.os/protocols/analytical-signal.schema.json",
+  "title": "Bounded analytical signal",
+  "description": "A sanitized, provenance-bound signal used to assess one hypothesis. It contains references and fixed-point quality measures rather than raw sensor content. Repeated observations from one primary source remain one analytical vote.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "signal_id", "hypothesis_id", "evidence_ref", "evidence_sha256", "source_root",
+    "semantic_key", "stance", "reliability_permille", "relevance_permille",
+    "observed_at_ms", "machine_analysis_allowed", "consent_required", "consent_granted"
+  ],
+  "properties": {
+    "signal_id": { "$ref": "#/$defs/reference" },
+    "hypothesis_id": { "$ref": "#/$defs/reference" },
+    "evidence_ref": {
+      "$ref": "#/$defs/reference",
+      "description": "Opaque reference to policy-controlled evidence; never an embedded payload."
+    },
+    "evidence_sha256": { "$ref": "#/$defs/digest" },
+    "source_root": {
+      "$ref": "#/$defs/reference",
+      "description": "Primary provenance root used as the unit of independence."
+    },
+    "semantic_key": {
+      "$ref": "#/$defs/reference",
+      "description": "Normalized meaning used to identify repetition without storing free text."
+    },
+    "stance": { "enum": ["supports", "contradicts", "unknown"] },
+    "reliability_permille": { "$ref": "#/$defs/permille" },
+    "relevance_permille": { "$ref": "#/$defs/permille" },
+    "observed_at_ms": { "type": "integer", "minimum": 1 },
+    "expires_at_ms": { "type": ["integer", "null"], "minimum": 1 },
+    "machine_analysis_allowed": { "type": "boolean" },
+    "consent_required": { "type": "boolean" },
+    "consent_granted": { "type": "boolean" }
+  },
+  "$defs": {
+    "reference": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 192,
+      "pattern": "^[A-Za-z0-9:._/-]+$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "permille": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000
+    }
+  }
+}

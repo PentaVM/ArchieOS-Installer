@@ -1,0 +1,26 @@
+[package]
+name = "archie-state"
+description = "PostgreSQL and TimescaleDB durable state and the ArchieOS filesystem layout."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+test-support = []
+
+[dependencies]
+archie-memory.workspace = true
+archie-types.workspace = true
+archie-observability.workspace = true
+archie-postgres.workspace = true
+postgres.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+fs2.workspace = true
+
+[dev-dependencies]
+hex.workspace = true
+archie-state = { path = ".", features = ["test-support"] }

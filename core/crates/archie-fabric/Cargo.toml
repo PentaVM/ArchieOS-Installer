@@ -1,0 +1,23 @@
+[package]
+name = "archie-fabric"
+description = "Node identity, authenticated messaging, and peer discovery."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+archie-types.workspace = true
+archie-observability.workspace = true
+async-trait.workspace = true
+ed25519-dalek.workspace = true
+hex.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }

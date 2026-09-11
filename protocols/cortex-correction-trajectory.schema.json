@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://archie.os/protocols/cortex-correction-trajectory.schema.json",
+  "title": "Cortex correction trajectory",
+  "description": "A replayable operator correction for the Archie Analytical Cortex. This record is deliberately not a transcript, voice clip, model response, biometric template or mutable fact. It preserves only opaque private-vault/provenance references, SHA-256 digests, graph identifiers and the authoritative graph-writer receipt. The receipt means a factual correction was applied to persistent graph memory before it can become asynchronous model supervision; a neural model may therefore learn how to retrieve knowledge without becoming a source of truth or a graph-writing authority.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "trajectory_id",
+    "correction",
+    "graph_update",
+    "selected_context_ids",
+    "omitted_candidate_ids",
+    "response_ref",
+    "response_digest",
+    "corrected_interpretation_ref",
+    "model_id",
+    "model_hash",
+    "captured_at_ms"
+  ],
+  "properties": {
+    "trajectory_id": { "$ref": "#/$defs/reference" },
+    "correction": { "$ref": "#/$defs/correctionEvent" },
+    "graph_update": { "$ref": "#/$defs/graphCorrectionReceipt" },
+    "selected_context_ids": { "$ref": "#/$defs/contextIdentifiers" },
+    "omitted_candidate_ids": { "$ref": "#/$defs/contextIdentifiers" },
+    "response_ref": { "$ref": "#/$defs/reference" },
+    "response_digest": { "$ref": "#/$defs/sha256" },
+    "corrected_interpretation_ref": { "$ref": "#/$defs/reference" },
+    "model_id": { "$ref": "#/$defs/reference" },
+    "model_hash": { "$ref": "#/$defs/sha256" },
+    "captured_at_ms": { "$ref": "#/$defs/timestamp" }
+  },
+  "$defs": {
+    "reference": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 192,
+      "pattern": "^[A-Za-z0-9:._/-]+$",
+      "description": "An opaque identifier or vault/provenance reference. It is never dereferenced by a Cortex worker."
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "A lower-case SHA-256 content identity, not a model confidence score."
+    },
+    "timestamp": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "UTC milliseconds since the Unix epoch."
+    },
+    "correctionKind": {
+      "enum": [
+        "entity_correction",
+        "relation_correction",
+        "coreference_correction",
+        "retrieval_positive",
+        "retrieval_negative",
+        "missing_context_label",
+        "stale_knowledge_correction",
+        "context_preference",
+        "answer_failure"
+      ]
+    },
+    "correctionEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "correction_id",
+        "kind",
+        "operator_id",
+        "graph_snapshot_id",
+        "query_digest",
+        "raw_correction_ref",
+        "rationale_ref",
+        "target_ids",
+        "recorded_at_ms"
+      ],
+      "properties": {
+        "correction_id": { "$ref": "#/$defs/reference" },
+        "kind": { "$ref": "#/$defs/correctionKind" },
+        "operator_id": { "$ref": "#/$defs/reference" },
+        "graph_snapshot_id": { "$ref": "#/$defs/reference" },
+        "query_digest": { "$ref": "#/$defs/sha256" },
+        "raw_correction_ref": { "$ref": "#/$defs/reference" },
+        "rationale_ref": { "$ref": "#/$defs/reference" },
+        "target_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/reference" }
+        },
+        "recorded_at_ms": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "graphCorrectionReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "correction_id",
+        "source_graph_snapshot_id",
+        "resulting_graph_snapshot_id",
+        "graph_update_ref",
+        "applied_at_ms"
+      ],
+      "properties": {
+        "correction_id": { "$ref": "#/$defs/reference" },
+        "source_graph_snapshot_id": { "$ref": "#/$defs/reference" },
+        "resulting_graph_snapshot_id": { "$ref": "#/$defs/reference" },
+        "graph_update_ref": { "$ref": "#/$defs/reference" },
+        "applied_at_ms": { "$ref": "#/$defs/timestamp" }
+      },
+      "description": "The trusted graph writer supplies this receipt. Runtime validation additionally requires that correction and source snapshot match the event, the result is a successor snapshot, and applied_at_ms is no earlier than recorded_at_ms."
+    },
+    "contextIdentifiers": {
+      "type": "array",
+      "maxItems": 4096,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/reference" }
+    }
+  }
+}

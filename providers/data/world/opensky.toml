@@ -1,0 +1,38 @@
+# Anonymous access is heavily rate-limited; a registered account raises the quota, which
+# is why this manifest names a secret even though the feed is reachable without one.
+id = "opensky.states"
+title = "OpenSky Network aircraft state vectors"
+description = "Community ADS-B receiver network providing aircraft state vectors."
+homepage = "https://opensky-network.org/"
+capability = "world.aviation"
+records = ["observation", "track", "entity"]
+
+[access]
+transport = "https"
+authentication = "basic"
+secret_handle = "opensky.credentials"
+access_class = "research-only"
+terms_url = "https://opensky-network.org/about/terms-of-use"
+
+[cadence]
+poll_seconds = 10
+min_poll_seconds = 5
+
+[cadence.quota]
+requests = 4000
+per_seconds = 86400
+
+[cadence.backoff]
+strategy = "exponential"
+initial_seconds = 30
+max_seconds = 1800
+jitter = true
+
+[coverage]
+geographic = "global"
+latency_seconds = 15
+known_gaps = [
+  "Coverage follows volunteer receiver density: dense over Europe, sparse over oceans, Africa and central Asia.",
+  "State aircraft frequently transmit no ADS-B, or transmit a filtered identity. Absence of a track is not absence of an aircraft.",
+  "Research-only terms: records may be analysed but redistribution is restricted.",
+]

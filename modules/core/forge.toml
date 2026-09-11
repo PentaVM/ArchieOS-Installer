@@ -1,0 +1,21 @@
+# Forge: software diagnosis, testing, versioning, patch preparation, rollback.
+#
+# Heavy coding is delegated to specialist external workers rather than requiring the
+# local Archie model to specialise in code.
+id = "core.forge"
+version = "0.1.0"
+description = "Forge: diagnosis, testing, versioning, patch creation, rollback preparation"
+priority = 50
+
+required_capabilities = ["compute.cpu"]
+optional_capabilities = ["network.internet"]
+dependencies = ["core.archie"]
+permissions = ["read-telemetry", "spawn-workers"]
+
+[worker]
+kind = "python"
+module = "workers.forge"
+entrypoint = "main"
+
+[health_check]
+kind = "none"

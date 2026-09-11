@@ -1,0 +1,14 @@
+[package]
+name = "archie-policy"
+description = "Authorisation: capability requests, decisions, and expiring leases."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+archie-types.workspace = true
+archie-observability.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

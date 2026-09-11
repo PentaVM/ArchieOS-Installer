@@ -1,0 +1,31 @@
+# The reference implementation for the provider runtime: free, no credentials,
+# well documented, and a stable schema.
+id = "usgs.earthquakes"
+title = "USGS Earthquake Hazards Program"
+description = "Authoritative global seismic event feed, updated continuously."
+homepage = "https://earthquake.usgs.gov/earthquakes/feed/"
+capability = "world.seismic"
+records = ["observation", "event"]
+
+[access]
+transport = "https"
+authentication = "none"
+access_class = "public"
+
+[cadence]
+poll_seconds = 60
+min_poll_seconds = 60
+
+[cadence.backoff]
+strategy = "exponential"
+initial_seconds = 30
+max_seconds = 900
+jitter = true
+
+[coverage]
+geographic = "global"
+latency_seconds = 90
+known_gaps = [
+  "Detection threshold varies with station density; small events in deep ocean and sparsely instrumented regions go unreported.",
+  "Magnitudes are revised for hours after an event. An early automatic solution is not a final one.",
+]

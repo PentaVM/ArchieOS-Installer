@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://archie.os/protocols/person-public-profile.schema.json",
+  "title": "Public professional profile",
+  "description": "A person in their PUBLISHED PROFESSIONAL capacity only — a reporter's byline, an official's stated role, a researcher's affiliation.\n\nThe purpose is source analysis: knowing who reported a thing, what they usually cover, who they cited, and whether the piece was later corrected. That is what lets Archie weigh a claim. It is not a dossier on a human being.\n\nThe boundary is enforced by the schema rather than by good intentions. `additionalProperties` is false and the forbidden fields are named explicitly below, so a record carrying a home address or a phone number does not validate and cannot enter the store. A rule that lives only in a policy document is a rule that gets forgotten during an incident; this one fails a parse.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "display_name", "basis", "provenance"],
+
+  "properties": {
+    "id": { "type": "string", "maxLength": 256 },
+
+    "display_name": {
+      "type": "string",
+      "maxLength": 256,
+      "description": "The name as published on their own work."
+    },
+
+    "basis": {
+      "type": "object",
+      "description": "Why this person is in the store at all. A profile exists because they published something under their own name in a professional capacity, or hold a public office. There is no other admissible basis.",
+      "additionalProperties": false,
+      "required": ["reason", "public_evidence_url"],
+      "properties": {
+        "reason": {
+          "enum": ["published_byline", "public_office", "official_spokesperson", "cited_expert", "corporate_filing_signatory"]
+        },
+        "public_evidence_url": {
+          "type": "string",
+          "maxLength": 4096,
+          "description": "A public URL demonstrating the basis. Required: without it, the record is an assertion about a person with nothing behind it."
+        }
+      }
+    },
+
+    "affiliations": {
+      "type": "array",
+      "description": "Publicly stated professional affiliations only, as the person or the outlet published them.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["organization_id", "stated_role"],
+        "properties": {
+          "organization_id": { "type": "string", "maxLength": 256 },
+          "stated_role": { "type": "string", "maxLength": 256 },
+          "from": { "type": "string", "format": "date" },
+          "until": { "type": "string", "format": "date" },
+          "source_url": { "type": "string", "maxLength": 4096 }
+        }
+      }
+    },
+
+    "beats": {
+      "type": "array",
+      "description": "Topics they demonstrably cover, derived from their own published work.",
+      "items": { "type": "string", "maxLength": 128 }
+    },
+
+    "professional_accounts": {
+      "type": "array",
+      "description": "Accounts the person or their employer has PUBLISHED as their professional contact — the handle printed on an author page. Never an account inferred, matched, or discovered by correlation.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["platform", "handle", "published_at_url"],
+        "properties": {
+          "platform": { "type": "string", "maxLength": 64 },
+          "handle": { "type": "string", "maxLength": 128 },
+          "published_at_url": {
+            "type": "string",
+            "maxLength": 4096,
+            "description": "The page where the person or outlet themselves published this handle. Its absence means the link was inferred, and inferred links are not recorded."
+          }
+        }
+      }
+    },
+
+    "publication_record": {
+      "type": "object",
+      "description": "What they have published and how it held up. This is the analytically useful part: a byline with three uncorrected pieces on a beat reads differently from one with a retraction.",
+      "additionalProperties": false,
+      "properties": {
+        "article_ids": { "type": "array", "items": { "type": "string", "maxLength": 256 } },
+        "first_seen": { "type": "string", "format": "date" },
+        "last_seen": { "type": "string", "format": "date" },
+        "corrections": {
+          "type": "array",
+          "description": "Corrections and retractions the OUTLET issued. Recorded as the outlet stated them, never as Archie's characterisation.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["article_id", "kind", "source_url"],
+            "properties": {
+              "article_id": { "type": "string", "maxLength": 256 },
+              "kind": { "enum": ["correction", "clarification", "retraction", "editors_note"] },
+              "issued_at": { "type": "string", "format": "date" },
+              "source_url": { "type": "string", "maxLength": 4096 }
+            }
+          }
+        },
+        "primary_sources_cited": {
+          "type": "array",
+          "description": "Named primary sources in their pieces. The most useful provenance signal there is: it distinguishes reporting from aggregation.",
+          "items": { "type": "string", "maxLength": 512 }
+        }
+      }
+    },
+
+    "provenance": { "$ref": "https://archie.os/protocols/provenance.schema.json" },
+
+    "$comment_no_scoring": "There is deliberately no reliability or bias score. A single opaque number presented as a property of a journalist is a political act wearing a metric's clothes. What the model records instead is checkable: what they published, who they cited, and what was corrected. A reader can weigh that; nobody can argue with a 7.3.",
+
+    "$comment_forbidden": "The following are NEVER admissible and are excluded by additionalProperties:false — home or physical address, personal phone number, personal email, family members, relationships, date of birth, national identifiers, financial accounts, physical movements or travel, real-time location, private photographs, health information, and any field sourced from a breach, leak, or scraped private database. Archie's purpose here is source analysis, not personal targeting."
+  }
+}

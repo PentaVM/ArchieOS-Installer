@@ -1,0 +1,107 @@
+[Unit]
+Description=ArchieOS task execution supervisor
+Documentation=file:/usr/share/doc/archie-os/RFC-007-KERNEL-INTEGRATION.md
+# The executor is a mechanism, not an authority. It starts alongside archied but does not
+# require it: a supervisor that refused to run without its control plane would drop every
+# surviving worker on the floor during an archied restart, which is exactly the case its
+# reconciliation exists to handle.
+Wants=archied.service
+After=archied.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=archie-executor
+Group=archie
+ExecStart=/usr/bin/archie-executord
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+
+# ---------------------------------------------------------------------------
+# The delegated cgroup subtree — the entire point of this being a separate unit.
+#
+# archied keeps ProtectControlGroups=yes and an empty capability bounding set. It is
+# never given the access a worker supervisor needs. Instead that access is confined to
+# this process, and confined further to one subtree.
+#
+# Delegate= grants write access to *this unit's own* cgroup and everything below it, and
+# to nothing above it. The alternative — making /sys/fs/cgroup writable — would hand the
+# executor the ability to write cgroup.freeze into archied's cgroup, which would stop the
+# control plane with no way to restart it, since the freezer cannot be released from
+# inside.
+#
+# The controllers are named rather than using `Delegate=yes`, so the set is reviewable and
+# an addition is a deliberate edit rather than something that arrives with a systemd
+# upgrade.
+# ---------------------------------------------------------------------------
+Delegate=cpu cpuset io memory pids
+
+# The executor's own footprint, distinct from the budgets it writes for tasks. Kept small
+# on purpose: it spawns and supervises, and a supervisor that needs a gigabyte is a
+# supervisor doing something it should not be.
+CPUWeight=80
+MemoryHigh=192M
+MemoryMax=384M
+TasksMax=512
+OOMPolicy=stop
+
+RuntimeDirectory=archie-executor
+RuntimeDirectoryMode=0750
+StateDirectory=archie-executor
+StateDirectoryMode=0750
+LogsDirectory=archie-executor
+UMask=0007
+
+Environment=RUST_LOG=info
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=archie-executord
+
+# ---------------------------------------------------------------------------
+# Hardening.
+#
+# Narrower than archied's in one direction and necessarily wider in another. Wider: it
+# must be able to fork, exec and write its own cgroup subtree. Narrower: it holds no
+# keys, parses no provider data, and has no reason to touch the network at all.
+# ---------------------------------------------------------------------------
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+LockPersonality=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+
+# AF_UNIX only. The executor talks to archied over a socket in its runtime directory and
+# has no other correspondent. Admitting AF_INET would turn a local privilege boundary
+# into a network-reachable one, in the process that can create cgroups and spawn workers.
+RestrictAddressFamilies=AF_UNIX
+
+# Deliberately NOT set:
+#
+#   ProtectControlGroups=yes
+#       would defeat Delegate= — the unit could not write the subtree it was given.
+#       Delegation is the narrow grant; this directive is the blanket denial, and having
+#       both would mean the executor cannot do the one thing it exists for.
+#
+#   MemoryDenyWriteExecute=yes
+#       archied sets it and should. Here it would be inherited by every worker this
+#       process execs, and a worker running a JIT — any Python with a JIT, any inference
+#       runtime generating kernels — would die on its first compilation with an error
+#       pointing nowhere near the cause. Worker confinement is the task runner's job and
+#       is expressed per task, not inherited wholesale from the supervisor.
+
+[Install]
+WantedBy=multi-user.target

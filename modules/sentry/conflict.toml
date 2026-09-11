@@ -1,0 +1,23 @@
+# Armed conflict and political violence.
+#
+# No single conflict database is canonical. ACLED, UCDP and GDELT will disagree about the
+# same day in the same town, and this module records the disagreement rather than picking
+# a winner — the spread between them is often the most informative output.
+id = "sentry.conflict"
+version = "0.1.0"
+description = "Armed conflict and political violence reporting from multiple independent databases"
+priority = 420
+
+required_capabilities = ["world.conflict", "network.internet"]
+optional_capabilities = ["fusion.corroboration", "fusion.geocoding"]
+dependencies = ["core.sentry", "core.memory"]
+permissions = ["read-knowledge", "write-knowledge", "network-internet"]
+
+[worker]
+kind = "python"
+module = "workers.sentry.conflict"
+entrypoint = "main"
+
+[health_check]
+kind = "heartbeat"
+interval_seconds = 300

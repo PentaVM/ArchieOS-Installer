@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.88'
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+      - run: cargo fmt --all -- --check
+      - run: cargo check --workspace --locked
+      - run: cargo test --workspace --locked
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  native-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y cmake ninja-build zlib1g-dev
+      - run: cmake -S cortex -B build/cortex -G Ninja -DARCHIE_CORTEX_BUILD_TESTS=ON
+      - run: cmake --build build/cortex --parallel 2
+      - run: ctest --test-dir build/cortex --output-on-failure
+      - run: cmake -S sentry -B build/sentry -G Ninja -DSENTRY_BUILD_TESTS=ON
+      - run: cmake --build build/sentry --parallel 2
+      - run: ctest --test-dir build/sentry --output-on-failure
+      - run: cmake -S display/visual -B build/visual -G Ninja -DARCHIE_VISUAL_BUILD_TESTS=ON
+      - run: cmake --build build/visual --parallel 2
+      - run: ctest --test-dir build/visual --output-on-failure
+      - run: cmake -S display/osm -B build/osm -G Ninja -DARCHIE_OSM_BUILD_TESTS=ON
+      - run: cmake --build build/osm --parallel 2
+      - run: ctest --test-dir build/osm --output-on-failure

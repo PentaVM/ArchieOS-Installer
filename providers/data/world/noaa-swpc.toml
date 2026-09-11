@@ -1,0 +1,28 @@
+# Relevant beyond curiosity: geomagnetic disturbance degrades GNSS accuracy and HF
+# propagation, so this feed is a confounder that GNSS interference detection must
+# account for before it claims interference.
+id = "noaa.swpc"
+title = "NOAA Space Weather Prediction Center"
+description = "Geomagnetic indices, solar wind, flare and radio blackout observations."
+homepage = "https://www.swpc.noaa.gov/"
+capability = "world.spaceweather"
+records = ["observation", "metric", "time_series"]
+
+[access]
+transport = "https"
+authentication = "none"
+access_class = "public"
+
+[cadence]
+poll_seconds = 900
+min_poll_seconds = 300
+
+[cadence.backoff]
+strategy = "exponential"
+initial_seconds = 60
+max_seconds = 3600
+jitter = true
+
+[coverage]
+geographic = "global"
+latency_seconds = 900

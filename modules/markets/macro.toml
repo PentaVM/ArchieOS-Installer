@@ -1,0 +1,22 @@
+# Macroeconomic series and corporate filings.
+#
+# Series carry their vintage. A revision that silently overwrites the prior print
+# destroys the ability to ask what was known at the time, which is usually the question.
+id = "markets.macro"
+version = "0.1.0"
+description = "FRED/ALFRED, World Bank, IMF and SEC EDGAR ingestion with data-vintage tracking"
+priority = 460
+
+required_capabilities = ["market.macro", "network.internet"]
+optional_capabilities = ["market.filings"]
+dependencies = ["core.memory"]
+permissions = ["read-knowledge", "write-knowledge", "network-internet"]
+
+[worker]
+kind = "python"
+module = "workers.markets.macro"
+entrypoint = "main"
+
+[health_check]
+kind = "heartbeat"
+interval_seconds = 1800

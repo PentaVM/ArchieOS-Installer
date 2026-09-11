@@ -1,0 +1,104 @@
+[Unit]
+Description=ArchieOS native 3D observatory
+Documentation=file:/usr/share/doc/archie-os/RFC-006-DISPLAY-ISOLATION.md
+# The display is a client of the bridge. If the bridge is down the renderer still starts
+# and shows an honest disconnected state rather than refusing to run.
+Wants=archie-displayd.service systemd-logind.service
+After=archie-displayd.service systemd-user-sessions.service systemd-logind.service
+# tty2 belongs exclusively to the observatory while this unit is active. This conflict
+# does not affect tty1, so a local recovery console remains available.
+Conflicts=getty@tty2.service
+# No GPU, no session. Without this the unit restart-loops forever on a headless node.
+ConditionPathExists=/dev/dri/card0
+ConditionKernelCommandLine=!archie.install=1
+
+# The GPU condition stops a restart loop on a headless node. It does nothing about a
+# renderer that starts, has a GPU, and dies anyway — a driver it cannot use, a shader it
+# cannot compile, a memory ceiling it cannot fit under. Restart=always with RestartSec=3s
+# would retry that forever: five attempts span fifteen seconds, so systemd's default limit
+# of five starts per ten seconds is never reached and the failure stays invisible in the
+# journal instead of becoming a state you can see with `systemctl status`.
+#
+# Five attempts within five minutes is enough to ride out a transient failure (a slow seat
+# handover, a GPU still binding) and few enough that a genuine one stops and says so.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=archie-display
+Group=archie-display
+PAMName=login
+TTYPath=/dev/tty2
+StandardInput=tty-force
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+
+# Native Qt Quick 3D executable. EGLFS talks directly to DRM/KMS: no browser, HTML,
+# JavaScript runtime, Electron, desktop environment, compositor or window manager.
+# QML and the NASA texture are compiled into the ELF at build time.
+ExecStart=/usr/bin/archie-display
+
+Restart=always
+RestartSec=3s
+TimeoutStopSec=10s
+
+StateDirectory=archie-display
+UMask=0027
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+Environment=QT_QPA_PLATFORM=eglfs
+Environment=QT_QPA_EGLFS_INTEGRATION=eglfs_kms
+Environment=QSG_RHI_BACKEND=opengl
+Environment=QT_QUICK_CONTROLS_STYLE=Basic
+Environment=QML_DISABLE_DISK_CACHE=1
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=archie-display
+
+# The native renderer needs DRM/KMS and input, but no state, keys, shell or public network.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+LockPersonality=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET
+# The renderer must never reach the network. Everything it draws comes from the loopback
+# bridge, so a compromised page has nowhere to send anything.
+IPAddressAllow=localhost
+IPAddressDeny=any
+
+# Wave E resource envelope. The display is important, never control-plane critical.
+CPUWeight=20
+CPUQuota=100%
+# The globe texture is not what sizes this: 2048x1024 RGBA decodes to 8 MB, ~11 MB with
+# mipmaps. The real consumers are the GPU driver's userspace allocations and the
+# framebuffers, and both scale with the panel. At 4K a triple-buffered surface is ~100 MB
+# before Quick3D's own depth and render targets, and a proprietary NVIDIA userspace maps
+# considerably more than Mesa does. 512M fits a 1080p Mesa node and silently fails a 4K
+# NVIDIA one — which is the machine this is actually for.
+#
+# MemoryHigh is the throttle: past it the kernel reclaims and the renderer slows down,
+# which is the correct response to a display using too much. MemoryMax is the kill, and it
+# triggers on the peak rather than the average, so it has to clear the transient spike of a
+# texture upload or a resolution change, not just the steady state.
+MemoryHigh=768M
+MemoryMax=1536M
+TasksMax=128
+LimitNOFILE=2048
+OOMPolicy=stop
+
+[Install]
+WantedBy=graphical.target

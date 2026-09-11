@@ -1,0 +1,15 @@
+[package]
+name = "archie-speech"
+description = "The realtime speech plane: conversational floor, adapters, and what is spoken."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+archie-types.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

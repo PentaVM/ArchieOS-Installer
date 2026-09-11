@@ -1,0 +1,18 @@
+# Decomposes an objective into a task DAG. Produces structure, not prose.
+id = "cognition.planner"
+version = "0.1.0"
+description = "Objective decomposition into a persistent task DAG"
+priority = 100
+
+required_capabilities = ["compute.inference"]
+dependencies = ["core.archie"]
+permissions = ["read-knowledge", "spawn-workers"]
+
+[worker]
+kind = "python"
+module = "workers.planner"
+entrypoint = "main"
+
+[health_check]
+kind = "heartbeat"
+interval_seconds = 60

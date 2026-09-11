@@ -1,0 +1,34 @@
+# Thermal anomaly detections from MODIS and VIIRS.
+id = "nasa.firms"
+title = "NASA FIRMS active fire detections"
+description = "Near-real-time satellite thermal anomaly detection, used for wildfire monitoring and as a corroborating signal for industrial and conflict-related fires."
+homepage = "https://firms.modaps.eosdis.nasa.gov/"
+capability = "world.wildfire"
+records = ["observation"]
+
+[access]
+transport = "https"
+authentication = "api-key"
+secret_handle = "nasa.firms.map_key"
+access_class = "attribution-required"
+attribution = "NASA FIRMS (MODIS/VIIRS)"
+terms_url = "https://firms.modaps.eosdis.nasa.gov/usage/"
+
+[cadence]
+poll_seconds = 600
+min_poll_seconds = 300
+
+[cadence.backoff]
+strategy = "exponential"
+initial_seconds = 60
+max_seconds = 3600
+jitter = true
+
+[coverage]
+geographic = "global"
+latency_seconds = 10800
+known_gaps = [
+  "A detection is a thermal anomaly, not a confirmed fire. Gas flares and hot industrial roofs produce persistent false positives.",
+  "Cloud cover suppresses detection entirely. An empty region under cloud is unobserved, not fire-free.",
+  "Revisit interval leaves multi-hour gaps at low latitudes.",
+]

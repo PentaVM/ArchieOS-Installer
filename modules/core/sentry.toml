@@ -1,0 +1,23 @@
+# Sentry: the physical/digital bridge.
+#
+# Device discovery, telemetry, anomaly detection, fault isolation and degraded-state
+# coordination. Sentry observes and reports; it never commands an actuator on its own
+# authority — that path runs through the safety boundary and a human decision.
+id = "core.sentry"
+version = "0.1.0"
+description = "Sentry: device discovery, telemetry, anomaly detection, fault isolation"
+priority = 30
+
+required_capabilities = ["compute.cpu", "network.lan"]
+optional_capabilities = ["sensor.thermal", "bus.can", "radio.lora"]
+dependencies = ["core.archie"]
+permissions = ["read-telemetry", "device-communicate"]
+
+[worker]
+kind = "python"
+module = "workers.sentry"
+entrypoint = "main"
+
+[health_check]
+kind = "heartbeat"
+interval_seconds = 5

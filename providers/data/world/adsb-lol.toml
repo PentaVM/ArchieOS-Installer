@@ -1,0 +1,34 @@
+# No published rate limit: the service states its own limits move with load rather
+# than committing to a fixed number. Ten seconds is the rate its own public map polls
+# at, which is the closest thing to a documented floor this provider has.
+id = "adsblol.aircraft"
+title = "adsb.lol community ADS-B aircraft"
+description = "Community-run ADS-B aggregator; aircraft positions from volunteer ground receivers, no account required."
+homepage = "https://adsb.lol/"
+capability = "world.aviation"
+records = ["observation", "track", "entity"]
+
+[access]
+transport = "https"
+authentication = "none"
+access_class = "attribution-required"
+attribution = "adsb.lol community feeders"
+
+[cadence]
+poll_seconds = 10
+min_poll_seconds = 10
+
+[cadence.backoff]
+strategy = "exponential"
+initial_seconds = 10
+max_seconds = 300
+jitter = true
+
+[coverage]
+geographic = "global"
+latency_seconds = 5
+known_gaps = [
+  "Coverage follows volunteer receiver density, the same shape as OpenSky: dense over Europe and North America, sparse over oceans and much of the southern hemisphere.",
+  "No account or key is required today, but the project has said a key will eventually be required for feeders; an unauthenticated node may need reconfiguration later.",
+  "State and military aircraft frequently transmit no ADS-B, or transmit a filtered identity. Absence of a track is not absence of an aircraft.",
+]

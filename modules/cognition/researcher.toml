@@ -1,0 +1,22 @@
+# Literature discovery and deep investigation.
+#
+# Runs in the Background queue so it fills idle compute and yields cleanly to any user
+# request, checkpointing before it releases its slot.
+id = "cognition.researcher"
+version = "0.1.0"
+description = "Literature discovery, scientific research, deep investigation"
+priority = 110
+
+required_capabilities = ["compute.inference", "network.internet"]
+optional_capabilities = ["compute.embedding"]
+dependencies = ["core.memory"]
+permissions = ["read-knowledge", "write-knowledge", "network-internet"]
+
+[worker]
+kind = "python"
+module = "workers.research"
+entrypoint = "main"
+
+[health_check]
+kind = "heartbeat"
+interval_seconds = 60

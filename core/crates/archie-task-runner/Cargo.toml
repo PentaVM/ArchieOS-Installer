@@ -1,0 +1,28 @@
+[package]
+name = "archie-task-runner"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "ArchieOS per-task sandbox launcher"
+
+[[bin]]
+name = "archie-task-runner"
+path = "src/main.rs"
+
+[lib]
+name = "archie_task_runner"
+path = "src/lib.rs"
+
+[dependencies]
+archie-execution.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# Only the tests construct a TaskExecutionSpec from scratch; the runner receives one
+# already built, so this stays out of the shipped binary's dependency graph.
+[dev-dependencies]
+archie-types.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"

@@ -1,0 +1,30 @@
+id = "first.epss"
+title = "FIRST Exploit Prediction Scoring System"
+description = "Daily probability estimates that a given CVE will be exploited in the next thirty days."
+homepage = "https://www.first.org/epss/"
+capability = "cyber.vulnerability"
+records = ["metric", "time_series"]
+
+[access]
+transport = "https"
+authentication = "none"
+access_class = "attribution-required"
+attribution = "FIRST.org EPSS"
+
+[cadence]
+poll_seconds = 86400
+min_poll_seconds = 3600
+
+[cadence.backoff]
+strategy = "exponential"
+initial_seconds = 300
+max_seconds = 21600
+jitter = true
+
+[coverage]
+geographic = "global"
+latency_seconds = 86400
+known_gaps = [
+  "EPSS is a probability of exploitation, not a measure of severity or of impact on any particular estate. Reading it as a patch priority without asset context is a misuse.",
+  "Scores move daily; a decision recorded against an EPSS value must record the date with it.",
+]

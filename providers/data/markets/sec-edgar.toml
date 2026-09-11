@@ -1,0 +1,35 @@
+id = "sec.edgar"
+title = "SEC EDGAR filings"
+description = "US corporate disclosure filings, the primary source for company events."
+homepage = "https://www.sec.gov/edgar"
+capability = "market.filings"
+records = ["observation", "organization", "event"]
+
+[access]
+transport = "https"
+authentication = "none"
+access_class = "public"
+terms_url = "https://www.sec.gov/os/webmaster-faq#developers"
+
+[cadence]
+poll_seconds = 600
+min_poll_seconds = 100
+
+[cadence.quota]
+requests = 10
+per_seconds = 1
+
+[cadence.backoff]
+strategy = "exponential"
+initial_seconds = 60
+max_seconds = 3600
+jitter = true
+
+[coverage]
+geographic = "national"
+regions = ["USA"]
+latency_seconds = 900
+known_gaps = [
+  "US registrants only. A company with no US listing files nothing here.",
+  "EDGAR requires a declared User-Agent; requests without one are refused rather than rate-limited.",
+]

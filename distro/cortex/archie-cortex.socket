@@ -1,0 +1,13 @@
+[Unit]
+Description=ARCHIE Analytical Cortex local IPC socket
+
+[Socket]
+ListenStream=/run/archie/cortex.sock
+SocketUser=archie-cortex
+SocketGroup=archie
+SocketMode=0660
+DirectoryMode=0750
+RemoveOnStop=true
+
+[Install]
+WantedBy=sockets.target

@@ -1,0 +1,23 @@
+# Nova: simulation, digital twins, physics validation.
+#
+# Nova is what stands between a candidate design or a candidate patch and the physical
+# world: it simulates the degraded system and the proposed change before either is
+# trusted.
+id = "core.nova"
+version = "0.1.0"
+description = "Nova: simulation, digital twins, physics validation, candidate analysis"
+priority = 40
+
+required_capabilities = ["compute.cpu", "simulation.multibody"]
+optional_capabilities = ["simulation.fea", "simulation.cfd", "compute.cuda"]
+dependencies = ["core.archie"]
+permissions = ["read-knowledge", "spawn-workers"]
+
+[worker]
+kind = "python"
+module = "workers.simulation"
+entrypoint = "main"
+
+[health_check]
+kind = "heartbeat"
+interval_seconds = 30

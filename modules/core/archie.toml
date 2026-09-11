@@ -1,0 +1,19 @@
+# Archie Core: the single user-facing identity.
+#
+# Supervision, planning, task ownership, approvals and routing. Everything else in the
+# topology is a resource this module draws on; nothing else speaks to the user directly.
+id = "core.archie"
+version = "0.1.0"
+description = "Archie Core: supervision, planning, task ownership, approvals, routing"
+priority = 10
+
+required_capabilities = ["compute.cpu"]
+permissions = ["read-knowledge", "read-telemetry", "spawn-workers"]
+
+[worker]
+kind = "builtin"
+symbol = "archie_core::runtime"
+
+[health_check]
+kind = "heartbeat"
+interval_seconds = 10

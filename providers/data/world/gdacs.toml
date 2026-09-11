@@ -1,0 +1,29 @@
+id = "gdacs.alerts"
+title = "GDACS multi-hazard alerts"
+description = "Joint UN and EC alerting for earthquakes, tropical cyclones, floods, droughts and volcanic activity, with population-exposure estimates."
+homepage = "https://www.gdacs.org/"
+capability = "world.disaster"
+records = ["observation", "event", "alert"]
+
+[access]
+transport = "https"
+authentication = "none"
+access_class = "attribution-required"
+attribution = "GDACS (European Commission / UN OCHA)"
+
+[cadence]
+poll_seconds = 300
+min_poll_seconds = 300
+
+[cadence.backoff]
+strategy = "exponential"
+initial_seconds = 60
+max_seconds = 1800
+jitter = true
+
+[coverage]
+geographic = "global"
+latency_seconds = 1800
+known_gaps = [
+  "Alert levels are modelled from hazard magnitude and population exposure, not from observed impact. A red alert predicts consequence; it does not report one.",
+]

@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://archie.os/protocols/detector.schema.json",
+  "title": "Detector",
+  "description": "A versioned, auditable rule that turns observations into findings.\n\nDetectors are the opposite of magic. Every one declares its inputs, its window, its thresholds and its known false positives, and every finding it emits names the detector version that produced it. Two consequences follow, and both are the point:\n\n1. A finding from six months ago can be re-derived, because the thresholds that produced it are recorded rather than remembered.\n2. A language model may propose a detector, and a human may accept it, but no model silently retunes a live threshold. Changing one is a version bump with an author.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "version", "title", "inputs", "window", "output", "authored_by"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*(\\.[a-z][a-z0-9_-]*)*$",
+      "maxLength": 128
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Any change to thresholds or logic requires a bump. Findings reference id AND version, so a retuned detector never rewrites the history of the old one."
+    },
+    "title": { "type": "string", "maxLength": 256 },
+    "rationale": {
+      "type": "string",
+      "maxLength": 4000,
+      "description": "What real-world pattern this is meant to catch, and why the thresholds are where they are."
+    },
+
+    "authored_by": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["human", "archie_proposed"] },
+        "identifier": { "type": "string", "maxLength": 256 },
+        "approved_by": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "Required for archie_proposed detectors. A detector Archie wrote does not run until a human accepts it."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "archie_proposed" } }, "required": ["kind"] },
+          "then": { "required": ["approved_by"] }
+        }
+      ]
+    },
+
+    "inputs": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Observation kinds and capabilities this detector consumes. A detector whose inputs are unavailable on a node reports `unavailable` rather than silently never firing — a quiet detector and a missing feed must not look the same.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["observation_kind"],
+        "properties": {
+          "observation_kind": { "type": "string", "maxLength": 128 },
+          "required_capability": { "type": "string", "maxLength": 128 },
+          "minimum_sources": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Independent sources needed before the detector may fire at all."
+          }
+        }
+      }
+    },
+
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["duration_seconds"],
+      "properties": {
+        "duration_seconds": { "type": "integer", "minimum": 1 },
+        "step_seconds": { "type": "integer", "minimum": 1 },
+        "baseline_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Comparison period for anomaly detectors. 'Unusual' is meaningless without saying unusual against what."
+        }
+      }
+    },
+
+    "thresholds": {
+      "type": "object",
+      "description": "Named, versioned numbers. Kept as data rather than buried in code so a finding can be explained by quoting the threshold it crossed.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["value"],
+        "properties": {
+          "value": { "type": "number" },
+          "unit": { "type": "string", "maxLength": 32 },
+          "note": { "type": "string", "maxLength": 512 }
+        }
+      }
+    },
+
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["finding_kind", "default_severity"],
+      "properties": {
+        "finding_kind": { "type": "string", "maxLength": 128 },
+        "default_severity": {
+          "enum": ["informational", "low", "moderate", "high", "severe"]
+        },
+        "creates_event": {
+          "type": "boolean",
+          "description": "Whether a finding promotes to an Event. Most detectors annotate; few should create."
+        },
+        "may_change_scene": {
+          "type": "boolean",
+          "description": "Whether a finding may take over the observatory display. Deliberately opt-in: a detector that can seize the screen is a detector that can be used to hide something else."
+        }
+      }
+    },
+
+    "false_positive_notes": {
+      "type": "array",
+      "description": "Known ways this detector is wrong. Required in spirit for anything that can change the scene — an operator seeing an alert should be able to read, in one place, the ordinary innocent explanations before acting on it.",
+      "items": { "type": "string", "maxLength": 1000 }
+    },
+
+    "state": { "enum": ["enabled", "disabled", "unavailable", "shadow"] },
+
+    "$comment_shadow": "shadow mode runs the detector and records findings without alerting or changing scenes. It is how a new threshold is evaluated against real traffic before it is trusted."
+  },
+
+  "$defs": {
+    "finding": {
+      "title": "Detector finding",
+      "description": "One firing of a detector. Self-describing on purpose: it carries the detector version and the evidence, so it remains interpretable after the detector is retuned.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "detector_id", "detector_version", "created_at", "result", "evidence_refs", "confidence_band"],
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "detector_id": { "type": "string", "maxLength": 128 },
+        "detector_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "window_start": { "type": "string", "format": "date-time" },
+        "window_end": { "type": "string", "format": "date-time" },
+        "result": {
+          "enum": ["fired", "cleared", "unavailable"],
+          "description": "`unavailable` means the inputs were missing. It is recorded so a gap in findings can be distinguished from a period of genuine quiet."
+        },
+        "severity": { "enum": ["informational", "low", "moderate", "high", "severe"] },
+        "explanation": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "Which threshold was crossed and by how much, in plain language."
+        },
+        "evidence_refs": {
+          "type": "array",
+          "minItems": 0,
+          "description": "Observations and events supporting the finding. Empty is permitted only for `unavailable`.",
+          "items": { "type": "string", "maxLength": 256 }
+        },
+        "measured": {
+          "type": "object",
+          "description": "The actual values against the thresholds, so a reader can judge a marginal firing.",
+          "additionalProperties": { "type": "number" }
+        },
+        "confidence_band": {
+          "enum": ["reported", "probable", "corroborated", "confirmed", "disputed"]
+        }
+      }
+    }
+  }
+}

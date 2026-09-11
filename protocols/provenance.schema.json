@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://archie.os/protocols/provenance.schema.json",
+  "title": "Provenance",
+  "description": "Where a record came from and how much of it was observed rather than concluded. Every normalized Archie record carries one of these; it is the single most important object in the world-intelligence model. A globe with dots on it is a toy. A globe where every dot can be traced back to the byte a provider returned, through each transformation that touched it, is an instrument. This block is what makes the second thing possible, which is why nothing may omit it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source", "fetched_at", "kind", "confidence_band"],
+  "properties": {
+    "source": {
+      "$ref": "#/$defs/sourceRef",
+      "description": "The immediate upstream this record came from."
+    },
+    "upstream": {
+      "type": "array",
+      "description": "Sources behind the immediate one, nearest first. An aggregator that republishes a national agency's feed lists the agency here, so a reader can tell a primary source from a repeater.",
+      "items": { "$ref": "#/$defs/sourceRef" }
+    },
+    "fetched_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When Archie retrieved it. Distinct from when the event happened and from when the provider published it, because the three routinely differ by hours and the gap is itself a signal."
+    },
+    "published_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the provider published it, where the provider says so."
+    },
+    "observed_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the underlying phenomenon actually occurred, where it is known."
+    },
+    "kind": {
+      "enum": ["raw", "inferred", "curated", "verified"],
+      "description": "raw: as the provider returned it, only reshaped. inferred: Archie concluded it. curated: a human or a maintained dataset asserted it. verified: independently reproduced or cross-source corroborated. A record may only claim `verified` if `corroboration` names at least two independent sources."
+    },
+    "confidence_band": {
+      "enum": ["reported", "probable", "corroborated", "confirmed", "disputed"],
+      "description": "A band, never a fabricated percentage. A single number invites arithmetic that the underlying evidence does not support; a band forces the reader to look at `corroboration` for the actual basis."
+    },
+    "corroboration": {
+      "type": "array",
+      "description": "Independent sources that assert substantially the same thing. Independence is the point: three outlets republishing one wire story is one source, not three, and the pipeline is required to collapse them before recording corroboration.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "agreement"],
+        "properties": {
+          "source": { "$ref": "#/$defs/sourceRef" },
+          "agreement": {
+            "enum": ["agrees", "partially_agrees", "contradicts"],
+            "description": "A contradicting source is recorded, never discarded. Disagreement between sources is information."
+          },
+          "note": { "type": "string", "maxLength": 2000 }
+        }
+      }
+    },
+    "raw_reference": {
+      "type": "object",
+      "description": "How to get back to exactly what the provider returned. Without this, a derived record cannot be audited and a mistake cannot be traced to its origin.",
+      "additionalProperties": false,
+      "properties": {
+        "uri": { "type": "string", "maxLength": 4096 },
+        "content_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "record_id": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "The provider's own identifier, kept verbatim so an update can be matched to the record it supersedes."
+        },
+        "retrieved_bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "transformations": {
+      "type": "array",
+      "description": "Ordered list of what Archie did to the raw payload. A reader should be able to reconstruct the path from provider bytes to this record.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["step"],
+        "properties": {
+          "step": {
+            "enum": [
+              "parse",
+              "normalize",
+              "geocode",
+              "entity_resolve",
+              "deduplicate",
+              "cluster",
+              "corroborate",
+              "translate",
+              "summarize",
+              "classify"
+            ]
+          },
+          "implementation": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "Module and version that performed the step, so a bad transformation can be attributed and rolled back."
+          },
+          "model": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "Set when a language model performed this step. Its presence means the output is model-derived and must not be treated as observation."
+          }
+        }
+      }
+    },
+    "license": {
+      "type": "object",
+      "description": "What Archie is permitted to do with this record. Carried per record rather than per provider because a single provider often mixes terms across its endpoints.",
+      "additionalProperties": false,
+      "required": ["access_class"],
+      "properties": {
+        "access_class": {
+          "enum": ["public", "attribution_required", "research_only", "licensed", "restricted"],
+          "description": "restricted means the record may be used internally but never rendered to a shared display or exported."
+        },
+        "identifier": { "type": "string", "maxLength": 128 },
+        "attribution": { "type": "string", "maxLength": 512 },
+        "redistribution_permitted": { "type": "boolean" }
+      }
+    },
+    "freshness": {
+      "type": "object",
+      "description": "How current this is expected to be. A layer whose data has outlived its cadence must visibly dim rather than continue to look authoritative.",
+      "additionalProperties": false,
+      "properties": {
+        "expected_cadence_seconds": { "type": "integer", "minimum": 1 },
+        "stale_after_seconds": { "type": "integer", "minimum": 1 },
+        "is_stale": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "sourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider_id"],
+      "properties": {
+        "provider_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*(\\.[a-z][a-z0-9_-]*)*$",
+          "description": "Matches a provider manifest id, e.g. `usgs.earthquakes`."
+        },
+        "endpoint": { "type": "string", "maxLength": 512 },
+        "title": { "type": "string", "maxLength": 512 },
+        "url": { "type": "string", "maxLength": 4096 }
+      }
+    }
+  }
+}

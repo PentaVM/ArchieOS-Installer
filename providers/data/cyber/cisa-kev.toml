@@ -1,0 +1,33 @@
+# Vulnerabilities with confirmed in-the-wild exploitation.
+#
+# Ingestion only. Reading KEV tells Archie what attackers are using; it involves touching
+# nothing but a US government JSON file.
+id = "cisa.kev"
+title = "CISA Known Exploited Vulnerabilities catalog"
+description = "Authoritative catalog of vulnerabilities with confirmed active exploitation."
+homepage = "https://www.cisa.gov/known-exploited-vulnerabilities-catalog"
+capability = "cyber.vulnerability"
+records = ["vulnerability", "observation"]
+
+[access]
+transport = "https"
+authentication = "none"
+access_class = "public"
+
+[cadence]
+poll_seconds = 3600
+min_poll_seconds = 900
+
+[cadence.backoff]
+strategy = "exponential"
+initial_seconds = 120
+max_seconds = 7200
+jitter = true
+
+[coverage]
+geographic = "global"
+latency_seconds = 86400
+known_gaps = [
+  "Entry into KEV requires confirmed exploitation, so the catalog lags real-world use by days to weeks.",
+  "Scope reflects US federal enterprise relevance; exploited vulnerabilities outside that scope may never be listed.",
+]

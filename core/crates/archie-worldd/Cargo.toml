@@ -1,0 +1,39 @@
+[package]
+name = "archie-worldd"
+description = "Network-isolated authoritative world-data adapter for ArchieOS."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "archie_worldd"
+path = "src/lib.rs"
+
+[[bin]]
+name = "archie-worldd"
+path = "src/main.rs"
+required-features = ["provider"]
+
+[features]
+default = ["provider"]
+provider = [
+    "dep:archie-observability",
+    "dep:clap",
+    "dep:reqwest",
+    "dep:tokio",
+    "dep:tracing",
+]
+
+[dependencies]
+archie-observability = { workspace = true, optional = true }
+archie-types.workspace = true
+clap = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, optional = true, features = ["rt-multi-thread", "macros", "net", "time", "sync", "io-util", "signal"] }
+tracing = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }

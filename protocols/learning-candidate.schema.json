@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://archie.os/protocols/learning-candidate.schema.json",
+  "title": "Learning admission candidate",
+  "description": "A provenance-only proposal presented to Archie's deterministic learning firewall. It may describe Sentry or Wanda output, but it contains no sensor payload. Acceptance into working or episodic memory is distinct from admission into a model-training dataset.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "candidate_id", "source", "source_ref", "source_root", "evidence_ref",
+    "evidence_sha256", "semantic_key", "content_class", "sensitivity",
+    "machine_analysis_allowed", "consent_required", "consent_granted", "supervision",
+    "quality_permille", "relevance_permille", "novelty_permille", "observed_at_ms"
+  ],
+  "properties": {
+    "candidate_id": { "$ref": "#/$defs/reference" },
+    "source": {
+      "enum": ["sentry", "wanda", "operator_correction", "task_runtime", "derived_knowledge"]
+    },
+    "source_ref": { "$ref": "#/$defs/reference" },
+    "source_root": {
+      "$ref": "#/$defs/reference",
+      "description": "The independent root used for per-source quotas. Republishing adapters retain the original root."
+    },
+    "evidence_ref": {
+      "$ref": "#/$defs/reference",
+      "description": "Opaque vault or graph reference. Raw audio, pixels and transcript text are never embedded here."
+    },
+    "evidence_sha256": { "$ref": "#/$defs/digest" },
+    "semantic_key": {
+      "$ref": "#/$defs/reference",
+      "description": "Stable normalized meaning used to collapse repetition before sampling."
+    },
+    "content_class": {
+      "enum": [
+        "raw_audio", "raw_video", "raw_image", "transcript", "structured_observation",
+        "sanitized_aggregate", "social_hypothesis", "correction_trajectory", "task_outcome"
+      ]
+    },
+    "sensitivity": {
+      "enum": ["public", "local_restricted", "personal_private", "secret", "biometric", "location"]
+    },
+    "machine_analysis_allowed": {
+      "type": "boolean",
+      "description": "Copied from the provider/owner policy. False is an unconditional rejection."
+    },
+    "consent_required": { "type": "boolean" },
+    "consent_granted": { "type": "boolean" },
+    "supervision": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "none" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "graph_writer_receipt_ref"],
+          "properties": {
+            "kind": { "const": "operator_correction" },
+            "graph_writer_receipt_ref": { "$ref": "#/$defs/reference" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "outcome_receipt_ref"],
+          "properties": {
+            "kind": { "const": "verified_task_outcome" },
+            "outcome_receipt_ref": { "$ref": "#/$defs/reference" }
+          }
+        }
+      ]
+    },
+    "quality_permille": { "$ref": "#/$defs/permille" },
+    "relevance_permille": { "$ref": "#/$defs/permille" },
+    "novelty_permille": { "$ref": "#/$defs/permille" },
+    "observed_at_ms": { "type": "integer", "minimum": 1 },
+    "expires_at_ms": { "type": ["integer", "null"], "minimum": 1 }
+  },
+  "$defs": {
+    "reference": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 192,
+      "pattern": "^[A-Za-z0-9:._/-]+$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "permille": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000
+    }
+  }
+}

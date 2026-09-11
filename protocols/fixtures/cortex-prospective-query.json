@@ -1,0 +1,19 @@
+{
+  "request_id": "fixture:query",
+  "question": "actuator",
+  "active_project_id": "",
+  "snapshot_id": "fixture:graph",
+  "permitted_sensitivities": [
+    "local_restricted"
+  ],
+  "token_budget": 1024,
+  "maximum_items": 8,
+  "maximum_expansion_hops": 0,
+  "requested_at_ms": 1000,
+  "retrieval_cues": [
+    {
+      "grounding_node_id": "node:seed",
+      "question": "thermal"
+    }
+  ]
+}

@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://archie.os/protocols/observation.schema.json",
+  "title": "Observation",
+  "description": "One thing a provider reported, normalized. This is the atom of the world model: an earthquake, an aircraft position, a vessel report, a fire pixel, a route withdrawal, a market print.\n\nAn observation is deliberately NOT an event. It records that a source said something at a time and place. Deciding that several observations describe one real-world occurrence is fusion's job, and it produces an Event that points back here. Collapsing the two would make it impossible to tell one report from five, which is the difference between a rumour and a corroborated fact.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "kind", "observed_at", "provenance"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Archie's identifier. The provider's own id lives in provenance.raw_reference.record_id."
+    },
+    "kind": {
+      "enum": [
+        "aviation.position",
+        "maritime.position",
+        "orbital.element",
+        "seismic.event",
+        "wildfire.detection",
+        "weather.observation",
+        "spaceweather.index",
+        "disaster.alert",
+        "conflict.report",
+        "gnss.interference",
+        "airspace.restriction",
+        "infrastructure.status",
+        "imagery.scene",
+        "cyber.exposure",
+        "cyber.route_change",
+        "cyber.outage",
+        "cyber.censorship",
+        "market.print",
+        "market.release",
+        "media.article"
+      ],
+      "description": "Fixed vocabulary. A provider whose data does not fit gets a new kind added here, rather than a free-text label that nothing downstream can switch on."
+    },
+    "observed_at": { "type": "string", "format": "date-time" },
+    "valid_from": { "type": "string", "format": "date-time" },
+    "valid_to": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When this stops being true. An airspace restriction and a storm warning both expire; an observation still on the globe after its validity window is misinformation."
+    },
+
+    "location": { "$ref": "#/$defs/location" },
+
+    "entities": {
+      "type": "array",
+      "description": "Resolved entities this observation concerns: an aircraft, a vessel, a country, an organization. Populated by fusion.entity-resolution; empty until then, and empty is honest.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["entity_id", "role"],
+        "properties": {
+          "entity_id": { "type": "string", "maxLength": 256 },
+          "role": { "enum": ["subject", "actor", "target", "operator", "location", "mentioned"] },
+          "resolution_confidence": { "enum": ["exact", "probable", "ambiguous"] }
+        }
+      }
+    },
+
+    "measurements": {
+      "type": "object",
+      "description": "Numeric payload, each value carrying its unit. Units are mandatory because a bare number is the classic way an altitude in feet becomes an altitude in metres three transformations later.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["value", "unit"],
+        "properties": {
+          "value": { "type": "number" },
+          "unit": { "type": "string", "maxLength": 32 },
+          "uncertainty": { "type": "number", "minimum": 0 }
+        }
+      }
+    },
+
+    "attributes": {
+      "type": "object",
+      "description": "Bounded string payload for provider fields with no numeric meaning.",
+      "additionalProperties": { "type": "string", "maxLength": 2000 }
+    },
+
+    "severity": {
+      "enum": ["informational", "low", "moderate", "high", "severe"],
+      "description": "Present only when the PROVIDER assigns one. Archie does not invent a severity for an observation; a derived judgement belongs on an Event."
+    },
+
+    "provenance": { "$ref": "https://archie.os/protocols/provenance.schema.json" },
+
+    "superseded_by": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Set when a later observation from the same provider replaces this one. The original is retained: a correction is only legible next to what it corrected."
+    }
+  },
+
+  "$defs": {
+    "location": {
+      "type": "object",
+      "description": "Where, and how well that is known. `precision` is required because a country-level geocode and a GPS fix must never render identically on a globe.",
+      "additionalProperties": false,
+      "required": ["precision"],
+      "properties": {
+        "latitude": { "type": "number", "minimum": -90, "maximum": 90 },
+        "longitude": { "type": "number", "minimum": -180, "maximum": 180 },
+        "altitude_m": { "type": "number" },
+        "depth_m": { "type": "number" },
+        "precision": {
+          "enum": ["exact", "area", "city", "region", "country", "unknown"],
+          "description": "`unknown` is a legitimate value and must be rendered as such, never silently placed at 0,0."
+        },
+        "radius_m": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Uncertainty radius. Required in spirit for any precision coarser than `exact`."
+        },
+        "geometry": {
+          "type": "object",
+          "description": "GeoJSON geometry for anything that is not a point: a fire perimeter, a restricted airspace volume, an outage region.",
+          "properties": {
+            "type": {
+              "enum": ["Point", "LineString", "Polygon", "MultiPoint", "MultiLineString", "MultiPolygon"]
+            },
+            "coordinates": {}
+          },
+          "required": ["type", "coordinates"]
+        },
+        "country_iso3": { "type": "string", "pattern": "^[A-Z]{3}$" },
+        "place_name": { "type": "string", "maxLength": 512 }
+      }
+    }
+  }
+}

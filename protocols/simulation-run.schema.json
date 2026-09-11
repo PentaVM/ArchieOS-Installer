@@ -1,0 +1,299 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://archie.os/protocols/simulation-run.schema.json",
+  "title": "Simulation run",
+  "description": "One execution of a physics solver, with everything needed to reproduce or distrust it.\n\nThe governing rule from the architecture: never show an impressive simulation without provenance. A stress plot with no mesh size, no solver version and no convergence history is a picture, not a result — and a picture that looks like a result is worse than no picture.\n\nThe shape is informed by surrogate-accelerated design pipelines such as NovaTurbo, where a fast neural surrogate proposes and a real solver confirms. That workflow only stays honest if a surrogate estimate can never be mistaken for a solved field, which is why `fidelity` is required and why a surrogate result carries its own calibration record.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "discipline", "fidelity", "status", "model_revision", "solver", "created_at"],
+
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "campaign_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Groups runs belonging to one design study, so a Pareto front can be traced to the sweep that produced it."
+    },
+
+    "discipline": {
+      "enum": [
+        "structural",
+        "thermal",
+        "cfd",
+        "combustion",
+        "turbomachinery",
+        "multibody",
+        "modal",
+        "fatigue",
+        "electromagnetic",
+        "control",
+        "cycle_analysis"
+      ]
+    },
+
+    "fidelity": {
+      "enum": ["analytical", "surrogate", "low_fidelity", "high_fidelity", "experimental"],
+      "description": "The single most important field. `surrogate` output is a prediction from a trained model and must never be rendered or reported as a solved field; `analytical` is a closed-form cycle estimate; `high_fidelity` is a converged solve. Confusing these is how a design review approves a part that was never actually simulated."
+    },
+
+    "status": {
+      "enum": ["queued", "running", "converged", "diverged", "timed_out", "failed", "cancelled"],
+      "description": "`diverged` is a result, not an absence of one, and is retained: a divergence at a particular operating point is often the most informative outcome of a sweep."
+    },
+
+    "created_at": { "type": "string", "format": "date-time" },
+    "started_at": { "type": "string", "format": "date-time" },
+    "completed_at": { "type": "string", "format": "date-time" },
+    "wall_seconds": { "type": "number", "minimum": 0 },
+    "node_id": {
+      "type": "string",
+      "description": "Fabric node that ran it. A result that cannot be attributed to hardware cannot be reproduced on it."
+    },
+
+    "model_revision": {
+      "type": "object",
+      "description": "Exactly which geometry was solved. A result whose input geometry cannot be recovered is not reproducible, however good the solver was.",
+      "additionalProperties": false,
+      "required": ["artifact_id", "content_sha256"],
+      "properties": {
+        "artifact_id": { "type": "string", "maxLength": 256 },
+        "content_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "format": { "enum": ["step", "stl", "iges", "brep", "gltf", "glb", "parametric"] },
+        "parent_revision": { "type": "string", "maxLength": 256 },
+        "generator": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "What produced the geometry, e.g. a parametric CAD module and its version."
+        }
+      }
+    },
+
+    "parameters": {
+      "type": "object",
+      "description": "The design and operating point, each value with its unit. This is what a sweep varies and what a Pareto point is indexed by.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["value", "unit"],
+        "properties": {
+          "value": { "type": ["number", "string", "boolean"] },
+          "unit": { "type": "string", "maxLength": 32 }
+        }
+      }
+    },
+
+    "solver": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "type": "string", "maxLength": 128 },
+        "version": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Exact version. Solver releases change results; a comparison across versions that does not say so is not a comparison."
+        },
+        "configuration_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Digest of the full case setup, so two runs can be proven to have used identical configuration."
+        },
+        "turbulence_model": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "e.g. k-omega-SST, Spalart-Allmaras. Reported because it changes the answer more than most parameters do."
+        },
+        "scheme": { "type": "string", "maxLength": 128 },
+        "parallel_ranks": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "mesh": {
+      "type": "object",
+      "description": "Discretization quality. Reported for every field solve: results are only meaningful relative to the mesh that produced them.",
+      "additionalProperties": false,
+      "properties": {
+        "cells": { "type": "integer", "minimum": 1 },
+        "nodes": { "type": "integer", "minimum": 1 },
+        "generator": { "type": "string", "maxLength": 128 },
+        "max_skewness": { "type": "number", "minimum": 0 },
+        "min_orthogonality": { "type": "number" },
+        "y_plus_mean": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Wall resolution for turbulent solves. Outside the range the chosen wall treatment assumes, the near-wall answer is not trustworthy regardless of convergence."
+        },
+        "independence_study": {
+          "type": "object",
+          "description": "Evidence that the answer stopped changing as the mesh refined. Its absence does not invalidate a run, but a design decision resting on a run without one should say so.",
+          "additionalProperties": false,
+          "properties": {
+            "performed": { "type": "boolean" },
+            "refinement_levels": { "type": "integer", "minimum": 2 },
+            "quantity": { "type": "string", "maxLength": 128 },
+            "relative_change": { "type": "number", "minimum": 0 }
+          }
+        }
+      }
+    },
+
+    "boundary_conditions": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type"],
+        "properties": {
+          "type": { "type": "string", "maxLength": 64 },
+          "value": { "type": ["number", "string"] },
+          "unit": { "type": "string", "maxLength": 32 }
+        }
+      }
+    },
+
+    "convergence": {
+      "type": "object",
+      "description": "Whether the solve actually converged, in numbers. A `converged` status with residuals that plateaued three orders too high is a run that should be read as `diverged`.",
+      "additionalProperties": false,
+      "properties": {
+        "iterations": { "type": "integer", "minimum": 0 },
+        "final_residuals": { "type": "object", "additionalProperties": { "type": "number" } },
+        "residual_target": { "type": "number", "minimum": 0 },
+        "monitored_quantity_drift": {
+          "type": "number",
+          "description": "Change in the reported quantity over the final iterations. The honest convergence check: residuals can fall while the answer still moves."
+        }
+      }
+    },
+
+    "results": {
+      "type": "object",
+      "description": "Scalar outputs, each with unit and uncertainty where known.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["value", "unit"],
+        "properties": {
+          "value": { "type": "number" },
+          "unit": { "type": "string", "maxLength": 32 },
+          "uncertainty": { "type": "number", "minimum": 0 }
+        }
+      }
+    },
+
+    "fields": {
+      "type": "array",
+      "description": "Field outputs available for overlay on the geometry — pressure, velocity, temperature, von Mises stress.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "artifact_id"],
+        "properties": {
+          "name": { "type": "string", "maxLength": 64 },
+          "unit": { "type": "string", "maxLength": 32 },
+          "artifact_id": { "type": "string", "maxLength": 256 },
+          "range": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": { "type": "number" }
+          }
+        }
+      }
+    },
+
+    "surrogate": {
+      "type": "object",
+      "description": "Present only when fidelity is `surrogate`. A prediction is admissible in a design loop precisely because it is cheap, and dangerous for the same reason; recording which model produced it, and how it was calibrated, is what keeps it from being quoted as a solve.",
+      "additionalProperties": false,
+      "required": ["model_id", "model_version", "calibrated_against"],
+      "properties": {
+        "model_id": { "type": "string", "maxLength": 128 },
+        "model_version": { "type": "string", "maxLength": 64 },
+        "training_samples": { "type": "integer", "minimum": 1 },
+        "calibrated_against": {
+          "enum": ["high_fidelity_cfd", "experimental", "analytical", "uncalibrated"],
+          "description": "`uncalibrated` is permitted and must be surfaced. An uncalibrated surrogate is a hypothesis generator, not an evaluator."
+        },
+        "validation_error": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "metric": { "type": "string", "maxLength": 64 },
+            "value": { "type": "number" },
+            "on_holdout": { "type": "boolean" }
+          }
+        },
+        "in_training_domain": {
+          "type": "boolean",
+          "description": "Whether this operating point lies inside the range the surrogate was trained on. Extrapolation is where surrogates fail silently, so it is recorded per run rather than assumed."
+        }
+      }
+    },
+
+    "validation_state": {
+      "enum": ["unvalidated", "self_consistent", "mesh_independent", "cross_solver_agreed", "experimentally_validated"],
+      "description": "How much the result has actually earned. Ascending: a converged run is only `self_consistent` until something outside it agrees."
+    },
+
+    "optimization": {
+      "type": "object",
+      "description": "Set when the run is a point in a multi-objective study.",
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": { "type": "string", "maxLength": 64 },
+        "generation": { "type": "integer", "minimum": 0 },
+        "objectives": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "direction", "value"],
+            "properties": {
+              "name": { "type": "string", "maxLength": 64 },
+              "direction": { "enum": ["minimize", "maximize"] },
+              "value": { "type": "number" },
+              "unit": { "type": "string", "maxLength": 32 }
+            }
+          }
+        },
+        "constraints_satisfied": { "type": "boolean" },
+        "on_pareto_front": { "type": "boolean" }
+      }
+    },
+
+    "safety_review": {
+      "type": "object",
+      "description": "Gate between a simulation and anything physical. A result may inform a design, but a part that will carry load or a patch that will run on a controller requires an explicit human acceptance recorded here — a converged solve is not authorization.",
+      "additionalProperties": false,
+      "properties": {
+        "required": { "type": "boolean" },
+        "outcome": { "enum": ["pending", "accepted", "rejected"] },
+        "reviewed_by": { "type": "string", "maxLength": 256 },
+        "notes": { "type": "string", "maxLength": 4000 }
+      }
+    },
+
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reason": { "type": "string", "maxLength": 2000 },
+        "log_artifact_id": { "type": "string", "maxLength": 256 }
+      }
+    }
+  },
+
+  "allOf": [
+    {
+      "$comment": "A surrogate result must always say which model produced it and how that model was calibrated.",
+      "if": { "properties": { "fidelity": { "const": "surrogate" } }, "required": ["fidelity"] },
+      "then": { "required": ["surrogate"] }
+    },
+    {
+      "$comment": "A converged solve must report how it converged. Otherwise the status is an assertion.",
+      "if": { "properties": { "status": { "const": "converged" } }, "required": ["status"] },
+      "then": { "required": ["convergence"] }
+    }
+  ]
+}

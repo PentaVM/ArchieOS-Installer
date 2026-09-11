@@ -1,0 +1,37 @@
+{
+  "type": "FeatureCollection",
+  "metadata": {
+    "generated": 1725000000000,
+    "url": "https://example.invalid/provider-only-field"
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "id": "ci407test1",
+      "properties": {
+        "mag": 2.4,
+        "place": "8 km NW of Test Ridge\u0000",
+        "time": 1724999900000,
+        "updated": 1724999950000,
+        "felt": 3,
+        "tsunami": 0,
+        "url": "https://example.invalid/event/ci407test1",
+        "detail": "https://example.invalid/provider-only-field"
+      },
+      "geometry": {"type": "Point", "coordinates": [-117.5, 34.2, 8.1]}
+    },
+    {
+      "type": "Feature",
+      "id": "us7000test2",
+      "properties": {
+        "mag": 6.2,
+        "place": "South Atlantic Ocean",
+        "time": 1725000000000,
+        "updated": 1725000050000,
+        "felt": null,
+        "tsunami": 1
+      },
+      "geometry": {"type": "Point", "coordinates": [-71.25, -30.5, 22.0]}
+    }
+  ]
+}

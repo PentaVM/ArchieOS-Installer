@@ -1,0 +1,16 @@
+# Model router: turns a request into a choice of model, with the reasons recorded.
+id = "core.router"
+version = "0.1.0"
+description = "Model routing across local, fabric and cloud providers"
+priority = 15
+
+required_capabilities = ["compute.cpu"]
+dependencies = ["core.archie"]
+permissions = ["read-telemetry", "manage-models"]
+
+[worker]
+kind = "builtin"
+symbol = "archie_router::Router"
+
+[health_check]
+kind = "none"

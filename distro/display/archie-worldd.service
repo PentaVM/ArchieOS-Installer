@@ -1,0 +1,61 @@
+[Unit]
+Description=ArchieOS authoritative world-data adapter
+Documentation=file:/usr/share/doc/archie-os/RFC-006-DISPLAY-ISOLATION.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+# A transient account intentionally has no Archie group, state directory, control
+# socket access, or persistent home. This is the only display component with egress.
+DynamicUser=yes
+ExecStart=/usr/bin/archie-worldd --bind 127.0.0.1:7667
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=10s
+UMask=0077
+
+Environment=RUST_LOG=info
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=archie-worldd
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectProc=invisible
+ProcSubset=pid
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+# HTTPS/DNS plus the loopback listener. AF_UNIX is intentionally absent so this
+# process cannot open archied's Unix control socket even if file permissions regress.
+RestrictAddressFamilies=AF_INET AF_INET6
+# Defense in depth: explicit Archie paths stay invisible despite ProtectSystem=strict.
+InaccessiblePaths=-/etc/archie -/run/archie -/var/lib/archie -/var/log/archie
+
+# Egress is constrained in code to one non-configurable HTTPS USGS endpoint. Hostname
+# addresses rotate, so systemd IP allow-listing would be brittle and fail open on drift.
+TasksMax=32
+LimitNOFILE=256
+CPUWeight=20
+CPUQuota=10%
+MemoryHigh=48M
+MemoryMax=96M
+OOMPolicy=stop
+
+[Install]
+WantedBy=multi-user.target

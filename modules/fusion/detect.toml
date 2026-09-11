@@ -1,0 +1,27 @@
+# Versioned detectors over the observation stream.
+#
+# Every detector declares inputs, window, baseline, named thresholds and known false
+# positives, and every finding carries the detector version that produced it, so a
+# six-month-old finding can be re-derived rather than remembered.
+#
+# A model may propose a detector and a human may accept it; no model retunes a live
+# threshold. `shadow` state runs a new threshold against real traffic without alerting,
+# which is how a tuning change earns trust before it gets it.
+id = "fusion.detect"
+version = "0.1.0"
+description = "Versioned auditable detectors with shadow evaluation and explicit false-positive notes"
+priority = 320
+
+required_capabilities = ["fusion.detector", "compute.cpu"]
+optional_capabilities = ["compute.inference"]
+dependencies = ["fusion.corroborate"]
+permissions = ["read-knowledge", "write-knowledge", "read-telemetry"]
+
+[worker]
+kind = "python"
+module = "workers.fusion.detect"
+entrypoint = "main"
+
+[health_check]
+kind = "heartbeat"
+interval_seconds = 30

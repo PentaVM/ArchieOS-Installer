@@ -1,0 +1,26 @@
+# Geocoding, entity resolution and deduplication.
+#
+# The unglamorous half of fusion and the half everything else depends on. Without
+# republication collapse, adding feeds makes the picture worse: the same wire story
+# arriving from twelve outlets looks like twelve independent confirmations.
+#
+# Geocoding output always carries a precision band. A country-level guess and a GPS fix
+# must never render identically on a globe.
+id = "fusion.normalize"
+version = "0.1.0"
+description = "Geocoding with precision bands, entity resolution, and republication collapse"
+priority = 300
+
+required_capabilities = ["fusion.geocoding", "compute.cpu"]
+optional_capabilities = ["fusion.entity-resolution", "fusion.deduplication", "compute.embedding"]
+dependencies = ["core.memory"]
+permissions = ["read-knowledge", "write-knowledge"]
+
+[worker]
+kind = "python"
+module = "workers.fusion.normalize"
+entrypoint = "main"
+
+[health_check]
+kind = "heartbeat"
+interval_seconds = 60

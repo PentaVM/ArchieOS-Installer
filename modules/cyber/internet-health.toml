@@ -1,0 +1,23 @@
+# Routing, outages and censorship: the health of the internet as a physical system.
+#
+# BGP announcements and withdrawals, RPKI validity, country-level reachability, and
+# censorship measurements. All of it is published telemetry about public infrastructure;
+# none of it involves touching a third party's host.
+id = "cyber.internet-health"
+version = "0.1.0"
+description = "BGP routing changes, RPKI validity, reachability collapse and censorship measurement"
+priority = 440
+
+required_capabilities = ["cyber.routing", "network.internet"]
+optional_capabilities = ["cyber.outage", "cyber.censorship", "world.infrastructure"]
+dependencies = ["core.sentry"]
+permissions = ["read-knowledge", "write-knowledge", "network-internet"]
+
+[worker]
+kind = "python"
+module = "workers.cyber.internet_health"
+entrypoint = "main"
+
+[health_check]
+kind = "heartbeat"
+interval_seconds = 120

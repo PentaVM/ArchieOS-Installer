@@ -1,0 +1,67 @@
+[Unit]
+Description=ArchieOS observatory bridge
+Documentation=file:/usr/share/doc/archie-os/RFC-006-DISPLAY-ISOLATION.md
+# Wants, not Requires: the bridge is useful before archied is up. It reports the daemon
+# as unreachable and recovers on its own, which is exactly what an operator watching a
+# restart needs to see.
+Wants=archied.service archie-worldd.service
+After=archied.service archie-worldd.service
+
+[Service]
+Type=simple
+User=archie-display
+Group=archie-display
+# The only membership that matters: it lets this process open archied's control socket,
+# which is group-gated to `archie`. The renderer account has no such membership.
+SupplementaryGroups=archie
+ExecStart=/usr/bin/archie-displayd --bind 127.0.0.1:7666
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=10s
+
+StateDirectory=archie-display
+StateDirectoryMode=0750
+UMask=0027
+
+Environment=RUST_LOG=info
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=archie-displayd
+
+# The bridge reads a socket and serves loopback HTTP. It needs nothing else.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+# AF_UNIX reaches archied; AF_INET is the loopback listener. Nothing else.
+RestrictAddressFamilies=AF_UNIX AF_INET
+# Loopback only. The observatory exposes node identity and hardware inventory, and this
+# is the second line of defence behind the bind check in the binary itself.
+IPAddressAllow=localhost
+IPAddressDeny=any
+
+TasksMax=64
+LimitNOFILE=2048
+CPUWeight=40
+CPUQuota=25%
+MemoryHigh=64M
+MemoryMax=128M
+OOMPolicy=stop
+
+[Install]
+WantedBy=multi-user.target

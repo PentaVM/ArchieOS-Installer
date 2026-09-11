@@ -1,0 +1,37 @@
+{
+  "snapshot_id": "fixture:graph",
+  "captured_at_ms": 1000,
+  "nodes": [
+    {
+      "id": "node:seed",
+      "kind": "project",
+      "summary": "actuator",
+      "aliases": [],
+      "provenance_ref": "source:one",
+      "sensitivity": "local_restricted",
+      "observed_at_ms": 100,
+      "version": 1
+    },
+    {
+      "id": "node:archive",
+      "kind": "paper",
+      "summary": "distant thermal evidence",
+      "aliases": [],
+      "provenance_ref": "source:two",
+      "sensitivity": "local_restricted",
+      "observed_at_ms": 100,
+      "version": 1
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge:bridge",
+      "source_id": "node:seed",
+      "target_id": "node:archive",
+      "kind": "depends_on",
+      "provenance_ref": "source:bridge",
+      "observed_at_ms": 100,
+      "version": 1
+    }
+  ]
+}

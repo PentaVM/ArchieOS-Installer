@@ -1,0 +1,33 @@
+# National, not global — see known_gaps. This is the feed that would otherwise make a
+# quiet Chile and an unwatched Chile look identical on a display that also shows US
+# severe-weather alerts and implies global coverage by not saying otherwise.
+id = "nws.alerts"
+title = "NOAA National Weather Service active alerts"
+description = "Active severe weather alerts for the United States and its territories."
+homepage = "https://www.weather.gov/documentation/services-web-api"
+capability = "world.weather"
+records = ["observation", "alert"]
+
+[access]
+transport = "https"
+authentication = "none"
+access_class = "public"
+
+[cadence]
+poll_seconds = 60
+min_poll_seconds = 60
+
+[cadence.backoff]
+strategy = "exponential"
+initial_seconds = 30
+max_seconds = 900
+jitter = true
+
+[coverage]
+geographic = "national"
+regions = ["United States and territories"]
+latency_seconds = 60
+known_gaps = [
+  "Covers only the United States and its territories. Absence of an alert elsewhere is not observed by this feed at all, not a report of calm weather.",
+  "The API requires a descriptive User-Agent identifying the requesting application; requests without one are more likely to be rate-limited.",
+]

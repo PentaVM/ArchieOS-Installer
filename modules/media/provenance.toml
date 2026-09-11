@@ -1,0 +1,26 @@
+# The public professional source graph.
+#
+# Bylines, stated affiliations, cited primary sources, and outlet-issued corrections.
+# This exists to weigh a claim by who reported it and what they cited.
+#
+# It is NOT a people database. protocols/person-public-profile.schema.json refuses any
+# field describing private life, requires a public evidence URL for every profile, and
+# has no reliability or bias score — an opaque number attached to a named journalist is a
+# political act wearing a metric's clothes.
+id = "media.provenance"
+version = "0.1.0"
+description = "Public byline, affiliation, citation and correction graph for source analysis"
+priority = 480
+
+required_capabilities = ["media.provenance", "network.internet"]
+optional_capabilities = ["media.corpus", "fusion.entity-resolution"]
+dependencies = ["core.memory", "media.news"]
+permissions = ["read-knowledge", "write-knowledge", "network-internet"]
+
+[worker]
+kind = "python"
+module = "workers.media.provenance"
+entrypoint = "main"
+
+[health_check]
+kind = "none"

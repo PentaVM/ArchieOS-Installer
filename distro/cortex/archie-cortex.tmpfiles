@@ -1,0 +1,9 @@
+# The graph is created atomically by the trusted knowledge writer, not by cortexd.
+# Traverse only: Cortex must not join the Core control-socket group or list its state.
+a+ /var/lib/archie - - - - u:archie-cortex:--x
+d /etc/archie/cortex 0750 root archie-cortex -
+d /var/lib/archie/cortex 0750 archie-cortex archie-cortex -
+d /var/lib/archie/knowledge 0750 archie archie-cortex -
+d /var/lib/archie/knowledge/graph 2750 archie archie-cortex -
+d /var/lib/archie/private 0700 root root -
+d /var/cache/archie/cortex 0750 archie-cortex archie-cortex -

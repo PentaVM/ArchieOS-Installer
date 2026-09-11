@@ -1,0 +1,31 @@
+# BGP as it is actually announced, from RIPE route collectors.
+id = "ripe.ris"
+title = "RIPE RIS routing information service"
+description = "BGP announcements, withdrawals and origin changes from globally distributed route collectors."
+homepage = "https://ris.ripe.net/"
+capability = "cyber.routing"
+records = ["observation", "network_prefix", "autonomous_system"]
+
+[access]
+transport = "https"
+authentication = "none"
+access_class = "attribution-required"
+attribution = "RIPE NCC Routing Information Service"
+
+[cadence]
+poll_seconds = 120
+min_poll_seconds = 60
+
+[cadence.backoff]
+strategy = "exponential"
+initial_seconds = 30
+max_seconds = 1800
+jitter = true
+
+[coverage]
+geographic = "global"
+latency_seconds = 120
+known_gaps = [
+  "Visibility is limited to what the collector peers see. A hijack propagated only within one region may be invisible to every collector.",
+  "An origin change is not by itself a hijack. Legitimate reassignment, anycast and traffic engineering all produce the same signal, which is why the detector cross-checks RPKI before it says anything.",
+]

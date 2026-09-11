@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://archie.os/protocols/capture-event.schema.json",
+  "title": "CaptureEvent",
+  "description": "One thing a device agent observed, posted to the Sentry capture ingest. The language-independent contract between a per-platform agent (Android, browser, desktop) and the tested C++ gate in sentry/capture. An event that does not obey this is dropped as unparsed; an event that obeys it is still subject to the gate, which decides whether it is recorded, counted anonymously, or discarded. The agent's job is to report honestly; the gate's job is to decide.",
+  "type": "object",
+  "required": ["device_id", "source"],
+  "additionalProperties": false,
+  "properties": {
+    "device_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 192,
+      "description": "The device this happened on. Must match an enrollment the owner created, or the event is discarded before its content is considered. This is 'linkearse solo a mí': a device the owner never enrolled has no standing to feed anything."
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "text_entry",
+        "email",
+        "web_search",
+        "navigation",
+        "app_usage",
+        "notification",
+        "clipboard",
+        "file_activity",
+        "device_location"
+      ],
+      "description": "What kind of activity. Grouped by the OS mechanism that delivers it live: 'notification' is where a phone's WhatsApp/Instagram/SMS/mail previews arrive through the supported NotificationListenerService; 'web_search' and 'navigation' come from a browser extension; 'email' from an IMAP IDLE session or the Gmail API."
+    },
+    "actor": {
+      "type": "string",
+      "enum": ["confirmed_owner", "presumed_owner", "unknown", "confirmed_other"],
+      "default": "unknown",
+      "description": "Who was at the device. THE agent must set this honestly and it is the whole safety of multi-user capture. 'confirmed_other' — a biometric non-match, a different unlock, an explicit 'not me' — means someone other than the owner (mum, a friend) is using the device, and the gate will suppress the event rather than profile them. 'confirmed_owner' needs a positive signal (a biometric unlock this session). 'presumed_owner' is an unlocked personal device with nothing contradicting the owner. 'unknown' is a just-woken or fresh session. When in doubt an agent reports a weaker attribution, never a stronger one: over-claiming the owner records a guest's activity."
+    },
+    "author": {
+      "type": "string",
+      "enum": ["owner", "counterparty", "system"],
+      "default": "system",
+      "description": "Who produced the content. 'owner' is what the owner typed, searched or composed. 'counterparty' is a message the owner received — someone else's words, kept as metadata only (that the owner is in contact with them), never as retained text. 'system' is an app name, a window title, a URL — nobody's private speech."
+    },
+    "counterparty": {
+      "type": "string",
+      "maxLength": 192,
+      "description": "When the content is a message, who the other party is as the device knows them — a contact name, a handle, a number. Never resolved to a graph identity by the agent; that is the consent-gated step done downstream. Its only graph effect is a hypothesis edge that the owner is in contact with this person."
+    },
+    "observed_at": {
+      "type": "string",
+      "pattern": "^-?[0-9]+$",
+      "description": "Unix milliseconds, as a string. When the event happened on the device. An event stamped before the device's enrollment is not trusted."
+    }
+  },
+  "$comment": "Wire form is newline-delimited JSON: one flat object per line, posted in batches of at most 4 MiB. The C++ ingest additionally caps a batch at 16,384 events, each line at 4,096 bytes, and distinct contacts at 512. It reads exactly these fields and ignores content the agent does not send — deliberately, no message body has a field here, because a capture stream that carried message text would become the most damaging file on the machine. The agent sends metadata; the graph keeps bounded counts and contacts."
+}

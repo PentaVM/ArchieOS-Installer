@@ -1,0 +1,23 @@
+# Earthquakes, volcanoes, wildfire thermal anomalies, and multi-hazard alerts.
+#
+# One module rather than four: these share a normalization path, and all four upstreams
+# (USGS, GVP, FIRMS, GDACS) are authoritative, free, and need no credentials — which is
+# why they are the right feeds to build the provider runtime against first.
+id = "sentry.geophysical"
+version = "0.1.0"
+description = "Seismic, volcanic, wildfire and multi-hazard disaster observation"
+priority = 400
+
+required_capabilities = ["world.seismic", "network.internet"]
+optional_capabilities = ["world.wildfire", "world.disaster", "world.weather"]
+dependencies = ["core.sentry"]
+permissions = ["read-knowledge", "write-knowledge", "network-internet"]
+
+[worker]
+kind = "python"
+module = "workers.sentry.geophysical"
+entrypoint = "main"
+
+[health_check]
+kind = "heartbeat"
+interval_seconds = 120

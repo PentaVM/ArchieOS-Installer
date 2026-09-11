@@ -1,0 +1,23 @@
+# Price series for equities, commodities and FX.
+#
+# Every print records whether it is delayed or real-time, its currency, its market
+# session, and whether the series is adjusted. A delayed quote presented as live is a
+# trading decision made on false information.
+id = "markets.instruments"
+version = "0.1.0"
+description = "Equity, commodity and FX price observation with explicit delay and session state"
+priority = 460
+
+required_capabilities = ["market.equities", "network.internet"]
+optional_capabilities = ["market.commodities", "market.fx"]
+dependencies = ["core.memory"]
+permissions = ["read-knowledge", "write-knowledge", "network-internet", "read-secrets"]
+
+[worker]
+kind = "python"
+module = "workers.markets.instruments"
+entrypoint = "main"
+
+[health_check]
+kind = "heartbeat"
+interval_seconds = 300

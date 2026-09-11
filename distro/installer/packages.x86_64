@@ -1,0 +1,6 @@
+# Live installer UI. Removed from the installed target before its initramfs is built.
+foot
+gparted
+weston
+qt6-wayland
+xorg-xwayland

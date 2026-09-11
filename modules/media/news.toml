@@ -1,0 +1,22 @@
+# News and wire ingestion.
+#
+# Feeds the deduplication path directly: twelve outlets carrying one agency story must
+# collapse to one independent source before anything counts it as corroboration.
+id = "media.news"
+version = "0.1.0"
+description = "GDELT, RSS/Atom and institutional feed ingestion with republication collapse"
+priority = 470
+
+required_capabilities = ["media.news", "network.internet"]
+optional_capabilities = ["fusion.deduplication", "fusion.geocoding"]
+dependencies = ["core.memory"]
+permissions = ["read-knowledge", "write-knowledge", "network-internet"]
+
+[worker]
+kind = "python"
+module = "workers.media.news"
+entrypoint = "main"
+
+[health_check]
+kind = "heartbeat"
+interval_seconds = 300

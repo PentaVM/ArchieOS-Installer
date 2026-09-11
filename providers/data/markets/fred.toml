@@ -1,0 +1,39 @@
+# Macro series with vintages.
+#
+# ALFRED preserves what each series looked like at the time it was published, which is
+# what makes it possible to ask what was known on a given date rather than what is
+# believed now. A revision that silently overwrites the prior print destroys that.
+id = "stlouisfed.fred"
+title = "FRED / ALFRED economic data"
+description = "Federal Reserve Bank of St. Louis economic time series, with archival vintages."
+homepage = "https://fred.stlouisfed.org/"
+capability = "market.macro"
+records = ["time_series", "metric"]
+
+[access]
+transport = "https"
+authentication = "api-key"
+secret_handle = "fred.api_key"
+access_class = "attribution-required"
+attribution = "Federal Reserve Bank of St. Louis (FRED)"
+
+[cadence]
+poll_seconds = 3600
+min_poll_seconds = 600
+
+[cadence.quota]
+requests = 120
+per_seconds = 60
+
+[cadence.backoff]
+strategy = "exponential"
+initial_seconds = 60
+max_seconds = 7200
+jitter = true
+
+[coverage]
+geographic = "global"
+latency_seconds = 3600
+known_gaps = [
+  "Publication lag varies from days to quarters by series. A series with no recent value is usually unpublished, not zero.",
+]
