@@ -57,7 +57,12 @@ not, and are named here so that nothing in this repository overstates what is ne
   deliberately not serialisable, so private context cannot become a trace by accident.
 - Added `archie-mcp`: Model Context Protocol entered through the capability model.
   `AuthorizedCall` has no public constructor, so the path from a model's proposed tool
-  call to a transport necessarily passes the gate. Its transports are not implemented,
+  call to a transport necessarily passes the gate. The operator's allowlist is the
+  authority; `tools/list` is the server describing itself.
+- Added the streamable HTTP transport for it, covering `initialize` negotiation,
+  session binding, `tools/list`, `tools/call`, `resources/list` and `resources/read`,
+  both the JSON and event-stream response shapes, per-call credential brokering, and
+  response budgets enforced before allocation. The `stdio` transport is not implemented,
   and no stub resembling one ships.
 
 Vault references (`vault:...`) existed throughout the pre-existing codebase; what was
