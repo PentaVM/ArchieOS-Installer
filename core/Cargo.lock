@@ -192,6 +192,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "archie-mcp"
+version = "0.1.0"
+dependencies = [
+ "archie-types",
+ "archie-vault",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "toml",
+]
+
+[[package]]
 name = "archie-memory"
 version = "0.1.0"
 dependencies = [
