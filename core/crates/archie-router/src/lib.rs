@@ -76,6 +76,9 @@ impl RoutingRequest {
 pub mod reasons {
     pub const UNAVAILABLE: &str = "model_unavailable";
     pub const PRIVACY: &str = "privacy_grade_not_permitted";
+    /// A third party that has not had zero data retention verified for this deployment,
+    /// asked to receive something that is not already public.
+    pub const RETENTION_UNVERIFIED: &str = "provider_retention_unverified";
     pub const MISSING_CAPABILITY: &str = "missing_capability";
     pub const CONTEXT_EXCEEDED: &str = "context_window_exceeded";
     pub const OUTPUT_EXCEEDED: &str = "output_limit_exceeded";
@@ -268,8 +271,15 @@ impl Router {
         }
 
         // Privacy is a hard gate, checked before anything else can compensate for it.
-        if !model.permits_privacy(request.privacy) {
+        // The two halves are reported separately because they are different problems:
+        // a grade refusal needs a different model, an unverified retention posture needs
+        // someone to go and check an account setting. Both are recorded when both bind,
+        // rather than short-circuiting, so the trace shows everything that was wrong.
+        if !model.permits_privacy_grade(request.privacy) {
             disqualifiers.push(reasons::PRIVACY.to_string());
+        }
+        if !model.retention_admits(request.privacy) {
+            disqualifiers.push(reasons::RETENTION_UNVERIFIED.to_string());
         }
 
         for capability in &request.required_capabilities {
@@ -757,6 +767,133 @@ mod tests {
         assert!(cloud_candidate
             .disqualifiers
             .contains(&reasons::PRIVACY.to_string()));
+    }
+
+    #[test]
+    fn an_unverified_cloud_provider_loses_internal_work_to_a_worse_local_model() {
+        // The scenario the retention gate exists for: a far better cloud model that
+        // nobody has confirmed the retention posture of. Quality must not buy its way
+        // past that, exactly as it cannot buy its way past a grade.
+        let mut unverified = cloud(100);
+        unverified.retention = DataRetention::Unknown;
+        let registry = registry(vec![local(20), unverified]);
+        let mut req = request();
+        req.privacy = PrivacyGrade::Internal;
+
+        let outcome = Router::default().route(&registry, &req);
+        assert_eq!(
+            outcome.selected_model().map(|m| m.as_str()),
+            Some("local.qwen3")
+        );
+
+        let rejected = outcome
+            .considered()
+            .iter()
+            .find(|c| c.model.as_str() == "cloud.big")
+            .unwrap();
+        assert!(rejected
+            .disqualifiers
+            .contains(&reasons::RETENTION_UNVERIFIED.to_string()));
+        // And it says *retention*, not "privacy": the remedy is to go and verify an
+        // account setting, which a generic privacy refusal would not have suggested.
+        assert!(!rejected
+            .disqualifiers
+            .contains(&reasons::PRIVACY.to_string()));
+    }
+
+    #[test]
+    fn verifying_retention_is_what_lets_the_cloud_model_win() {
+        // The other half of the previous test: with the same request and the same
+        // models, the only change is the retention posture.
+        let registry = registry(vec![local(20), cloud(100)]);
+        let mut req = request();
+        req.privacy = PrivacyGrade::Internal;
+
+        assert_eq!(
+            Router::default()
+                .route(&registry, &req)
+                .selected_model()
+                .map(|m| m.as_str()),
+            Some("cloud.big"),
+            "a verified provider should be selectable on its merits"
+        );
+    }
+
+    #[test]
+    fn public_work_still_reaches_an_unverified_provider() {
+        // Retention describes what happens to disclosed data. Public data discloses
+        // nothing, so the gate must not apply — otherwise it would quietly become a
+        // ban on cloud inference.
+        let mut unverified = cloud(100);
+        unverified.retention = DataRetention::Retains;
+        let registry = registry(vec![local(20), unverified]);
+        let mut req = request();
+        req.privacy = PrivacyGrade::Public;
+
+        assert_eq!(
+            Router::default()
+                .route(&registry, &req)
+                .selected_model()
+                .map(|m| m.as_str()),
+            Some("cloud.big")
+        );
+    }
+
+    #[test]
+    fn both_privacy_refusals_are_reported_when_both_bind() {
+        // Restricted data at an unverified cloud provider fails two independent rules.
+        // Reporting only the first would understate what has to change.
+        let mut unverified = cloud(100);
+        unverified.retention = DataRetention::Unknown;
+        let registry = registry(vec![unverified]);
+        let mut req = request();
+        req.privacy = PrivacyGrade::Restricted;
+
+        let outcome = Router::default().route(&registry, &req);
+        let rejected = &outcome.considered()[0];
+        assert!(rejected
+            .disqualifiers
+            .contains(&reasons::PRIVACY.to_string()));
+        assert!(rejected
+            .disqualifiers
+            .contains(&reasons::RETENTION_UNVERIFIED.to_string()));
+    }
+
+    #[test]
+    fn unverified_retention_does_not_escalate() {
+        // Escalation means "decompose the problem"; it must not come to mean "ask
+        // again with the privacy rule switched off".
+        let mut unverified = cloud(100);
+        unverified.retention = DataRetention::Unknown;
+        let registry = registry(vec![unverified]);
+        let mut req = request();
+        req.privacy = PrivacyGrade::Internal;
+
+        assert!(matches!(
+            Router::default().route(&registry, &req),
+            RoutingOutcome::NoModelAvailable { .. }
+        ));
+    }
+
+    #[test]
+    fn a_secret_reaches_no_model_the_router_knows_about() {
+        // The router is the last place this could go wrong, and the local model is the
+        // one a locality-only rule would wave through.
+        let registry = registry(vec![local(20), cloud(100)]);
+        let mut req = request();
+        req.privacy = PrivacyGrade::Secret;
+
+        let outcome = Router::default().route(&registry, &req);
+        assert!(outcome.selected_model().is_none());
+        for candidate in outcome.considered() {
+            assert!(
+                candidate
+                    .disqualifiers
+                    .contains(&reasons::PRIVACY.to_string()),
+                "{} was not refused secret data",
+                candidate.model
+            );
+        }
     }
 
     #[test]

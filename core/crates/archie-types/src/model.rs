@@ -304,9 +304,19 @@ impl ModelDescriptor {
     /// [`PrivacyGrade::Secret`] fails the locality gate for every model everywhere,
     /// which is the property the whole grade exists for.
     pub fn permits_privacy(&self, grade: PrivacyGrade) -> bool {
-        grade <= self.max_privacy_grade
-            && grade.permits(self.locality)
-            && self.retention_admits(grade)
+        self.permits_privacy_grade(grade) && self.retention_admits(grade)
+    }
+
+    /// The clearance and locality halves alone, without the retention gate.
+    ///
+    /// Exists so a caller can tell the two refusals apart when reporting one. "This
+    /// model may not see restricted data" and "this provider has not had its retention
+    /// verified" are different problems with different remedies — the first needs a
+    /// different model, the second needs someone to check an account setting — and a
+    /// single `privacy` disqualifier in a routing trace would hide which one bound.
+    /// Enforcement still goes through [`ModelDescriptor::permits_privacy`].
+    pub fn permits_privacy_grade(&self, grade: PrivacyGrade) -> bool {
+        grade <= self.max_privacy_grade && grade.permits(self.locality)
     }
 
     /// Whether this model's retention posture admits data of `grade`.
