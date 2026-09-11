@@ -30,6 +30,7 @@ members = [
     "crates/archie-speech",
     "crates/archie-geofabric",
     "crates/archie-model-runtime",
+    "crates/archie-vault",
 ]
 
 [workspace.package]
@@ -61,6 +62,7 @@ archie-geofabric = { path = "crates/archie-geofabric" }
 archie-displayd = { path = "crates/archie-displayd" }
 archie-worldd = { path = "crates/archie-worldd", default-features = false }
 archie-model-runtime = { path = "crates/archie-model-runtime" }
+archie-vault = { path = "crates/archie-vault" }
 
 # External.
 anyhow = "1"
@@ -75,9 +77,11 @@ futures-util = "0.3"
 postgres = "=0.19.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+ring = "0.17"
 sha2 = "0.10"
 sysinfo = "0.33"
 thiserror = "2"
+zeroize = { version = "1", features = ["derive"] }
 time = { version = "0.3", features = ["serde", "formatting", "parsing", "macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "io-util", "signal"] }
 toml = "0.8"
