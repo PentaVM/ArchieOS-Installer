@@ -28,5 +28,8 @@ The native display remains a read-only client. Sentry observations retain proven
 and consent separately from visual presentation. Models cannot grant capabilities or
 actuate hardware; those decisions stay in the policy and execution boundaries.
 
+Cerebra — the loop that decides whether anything should happen, and where a model is
+and is not allowed to sit — is specified in [`docs/CEREBRA.md`](docs/CEREBRA.md).
+
 Detailed component contracts and threat boundaries remain in `docs/` and the numbered
 RFCs.
