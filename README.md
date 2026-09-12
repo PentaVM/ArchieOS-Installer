@@ -74,3 +74,15 @@ environment variables at request time and never stored in repository configurati
 
 See [ARCHITECTURE.md](ARCHITECTURE.md), [HACKATHON.md](HACKATHON.md), and
 [`docs/SECURITY.md`](docs/SECURITY.md).
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+The Apache licence rather than MIT for the patent grant: this repository contains
+device control, physical actuation and inference-routing work, and an explicit patent
+grant is worth more to a contributor here than the shorter text would be.
+
+Upstream data providers keep their own terms. `providers/` records the attribution each
+one requires, and the registry refuses to display records from a provider whose
+attribution is missing — this licence does not waive those obligations.

@@ -1,0 +1,12 @@
+ArchieOS
+Copyright 2026 PentaVM
+
+This product includes software developed by PentaVM.
+
+Licensed under the Apache License, Version 2.0. See LICENSE for the full terms.
+
+Third-party dependencies and data sources retain their own licenses and
+attribution requirements. Provider manifests under providers/ record the
+attribution each upstream source requires; those requirements are not waived by
+this license, and archie-registry refuses to display records from a provider
+whose attribution is missing.
