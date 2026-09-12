@@ -326,3 +326,90 @@ fn an_awaiting_approval_pass_is_neither_done_nor_refused() {
     ));
     assert!(hud.silent, "nothing has been done yet");
 }
+
+#[test]
+fn a_pass_still_running_is_not_reported_as_silence() {
+    // The sequencer hands a capsule back for inference and the result returns later, so
+    // a trace whose last stage proceeded has not finished. Rendering that as silence
+    // would make a system that is thinking look like one with nothing to say, and the
+    // two call for opposite responses from whoever is watching.
+    let mut trace = trace();
+    trace
+        .record(StageRecord::new(
+            Stage::Observe,
+            T0,
+            StageOutcome::Proceeded,
+        ))
+        .unwrap();
+    trace
+        .record(StageRecord::new(
+            Stage::Reason,
+            T0 + 1,
+            StageOutcome::Proceeded,
+        ))
+        .unwrap();
+
+    assert!(trace.in_progress());
+    assert!(!trace.was_silent());
+    assert!(!trace.has_acted());
+
+    let hud = trace.hud();
+    assert!(hud.in_progress);
+    assert!(!hud.silent);
+}
+
+#[test]
+fn silence_and_progress_are_never_both_true() {
+    // Whatever sequence of stages arrives, a display can rely on these being exclusive.
+    for outcome in [
+        StageOutcome::Proceeded,
+        StageOutcome::Silent {
+            reason: "thought_not_complete".into(),
+        },
+        StageOutcome::Refused {
+            reason: "privacy_grade_not_permitted".into(),
+        },
+        StageOutcome::Failed {
+            reason: "provider_timeout".into(),
+        },
+        StageOutcome::AwaitingApproval {
+            reason: "operator_approval_required".into(),
+        },
+    ] {
+        for stage in [Stage::Interpret, Stage::Reason, Stage::Act, Stage::Remember] {
+            let mut trace = trace();
+            trace
+                .record(StageRecord::new(stage, T0, outcome.clone()))
+                .unwrap();
+            let hud = trace.hud();
+            assert!(
+                !(hud.silent && hud.in_progress),
+                "{stage} / {outcome:?} reported both"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_pass_that_acted_is_neither_silent_nor_in_progress() {
+    let mut trace = trace();
+    trace
+        .record(StageRecord::new(Stage::Act, T0, StageOutcome::Proceeded))
+        .unwrap();
+    trace
+        .record(StageRecord::new(
+            Stage::Remember,
+            T0 + 1,
+            StageOutcome::Silent {
+                reason: "no_novel_claim".into(),
+            },
+        ))
+        .unwrap();
+
+    assert!(trace.has_acted());
+    assert!(
+        !trace.was_silent(),
+        "memory declining is not Archie staying quiet"
+    );
+    assert!(!trace.in_progress());
+}

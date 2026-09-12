@@ -1,0 +1,21 @@
+[package]
+name = "archie-cerebra"
+description = "The cognitive loop: whether to speak, what may be disclosed, which resource may see it, and what deserves to be remembered."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+archie-mcp.workspace = true
+archie-memory.workspace = true
+archie-observability.workspace = true
+archie-registry.workspace = true
+archie-router.workspace = true
+archie-types.workspace = true
+archie-vault.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

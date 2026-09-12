@@ -68,6 +68,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "archie-cerebra"
+version = "0.1.0"
+dependencies = [
+ "archie-mcp",
+ "archie-memory",
+ "archie-observability",
+ "archie-registry",
+ "archie-router",
+ "archie-types",
+ "archie-vault",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "archie-cli"
 version = "0.1.0"
 dependencies = [

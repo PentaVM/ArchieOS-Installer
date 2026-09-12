@@ -347,12 +347,34 @@ impl CognitiveTrace {
             .fold(0, u64::saturating_add)
     }
 
-    /// Whether this pass ended without Archie doing anything outwardly.
-    pub fn was_silent(&self) -> bool {
-        !self
-            .stages
+    /// Whether anything outward actually happened.
+    pub fn has_acted(&self) -> bool {
+        self.stages
             .iter()
             .any(|r| r.stage == Stage::Act && r.outcome.proceeded())
+    }
+
+    /// Whether this pass is still running.
+    ///
+    /// A pass whose last stage proceeded has not finished: the sequencer hands a
+    /// capsule back for inference, and the result returns later. Distinguishing this
+    /// from silence matters on a display — "thinking" and "decided not to speak" look
+    /// identical if both render as quiet, and only one of them is worth waiting for.
+    pub fn in_progress(&self) -> bool {
+        !self.has_acted()
+            && matches!(
+                self.stages.last().map(|r| &r.outcome),
+                Some(StageOutcome::Proceeded)
+            )
+    }
+
+    /// Whether this pass *concluded* without Archie doing anything outwardly.
+    ///
+    /// Requires the pass to have stopped. A pass mid-flight is [`Self::in_progress`],
+    /// not silent — reporting it as silence would describe a system that is working as
+    /// one that has nothing to say.
+    pub fn was_silent(&self) -> bool {
+        !self.has_acted() && !self.in_progress()
     }
 
     /// What a display may show.
@@ -370,6 +392,7 @@ impl CognitiveTrace {
             verification: self.last(Stage::Verify).map(|r| r.outcome.clone()),
             memory: self.last(Stage::Remember).map(|r| r.outcome.clone()),
             silent: self.was_silent(),
+            in_progress: self.in_progress(),
             total_latency_ms: self.total_latency_ms(),
             total_cost_micros: self.total_cost_micros(),
         }
@@ -407,9 +430,11 @@ pub struct HudProjection {
     pub verification: Option<StageOutcome>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory: Option<StageOutcome>,
-    /// True when nothing outward happened. Worth rendering: a silent assistant that
-    /// looks identical to a stalled one gets restarted.
+    /// True when the pass concluded without doing anything outward. Worth rendering: a
+    /// silent assistant that looks identical to a stalled one gets restarted.
     pub silent: bool,
+    /// True while the pass is still running. Never true at the same time as `silent`.
+    pub in_progress: bool,
     pub total_latency_ms: u32,
     pub total_cost_micros: u64,
 }

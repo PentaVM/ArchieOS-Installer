@@ -32,6 +32,7 @@ members = [
     "crates/archie-model-runtime",
     "crates/archie-vault",
     "crates/archie-mcp",
+    "crates/archie-cerebra",
 ]
 
 [workspace.package]
@@ -65,6 +66,7 @@ archie-worldd = { path = "crates/archie-worldd", default-features = false }
 archie-model-runtime = { path = "crates/archie-model-runtime" }
 archie-vault = { path = "crates/archie-vault" }
 archie-mcp = { path = "crates/archie-mcp" }
+archie-cerebra = { path = "crates/archie-cerebra" }
 
 # External.
 anyhow = "1"
