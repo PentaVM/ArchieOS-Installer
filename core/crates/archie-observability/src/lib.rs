@@ -23,10 +23,14 @@
 #![forbid(unsafe_code)]
 
 pub mod audit;
+pub mod cognition;
 pub mod kernel;
 pub mod metrics;
 
 pub use audit::{AuditError, AuditEvent, AuditOutcome, AuditSink, InMemoryAuditSink};
+pub use cognition::{
+    CognitiveTrace, HudProjection, Stage, StageCost, StageOutcome, StageRecord, Subject, TraceError,
+};
 pub use kernel::{
     read_system_pressure, read_thermal, PressureThresholds, PressureVerdict, SystemPressure,
     ThermalReport, ThermalState,
