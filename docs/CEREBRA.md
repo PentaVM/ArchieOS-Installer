@@ -1,8 +1,8 @@
 # Cerebra — the cognitive loop
 
 Status: perception, learning admission and analytical synthesis are implemented kernel
-contracts. The loop that sequences them is specified here and not yet built. No neural
-head exists; §7 is the roadmap for adding one without giving it authority.
+contracts, and `archie-cerebra` now sequences them. No neural head exists; §7 is the
+roadmap for adding one without giving it authority.
 
 Companion documents: [RFC-011](RFC-011-LEARNING-ADMISSION.md) (perception and learning
 admission), [RFC-012](RFC-012-ANALYTICAL-SYNTHESIS.md) (bounded analytical synthesis),
@@ -297,11 +297,19 @@ inference may happen; this one answers *whether*, and the answer is no.
 | Privacy-aware routing incl. verified retention | Implemented |
 | MCP capability gate and HTTP transport | Implemented |
 | Cognitive trace and HUD projection | Implemented |
-| **The loop that sequences them** | **Specified here, not built** |
+| The loop that sequences them | Implemented — `archie-cerebra` |
 | Neural head (any stage) | Not started — §7 |
 | Opportunity / intervention engine | Not started |
 | Verification against world state | Contracts only |
 
-The gap worth naming: every decision in §2 exists as a tested function, and nothing calls
-them in order. Building that sequencer is the next structural piece of work, and §2.1 is
-the part of it that must not be got wrong.
+`archie-cerebra` implements §2 and the orderings in §2.1, and its tests assert them
+rather than describe them — a silent pass is checked against the vault's own audit log,
+which must show that nothing was ever read.
+
+What it deliberately does not do is call a model or execute a tool. `consider()` ends by
+handing back a capsule and the identifier of the resource that may receive it; inference
+and execution are I/O and live elsewhere. That is what keeps the whole loop testable
+without a network.
+
+The gaps that remain are §7 (no neural head), the opportunity/intervention engine, and
+verification against world state, which has contracts but no implementation.
