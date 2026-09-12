@@ -219,6 +219,44 @@ The decision function `decide_floor` stays deterministic regardless. A learned e
 supplies inputs to it; it does not replace it, because a learned component that can
 decide to interrupt has no bound on how often it does.
 
+### Training from Sentry: what the firewall already decided
+
+Sentry is the richest signal in the system and the obvious thing to train on. It is also
+the thing RFC-011 spends its entire length restricting. Both are true, and the resolution
+is not a compromise — it determines which of the stages above are reachable today.
+
+**What reaches a trainer from Sentry right now:** opaque references, SHA-256 digests,
+normalised semantic keys, and a supervision receipt. The trainer-facing type has no field
+capable of holding audio, video, images or transcript text. That is not a policy setting;
+it is the shape of `CuratedTrainingRecord`.
+
+So the question is not "can we train on Sentry" but "which models can be trained on
+references and outcomes rather than on signal":
+
+| Target | Trainable on admitted records? | Why |
+|---|---|---|
+| Context utility / salience (Stage 2) | **Yes** | Operates on which references helped and what the outcome was — exactly what `UtilityObservation` carries |
+| Analytical interpretation (Stage 1) | **Yes** | Reads admitted evidence; `gate_model_proposal` already defines its contract |
+| Relevance and novelty scoring | **Yes** | Semantic keys and digests are sufficient |
+| Floor estimation (Stage 3) | **On-device only** | Needs raw timing, which may be inspected during inference but never retained |
+| Perception itself — wake word, speaker ID, vision | **No** | Requires the signal, which admission destroys |
+
+The last row is the real decision, and it is an operator's rather than an engineer's. A
+perception model trained on this household's own data would be better than a generic one.
+Getting there requires an explicit retention policy that keeps a bounded corpus, and that
+policy needs, at minimum: per-subject consent rather than owner-only consent, a stated
+expiry, and passage through admission anyway so that the corpus is curated rather than
+merely accumulated.
+
+Until such a policy exists and is granted, Stages 1 and 2 are the reachable work, and
+they are also the highest-leverage: better context selection improves every downstream
+answer *and* reduces disclosure, because context not retrieved is context not disclosed.
+Nothing about starting there forecloses the harder option later.
+
+What must not happen is the firewall being relaxed incrementally to make training easier.
+It is load-bearing, it is the thing that keeps an always-on perceptual system from
+becoming a surveillance archive, and it is far easier to widen once than to narrow again.
+
 ### Non-goals
 
 - **No end-to-end neural policy.** A model that maps observation directly to action
