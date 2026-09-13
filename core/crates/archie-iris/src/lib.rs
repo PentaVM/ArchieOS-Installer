@@ -10,6 +10,7 @@ pub mod cortex;
 pub mod damage;
 pub mod geometry;
 pub mod motor;
+pub mod multisource;
 pub mod reflex;
 pub mod scene;
 pub mod source;
@@ -28,6 +29,10 @@ pub use damage::{DamageConfig, DamageRegion, EphemeralFrame, PixelFormat, Semant
 pub use geometry::{Affine2D, Point, Rect};
 pub use motor::{
     MotorController, MotorError, MotorExecutor, MotorOutcome, PreparedMotorAction, SemanticAction,
+};
+pub use multisource::{
+    InferenceDemand, MicroBatchPlan, MultiSourceError, MultiSourceRuntime, PerceptionSessionId,
+    PlannedRoi, QueuedRoi,
 };
 pub use reflex::{
     DeterministicReflexBaseline, ModelManifest, ReflexBatchResult, ReflexDetection, ReflexError,
