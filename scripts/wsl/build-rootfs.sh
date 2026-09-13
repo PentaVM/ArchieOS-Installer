@@ -31,9 +31,13 @@ cargo build --manifest-path "$repo_root/core/Cargo.toml" --release -p archied -p
 install -m 0755 "$repo_root/core/target/release/archied" "$rootfs/usr/bin/archied"
 install -m 0755 "$repo_root/core/target/release/archie" "$rootfs/usr/bin/archie"
 install -m 0755 "$repo_root/core/target/release/archie-workstation-check" "$rootfs/usr/bin/archie-workstation-check"
+install -d "$rootfs/usr/lib/archie"
 install -m 0755 "$repo_root/scripts/models/install-nemotron-speech.sh" "$rootfs/usr/lib/archie/install-nemotron-speech"
 install -m 0755 "$repo_root/scripts/freecad/smoke-test.sh" "$rootfs/usr/lib/archie/freecad-smoke-test"
 arch-chroot "$rootfs" systemctl enable archie-workstation.target
+arch-chroot "$rootfs" systemctl mask systemd-resolved.service systemd-networkd.service \
+  NetworkManager.service systemd-tmpfiles-clean.service systemd-tmpfiles-clean.timer \
+  systemd-tmpfiles-setup-dev-early.service systemd-tmpfiles-setup-dev.service tmp.mount
 arch-chroot "$rootfs" pacman -Q > "$rootfs/package-versions.txt"
 rm -rf "$rootfs/var/cache/pacman/pkg"/* "$rootfs/var/log"/*
 rm -f "$rootfs/etc/machine-id"

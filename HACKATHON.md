@@ -116,3 +116,26 @@ from executed builds on identified hardware.
   dataset, microphone driver integration, retained recordings or accuracy claim ships.
 - Disabled inference HTTP redirects so an endpoint cannot forward admitted context
   beyond the destination selected by routing; verified with two loopback listeners.
+
+### Workstation alpha additions
+
+Built for this hackathon after the original control-plane work:
+
+- Reproducible Arch Linux WSL rootfs and modern `.wsl` packaging, a fallback importer,
+  systemd units, non-root session, disabled Windows automount/interop, and `archie`
+  first-run/health commands.
+- A native deterministic clarification gate in Cerebra with explicit permille inputs,
+  floor-aware deferral, pre-commit/pre-external-effect states, answer-ref resumption and
+  duplicate-question prevention.
+- Provider discovery/config for Nebius, Cerebras, OpenRouter, Ollama and vLLM, plus a
+  replaceable loopback UHP client for HarnessRouter-style Codex/Claude/Hermes workers.
+- A pinned first-run build of NVIDIA NeMo-Speech.cpp and checksum-pinned Nemotron Speech
+  Q8_0 weights. Audio buffers are bounded and ephemeral; partial/final text remains
+  unadmitted until Cerebra decides.
+- A policy-lease-gated FreeCAD process adapter and real headless parametric bracket
+  smoke test using the official Arch package.
+
+The original floor decision, learning-admission firewall, analytical gate, Vault and
+capability policy remain pre-existing foundations. The workstation work composes them;
+it does not relabel them as hackathon output. No speech accuracy, floor accuracy or
+professional CAD fitness metric is claimed.

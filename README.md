@@ -61,16 +61,60 @@ NVIDIA NIM and Nebius setup is documented in
 [`providers/nvidia/README.md`](providers/nvidia/README.md). Credentials are read from
 environment variables at request time and never stored in repository configuration.
 
+## ArchieOS Workstation for WSL2
+
+The workstation alpha packages ArchieOS as an Arch Linux WSL2 distribution with
+systemd, a non-root `archie` session, a sealed Vault boundary, local Nemotron ASR,
+replaceable API/harness adapters and FreeCAD. Windows drives and process interop are
+disabled inside the autonomous runtime.
+
+Build on the supplied Arch builder or another Arch Linux environment:
+
+```bash
+sudo ./scripts/wsl/build-rootfs.sh ./dist
+```
+
+Install with WSL 2.4.4 or newer:
+
+```powershell
+wsl --install --from-file .\dist\ArchieOS.wsl
+```
+
+For older hosts run `dist\install-archie-wsl.ps1`, which imports the reproducible
+rootfs fallback. Then:
+
+```bash
+archie setup
+archie doctor
+sudo /usr/lib/archie/install-nemotron-speech
+archie provider add nebius   # or ollama/vLLM on loopback
+archie tools test freecad
+```
+
+The router sends only gateway-issued Context Capsules. `Restricted` work stays local,
+`Sensitive` stays within the controlled fabric, and `Secret` reaches no model. Model and
+harness credentials remain in environment/upstream login stores and are never embedded
+in the image. See [the WSL build guide](docs/WSL-BUILD.md),
+[the security boundary](docs/SECURITY-BOUNDARY.md), and
+[the first-run guide](docs/FIRST-RUN.md).
+
+The FreeCAD smoke demo creates a parameterized motor bracket and exports FCStd, STEP and
+STL inside `/archie/workspaces/freecad-smoke`. This is a build fixture, not an inferred
+professional design. User tasks with missing critical dimensions go through Cerebra's
+clarification gate before policy can issue a workspace lease.
+
 ## Current status
 
 - **Working:** Rust authority, policy, scheduler, model router, memory and PostgreSQL
   state; Cortex; Sentry contracts; native observatory; OSM building ingestion; ArchISO
   build profile.
 - **Working in this edition:** OpenAI-compatible NVIDIA NIM and Nebius inference
-  transport with locality and privacy enforcement.
+  transport with locality and privacy enforcement; reproducible Arch WSL packaging;
+  deterministic clarification; provider/UHP harness adapters; workspace-scoped FreeCAD.
 - **Experimental:** camera/model workers, detailed world streaming, and physical device
-  adapters that require external hardware or datasets.
-- **Planned:** broader model-role orchestration and production deployment automation.
+  adapters that require external hardware or datasets; local Nemotron live microphone
+  integration on target hardware.
+- **Planned:** privileged Windows host bridge and production deployment automation.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md), [HACKATHON.md](HACKATHON.md), and
 [`docs/SECURITY.md`](docs/SECURITY.md).
