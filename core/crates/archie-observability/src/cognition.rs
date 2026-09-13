@@ -190,6 +190,9 @@ pub struct StageRecord {
     pub stage: Stage,
     pub at_ms: i64,
     pub outcome: StageOutcome,
+    /// Stable decision code, including successful advisory decisions. Never model text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decision_code: Option<String>,
     /// The sensitivity this stage handled, where it handled data at all.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub privacy: Option<PrivacyGrade>,
@@ -205,6 +208,7 @@ impl StageRecord {
             stage,
             at_ms,
             outcome,
+            decision_code: None,
             privacy: None,
             subject: None,
             cost: StageCost::default(),
@@ -213,6 +217,11 @@ impl StageRecord {
 
     pub fn about(mut self, subject: Subject) -> Self {
         self.subject = Some(subject);
+        self
+    }
+
+    pub fn decision(mut self, code: &'static str) -> Self {
+        self.decision_code = Some(code.into());
         self
     }
 
@@ -230,7 +239,12 @@ impl StageRecord {
         if self.at_ms <= 0 {
             return Err(TraceError::Time);
         }
-        if let Some(reason) = self.outcome.reason() {
+        for reason in self
+            .outcome
+            .reason()
+            .into_iter()
+            .chain(self.decision_code.as_deref())
+        {
             if reason.is_empty() || reason.len() > limits::MAX_REASON {
                 return Err(TraceError::Reason);
             }

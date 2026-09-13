@@ -1,8 +1,8 @@
 # Cerebra — the cognitive loop
 
 Status: perception, learning admission and analytical synthesis are implemented kernel
-contracts, and `archie-cerebra` now sequences them. No neural head exists; §7 is the
-roadmap for adding one without giving it authority.
+contracts, and `archie-cerebra` sequences them. An optional advisory runtime adapter
+exists; §7 records its conservative limits and the remaining learning stages.
 
 Companion documents: [RFC-011](RFC-011-LEARNING-ADMISSION.md) (perception and learning
 admission), [RFC-012](RFC-012-ANALYTICAL-SYNTHESIS.md) (bounded analytical synthesis),
@@ -171,20 +171,35 @@ without consulting one.
 
 ## 7. Roadmap for the neural head
 
-Nothing here is implemented. Each stage is listed with the types that already exist to
-receive it, because the gates were built before the model deliberately — the deterministic
-frame goes around the neural head, not after it.
+The stages below distinguish executable adapters from validated learned models. The
+deterministic frame remains the authority around each estimator.
 
-### Stage 0 — today
+### Stage 0 — deterministic baseline
 
-No neural head. `gate_model_proposal` exists and would correctly accept or reject a
-proposal; nothing produces one. The deterministic assessment stands alone, which is a
-working system rather than a placeholder.
+The deterministic assessment stands alone unless the optional runtime continuation is
+called. It remains usable with no model, training data or network.
 
 ### Stage 1 — advisory interpreter
 
 The first place a model enters Cerebra. It reads admitted evidence and proposes a stance;
 `ModelProposal` and `gate_model_proposal` already define the contract it must satisfy.
+
+Implemented: `archie-cerebra::advisory::AdvisoryInterpreter::interpret` continues a
+`Pass` returned by `consider`, after floor/context/routing and before tool proposals or
+remembering. It renders only a gateway capsule whose references survived analysis,
+uses the router-selected descriptor through `archie-model-runtime`, and enforces 32 KiB
+HTTP / 16 KiB proposal limits. Strict JSON and explicit content-free trace codes cover
+malformed, oversized, uncited, unsupported and uncertain proposals. No model is called
+for supported, refuted or unavailable assessments. A model-reported checkpoint digest
+is syntactically validated, not a verified checkpoint attestation.
+
+**Contract conflict:** the existing RFC-012 gate always abstains for disputed or
+insufficient evidence and only accepts on settled assessments. With ambiguous-only
+consultation, no runtime proposal can currently be accepted. This adapter preserves
+that rule; it does not claim improved conclusions or corpus accuracy. A change to that
+admission contract needs an explicit design decision. Loopback NIM-compatible tests
+exercise the real transport; live NIM/Nebius accounts and a labelled corpus are not
+validated here.
 
 Success criterion: on a corpus where the deterministic assessment is `disputed` or
 `insufficient`, the interpreter raises the proportion of questions a person can act on,
@@ -298,7 +313,8 @@ inference may happen; this one answers *whether*, and the answer is no.
 | MCP capability gate and HTTP transport | Implemented |
 | Cognitive trace and HUD projection | Implemented |
 | The loop that sequences them | Implemented — `archie-cerebra` |
-| Neural head (any stage) | Not started — §7 |
+| Advisory interpreter | Runtime adapter implemented; ambiguous proposals abstain under the existing gate — §7 |
+| Context utility learning / floor estimation | Pending — §7 |
 | Opportunity / intervention engine | Not started |
 | Verification against world state | Contracts only |
 
@@ -306,10 +322,10 @@ inference may happen; this one answers *whether*, and the answer is no.
 rather than describe them — a silent pass is checked against the vault's own audit log,
 which must show that nothing was ever read.
 
-What it deliberately does not do is call a model or execute a tool. `consider()` ends by
+`consider()` does not call a model or execute a tool. It ends by
 handing back a capsule and the identifier of the resource that may receive it; inference
 and execution are I/O and live elsewhere. That is what keeps the whole loop testable
 without a network.
 
-The gaps that remain are §7 (no neural head), the opportunity/intervention engine, and
+The gaps that remain include §7's learning stages and advisory acceptance contract, the opportunity/intervention engine, and
 verification against world state, which has contracts but no implementation.

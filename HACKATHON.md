@@ -71,3 +71,12 @@ work here.
 
 No benchmark numbers are claimed here. Test results and any demo measurements must come
 from executed builds on identified hardware.
+
+### Cerebra runtime additions
+
+- Added a bounded advisory interpreter as an optional continuation after Cerebra's
+  existing floor/context/router sequence. It uses real OpenAI-compatible HTTP and
+  gateway capsules, with synthetic loopback tests and content-free refusal traces.
+- The analytical gate and floor policy predate this work. The existing gate abstains
+  throughout the ambiguous band; this work does not change it or claim a measured
+  analytical improvement. Live provider and labelled-corpus evaluation remain pending.

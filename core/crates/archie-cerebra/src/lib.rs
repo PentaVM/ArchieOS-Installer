@@ -42,6 +42,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod advisory;
 pub mod observation;
 pub mod pass;
 
