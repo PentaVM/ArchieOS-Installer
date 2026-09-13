@@ -1,0 +1,8 @@
+[Unit]
+Description=ArchieOS Workstation
+Wants=archie-core.service archie-cerebra.service archie-vault.service archie-router.service archie-speech.service archie-tool-runtime.service
+After=network.target
+
+[Install]
+WantedBy=multi-user.target
+

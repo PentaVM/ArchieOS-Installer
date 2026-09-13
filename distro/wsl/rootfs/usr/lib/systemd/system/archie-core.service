@@ -1,0 +1,19 @@
+[Unit]
+Description=ArchieOS trusted control plane
+After=local-fs.target
+
+[Service]
+Type=simple
+User=archie
+Group=archie
+ExecStart=/usr/bin/archied --root /archie/state
+Restart=on-failure
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/archie/state /archie/runtime /archie/logs
+ProtectHome=true
+
+[Install]
+WantedBy=archie-workstation.target
+

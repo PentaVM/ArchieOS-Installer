@@ -1,0 +1,19 @@
+[Unit]
+Description=Validate workspace-scoped professional tools
+After=archie-vault.service
+
+[Service]
+Type=oneshot
+User=archie
+Group=archie
+ExecStart=/usr/bin/archie-workstation-check tools
+RemainAfterExit=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/archie/workspaces
+ReadOnlyPaths=/vault
+PrivateNetwork=true
+
+[Install]
+WantedBy=archie-workstation.target
+

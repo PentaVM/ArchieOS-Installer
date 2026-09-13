@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+install -d -m 0755 /archie/{bin,runtime,workspaces,cache,models,state,logs}
+install -d -m 0700 /vault
+chown -R archie:archie /archie
+chown root:archie /vault
+systemctl enable archie-workstation.target >/dev/null
+printf 'ArchieOS is ready. Run: archie doctor\n'
+

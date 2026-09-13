@@ -1,0 +1,14 @@
+[Unit]
+Description=Validate ArchieOS Cerebra contracts
+Before=archie-core.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/archie-workstation-check cerebra
+RemainAfterExit=true
+NoNewPrivileges=true
+ProtectSystem=strict
+
+[Install]
+WantedBy=archie-workstation.target
+

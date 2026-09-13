@@ -1,0 +1,16 @@
+[Unit]
+Description=Validate local ArchieOS speech runtime
+
+[Service]
+Type=oneshot
+User=archie
+Group=archie
+ExecStart=/usr/bin/archie-workstation-check speech
+RemainAfterExit=true
+NoNewPrivileges=true
+ProtectSystem=strict
+PrivateNetwork=true
+
+[Install]
+WantedBy=archie-workstation.target
+

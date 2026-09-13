@@ -1,0 +1,16 @@
+[Unit]
+Description=Prepare the sealed local Vault boundary
+Before=archie-core.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemd-tmpfiles --create /usr/lib/tmpfiles.d/archie.conf
+ExecStart=/usr/bin/archie-workstation-check vault
+RemainAfterExit=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/vault /archie/state
+
+[Install]
+WantedBy=archie-workstation.target
+
