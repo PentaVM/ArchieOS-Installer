@@ -7,12 +7,17 @@
 
 pub mod damage;
 pub mod geometry;
+pub mod reflex;
 pub mod scene;
 pub mod source;
 pub mod specialist;
 
 pub use damage::{DamageConfig, DamageRegion, EphemeralFrame, PixelFormat, SemanticRoi};
 pub use geometry::{Affine2D, Point, Rect};
+pub use reflex::{
+    DeterministicReflexBaseline, ModelManifest, ReflexBatchResult, ReflexDetection, ReflexError,
+    ReflexSample, VisualReflexModel, VisualReflexRuntime,
+};
 pub use scene::{
     NodeId, NodeKind, Relation, RelationKind, SceneError, SceneEvent, SceneGraph, SceneNode,
     SourceId, TrackId,
