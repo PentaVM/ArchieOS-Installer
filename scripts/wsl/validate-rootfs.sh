@@ -23,7 +23,7 @@ fi
 for unit in core cerebra vault router speech tool-runtime; do
   test -f "$rootfs/usr/lib/systemd/system/archie-$unit.service"
 done
-if grep -RIlE --exclude-dir=share --exclude-dir=pacman \
+if grep -rIlE --exclude-dir=share --exclude-dir=pacman \
     '(NEBIUS_API_KEY|OPENAI_API_KEY|ANTHROPIC_API_KEY)=[^[:space:]]+' "$rootfs"; then
   echo 'credential material found in rootfs' >&2
   exit 1
