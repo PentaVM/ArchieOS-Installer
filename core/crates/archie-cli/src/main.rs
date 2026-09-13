@@ -140,6 +140,11 @@ enum Command {
         #[command(subcommand)]
         command: WorkspaceCommand,
     },
+    /// Inspect the locally deployed Iris visual-reflex model.
+    Iris {
+        #[command(subcommand)]
+        command: IrisCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -186,6 +191,18 @@ enum WorkspaceCommand {
     Create { id: String },
     List,
 }
+#[derive(Debug, Subcommand)]
+enum IrisCommand {
+    /// Verify the manifest, checkpoint digest and fixed-point tensor bounds.
+    VerifyModel {
+        /// Deployment manifest; defaults to /archie/models/iris/champion/model-manifest.json.
+        #[arg(long)]
+        manifest: Option<PathBuf>,
+        /// INT8 checkpoint; defaults to /archie/models/iris/champion/model.int8.json.
+        #[arg(long)]
+        checkpoint: Option<PathBuf>,
+    },
+}
 
 impl Command {
     /// The daemon request this command makes, or `None` when it makes none.
@@ -205,7 +222,8 @@ impl Command {
             | Self::Speech { .. }
             | Self::Voice { .. }
             | Self::Tools { .. }
-            | Self::Workspace { .. } => return None,
+            | Self::Workspace { .. }
+            | Self::Iris { .. } => return None,
             Self::Status => ControlRequest::Status,
             Self::Topology => ControlRequest::Topology,
             Self::Modules => ControlRequest::Modules,
@@ -250,6 +268,14 @@ fn run_process(command: &str, args: &[&str]) -> std::process::ExitCode {
         Ok(status) if status.success() => std::process::ExitCode::SUCCESS,
         Ok(_) | Err(_) => std::process::ExitCode::FAILURE,
     }
+}
+
+fn read_bounded(path: &Path, maximum: u64) -> Result<Vec<u8>, String> {
+    let metadata = std::fs::metadata(path).map_err(|error| error.to_string())?;
+    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > maximum {
+        return Err(format!("{} is not a bounded model file", path.display()));
+    }
+    std::fs::read(path).map_err(|error| error.to_string())
 }
 
 async fn local_command(command: &Command, root: &Path, json: bool) -> std::process::ExitCode {
@@ -480,6 +506,54 @@ async fn local_command(command: &Command, root: &Path, json: bool) -> std::proce
                 }
             }
             std::process::ExitCode::SUCCESS
+        }
+        Command::Iris {
+            command:
+                IrisCommand::VerifyModel {
+                    manifest,
+                    checkpoint,
+                },
+        } => {
+            use archie_iris::{FoundryReflexModel, VisualReflexModel};
+            let directory = root.join("models/iris/champion");
+            let manifest_path = manifest
+                .clone()
+                .unwrap_or_else(|| directory.join("model-manifest.json"));
+            let checkpoint_path = checkpoint
+                .clone()
+                .unwrap_or_else(|| directory.join("model.int8.json"));
+            let loaded = read_bounded(&manifest_path, 64 * 1024)
+                .and_then(|manifest_json| {
+                    read_bounded(&checkpoint_path, 1024 * 1024)
+                        .map(|checkpoint_json| (manifest_json, checkpoint_json))
+                })
+                .and_then(|(manifest_json, checkpoint_json)| {
+                    FoundryReflexModel::load(&manifest_json, &checkpoint_json)
+                        .map_err(|error| error.to_string())
+                });
+            match loaded {
+                Ok(model) => {
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(model.manifest()).unwrap()
+                        );
+                    } else {
+                        println!(
+                            "iris model={} revision={} quantization={} checkpoint={}",
+                            model.manifest().model_id,
+                            model.manifest().revision,
+                            model.manifest().quantization.as_deref().unwrap_or("none"),
+                            model.manifest().checkpoint_sha256
+                        );
+                    }
+                    std::process::ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("archie: {error}");
+                    std::process::ExitCode::FAILURE
+                }
+            }
         }
         _ => std::process::ExitCode::FAILURE,
     }
@@ -1378,5 +1452,17 @@ mod tests {
         ] {
             assert!(command.to_request().is_none());
         }
+    }
+
+    #[test]
+    fn iris_model_verification_is_local() {
+        assert!(Command::Iris {
+            command: IrisCommand::VerifyModel {
+                manifest: None,
+                checkpoint: None,
+            },
+        }
+        .to_request()
+        .is_none());
     }
 }

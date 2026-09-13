@@ -93,6 +93,7 @@ version = "0.1.0"
 dependencies = [
  "archie-core",
  "archie-fabric",
+ "archie-iris",
  "archie-model-runtime",
  "archie-state",
  "archie-types",
@@ -217,9 +218,11 @@ dependencies = [
 name = "archie-iris"
 version = "0.1.0"
 dependencies = [
+ "archie-policy",
  "archie-types",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror",
 ]
 
