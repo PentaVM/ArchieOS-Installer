@@ -35,6 +35,7 @@ members = [
     "crates/archie-search",
     "crates/archie-cerebra",
     "crates/archie-workstation",
+    "crates/archie-iris",
 ]
 
 [workspace.package]
@@ -71,6 +72,7 @@ archie-mcp = { path = "crates/archie-mcp" }
 archie-search = { path = "crates/archie-search" }
 archie-cerebra = { path = "crates/archie-cerebra" }
 archie-workstation = { path = "crates/archie-workstation" }
+archie-iris = { path = "crates/archie-iris" }
 
 # External.
 anyhow = "1"

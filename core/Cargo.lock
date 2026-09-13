@@ -214,6 +214,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "archie-iris"
+version = "0.1.0"
+dependencies = [
+ "archie-types",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "archie-mcp"
 version = "0.1.0"
 dependencies = [
