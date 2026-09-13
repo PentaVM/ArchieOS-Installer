@@ -13,7 +13,9 @@ rm -f "$out_dir/ArchieOS.wsl" "$out_dir/ArchieOS-rootfs.tar.zst" "$out_dir/SHA25
 # Modern WSL packages are gzip-compressed rootfs tar archives with a .wsl suffix.
 tar --numeric-owner --xattrs --acls -C "$rootfs" -cf - . | gzip -n -9 > "$out_dir/ArchieOS.wsl"
 # Keep a zstd fallback; install.ps1 expands it before invoking wsl --import.
-tar --numeric-owner --xattrs --acls -C "$rootfs" -cf - . | zstd -T0 -19 -o "$out_dir/ArchieOS-rootfs.tar.zst"
+# A single worker at level 10 stays within the RAM available to the reference WSL
+# builder. Higher levels caused swap thrashing without changing package semantics.
+tar --numeric-owner --xattrs --acls -C "$rootfs" -cf - . | zstd -T1 -10 -o "$out_dir/ArchieOS-rootfs.tar.zst"
 (
   cd "$out_dir"
   sha256sum ArchieOS.wsl ArchieOS-rootfs.tar.zst > SHA256SUMS
