@@ -222,6 +222,34 @@ is context not disclosed.
 Note that `privacy_exposure` is a cost term. A policy trained to maximise task success
 while ignoring it would learn to retrieve everything.
 
+Implemented: `archie-memory::utility` learns integer empirical utility from
+`AdmittedUtilitySample`. Binding requires a `CuratedTrainingRecord` produced by
+`admit_learning`, matching event identity/reference/time and SHA-256 of the canonical
+`TrainingEvent`. The trusted supervision producer must verify that digest before
+admission; an arbitrary reward attached after admission fails binding. Admission's
+eight-field record and firewall remain unchanged. Process samples have no attributed
+context reward and are refused by this learner.
+
+Reward is signal/task outcome plus half quality and relevance, minus twice privacy
+exposure and risk (all quantised to whole permille). Missing cost measurements take
+the worst case. Four updates globally and two for a reference are required to use its
+score. Zero/insufficient training and expired parameters preserve the original request.
+`Cerebra::with_context_utility` opts in after floor and before gateway retrieval; only
+indices of requested references can survive. Missing-context signals cannot add context.
+
+Parameters contain salted reference hashes, integer totals/counts and replay digests,
+bounded to 128 references / 1,024 updates, with deterministic ordering and seed.
+`archie-cerebra::parameters::{save_utility,load_utility}` writes and restores encrypted
+local files under `Restricted`, with a fixed seven-day lifetime that training does not
+extend. Expired state is refused; physical cleanup of encrypted files belongs to the
+operator's checkpoint lifecycle (no background deletion job is installed).
+
+Synthetic comparison only: both supplied contexts have successful outcomes; a
+success-only selector keeps two references with 1,100 summed exposure permille, while
+this learner keeps one with 100. These are fixture arithmetic, not measured accuracy or
+a claim about a household. Real verified outcome ingestion, holdout evaluation and
+deployment promotion remain operator integration work.
+
 ### Stage 3 — floor estimation
 
 `ConversationalFloorState` is documented today as taking estimates it does not learn:
@@ -314,7 +342,8 @@ inference may happen; this one answers *whether*, and the answer is no.
 | Cognitive trace and HUD projection | Implemented |
 | The loop that sequences them | Implemented — `archie-cerebra` |
 | Advisory interpreter | Runtime adapter implemented; ambiguous proposals abstain under the existing gate — §7 |
-| Context utility learning / floor estimation | Pending — §7 |
+| Context utility learning | Integer learner, admission binding, gateway ranking and encrypted checkpoints implemented; synthetic evaluation only |
+| Floor estimation | Pending — §7 |
 | Opportunity / intervention engine | Not started |
 | Verification against world state | Contracts only |
 

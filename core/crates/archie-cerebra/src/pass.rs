@@ -111,6 +111,7 @@ pub struct Cerebra {
     router: Router,
     gateway: ContextGateway,
     config: CerebraConfig,
+    context_utility: Option<archie_memory::utility::ContextUtilityModel>,
 }
 
 impl Cerebra {
@@ -119,11 +120,22 @@ impl Cerebra {
             router,
             gateway,
             config,
+            context_utility: None,
         }
     }
 
     pub fn config(&self) -> &CerebraConfig {
         &self.config
+    }
+
+    /// Opt in to local context ranking. With no training, the original retrieval
+    /// order and set are unchanged. The floor still runs before any retrieval.
+    pub fn with_context_utility(
+        mut self,
+        model: archie_memory::utility::ContextUtilityModel,
+    ) -> Self {
+        self.context_utility = Some(model);
+        self
     }
 
     /// Observe, decide whether to act, assemble context, choose a resource.
@@ -419,6 +431,18 @@ impl Cerebra {
             self.config.capsule_ttl_ms,
         );
         request.references = observation.context_refs.clone();
+        if let Some(model) = &self.context_utility {
+            let requested = request
+                .references
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>();
+            request.references = model
+                .select_indices(&requested, now_ms)
+                .into_iter()
+                .filter_map(|i| observation.context_refs.get(i).cloned())
+                .collect();
+        }
         self.gateway.assemble(vault, &request, now_ms)
     }
 }

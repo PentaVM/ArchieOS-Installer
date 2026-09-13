@@ -80,3 +80,8 @@ from executed builds on identified hardware.
 - The analytical gate and floor policy predate this work. The existing gate abstains
   throughout the ambiguous band; this work does not change it or claim a measured
   analytical improvement. Live provider and labelled-corpus evaluation remain pending.
+- Added an integer context-utility learner, digest-bound to admitted outcomes, with
+  exposure/risk costs, requested-reference-only gateway ranking and encrypted local
+  parameter checkpoints. Tests compare explicitly synthetic contexts; no production
+  training corpus, promotion or accuracy is claimed. The admission firewall is reused
+  unchanged, including its eight-field payload-free curated record.

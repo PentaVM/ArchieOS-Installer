@@ -44,6 +44,7 @@
 
 pub mod advisory;
 pub mod observation;
+pub mod parameters;
 pub mod pass;
 
 pub use observation::{Observation, Trigger};

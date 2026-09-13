@@ -35,6 +35,7 @@ pub mod floor;
 pub mod graph;
 pub mod shared_thought;
 pub mod storage;
+pub mod utility;
 
 pub use admission::{
     admit_learning, AdmissionBatch, AdmissionDecision, AdmissionError, AdmissionPolicy,

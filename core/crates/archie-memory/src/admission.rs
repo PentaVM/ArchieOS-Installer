@@ -222,6 +222,18 @@ pub struct CuratedTrainingRecord {
 }
 
 impl CuratedTrainingRecord {
+    pub fn evidence_sha256(&self) -> &str {
+        &self.evidence_sha256
+    }
+
+    pub fn source_ref(&self) -> &str {
+        &self.source_ref
+    }
+
+    pub fn observed_at_ms(&self) -> i64 {
+        self.observed_at_ms
+    }
+
     pub fn candidate_id(&self) -> &str {
         &self.candidate_id
     }
