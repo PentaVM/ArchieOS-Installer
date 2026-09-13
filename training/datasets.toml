@@ -1,0 +1,57 @@
+schema_version = 1
+
+[[dataset]]
+id = "archie.synthetic.freecad-v1"
+source = "generated-by-archieos"
+revision = "v1"
+sha256 = "GENERATED_PER_FIXTURE"
+license = "Apache-2.0"
+purpose = "train"
+redistribution = true
+pii_review = "none-synthetic"
+admission = "train_allowed"
+
+[[dataset]]
+id = "swe-bench"
+source = "https://github.com/SWE-bench/SWE-bench"
+revision = "PIN_BEFORE_DOWNLOAD"
+sha256 = "REQUIRED_BEFORE_DOWNLOAD"
+license = "MIT-framework-upstream-repos-vary"
+purpose = "validation"
+redistribution = false
+pii_review = "required"
+admission = "blocked_until_pinned_and_reviewed"
+
+[[dataset]]
+id = "osworld-v2"
+source = "https://github.com/xlang-ai/OSWorld-V2"
+revision = "v2026.08.08"
+sha256 = "REQUIRED_FROM_RELEASE_MANIFEST"
+license = "Apache-2.0-code-assets-gated"
+purpose = "evaluation"
+redistribution = false
+pii_review = "required"
+admission = "evaluation_only"
+
+[[dataset]]
+id = "mozilla-common-voice"
+source = "https://commonvoice.mozilla.org/en/datasets"
+revision = "PIN_RELEASE_BEFORE_DOWNLOAD"
+sha256 = "REQUIRED_BEFORE_DOWNLOAD"
+license = "CC0-1.0"
+purpose = "validation"
+redistribution = false
+pii_review = "voice-biometric-review-required"
+admission = "blocked_until_nelson_retention_decision"
+
+[[dataset]]
+id = "sketchgraphs"
+source = "https://github.com/PrincetonLIPS/SketchGraphs"
+revision = "PIN_BEFORE_DOWNLOAD"
+sha256 = "REQUIRED_BEFORE_DOWNLOAD"
+license = "MIT-code-underlying-sketch-copyright-varies"
+purpose = "evaluation"
+redistribution = false
+pii_review = "none-expected"
+admission = "blocked_until_license_review"
+
