@@ -5,9 +5,11 @@
 
 #![forbid(unsafe_code)]
 
+pub mod damage;
 pub mod geometry;
 pub mod scene;
 
+pub use damage::{DamageConfig, DamageRegion, EphemeralFrame, PixelFormat, SemanticRoi};
 pub use geometry::{Affine2D, Point, Rect};
 pub use scene::{
     NodeId, NodeKind, Relation, RelationKind, SceneError, SceneEvent, SceneGraph, SceneNode,
