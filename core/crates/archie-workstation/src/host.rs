@@ -40,6 +40,7 @@ impl HostOperation {
         }
         if let Some(path) = &self.relative_path {
             if path.is_absolute()
+                || has_windows_drive_prefix(path)
                 || path
                     .components()
                     .any(|part| !matches!(part, Component::Normal(_)))
@@ -57,6 +58,14 @@ impl HostOperation {
             .as_ref()
             .map(|path| root.join(&self.workspace_id).join(path)))
     }
+}
+
+fn has_windows_drive_prefix(path: &Path) -> bool {
+    let value = path.as_os_str().to_string_lossy().as_bytes().to_vec();
+    value.len() >= 3
+        && value[0].is_ascii_alphabetic()
+        && value[1] == b':'
+        && matches!(value[2], b'/' | b'\\')
 }
 
 #[cfg(test)]
