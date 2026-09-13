@@ -28,4 +28,5 @@ toml.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+archie-cerebra.workspace = true
 tempfile = "3"

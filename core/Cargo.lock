@@ -417,6 +417,7 @@ dependencies = [
 name = "archie-workstation"
 version = "0.1.0"
 dependencies = [
+ "archie-cerebra",
  "archie-model-runtime",
  "archie-policy",
  "archie-types",

@@ -106,20 +106,47 @@ pub fn load_providers(path: &Path) -> Result<BTreeMap<String, ProviderSpec>, Pro
 }
 
 pub fn builtin_provider(id: &str) -> Option<ProviderSpec> {
-    let (base_url, credential_env) = match id {
+    let (protocol, base_url, credential_env) = match id {
         "nebius" => (
+            ProviderProtocol::OpenAiCompatible,
             "https://api.tokenfactory.nebius.com/v1/",
             "NEBIUS_TOKEN_FACTORY_KEY",
         ),
-        "cerebras" => ("https://api.cerebras.ai/v1/", "CEREBRAS_API_KEY"),
-        "openrouter" => ("https://openrouter.ai/api/v1/", "OPENROUTER_API_KEY"),
-        "ollama" => ("http://127.0.0.1:11434/v1/", ""),
-        "vllm" => ("http://127.0.0.1:8000/v1/", ""),
+        "cerebras" => (
+            ProviderProtocol::OpenAiCompatible,
+            "https://api.cerebras.ai/v1/",
+            "CEREBRAS_API_KEY",
+        ),
+        "openai" => (
+            ProviderProtocol::OpenAiCompatible,
+            "https://api.openai.com/v1/",
+            "OPENAI_API_KEY",
+        ),
+        "openrouter" => (
+            ProviderProtocol::OpenAiCompatible,
+            "https://openrouter.ai/api/v1/",
+            "OPENROUTER_API_KEY",
+        ),
+        "anthropic" => (
+            ProviderProtocol::Anthropic,
+            "https://api.anthropic.com/v1/",
+            "ANTHROPIC_API_KEY",
+        ),
+        "ollama" => (
+            ProviderProtocol::OpenAiCompatible,
+            "http://127.0.0.1:11434/v1/",
+            "",
+        ),
+        "vllm" => (
+            ProviderProtocol::OpenAiCompatible,
+            "http://127.0.0.1:8000/v1/",
+            "",
+        ),
         _ => return None,
     };
     Some(ProviderSpec {
         id: id.into(),
-        protocol: ProviderProtocol::OpenAiCompatible,
+        protocol,
         base_url: base_url.into(),
         locality: if credential_env.is_empty() {
             Locality::Local
@@ -158,9 +185,27 @@ mod tests {
 
     #[test]
     fn models_are_discovered_or_configured_not_hardcoded() {
-        for id in ["nebius", "cerebras", "openrouter", "ollama", "vllm"] {
+        for id in [
+            "nebius",
+            "cerebras",
+            "openai",
+            "anthropic",
+            "openrouter",
+            "ollama",
+            "vllm",
+        ] {
             assert!(builtin_provider(id).unwrap().models.is_empty());
         }
+    }
+
+    #[test]
+    fn anthropic_cannot_receive_openai_wire_messages() {
+        let provider = builtin_provider("anthropic").unwrap();
+        assert!(provider.validate().is_ok());
+        assert!(matches!(
+            provider.openai_endpoint(),
+            Err(ProviderConfigError::UnsupportedProtocol)
+        ));
     }
 
     #[test]
