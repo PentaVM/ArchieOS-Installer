@@ -5,6 +5,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod acp;
 pub mod cortex;
 pub mod damage;
 pub mod geometry;
@@ -14,6 +15,10 @@ pub mod source;
 pub mod specialist;
 pub mod working_memory;
 
+pub use acp::{
+    benchmark_sizes, encode_checkpoint, encode_delta, AcpCheckpoint, AcpCompiler, AcpDelta,
+    AcpError, AcpNode, AcpSizeBenchmark, ActionHorizon, TokenCounter,
+};
 pub use cortex::{
     CortexError, CortexEscalationGate, CortexProposal, CortexRequest, KeyframeReference,
     VisualCortex,
