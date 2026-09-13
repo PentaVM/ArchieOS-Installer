@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root=$(realpath "$(dirname "$0")/../..")
+export ARCHIE_SOURCE_SHA=${ARCHIE_SOURCE_SHA:-$(git -C "$repo_root" rev-parse HEAD)}
 out_dir=$(realpath -m "${1:-$repo_root/dist}")
 work_dir=${ARCHIE_WSL_WORK_DIR:-/var/tmp/archieos-wsl-build}
 rootfs="$work_dir/rootfs"
@@ -38,4 +39,3 @@ rm -rf "$rootfs/var/cache/pacman/pkg"/* "$rootfs/var/log"/*
 rm -f "$rootfs/etc/machine-id"
 : > "$rootfs/etc/machine-id"
 "$repo_root/scripts/wsl/package-wsl.sh" "$rootfs" "$out_dir"
-

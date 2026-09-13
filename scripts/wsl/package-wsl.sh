@@ -19,10 +19,11 @@ tar --numeric-owner --xattrs --acls -C "$rootfs" -cf - . | zstd -T0 -19 -o "$out
   sha256sum ArchieOS.wsl ArchieOS-rootfs.tar.zst > SHA256SUMS
 )
 
+source_sha=${ARCHIE_SOURCE_SHA:-$(git -C "$(dirname "$0")/../.." rev-parse HEAD)}
 cat > "$out_dir/build-metadata.json" <<EOF
 {
   "format": 1,
-  "git_sha": "$(git -C "$(dirname "$0")/../.." rev-parse HEAD)",
+  "git_sha": "$source_sha",
   "arch": "$(uname -m)",
   "built_at_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "base": "Arch Linux",
@@ -30,4 +31,3 @@ cat > "$out_dir/build-metadata.json" <<EOF
 }
 EOF
 cp "$(dirname "$0")/install.ps1" "$out_dir/install-archie-wsl.ps1"
-
