@@ -13,8 +13,10 @@ path = "src/main.rs"
 [dependencies]
 archie-core.workspace = true
 archie-fabric.workspace = true
+archie-model-runtime.workspace = true
 archie-state.workspace = true
 archie-types.workspace = true
+archie-workstation.workspace = true
 clap.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "io-util"] }

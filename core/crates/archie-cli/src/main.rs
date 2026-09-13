@@ -15,6 +15,8 @@ use archie_fabric::{plan_enrolment, Enrolment, FabricChoice, NodeIdentity};
 use archie_state::StatePaths;
 use clap::{Parser, Subcommand};
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::process::{Command as ProcessCommand, Stdio};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -37,6 +39,14 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Validate the local workstation boundary and optional runtimes.
+    Doctor,
+    /// Create the local runtime directories and show first-run state.
+    Setup,
+    /// Start the ArchieOS workstation target.
+    Start,
+    /// Stop the ArchieOS workstation target.
+    Stop,
     /// Node identity, hardware, capabilities, peers, modules and health.
     Status,
     /// The capability and resource graph across the fabric.
@@ -95,6 +105,86 @@ enum Command {
         #[arg(long, value_name = "HEX")]
         owner_key: Option<String>,
     },
+    /// Inspect or configure inference providers.
+    Provider {
+        #[command(subcommand)]
+        command: ProviderCommand,
+    },
+    /// Inspect, add, authenticate or probe external harnesses.
+    Harness {
+        #[command(subcommand)]
+        command: HarnessCommand,
+    },
+    /// Inspect the local sealed Vault.
+    Vault {
+        #[command(subcommand)]
+        command: VaultCommand,
+    },
+    /// Inspect the local ASR model.
+    Speech {
+        #[command(subcommand)]
+        command: SpeechCommand,
+    },
+    /// Test the local audio bridge.
+    Voice {
+        #[command(subcommand)]
+        command: VoiceCommand,
+    },
+    /// Inspect professional tool adapters.
+    Tools {
+        #[command(subcommand)]
+        command: ToolsCommand,
+    },
+    /// Manage controlled workspaces.
+    Workspace {
+        #[command(subcommand)]
+        command: WorkspaceCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ProviderCommand {
+    List,
+    Add { id: String },
+    Test { id: String },
+}
+
+#[derive(Debug, Subcommand)]
+enum HarnessCommand {
+    List,
+    Add { id: String },
+    Login { id: String },
+    Test { id: String },
+}
+
+#[derive(Debug, Subcommand)]
+enum VaultCommand {
+    Status,
+}
+#[derive(Debug, Subcommand)]
+enum SpeechCommand {
+    Model {
+        #[command(subcommand)]
+        command: ModelCommand,
+    },
+}
+#[derive(Debug, Subcommand)]
+enum ModelCommand {
+    Status,
+}
+#[derive(Debug, Subcommand)]
+enum VoiceCommand {
+    Test,
+}
+#[derive(Debug, Subcommand)]
+enum ToolsCommand {
+    List,
+    Test { id: String },
+}
+#[derive(Debug, Subcommand)]
+enum WorkspaceCommand {
+    Create { id: String },
+    List,
 }
 
 impl Command {
@@ -105,6 +195,17 @@ impl Command {
     /// means adding another cannot produce an `unreachable!` that is one day reached.
     fn to_request(&self) -> Option<ControlRequest> {
         Some(match self {
+            Self::Doctor
+            | Self::Setup
+            | Self::Start
+            | Self::Stop
+            | Self::Provider { .. }
+            | Self::Harness { .. }
+            | Self::Vault { .. }
+            | Self::Speech { .. }
+            | Self::Voice { .. }
+            | Self::Tools { .. }
+            | Self::Workspace { .. } => return None,
             Self::Status => ControlRequest::Status,
             Self::Topology => ControlRequest::Topology,
             Self::Modules => ControlRequest::Modules,
@@ -122,6 +223,265 @@ impl Command {
             Self::Ping => ControlRequest::Ping,
             Self::Enrol { .. } => return None,
         })
+    }
+}
+
+fn workstation_root(cli_root: Option<&str>) -> PathBuf {
+    cli_root
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/archie"))
+}
+
+fn valid_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+}
+
+fn run_process(command: &str, args: &[&str]) -> std::process::ExitCode {
+    match ProcessCommand::new(command)
+        .args(args)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+    {
+        Ok(status) if status.success() => std::process::ExitCode::SUCCESS,
+        Ok(_) | Err(_) => std::process::ExitCode::FAILURE,
+    }
+}
+
+async fn local_command(command: &Command, root: &Path, json: bool) -> std::process::ExitCode {
+    use archie_workstation::harness::{HarnessKind, HarnessSpec};
+    match command {
+        Command::Doctor => {
+            let checks = archie_workstation::doctor();
+            if json {
+                println!("{}", serde_json::to_string_pretty(&checks).unwrap());
+            } else {
+                for c in &checks {
+                    println!("{:<5} {:<20} {}", c.status, c.name, c.detail);
+                }
+            }
+            if checks.iter().all(|c| c.status.is_healthy()) {
+                std::process::ExitCode::SUCCESS
+            } else {
+                std::process::ExitCode::FAILURE
+            }
+        }
+        Command::Setup => {
+            for directory in ["runtime", "workspaces", "cache", "models", "state", "logs"] {
+                if let Err(error) = std::fs::create_dir_all(root.join(directory)) {
+                    eprintln!("archie: {error}");
+                    return std::process::ExitCode::FAILURE;
+                }
+            }
+            println!("workstation directories ready at {}", root.display());
+            std::process::ExitCode::SUCCESS
+        }
+        Command::Start => run_process("sudo", &["systemctl", "start", "archie-workstation.target"]),
+        Command::Stop => run_process("sudo", &["systemctl", "stop", "archie-workstation.target"]),
+        Command::Provider { command } => {
+            let path = root.join("state/providers.toml");
+            match command {
+                ProviderCommand::List => {
+                    match archie_workstation::provider::load_providers(&path) {
+                        Ok(items) => {
+                            for (id, p) in items {
+                                println!("{id}\t{:?}\t{}", p.locality, p.base_url);
+                            }
+                            std::process::ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("archie: {e}");
+                            std::process::ExitCode::FAILURE
+                        }
+                    }
+                }
+                ProviderCommand::Add { id } => {
+                    match archie_workstation::provider::builtin_provider(id)
+                        .ok_or("unknown provider")
+                        .and_then(|p| {
+                            archie_workstation::provider::save_provider(&path, p)
+                                .map_err(|_| "invalid provider")
+                        }) {
+                        Ok(()) => {
+                            println!(
+                                "provider {id} configured; credentials remain environment-backed"
+                            );
+                            std::process::ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("archie: {e}");
+                            std::process::ExitCode::FAILURE
+                        }
+                    }
+                }
+                ProviderCommand::Test { id } => {
+                    let providers =
+                        archie_workstation::provider::load_providers(&path).unwrap_or_default();
+                    let Some(p) = providers.get(id) else {
+                        eprintln!("archie: provider not configured");
+                        return std::process::ExitCode::FAILURE;
+                    };
+                    let endpoint = match p.openai_endpoint() {
+                        Ok(value) => value,
+                        Err(e) => {
+                            eprintln!("archie: {e}");
+                            return std::process::ExitCode::FAILURE;
+                        }
+                    };
+                    let client = match archie_model_runtime::InferenceClient::new(endpoint) {
+                        Ok(value) => value,
+                        Err(e) => {
+                            eprintln!("archie: {e}");
+                            return std::process::ExitCode::FAILURE;
+                        }
+                    };
+                    match client.models().await {
+                        Ok(models) => {
+                            println!("provider {id}: {} model(s) discovered", models.data.len());
+                            std::process::ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("archie: {e}");
+                            std::process::ExitCode::FAILURE
+                        }
+                    }
+                }
+            }
+        }
+        Command::Harness { command } => {
+            let config_path = root.join("state/harnesses.toml");
+            let kind = |id: &str| match id {
+                "codex" => Some(HarnessKind::Codex),
+                "claude" => Some(HarnessKind::Claude),
+                "hermes" => Some(HarnessKind::Hermes),
+                "uhp" => Some(HarnessKind::Uhp),
+                _ => None,
+            };
+            match command {
+                HarnessCommand::List => {
+                    for harness in archie_workstation::harness::load_harnesses(&config_path)
+                        .unwrap_or_default()
+                    {
+                        let available = harness.probe().unwrap_or_else(|_| "not installed".into());
+                        println!("{}\t{available}", harness.id);
+                    }
+                    std::process::ExitCode::SUCCESS
+                }
+                HarnessCommand::Add { id } => {
+                    let Some(harness) = kind(id).map(HarnessSpec::official) else {
+                        eprintln!("archie: unknown harness");
+                        return std::process::ExitCode::FAILURE;
+                    };
+                    match archie_workstation::harness::save_harness(&config_path, harness) {
+                        Ok(()) => {
+                            println!("harness {id} registered; install remains first-run and license-controlled");
+                            std::process::ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("archie: {e}");
+                            std::process::ExitCode::FAILURE
+                        }
+                    }
+                }
+                HarnessCommand::Login { id } => match kind(id) {
+                    Some(HarnessKind::Codex) => run_process("codex", &["login"]),
+                    Some(HarnessKind::Claude) => run_process("claude", &[]),
+                    Some(HarnessKind::Hermes) => run_process("hermes", &["setup"]),
+                    _ => std::process::ExitCode::FAILURE,
+                },
+                HarnessCommand::Test { id } => match kind(id)
+                    .map(HarnessSpec::official)
+                    .and_then(|h| h.probe().ok())
+                {
+                    Some(version) => {
+                        println!("{id}: {version}");
+                        std::process::ExitCode::SUCCESS
+                    }
+                    None => std::process::ExitCode::FAILURE,
+                },
+            }
+        }
+        Command::Vault {
+            command: VaultCommand::Status,
+        } => {
+            let vault = Path::new("/vault");
+            println!(
+                "vault={} mode=sealed references=opaque",
+                if vault.exists() {
+                    "ready"
+                } else {
+                    "unavailable"
+                }
+            );
+            if vault.exists() || cfg!(windows) {
+                std::process::ExitCode::SUCCESS
+            } else {
+                std::process::ExitCode::FAILURE
+            }
+        }
+        Command::Speech {
+            command:
+                SpeechCommand::Model {
+                    command: ModelCommand::Status,
+                },
+        } => {
+            let model = root.join("models/nemotron-speech-streaming-en-0.6b.q8_0.gguf");
+            println!(
+                "model={} path={}",
+                if model.is_file() { "ready" } else { "missing" },
+                model.display()
+            );
+            if model.is_file() {
+                std::process::ExitCode::SUCCESS
+            } else {
+                std::process::ExitCode::FAILURE
+            }
+        }
+        Command::Voice {
+            command: VoiceCommand::Test,
+        } => run_process("nemo-speech", &["--help"]),
+        Command::Tools {
+            command: ToolsCommand::List,
+        } => {
+            println!("freecad\tworkspace-scoped\tnetwork=false");
+            std::process::ExitCode::SUCCESS
+        }
+        Command::Tools {
+            command: ToolsCommand::Test { id },
+        } if id == "freecad" => run_process("/usr/lib/archie/freecad-smoke-test", &[]),
+        Command::Tools { .. } => std::process::ExitCode::FAILURE,
+        Command::Workspace {
+            command: WorkspaceCommand::Create { id },
+        } => {
+            if !valid_id(id) {
+                return std::process::ExitCode::FAILURE;
+            }
+            match std::fs::create_dir(root.join("workspaces").join(id)) {
+                Ok(()) => {
+                    println!("workspace {id} created");
+                    std::process::ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("archie: {e}");
+                    std::process::ExitCode::FAILURE
+                }
+            }
+        }
+        Command::Workspace {
+            command: WorkspaceCommand::List,
+        } => {
+            if let Ok(entries) = std::fs::read_dir(root.join("workspaces")) {
+                for entry in entries.flatten().filter(|e| e.path().is_dir()) {
+                    println!("{}", entry.file_name().to_string_lossy());
+                }
+            }
+            std::process::ExitCode::SUCCESS
+        }
+        _ => std::process::ExitCode::FAILURE,
     }
 }
 
@@ -237,12 +597,7 @@ async fn main() -> std::process::ExitCode {
     let Some(request) = cli.command.to_request() else {
         return match &cli.command {
             Command::Enrol { owner_key } => enrol(&paths, owner_key.as_deref(), cli.json),
-            // Unreachable only in the sense that every other arm returns a request. If
-            // another local command is added and this is not updated, it says so.
-            other => {
-                eprintln!("archie: {other:?} makes no daemon request and has no local handler");
-                std::process::ExitCode::FAILURE
-            }
+            other => local_command(other, &workstation_root(cli.root.as_deref()), cli.json).await,
         };
     };
 
@@ -1011,5 +1366,17 @@ mod tests {
         }
         .to_request()
         .is_none());
+    }
+
+    #[test]
+    fn workstation_commands_are_local() {
+        for command in [
+            Command::Doctor,
+            Command::Setup,
+            Command::Start,
+            Command::Stop,
+        ] {
+            assert!(command.to_request().is_none());
+        }
     }
 }
