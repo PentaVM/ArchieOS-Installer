@@ -9,6 +9,7 @@ pub mod acp;
 pub mod cortex;
 pub mod damage;
 pub mod geometry;
+pub mod motor;
 pub mod reflex;
 pub mod scene;
 pub mod source;
@@ -25,6 +26,9 @@ pub use cortex::{
 };
 pub use damage::{DamageConfig, DamageRegion, EphemeralFrame, PixelFormat, SemanticRoi};
 pub use geometry::{Affine2D, Point, Rect};
+pub use motor::{
+    MotorController, MotorError, MotorExecutor, MotorOutcome, PreparedMotorAction, SemanticAction,
+};
 pub use reflex::{
     DeterministicReflexBaseline, ModelManifest, ReflexBatchResult, ReflexDetection, ReflexError,
     ReflexSample, VisualReflexModel, VisualReflexRuntime,

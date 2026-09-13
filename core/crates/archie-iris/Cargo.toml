@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 archie-types.workspace = true
+archie-policy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
