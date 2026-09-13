@@ -8,8 +8,8 @@ license.workspace = true
 
 [dependencies]
 archie-types.workspace = true
+archie-memory.workspace = true
+zeroize.workspace = true
 serde.workspace = true
-thiserror.workspace = true
-
-[dev-dependencies]
 serde_json.workspace = true
+thiserror.workspace = true

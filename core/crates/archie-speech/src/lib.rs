@@ -11,6 +11,7 @@
 
 pub mod adapter;
 pub mod cognitive;
+pub mod estimator;
 pub mod floor;
 pub mod session;
 

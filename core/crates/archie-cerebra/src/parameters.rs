@@ -1,6 +1,7 @@
 //! Encrypted local parameter checkpoints. No trainer examples are written here.
 //! Files inherit the operator's directory ACL; keys remain caller-owned in memory.
 use archie_memory::utility::ContextUtilityModel;
+use archie_speech::estimator::FloorEstimator;
 use archie_types::PrivacyGrade;
 use archie_vault::{EntryClass, SealedEntry, Vault, VaultKey, VaultRef};
 use std::{
@@ -10,6 +11,35 @@ use std::{
 };
 
 const MAX_SEALED_BYTES: u64 = 2 * 1024 * 1024;
+
+pub fn save_floor(
+    path: &Path,
+    key: &VaultKey,
+    model: &FloorEstimator,
+    now_ms: i64,
+) -> Result<(), ParameterError> {
+    let bytes = model.snapshot();
+    FloorEstimator::restore(&bytes, archie_types::Locality::Local, now_ms)
+        .map_err(|_| ParameterError::Invalid)?;
+    save(
+        path,
+        key,
+        "vault:parameters/floor",
+        &bytes,
+        model.expires_at_ms(),
+        now_ms,
+    )
+}
+
+pub fn load_floor(
+    path: &Path,
+    key: &VaultKey,
+    now_ms: i64,
+) -> Result<FloorEstimator, ParameterError> {
+    let bytes = load(path, key, "vault:parameters/floor", now_ms)?;
+    FloorEstimator::restore(&bytes, archie_types::Locality::Local, now_ms)
+        .map_err(|_| ParameterError::Invalid)
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ParameterError {

@@ -77,6 +77,7 @@ dependencies = [
  "archie-observability",
  "archie-registry",
  "archie-router",
+ "archie-speech",
  "archie-types",
  "archie-vault",
  "serde",
@@ -326,10 +327,12 @@ dependencies = [
 name = "archie-speech"
 version = "0.1.0"
 dependencies = [
+ "archie-memory",
  "archie-types",
  "serde",
  "serde_json",
  "thiserror",
+ "zeroize",
 ]
 
 [[package]]

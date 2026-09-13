@@ -1,8 +1,8 @@
 # Cerebra — the cognitive loop
 
 Status: perception, learning admission and analytical synthesis are implemented kernel
-contracts, and `archie-cerebra` sequences them. An optional advisory runtime adapter
-exists; §7 records its conservative limits and the remaining learning stages.
+contracts, and `archie-cerebra` sequences them. Advisory inference, context utility
+learning and a local floor baseline are implemented; §7 records their validation limits.
 
 Companion documents: [RFC-011](RFC-011-LEARNING-ADMISSION.md) (perception and learning
 admission), [RFC-012](RFC-012-ANALYTICAL-SYNTHESIS.md) (bounded analytical synthesis),
@@ -262,6 +262,34 @@ The decision function `decide_floor` stays deterministic regardless. A learned e
 supplies inputs to it; it does not replace it, because a learned component that can
 decide to interrupt has no bound on how often it does.
 
+Implemented baseline: `archie-speech::estimator` consumes fixed 320-sample mono
+16 kHz windows (20 ms), extracts quantised amplitude, zero crossings and supplied local
+silence timing, and zeroes the source buffer. Features and online labels have neither
+`Serialize`, `Debug` nor `Clone`; features are zeroised on drop and never enter traces.
+No audio, transcripts or labelled examples are persisted. Existing speech capabilities
+and Sentry capture did not provide a PCM capture driver or labelled floor dataset;
+this API accepts a device callback buffer but does not claim that driver is integrated.
+
+Five bounded integer linear heads estimate hold, completion, resume, silence horizon
+and interruption utility. Local task/session inputs supply response utility, urgency,
+context sufficiency and explicit demand; sound alone cannot establish those semantics.
+Invalid audio, invalid task estimates and expired parameters give conservative valid
+estimates. The original deterministic `archie-memory::floor::decide_floor` is unchanged
+and also fails silent on an injected invalid estimate.
+
+`FloorEstimator::learn` consumes ephemeral features and human/verified targets,
+updates only a fixed matrix, and supports encrypted seven-day `Restricted` checkpoints
+via `archie-cerebra::parameters::{save_floor,load_floor}`. Constructors and restore
+reject Cloud and Fabric. The speech dependency graph contains no network transport,
+router or model runtime. Tests exercise online weight changes, deterministic replay,
+extreme/NaN inputs, non-serializability, checkpoint restore and the unchanged floor loop.
+
+This is a baseline plus an executable online learning interface, not a validated speech
+model. No real labelled dataset, turn-taking accuracy, perception training, automatic
+weight promotion or microphone integration is claimed. Nelson must choose a real
+labelling/evaluation source; retaining a corpus still requires his separate consent and
+retention decision. Online updates here retain no examples and need no such corpus.
+
 ### Training from Sentry: what the firewall already decided
 
 Sentry is the richest signal in the system and the obvious thing to train on. It is also
@@ -291,10 +319,11 @@ policy needs, at minimum: per-subject consent rather than owner-only consent, a 
 expiry, and passage through admission anyway so that the corpus is curated rather than
 merely accumulated.
 
-Until such a policy exists and is granted, Stages 1 and 2 are the reachable work, and
-they are also the highest-leverage: better context selection improves every downstream
-answer *and* reduces disclosure, because context not retrieved is context not disclosed.
-Nothing about starting there forecloses the harder option later.
+Without that policy, stages 1 and 2 can operate on admitted references/outcomes, and
+stage 3 can update weights from ephemeral local features and labels. Retained-signal
+perception training remains unavailable. Better context selection can reduce disclosure
+because context not retrieved is context not disclosed; measured answer improvements
+still require real evaluation data.
 
 What must not happen is the firewall being relaxed incrementally to make training easier.
 It is load-bearing, it is the thing that keeps an always-on perceptual system from
@@ -343,7 +372,7 @@ inference may happen; this one answers *whether*, and the answer is no.
 | The loop that sequences them | Implemented — `archie-cerebra` |
 | Advisory interpreter | Runtime adapter implemented; ambiguous proposals abstain under the existing gate — §7 |
 | Context utility learning | Integer learner, admission binding, gateway ranking and encrypted checkpoints implemented; synthetic evaluation only |
-| Floor estimation | Pending — §7 |
+| Floor estimation | Local integer baseline, ephemeral features/online updates, encrypted checkpoints implemented; no real dataset or capture driver — §7 |
 | Opportunity / intervention engine | Not started |
 | Verification against world state | Contracts only |
 
@@ -356,5 +385,5 @@ handing back a capsule and the identifier of the resource that may receive it; i
 and execution are I/O and live elsewhere. That is what keeps the whole loop testable
 without a network.
 
-The gaps that remain include §7's learning stages and advisory acceptance contract, the opportunity/intervention engine, and
+The gaps that remain include §7's real-data evaluation, device integration and advisory acceptance contract, the opportunity/intervention engine, and
 verification against world state, which has contracts but no implementation.

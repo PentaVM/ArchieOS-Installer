@@ -13,6 +13,7 @@ archie-model-runtime.workspace = true
 archie-observability.workspace = true
 archie-registry.workspace = true
 archie-router.workspace = true
+archie-speech.workspace = true
 archie-types.workspace = true
 archie-vault.workspace = true
 serde.workspace = true

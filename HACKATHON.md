@@ -85,3 +85,7 @@ from executed builds on identified hardware.
   parameter checkpoints. Tests compare explicitly synthetic contexts; no production
   training corpus, promotion or accuracy is claimed. The admission firewall is reused
   unchanged, including its eight-field payload-free curated record.
+- Added a local floor baseline with bounded ephemeral audio features, online updates
+  that keep only integer weights, and encrypted parameter checkpoints. This is new;
+  `decide_floor` remains the pre-existing deterministic decision. No real labelled floor
+  dataset, microphone driver integration, retained recordings or accuracy claim ships.
