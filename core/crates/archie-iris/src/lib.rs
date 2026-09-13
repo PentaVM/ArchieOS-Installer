@@ -5,6 +5,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod cortex;
 pub mod damage;
 pub mod geometry;
 pub mod reflex;
@@ -12,6 +13,10 @@ pub mod scene;
 pub mod source;
 pub mod specialist;
 
+pub use cortex::{
+    CortexError, CortexEscalationGate, CortexProposal, CortexRequest, KeyframeReference,
+    VisualCortex,
+};
 pub use damage::{DamageConfig, DamageRegion, EphemeralFrame, PixelFormat, SemanticRoi};
 pub use geometry::{Affine2D, Point, Rect};
 pub use reflex::{
