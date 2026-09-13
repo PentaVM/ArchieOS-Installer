@@ -9,6 +9,7 @@ use archie_observability::{
 };
 use archie_registry::ModelRegistry;
 use archie_router::{Router, RoutingOutcome, RoutingRequest};
+use archie_search::{SearchAdmission, SearchAuthority, SearchGate, SearchProposal, SearchRegistry};
 use archie_types::{Capability, Locality, ModelId, TraceId};
 use archie_vault::{ContextCapsule, ContextGateway, ContextRequest, GatewayError, Vault};
 use std::collections::BTreeSet;
@@ -326,6 +327,41 @@ impl Cerebra {
                     tool: proposal.tool.clone(),
                 })
                 .handling(proposal.argument_grade),
+        )?;
+        Ok(admission)
+    }
+
+    /// Put a web search the model proposed through its gate, and record what happened.
+    ///
+    /// The same shape as [`Cerebra::propose_tool`], for the same reason: a query is a
+    /// disclosure, and a model's suggested query becomes something sendable only by
+    /// passing the gate. The trace records the provider, the outcome and the grade the
+    /// query was handled under. It never records the query.
+    pub fn propose_search(
+        &self,
+        trace: &mut CognitiveTrace,
+        providers: &SearchRegistry,
+        authority: &SearchAuthority,
+        proposal: &SearchProposal,
+        now_ms: i64,
+    ) -> Result<SearchAdmission, TraceError> {
+        let admission = SearchGate::authorize(providers, authority, proposal);
+        let outcome = match &admission {
+            SearchAdmission::Allowed(_) => StageOutcome::Proceeded,
+            SearchAdmission::NeedsApproval { .. } => StageOutcome::AwaitingApproval {
+                reason: "operator_approval_required".into(),
+            },
+            SearchAdmission::Refused(refusal) => StageOutcome::Refused {
+                reason: refusal.code().into(),
+            },
+        };
+        trace.record(
+            StageRecord::new(Stage::SelectCapability, now_ms, outcome)
+                .about(Subject::Tool {
+                    server: proposal.provider_id.clone(),
+                    tool: "search".into(),
+                })
+                .handling(proposal.query_grade),
         )?;
         Ok(admission)
     }

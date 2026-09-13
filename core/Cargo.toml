@@ -32,6 +32,7 @@ members = [
     "crates/archie-model-runtime",
     "crates/archie-vault",
     "crates/archie-mcp",
+    "crates/archie-search",
     "crates/archie-cerebra",
 ]
 
@@ -66,6 +67,7 @@ archie-worldd = { path = "crates/archie-worldd", default-features = false }
 archie-model-runtime = { path = "crates/archie-model-runtime" }
 archie-vault = { path = "crates/archie-vault" }
 archie-mcp = { path = "crates/archie-mcp" }
+archie-search = { path = "crates/archie-search" }
 archie-cerebra = { path = "crates/archie-cerebra" }
 
 # External.

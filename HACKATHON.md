@@ -72,6 +72,31 @@ work here.
 No benchmark numbers are claimed here. Test results and any demo measurements must come
 from executed builds on identified hardware.
 
+### Web search
+
+- Added `archie-search`: web search through Tavily, entered through the capability model.
+  A query is a disclosure, so it passes a gate the way a tool call does.
+  `AuthorizedSearch` has no public constructor, a caller must hold `network.internet`,
+  and the query's grade is checked against the provider's validated clearance. A cloud
+  provider whose retention nobody has verified is cleared for public queries only;
+  a manifest that claims more fails validation instead of taking effect.
+- The client uses HTTPS only, follows no redirects, and enforces its response budget
+  before allocating. It sends the key as a bearer header brokered from the vault per
+  call. Tavily's generated answer, raw page content, images, country and automatic
+  parameters are never requested, and each is sent as `false`.
+- Results are bounded, stripped of control and bidirectional-override characters, kept
+  only for ordinary `http`/`https` pages, and given a `web:` reference that a later stage
+  can cite without quoting the page. Refusals, errors, receipts and debug output never
+  contain the query, and provider error text has echoed keys and queries blanked out.
+- `Cerebra::propose_search` records the search at `SelectCapability` with its grade and
+  never its words. `archie-search` is a CLI smoke path, like `archie-infer`, that reads
+  `TAVILY_API_KEY`. `providers/search/tavily.toml` ships public-only and unverified.
+- Verified against loopback listeners, not the live API. Eleven rules were broken on
+  purpose, and a test failed for each. One of them first survived: the only
+  credentials-in-URL case carried both a username and a password, so either check hid
+  the other. The test was fixed rather than recorded as passing. `extract`, `crawl` and
+  credit accounting are not implemented.
+
 ### Cerebra runtime additions
 
 - Added a bounded advisory interpreter as an optional continuation after Cerebra's

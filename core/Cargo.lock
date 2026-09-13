@@ -77,6 +77,7 @@ dependencies = [
  "archie-observability",
  "archie-registry",
  "archie-router",
+ "archie-search",
  "archie-speech",
  "archie-types",
  "archie-vault",
@@ -321,6 +322,26 @@ dependencies = [
  "serde",
  "thiserror",
  "tracing",
+]
+
+[[package]]
+name = "archie-search"
+version = "0.1.0"
+dependencies = [
+ "archie-types",
+ "archie-vault",
+ "clap",
+ "futures-util",
+ "hex",
+ "reqwest",
+ "ring",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "tokio",
+ "toml",
+ "zeroize",
 ]
 
 [[package]]

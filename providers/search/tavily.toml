@@ -1,0 +1,23 @@
+# Tavily web search, reached only through archie-search's gate.
+#
+# Every query sends Tavily the query text, any domain filters, and the depth, topic,
+# result-count and time-range options. Nothing else: no generated answer, raw page
+# content, images, country or automatic parameters is ever requested. The API key is
+# brokered from the vault at the moment of sending; this file names it and never holds it.
+#
+# Retention is unknown until someone verifies this account's setting, so only public
+# queries are admitted. Raising max_privacy_grade without retention = "zero-verified"
+# makes this manifest invalid rather than permissive.
+id = "tavily"
+display_name = "Tavily"
+kind = "tavily"
+endpoint = "https://api.tavily.com"
+secret_handle = "vault:tavily/main"
+max_privacy_grade = "public"
+retention = "unknown"
+max_results = 10
+# Advanced depth costs two credits per query instead of one.
+allow_advanced_depth = false
+timeout_ms = 20000
+max_response_bytes = 1048576
+enabled = true
