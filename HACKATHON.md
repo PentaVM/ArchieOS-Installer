@@ -139,3 +139,25 @@ The original floor decision, learning-admission firewall, analytical gate, Vault
 capability policy remain pre-existing foundations. The workstation work composes them;
 it does not relabel them as hackathon output. No speech accuracy, floor accuracy or
 professional CAD fitness metric is claimed.
+
+### IRIS perception and Foundry additions
+
+Built for this hackathon:
+
+- Added the `archie-iris` typed perception fabric: a revisioned scene graph, integer
+  transforms, bounded ephemeral frames, damage/semantic ROI extraction, structured-first
+  browser/CAD sources, explicit specialist seams, Visual Reflex/Cortex contracts, bounded
+  scene memory, ACP, policy-lease motor compilation and shared-weight source sessions.
+- Added a fixed-point INT8 deployment loader. `archie iris verify-model` checks file
+  bounds, manifest shape, checkpoint digest and tensor bounds locally before inference.
+- Created the separate `PentaVM/archie-iris` Foundry repository with license-gated
+  streaming, a bounded cache, checkpoint/resume, deterministic synthetic training, sealed
+  evaluation, INT8 export, champion/challenger promotion and bounded Forge experiments.
+- Composed PostgreSQL 18, reviewed signed TimescaleDB/pgvector packages and `archie-db`
+  into the WSL image. The control plane now waits for durable-state provisioning.
+
+The checked-in Visual Reflex checkpoint and its 1000/1000 sealed result use only the
+declared synthetic generator; they are pipeline validation, not a production accuracy
+claim. Production UI/camera adapters, OCR/grounding providers, real labelled benchmarks
+and Nebius cloud training remain unvalidated. No private frames, audio, transcripts or
+biometric examples are retained.
