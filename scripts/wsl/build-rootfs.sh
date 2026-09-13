@@ -6,6 +6,14 @@ export ARCHIE_SOURCE_SHA=${ARCHIE_SOURCE_SHA:-$(git -C "$repo_root" rev-parse HE
 out_dir=$(realpath -m "${1:-$repo_root/dist}")
 work_dir=${ARCHIE_WSL_WORK_DIR:-/var/tmp/archieos-wsl-build}
 rootfs="$work_dir/rootfs"
+rootfs_mounted=0
+
+cleanup() {
+  if (( rootfs_mounted )); then
+    umount "$rootfs"
+  fi
+}
+trap cleanup EXIT
 
 if [[ $EUID -ne 0 ]]; then echo 'run as root inside Arch Linux' >&2; exit 1; fi
 if [[ $(. /etc/os-release; echo "$ID") != arch ]]; then echo 'builder must be Arch Linux' >&2; exit 1; fi
@@ -19,6 +27,10 @@ reviewed_repo="$work_dir/reviewed-repo"
 rm -rf --one-file-system "$reviewed_repo"
 bash "$repo_root/distro/database/stage-reviewed-packages.sh" "$reviewed_repo"
 pacstrap -K -c "$rootfs" base ca-certificates curl git jq openssh postgresql ripgrep sudo zstd freecad python
+# arch-chroot requires the target to be a mount point. Without this, pacman cannot
+# determine free space and reports a false out-of-disk error for local packages.
+mount --bind "$rootfs" "$rootfs"
+rootfs_mounted=1
 rm -f "$rootfs/etc/resolv.conf"
 rm -f "$rootfs/boot"/vmlinuz-* "$rootfs/boot"/initramfs-*
 cp -a "$repo_root/distro/wsl/rootfs/." "$rootfs/"
