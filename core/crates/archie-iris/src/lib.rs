@@ -12,6 +12,7 @@ pub mod reflex;
 pub mod scene;
 pub mod source;
 pub mod specialist;
+pub mod working_memory;
 
 pub use cortex::{
     CortexError, CortexEscalationGate, CortexProposal, CortexRequest, KeyframeReference,
@@ -32,4 +33,8 @@ pub use specialist::{
     BiometricVerifier, GroundingSpecialist, NativeTextAdapter, ObjectSpecialist, OcrSpecialist,
     PoseSpecialist, SpecialistDescriptor, SpecialistError, SpecialistKind, UnconfiguredSpecialist,
     VisualRequest,
+};
+pub use working_memory::{
+    DurablePromotionCandidate, MemoryBounds, SceneDeltaRecord, SemanticEpisode, WorkingMemoryError,
+    WorkingSceneMemory,
 };
