@@ -1,19 +1,31 @@
 [Unit]
 Description=ArchieOS trusted control plane
-After=local-fs.target
+Requires=archie-database.service
+After=local-fs.target archie-database.service
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
+TimeoutStartSec=120
+WatchdogSec=60
 User=archie
 Group=archie
-ExecStart=/usr/bin/archied --root /archie/state
+ExecStart=/usr/bin/archied
 Restart=on-failure
+RestartPreventExitStatus=78
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=/archie/state /archie/runtime /archie/logs
 ProtectHome=true
+RuntimeDirectory=archie
+RuntimeDirectoryMode=0750
+StateDirectory=archie
+StateDirectoryMode=0750
+LogsDirectory=archie
+LogsDirectoryMode=0750
+ConfigurationDirectory=archie
+UMask=0007
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 [Install]
 WantedBy=archie-workstation.target
-

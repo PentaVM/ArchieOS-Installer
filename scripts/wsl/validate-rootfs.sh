@@ -14,6 +14,7 @@ test ! -e "$rootfs/boot/vmlinuz-linux"
 test ! -e "$rootfs/boot/initramfs-linux.img"
 test -x "$rootfs/usr/bin/archie"
 test -x "$rootfs/usr/bin/archied"
+test -x "$rootfs/usr/bin/archie-db"
 test -x "$rootfs/usr/bin/archie-workstation-check"
 test "$(stat -c %u "$rootfs/home/archie")" = 1000
 if awk -F: '$2 !~ /^(!|\*)*$/ { exit 1 }' "$rootfs/etc/shadow"; then :; else
@@ -23,6 +24,18 @@ fi
 for unit in core cerebra vault router speech tool-runtime; do
   test -f "$rootfs/usr/lib/systemd/system/archie-$unit.service"
 done
+for unit in postgres-init postgres database; do
+  test -f "$rootfs/usr/lib/systemd/system/archie-$unit.service"
+done
+grep -q '^Requires=archie-database.service$' \
+  "$rootfs/usr/lib/systemd/system/archie-core.service"
+grep -q '^ExecStart=/usr/bin/archied$' \
+  "$rootfs/usr/lib/systemd/system/archie-core.service"
+for package in postgresql timescaledb pgvector; do
+  grep -q "^${package} " "$rootfs/package-versions.txt"
+done
+test -f "$rootfs/usr/share/archie/database-compatibility.json"
+test -f "$rootfs/usr/share/archie/database-preflight.sql"
 if grep -rIlE --exclude-dir=share --exclude-dir=pacman \
     '(NEBIUS_API_KEY|OPENAI_API_KEY|ANTHROPIC_API_KEY)=[^[:space:]]+' "$rootfs"; then
   echo 'credential material found in rootfs' >&2

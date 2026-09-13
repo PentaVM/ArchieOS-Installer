@@ -15,11 +15,27 @@ command -v arch-chroot >/dev/null
 
 rm -rf --one-file-system "$rootfs"
 install -d "$rootfs" "$out_dir"
-pacstrap -K -c "$rootfs" base ca-certificates curl git jq openssh ripgrep sudo zstd freecad python
+reviewed_repo="$work_dir/reviewed-repo"
+rm -rf --one-file-system "$reviewed_repo"
+bash "$repo_root/distro/database/stage-reviewed-packages.sh" "$reviewed_repo"
+pacstrap -K -c "$rootfs" base ca-certificates curl git jq openssh postgresql ripgrep sudo zstd freecad python
 rm -f "$rootfs/etc/resolv.conf"
 rm -f "$rootfs/boot"/vmlinuz-* "$rootfs/boot"/initramfs-*
 cp -a "$repo_root/distro/wsl/rootfs/." "$rootfs/"
 chmod 0755 "$rootfs/usr/lib/wsl/archie-oobe"
+
+# Install only the reviewed, signed TimescaleDB and pgvector artifacts. They are
+# copied into the chroot because WSL builds deliberately have no host mounts.
+install -d "$rootfs/var/cache/archie-reviewed"
+cp "$reviewed_repo"/*.pkg.tar.zst "$reviewed_repo"/*.pkg.tar.zst.sig \
+  "$rootfs/var/cache/archie-reviewed/"
+reviewed_packages=()
+for package in "$reviewed_repo"/*.pkg.tar.zst; do
+  reviewed_packages+=("/var/cache/archie-reviewed/$(basename "$package")")
+done
+[[ ${#reviewed_packages[@]} == 2 ]]
+arch-chroot "$rootfs" pacman -U --noconfirm "${reviewed_packages[@]}"
+rm -rf "$rootfs/var/cache/archie-reviewed"
 
 arch-chroot "$rootfs" useradd --uid 1000 --create-home --shell /bin/bash archie
 arch-chroot "$rootfs" passwd -l archie
@@ -27,11 +43,26 @@ printf 'archie ALL=(root) /usr/bin/systemctl start archie-workstation.target, /u
 chmod 0440 "$rootfs/etc/sudoers.d/archie-services"
 
 export CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=1
-cargo build --manifest-path "$repo_root/core/Cargo.toml" --release -p archied -p archie-cli -p archie-workstation
+cargo build --locked --manifest-path "$repo_root/core/Cargo.toml" --release \
+  -p archie-state -p archied -p archie-cli -p archie-workstation
 install -m 0755 "$repo_root/core/target/release/archied" "$rootfs/usr/bin/archied"
 install -m 0755 "$repo_root/core/target/release/archie" "$rootfs/usr/bin/archie"
+install -m 0755 "$repo_root/core/target/release/archie-db" "$rootfs/usr/bin/archie-db"
 install -m 0755 "$repo_root/core/target/release/archie-workstation-check" "$rootfs/usr/bin/archie-workstation-check"
 install -d "$rootfs/usr/lib/archie"
+install -m 0644 "$repo_root/distro/database/pacman.conf" "$rootfs/etc/pacman.conf"
+install -Dm 0644 "$repo_root/distro/database/compatibility.json" \
+  "$rootfs/usr/share/archie/database-compatibility.json"
+install -Dm 0644 "$repo_root/distro/database/preflight.sql" \
+  "$rootfs/usr/share/archie/database-preflight.sql"
+for unit in archie-postgres-init archie-postgres archie-database; do
+  install -m 0644 "$repo_root/distro/database/${unit}.service" \
+    "$rootfs/usr/lib/systemd/system/${unit}.service"
+done
+for helper in initialize-cluster provision-node wait-postgres; do
+  install -m 0755 "$repo_root/distro/database/${helper}.sh" \
+    "$rootfs/usr/lib/archie/${helper}"
+done
 install -m 0755 "$repo_root/scripts/models/install-nemotron-speech.sh" "$rootfs/usr/lib/archie/install-nemotron-speech"
 install -m 0755 "$repo_root/scripts/freecad/smoke-test.sh" "$rootfs/usr/lib/archie/freecad-smoke-test"
 arch-chroot "$rootfs" systemctl enable archie-workstation.target
