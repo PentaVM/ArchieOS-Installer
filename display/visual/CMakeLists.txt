@@ -26,6 +26,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(archie-visual STATIC
     src/budget.cpp
     src/camera.cpp
+    src/cognition.cpp
     src/events.cpp
     src/geo.cpp
     src/ingest.cpp
@@ -94,6 +95,17 @@ if(ARCHIE_VISUAL_BUILD_TOOLS)
     target_compile_options(archie-visual-bench PRIVATE
         $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wswitch-enum;-Werror>
     )
+
+    # Runs a scripted Cerebra pass against the cognition motion engine exactly as a
+    # renderer must drive it -- on input and at the frame it asks for, never on a timer --
+    # and writes an animated SVG of the frames it drew, with the frame count beside what
+    # a fixed 60 fps loop would have cost. Motion is the one thing `render_svg` cannot
+    # show; this shows it without a GPU.
+    add_executable(archie-visual-cognition tools/cognition_svg.cpp)
+    target_link_libraries(archie-visual-cognition PRIVATE archie-visual)
+    target_compile_options(archie-visual-cognition PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wswitch-enum;-Werror>
+    )
 endif()
 
 option(ARCHIE_VISUAL_BUILD_TESTS "Build the visual model's tests" OFF)
@@ -104,6 +116,7 @@ if(ARCHIE_VISUAL_BUILD_TESTS)
     set(ARCHIE_VISUAL_TESTS
         test_freshness
         test_budget
+        test_cognition
         test_graph
         test_camera
         test_scene

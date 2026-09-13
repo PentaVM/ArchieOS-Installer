@@ -19,6 +19,7 @@ a specific way a status display lies:
 |---|---|
 | `freshness.hpp` | A four-minute-old reading drawn exactly like a current one. Motion stops before data disappears, because motion is what a viewer reads as "happening now". |
 | `budget.hpp` | Spending a GPU the machine needed. The tier comes from the same kernel pressure and thermal telemetry the scheduler uses, and a rich tier needs positive evidence of headroom. |
+| `cognition.hpp` | A spinner that turns whether or not Archie is doing anything, at sixty frames a second. Motion starts only from a changed `HudProjection`, a running pass breathes only while its reading is fresh, "no data" never looks like a finished silent pass, and every frame says when the next one is needed — so a still panel costs one frame per freshness boundary. |
 | `graph.hpp` | Recomputing identity every poll, so every refresh is a cut. A node is its id, holds its seat for life, and a single absent poll is a grace period rather than a death. |
 | `layout.hpp` | Position that looks like structure and carries none. Radius is dependency depth, angle is the node's slot through the golden angle, height is severity. Nothing is hashed. |
 | `palette.hpp` | "Red means trouble", which tells roughly one man in twelve nothing. Luminance rises with severity too, and age never touches hue. |
@@ -61,7 +62,7 @@ cmake --build build/visual
 ctest --test-dir build/visual --output-on-failure
 ```
 
-14 suites, 6934 checks, `-Wall -Wextra -Wpedantic -Wswitch-enum -Werror`. Every module has
+16 suites, 7159 checks, `-Wall -Wextra -Wpedantic -Wswitch-enum -Werror`. Every module has
 been mutation-tested: each rule above was deliberately broken to confirm a test fails.
 Where a mutation survived, it was because the code was unreachable or the test was weak,
 and both were fixed rather than recorded as passing.
@@ -85,3 +86,23 @@ PSI and thermal are unreadable on that platform and the governor will not spend 
 cannot measure. Nobody has yet watched this on the Arch node it is built for, at a node
 count where the budget actually bites, so the caps in `RenderProfile` are still the
 unmeasured half of the pair.
+
+## Seeing the cognition engine move
+
+```bash
+cmake -S display/visual -B build/visual -G Ninja -DARCHIE_VISUAL_BUILD_TOOLS=ON
+cmake --build build/visual --target archie-visual-cognition
+build/visual/archie-visual-cognition cerebra-motion.svg
+```
+
+Runs a scripted pass — a pause mid-sentence the floor waits out, a question, context from
+the vault, local reasoning, a tool call held for approval, execution, verification, and
+memory declining to keep it — and writes an animated SVG of exactly the frames the engine
+asked for. It prints the cost beside a fixed loop: on that script, 281 frames in the
+normal tier, 127 in conserve and 16 with reduced motion, against 937 for a 60 fps timer.
+
+The contract for a renderer is in `cognition.hpp` and is short: call `frame()` when a
+projection arrives and at `next_frame_at_ms`, and never on a timer of its own. One
+integration requirement follows from the freshness rule: while a pass is running or
+held for approval, `archie-displayd` must re-publish the HUD projection within the
+lagging window, or the panel will — correctly — dim a pass it can no longer vouch for.
