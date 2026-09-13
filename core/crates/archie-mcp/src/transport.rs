@@ -93,6 +93,11 @@ impl HttpTransport {
 
         let client = Client::builder()
             .timeout(Duration::from_millis(manifest.timeout_ms as u64))
+            // No redirects. The locality and https checks above were made against this
+            // URL; a 307 or 308 would re-post the same body — the tool arguments — to
+            // whatever host the server names, after every check has already passed. A
+            // redirect therefore comes back as a status error rather than being followed.
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(TransportError::Http)?;
 

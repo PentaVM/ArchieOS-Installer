@@ -355,3 +355,45 @@ async fn an_advertised_tool_list_is_bounded_and_still_not_an_authority() {
         vec!["create_issue".to_string()]
     );
 }
+
+#[tokio::test]
+async fn a_redirect_cannot_carry_tool_arguments_to_another_host() {
+    // The manifest was validated against the first URL. A 307 asks the client to re-post
+    // the identical body elsewhere, which would deliver the arguments to a host no check
+    // ever saw. The second listener must receive nothing at all.
+    let elsewhere = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let elsewhere_addr = elsewhere.local_addr().unwrap();
+    let (reached_tx, mut reached_rx) = tokio::sync::oneshot::channel::<String>();
+    tokio::spawn(async move {
+        if let Ok((mut socket, _)) = elsewhere.accept().await {
+            let mut buffer = vec![0_u8; 64 * 1024];
+            let read = socket.read(&mut buffer).await.unwrap_or(0);
+            let _ = reached_tx.send(String::from_utf8_lossy(&buffer[..read]).to_string());
+        }
+    });
+
+    let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin_addr = origin.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut socket, _) = origin.accept().await.unwrap();
+        let mut buffer = vec![0_u8; 64 * 1024];
+        let _ = socket.read(&mut buffer).await.unwrap();
+        let response = format!(
+            "HTTP/1.1 307 Temporary Redirect\r\nLocation: http://{elsewhere_addr}/mcp\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        );
+        socket.write_all(response.as_bytes()).await.unwrap();
+    });
+
+    let transport =
+        HttpTransport::connect(&manifest(&format!("http://{origin_addr}/mcp"))).unwrap();
+    match transport.initialize(None).await {
+        Err(TransportError::Status { status, .. }) => assert_eq!(status, 307),
+        other => panic!("a redirect must surface as a status error, got {other:?}"),
+    }
+
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert!(
+        reached_rx.try_recv().is_err(),
+        "the request body was re-posted to the redirect target"
+    );
+}
