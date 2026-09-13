@@ -8,6 +8,7 @@
 pub mod acp;
 pub mod cortex;
 pub mod damage;
+pub mod foundry;
 pub mod geometry;
 pub mod motor;
 pub mod multisource;
@@ -26,6 +27,7 @@ pub use cortex::{
     VisualCortex,
 };
 pub use damage::{DamageConfig, DamageRegion, EphemeralFrame, PixelFormat, SemanticRoi};
+pub use foundry::FoundryReflexModel;
 pub use geometry::{Affine2D, Point, Rect};
 pub use motor::{
     MotorController, MotorError, MotorExecutor, MotorOutcome, PreparedMotorAction, SemanticAction,

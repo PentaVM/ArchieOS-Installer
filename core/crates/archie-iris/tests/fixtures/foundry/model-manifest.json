@@ -1,0 +1,13 @@
+{
+  "checkpoint_sha256": "225e54e275d0f56cfcf5a68fb49d95271715bb4ded8789dbe6ecdbc488617a57",
+  "input_height": 256,
+  "input_width": 256,
+  "model_id": "archie-iris-reflex-synthetic-v1",
+  "quantization": "int8",
+  "revision": "seed-41-epoch-30",
+  "synthetic_only": true,
+  "training_checkpoint_sha256": "b2345def96117bc64282d08b8472637eecd14b765736f96e9a7647928551cfbc",
+  "training_data": [
+    "archie-synthetic-v1"
+  ]
+}
