@@ -515,7 +515,15 @@ async fn local_command(command: &Command, root: &Path, json: bool) -> std::proce
                 },
         } => {
             use archie_iris::{FoundryReflexModel, VisualReflexModel};
-            let directory = root.join("models/iris/champion");
+            let mutable_directory = root.join("models/iris/champion");
+            let packaged_directory = PathBuf::from("/usr/share/archie/models/iris/champion");
+            let directory = if mutable_directory.join("model-manifest.json").is_file()
+                && mutable_directory.join("model.int8.json").is_file()
+            {
+                mutable_directory
+            } else {
+                packaged_directory
+            };
             let manifest_path = manifest
                 .clone()
                 .unwrap_or_else(|| directory.join("model-manifest.json"));

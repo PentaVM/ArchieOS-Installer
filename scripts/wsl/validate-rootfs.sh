@@ -36,6 +36,12 @@ for package in postgresql timescaledb pgvector; do
 done
 test -f "$rootfs/usr/share/archie/database-compatibility.json"
 test -f "$rootfs/usr/share/archie/database-preflight.sql"
+test -f "$rootfs/usr/share/archie/models/iris/champion/model-manifest.json"
+test -f "$rootfs/usr/share/archie/models/iris/champion/model.int8.json"
+for directory in / /etc /usr /usr/lib /usr/lib/systemd /usr/lib/systemd/system \
+  /usr/lib/tmpfiles.d /usr/lib/wsl; do
+  test "$(stat -c %a "$rootfs$directory")" = 755
+done
 if grep -rIlE --exclude-dir=share --exclude-dir=pacman \
     '(NEBIUS_API_KEY|OPENAI_API_KEY|ANTHROPIC_API_KEY)=[^[:space:]]+' "$rootfs"; then
   echo 'credential material found in rootfs' >&2

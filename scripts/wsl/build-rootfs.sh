@@ -34,6 +34,11 @@ rootfs_mounted=1
 rm -f "$rootfs/etc/resolv.conf"
 rm -f "$rootfs/boot"/vmlinuz-* "$rootfs/boot"/initramfs-*
 cp -a "$repo_root/distro/wsl/rootfs/." "$rootfs/"
+# UNC staging can make overlay directories group-writable. System roots and
+# unit directories remain immutable regardless of the source checkout medium.
+chmod 0755 "$rootfs" "$rootfs/etc" "$rootfs/usr" "$rootfs/usr/lib" \
+  "$rootfs/usr/lib/systemd" "$rootfs/usr/lib/systemd/system" \
+  "$rootfs/usr/lib/tmpfiles.d" "$rootfs/usr/lib/wsl"
 chmod 0755 "$rootfs/usr/lib/wsl/archie-oobe"
 
 # Install only the reviewed, signed TimescaleDB and pgvector artifacts. They are
@@ -67,6 +72,10 @@ install -Dm 0644 "$repo_root/distro/database/compatibility.json" \
   "$rootfs/usr/share/archie/database-compatibility.json"
 install -Dm 0644 "$repo_root/distro/database/preflight.sql" \
   "$rootfs/usr/share/archie/database-preflight.sql"
+for artifact in model-manifest.json model.int8.json; do
+  install -Dm 0644 "$repo_root/models/iris/champion/$artifact" \
+    "$rootfs/usr/share/archie/models/iris/champion/$artifact"
+done
 for unit in archie-postgres-init archie-postgres archie-database; do
   install -m 0644 "$repo_root/distro/database/${unit}.service" \
     "$rootfs/usr/lib/systemd/system/${unit}.service"
