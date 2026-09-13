@@ -89,3 +89,5 @@ from executed builds on identified hardware.
   that keep only integer weights, and encrypted parameter checkpoints. This is new;
   `decide_floor` remains the pre-existing deterministic decision. No real labelled floor
   dataset, microphone driver integration, retained recordings or accuracy claim ships.
+- Disabled inference HTTP redirects so an endpoint cannot forward admitted context
+  beyond the destination selected by routing; verified with two loopback listeners.

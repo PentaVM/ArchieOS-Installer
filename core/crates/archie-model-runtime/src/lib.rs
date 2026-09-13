@@ -288,6 +288,9 @@ impl InferenceClient {
         let client = Client::builder()
             .timeout(endpoint.timeout)
             .https_only(false)
+            // A provider may not redirect private context to an endpoint that was
+            // never checked by the router/egress gate (including 307/308 POST replay).
+            .redirect(reqwest::redirect::Policy::none())
             .build()?;
         Ok(Self { endpoint, client })
     }
@@ -571,5 +574,49 @@ mod tests {
             client.models().await,
             Err(RuntimeError::ResponseTooLarge)
         ));
+    }
+
+    #[tokio::test]
+    async fn provider_redirect_cannot_forward_context_to_another_endpoint() {
+        let sink = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let source = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}/v1", source.local_addr().unwrap());
+        let location = format!("http://{}/collect", sink.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = source.accept().await.unwrap();
+            let mut request = [0; 4096];
+            let read = socket.read(&mut request).await.unwrap();
+            assert!(read > 0);
+            socket.write_all(format!("HTTP/1.1 307 Temporary Redirect\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+        });
+        let client =
+            InferenceClient::new(ProviderEndpoint::nvidia_nim(&base_url, Locality::Local).unwrap())
+                .unwrap();
+        let request = ChatRequest {
+            model: "test.model".into(),
+            messages: vec![ChatMessage {
+                role: MessageRole::User,
+                content: "synthetic:context".into(),
+            }],
+            max_tokens: Some(32),
+            temperature: Some(0.0),
+            stream: false,
+        };
+        assert!(matches!(
+            client
+                .chat(
+                    &descriptor(ProviderKind::NvidiaNim, Locality::Local),
+                    PrivacyGrade::Restricted,
+                    &request
+                )
+                .await,
+            Err(RuntimeError::HttpStatus(StatusCode::TEMPORARY_REDIRECT))
+        ));
+        server.await.unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), sink.accept())
+                .await
+                .is_err()
+        );
     }
 }

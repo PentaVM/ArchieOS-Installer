@@ -10,11 +10,11 @@
 //!
 //! # What this crate is not
 //!
-//! It is not a model and it does not call one. [`Cerebra::consider`] ends by handing
+//! [`Cerebra::consider`] is a deterministic sequencer. It ends by handing
 //! back a context capsule and the identifier of the resource that should receive it; the
-//! caller performs inference through `archie-model-runtime` and execution through
-//! `archie-mcp`. Both of those are I/O; everything here is a decision over state, which
-//! is why the whole loop is tested without a network.
+//! optional [`advisory::AdvisoryInterpreter`] continuation performs bounded inference
+//! through `archie-model-runtime`. Tool execution remains in `archie-mcp`. I/O is
+//! separate from `consider`, whose ordering tests need no network.
 //!
 //! That separation is the architecture, not a convenience. Everything can call an LLM.
 //! What distinguishes Archie is the sequence of decisions around the call.

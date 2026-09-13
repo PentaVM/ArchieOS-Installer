@@ -303,7 +303,7 @@ async fn oversized_http_response_is_traced() {
     pass.trace.validate().unwrap();
 }
 #[tokio::test]
-async fn unadmitted_capsule_and_expiry_fail_before_io() {
+async fn capsule_expiry_fails_before_io() {
     let interpreter = AdvisoryInterpreter::new(
         ProviderEndpoint::nvidia_nim("http://127.0.0.1:1/v1", Locality::Local).unwrap(),
     )
@@ -316,5 +316,103 @@ async fn unadmitted_capsule_and_expiry_fail_before_io() {
             .unwrap()
             .code(),
         "capsule_unavailable"
+    );
+}
+
+async fn refused_wire(content: String, code: &str) {
+    let body = json!({"model":"test.model","choices":[{"message":{"role":"assistant","content":content},"finish_reason":"stop"}]}).to_string();
+    let (interpreter, server) = serve(body).await;
+    let (mut pass, models) = pass();
+    assert_eq!(
+        interpreter
+            .interpret(&mut pass, &models, &assessment(true), NOW)
+            .await
+            .unwrap()
+            .code(),
+        code
+    );
+    server.await.unwrap();
+    assert_eq!(
+        pass.trace
+            .last(Stage::Interpret)
+            .unwrap()
+            .decision_code
+            .as_deref(),
+        Some(code)
+    );
+    pass.trace.validate().unwrap();
+}
+#[tokio::test]
+async fn uncited_http_proposal_is_explicitly_traced() {
+    let mut v = output();
+    v["evidence_refs"] = json!([]);
+    refused_wire(v.to_string(), "insufficient_citations").await;
+}
+#[tokio::test]
+async fn fabricated_http_citation_is_explicitly_traced() {
+    let mut v = output();
+    v["evidence_refs"] = json!(["vault:unknown/one"]);
+    refused_wire(v.to_string(), "unsupported_evidence_reference").await;
+}
+#[tokio::test]
+async fn malformed_http_proposal_is_explicitly_traced() {
+    refused_wire("invalid-json".into(), "invalid_proposal_json").await;
+}
+#[tokio::test]
+async fn partial_or_unadmitted_capsule_never_reaches_http() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let interpreter = AdvisoryInterpreter::new(
+        ProviderEndpoint::nvidia_nim(
+            &format!("http://{}/v1", listener.local_addr().unwrap()),
+            Locality::Local,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    for r in ["vault:evidence/0", "vault:unknown/one"] {
+        let (mut pass, models) = pass();
+        let mut vault = Vault::open(&VaultKey::from_bytes([6; 32])).unwrap();
+        let reference = VaultRef::parse(r).unwrap();
+        vault
+            .store(
+                "test",
+                reference.clone(),
+                EntryClass::PrivateFact,
+                PrivacyGrade::Restricted,
+                "{\"synthetic\":true}",
+                NOW,
+                None,
+            )
+            .unwrap();
+        let request = archie_vault::ContextRequest::new(
+            "task:one",
+            "trace:one",
+            "test",
+            Locality::Local,
+            60000,
+        )
+        .including(reference);
+        let capsule = ContextGateway::new()
+            .assemble(&mut vault, &request, NOW)
+            .unwrap();
+        if let archie_cerebra::Intent::Reason {
+            capsule: existing, ..
+        } = &mut pass.intent
+        {
+            **existing = capsule;
+        }
+        assert_eq!(
+            interpreter
+                .interpret(&mut pass, &models, &assessment(true), NOW)
+                .await
+                .unwrap()
+                .code(),
+            "capsule_evidence_not_admitted"
+        );
+    }
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(100), listener.accept())
+            .await
+            .is_err()
     );
 }

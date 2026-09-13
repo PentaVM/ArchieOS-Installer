@@ -14,7 +14,7 @@ admission), [RFC-012](RFC-012-ANALYTICAL-SYNTHESIS.md) (bounded analytical synth
 
 Cerebra is the layer that decides **whether anything should happen**, and on what terms.
 
-It is not a model and it does not contain one. Everything can call an LLM; that is not a
+It is a deterministic sequencer with optional advisory estimators. Everything can call an LLM; that is not a
 differentiator and it is not an architecture. What distinguishes Archie is the sequence
 of decisions *around* the call:
 
@@ -186,7 +186,7 @@ The first place a model enters Cerebra. It reads admitted evidence and proposes 
 
 Implemented: `archie-cerebra::advisory::AdvisoryInterpreter::interpret` continues a
 `Pass` returned by `consider`, after floor/context/routing and before tool proposals or
-remembering. It renders only a gateway capsule whose references survived analysis,
+remembering. It renders only a gateway capsule covering all and only admitted evidence,
 uses the router-selected descriptor through `archie-model-runtime`, and enforces 32 KiB
 HTTP / 16 KiB proposal limits. Strict JSON and explicit content-free trace codes cover
 malformed, oversized, uncited, unsupported and uncertain proposals. No model is called
@@ -200,6 +200,9 @@ that rule; it does not claim improved conclusions or corpus accuracy. A change t
 admission contract needs an explicit design decision. Loopback NIM-compatible tests
 exercise the real transport; live NIM/Nebius accounts and a labelled corpus are not
 validated here.
+
+Inference HTTP redirects are disabled: a provider cannot forward a capsule to another
+endpoint after routing. A loopback redirect test verifies zero connections to its target.
 
 Success criterion: on a corpus where the deterministic assessment is `disputed` or
 `insufficient`, the interpreter raises the proportion of questions a person can act on,

@@ -153,6 +153,12 @@ impl AdvisoryInterpreter {
         // and unrelated task context are not analytical evidence.
         if !capsule.credential_references().is_empty()
             || capsule.entries().is_empty()
+            || assessment.evidence_refs().iter().any(|r| {
+                !capsule
+                    .entries()
+                    .iter()
+                    .any(|e| e.reference.to_string() == *r)
+            })
             || capsule.entries().iter().any(|e| {
                 !assessment
                     .evidence_refs()

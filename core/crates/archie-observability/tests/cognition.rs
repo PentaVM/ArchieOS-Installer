@@ -7,6 +7,18 @@
 use archie_observability::{
     CognitiveTrace, Stage, StageCost, StageOutcome, StageRecord, Subject, TraceError,
 };
+
+#[test]
+fn advisory_success_has_a_stable_code_and_prose_is_rejected() {
+    let mut record = StageRecord::new(Stage::Interpret, 1000, StageOutcome::Proceeded)
+        .decision("evidence_aligned");
+    assert!(record.validate().is_ok());
+    assert!(serde_json::to_string(&record)
+        .unwrap()
+        .contains("evidence_aligned"));
+    record.decision_code = Some("model said something".into());
+    assert!(record.validate().is_err());
+}
 use archie_types::{PrivacyGrade, TaskId, TraceId};
 
 const T0: i64 = 1_760_000_000_000;
