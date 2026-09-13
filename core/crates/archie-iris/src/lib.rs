@@ -9,6 +9,7 @@ pub mod damage;
 pub mod geometry;
 pub mod scene;
 pub mod source;
+pub mod specialist;
 
 pub use damage::{DamageConfig, DamageRegion, EphemeralFrame, PixelFormat, SemanticRoi};
 pub use geometry::{Affine2D, Point, Rect};
@@ -17,3 +18,8 @@ pub use scene::{
     SourceId, TrackId,
 };
 pub use source::{PerceptionSource, SourceKind, SourceObservation, SourceSnapshot};
+pub use specialist::{
+    BiometricVerifier, GroundingSpecialist, NativeTextAdapter, ObjectSpecialist, OcrSpecialist,
+    PoseSpecialist, SpecialistDescriptor, SpecialistError, SpecialistKind, UnconfiguredSpecialist,
+    VisualRequest,
+};
