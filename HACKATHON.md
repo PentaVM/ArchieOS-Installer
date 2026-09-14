@@ -144,6 +144,23 @@ from executed builds on identified hardware.
   as the IDE agent's own principal, and can never obtain an approval or clear a person's
   takeover.
 
+### Tools Archie installs for itself
+
+- Added `archie-toolpack` ([docs/TOOLPACK.md](docs/TOOLPACK.md)), with which Archie fetches
+  a tool a task needs from a published release and installs it without a person running
+  an installer.
+- The catalog is read only after an Ed25519 signature by a trusted key verifies over its
+  exact bytes. It is then validated like outside input: HTTPS URLs, declared SHA-256 and
+  size, binary paths inside the tool, and no system administration tools.
+- An install needs a one-operation lease on the tool's directory. Tools that can reach the
+  network or devices also need a person's approval. Downloads enforce their size while
+  streaming, check the digest at the end, and follow redirects only to hosts the catalog
+  names.
+- Unpacking refuses `..`, absolute paths, links, overwrites and setuid bits. A version
+  appears in one rename and becomes current in another, and rollback swaps back.
+- Not done: `.tar.xz`, `.tar.zst` and `.zip` artifacts, a published catalog or release
+  repositories, registering installed capabilities, and revocation.
+
 ### Cerebra runtime additions
 
 - Added a bounded advisory interpreter as an optional continuation after Cerebra's

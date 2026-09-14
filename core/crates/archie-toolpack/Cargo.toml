@@ -1,0 +1,26 @@
+[package]
+name = "archie-toolpack"
+description = "Tools Archie installs for itself: a signed catalog, downloads verified while they stream, safe unpacking, and atomic installs with rollback, behind a lease."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+archie-policy.workspace = true
+archie-types.workspace = true
+ed25519-dalek.workspace = true
+flate2.workspace = true
+futures-util.workspace = true
+hex.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+sha2.workspace = true
+tar.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "rt", "time"] }
+toml.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "rt"] }
