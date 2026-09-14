@@ -10,6 +10,7 @@ pub mod cortex;
 pub mod damage;
 pub mod foundry;
 pub mod geometry;
+pub mod locate_anything;
 pub mod motor;
 pub mod multisource;
 pub mod reflex;
@@ -29,6 +30,7 @@ pub use cortex::{
 pub use damage::{DamageConfig, DamageRegion, EphemeralFrame, PixelFormat, SemanticRoi};
 pub use foundry::FoundryReflexModel;
 pub use geometry::{Affine2D, Point, Rect};
+pub use locate_anything::{GroundingProposal, LocateAnythingClient, LocateAnythingError};
 pub use motor::{
     MotorController, MotorError, MotorExecutor, MotorOutcome, PreparedMotorAction, SemanticAction,
 };

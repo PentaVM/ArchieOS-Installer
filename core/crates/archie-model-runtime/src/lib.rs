@@ -5,6 +5,7 @@
 //! all provider-controlled response data before allocation can grow without limit.
 
 use archie_types::{Locality, ModelDescriptor, PrivacyGrade, ProviderKind};
+use base64::Engine;
 use futures_util::StreamExt;
 use reqwest::{Client, StatusCode, Url};
 use serde::{Deserialize, Serialize};
@@ -16,6 +17,7 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(90);
 const DEFAULT_MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_MESSAGES: usize = 128;
 const MAX_CONTENT_BYTES: usize = 2 * 1024 * 1024;
+const MAX_VISION_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProviderFamily {
@@ -187,6 +189,71 @@ pub struct ChatRequest {
     pub stream: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VisionMime {
+    Png,
+    Jpeg,
+    Webp,
+}
+
+impl VisionMime {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Png => "image/png",
+            Self::Jpeg => "image/jpeg",
+            Self::Webp => "image/webp",
+        }
+    }
+
+    fn signature_matches(self, bytes: &[u8]) -> bool {
+        match self {
+            Self::Png => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+            Self::Jpeg => bytes.starts_with(&[0xff, 0xd8, 0xff]),
+            Self::Webp => bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP",
+        }
+    }
+}
+
+/// An encoded keyframe held only for one inference call. It deliberately implements
+/// neither `Serialize`, `Debug` nor `Clone`; only the egress client can form the wire body.
+pub struct VisionImage<'a> {
+    pub mime: VisionMime,
+    pub bytes: &'a [u8],
+    pub width: u32,
+    pub height: u32,
+}
+
+/// OpenAI-compatible image/text request used by local vLLM and selected APIs.
+/// Context must already have passed the Vault gateway before this type is constructed.
+pub struct VisionChatRequest<'a> {
+    pub instruction: &'a str,
+    pub context: &'a str,
+    pub image: VisionImage<'a>,
+    pub max_tokens: u32,
+}
+
+impl VisionChatRequest<'_> {
+    fn validate(&self) -> Result<(), RuntimeError> {
+        if self.instruction.is_empty()
+            || self.instruction.len() > 16 * 1024
+            || self.context.is_empty()
+            || self.context.len() > MAX_CONTENT_BYTES
+            || self.image.bytes.is_empty()
+            || self.image.bytes.len() > MAX_VISION_IMAGE_BYTES
+            || self.image.width == 0
+            || self.image.height == 0
+            || self.image.width > 8_192
+            || self.image.height > 8_192
+            || !self.image.mime.signature_matches(self.image.bytes)
+            || self.max_tokens == 0
+            || self.max_tokens > 8_192
+        {
+            return Err(RuntimeError::InvalidRequest);
+        }
+        Ok(())
+    }
+}
+
 impl ChatRequest {
     pub fn validate(&self) -> Result<(), RuntimeError> {
         if self.model.trim().is_empty()
@@ -334,6 +401,45 @@ impl InferenceClient {
         Ok(decoded)
     }
 
+    pub async fn vision_chat(
+        &self,
+        descriptor: &ModelDescriptor,
+        privacy: PrivacyGrade,
+        request: &VisionChatRequest<'_>,
+    ) -> Result<ChatResponse, RuntimeError> {
+        request.validate()?;
+        self.authorize(descriptor, privacy)?;
+        let provider_model = provider_model_id(descriptor)?;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(request.image.bytes);
+        let data_url = format!("data:{};base64,{encoded}", request.image.mime.as_str());
+        let body = serde_json::json!({
+            "model": provider_model,
+            "messages": [
+                {"role": "system", "content": request.instruction},
+                {"role": "user", "content": [
+                    {"type": "text", "text": request.context},
+                    {"type": "image_url", "image_url": {"url": data_url}}
+                ]}
+            ],
+            "max_tokens": request.max_tokens,
+            "temperature": 0.0,
+            "stream": false
+        });
+        let response = self
+            .send(self.endpoint.url("chat/completions")?, Some(&body))
+            .await?;
+        let status = response.status();
+        let bytes = self.bounded_body(response).await?;
+        if !status.is_success() {
+            return Err(RuntimeError::HttpStatus(status));
+        }
+        let decoded: ChatResponse = serde_json::from_slice(&bytes)?;
+        if decoded.choices.is_empty() {
+            return Err(RuntimeError::EmptyCompletion);
+        }
+        Ok(decoded)
+    }
+
     fn authorize(
         &self,
         descriptor: &ModelDescriptor,
@@ -387,6 +493,26 @@ impl InferenceClient {
         }
         Ok(output)
     }
+}
+
+/// Resolves the provider-facing model name from a trusted router descriptor. Archie model
+/// ids remain path-safe; provider names may contain slashes or uppercase characters.
+pub fn provider_model_id(descriptor: &ModelDescriptor) -> Result<&str, RuntimeError> {
+    let value = descriptor
+        .labels
+        .get("provider-model")
+        .map(String::as_str)
+        .unwrap_or_else(|| descriptor.id.as_str());
+    if value.is_empty()
+        || value.len() > 256
+        || !value.is_ascii()
+        || value
+            .chars()
+            .any(|character| character.is_control() || character.is_whitespace())
+    {
+        return Err(RuntimeError::InvalidRequest);
+    }
+    Ok(value)
 }
 
 #[cfg(test)]
@@ -559,6 +685,80 @@ mod tests {
         assert!(request_text.contains("\"model\":\"test.model\""));
         assert!(request_text.contains("\"content\":\"status\""));
         assert!(!request_text.to_ascii_lowercase().contains("authorization:"));
+    }
+
+    #[tokio::test]
+    async fn locate_anything_wire_carries_admitted_context_and_inline_keyframe() {
+        let body = r#"{"model":"test.model","choices":[{"message":{"role":"assistant","content":"<box> 100, 200, 700, 800 </box>"},"finish_reason":"stop"}]}"#;
+        let (url, received) = one_response(body).await;
+        let endpoint = ProviderEndpoint::nvidia_nim(&url, Locality::Local).unwrap();
+        let client = InferenceClient::new(endpoint).unwrap();
+        let png = b"\x89PNG\r\n\x1a\nsynthetic";
+        let request = VisionChatRequest {
+            instruction: "Return one box.",
+            context: "[vault:ui-target] search button",
+            image: VisionImage {
+                mime: VisionMime::Png,
+                bytes: png,
+                width: 32,
+                height: 24,
+            },
+            max_tokens: 128,
+        };
+        let response = client
+            .vision_chat(
+                &descriptor(ProviderKind::NvidiaNim, Locality::Local),
+                PrivacyGrade::Restricted,
+                &request,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.choices[0].message.content,
+            "<box> 100, 200, 700, 800 </box>"
+        );
+        let request_text = received.await.unwrap();
+        assert!(request_text.contains("[vault:ui-target] search button"));
+        assert!(request_text.contains("data:image/png;base64,"));
+        assert!(request_text.contains("image_url"));
+    }
+
+    #[test]
+    fn vision_input_rejects_mime_spoofing_and_unbounded_geometry() {
+        let invalid = VisionChatRequest {
+            instruction: "Return one box.",
+            context: "admitted context",
+            image: VisionImage {
+                mime: VisionMime::Png,
+                bytes: b"not-a-png",
+                width: 9_000,
+                height: 1,
+            },
+            max_tokens: 128,
+        };
+        assert!(matches!(
+            invalid.validate(),
+            Err(RuntimeError::InvalidRequest)
+        ));
+    }
+
+    #[test]
+    fn provider_model_label_is_bounded_and_cannot_inject_wire_content() {
+        let mut selected = descriptor(ProviderKind::NvidiaNim, Locality::Local);
+        selected
+            .labels
+            .insert("provider-model".into(), "nvidia/LocateAnything-3B".into());
+        assert_eq!(
+            provider_model_id(&selected).unwrap(),
+            "nvidia/LocateAnything-3B"
+        );
+        selected
+            .labels
+            .insert("provider-model".into(), "bad\nmodel".into());
+        assert!(matches!(
+            provider_model_id(&selected),
+            Err(RuntimeError::InvalidRequest)
+        ));
     }
 
     #[tokio::test]

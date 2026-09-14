@@ -155,6 +155,15 @@ Built for this hackathon:
   evaluation, INT8 export, champion/challenger promotion and bounded Forge experiments.
 - Composed PostgreSQL 18, reviewed signed TimescaleDB/pgvector packages and `archie-db`
   into the WSL image. The control plane now waits for durable-state provisioning.
+- Added a LocateAnything grounding adapter over the OpenAI-compatible vision API. It
+  accepts only Vault-admitted context and a digest-bound requested ROI, returns advisory
+  geometry, and was verified against a loopback server including a zero-connection
+  refusal. The NVIDIA weights are not bundled and their non-commercial research license
+  prevents treating them as Archie's production model.
+- Exercised that boundary against the live Nebius Token Factory API with
+  `google/gemma-3-27b-it`, a Public Vault capsule and a synthetic image created in memory.
+  The returned proposal was mapped into Archie scene coordinates. This is one functional
+  smoke test and carries no grounding-accuracy claim.
 
 The checked-in Visual Reflex checkpoint and its 1000/1000 sealed result use only the
 declared synthetic generator; they are pipeline validation, not a production accuracy
