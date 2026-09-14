@@ -27,6 +27,7 @@ add_library(archie-visual STATIC
     src/budget.cpp
     src/camera.cpp
     src/cognition.cpp
+    src/director.cpp
     src/events.cpp
     src/geo.cpp
     src/ingest.cpp
@@ -38,6 +39,7 @@ add_library(archie-visual STATIC
     src/history.cpp
     src/lod.cpp
     src/scene.cpp
+    src/stage.cpp
     src/value.cpp
 )
 
@@ -106,6 +108,16 @@ if(ARCHIE_VISUAL_BUILD_TOOLS)
     target_compile_options(archie-visual-cognition PRIVATE
         $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wswitch-enum;-Werror>
     )
+
+    # Plays a scripted session in which the agent works three applications, a person takes
+    # over mid-action, and a pause chord stops it -- through the same stage checks, playback
+    # and director the compositor uses -- and writes an animated SVG of exactly the frames
+    # the director asked for. The cinematics, visible without a compositor or a GPU.
+    add_executable(archie-visual-stage tools/stage_svg.cpp)
+    target_link_libraries(archie-visual-stage PRIVATE archie-visual)
+    target_compile_options(archie-visual-stage PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Wswitch-enum;-Werror>
+    )
 endif()
 
 option(ARCHIE_VISUAL_BUILD_TESTS "Build the visual model's tests" OFF)
@@ -117,6 +129,8 @@ if(ARCHIE_VISUAL_BUILD_TESTS)
         test_freshness
         test_budget
         test_cognition
+        test_stage
+        test_director
         test_graph
         test_camera
         test_scene

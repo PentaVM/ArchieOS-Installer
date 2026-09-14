@@ -1,0 +1,31 @@
+# Applications the agent may operate on the Archie Stage.
+#
+# Anything not listed here is refused, whatever a lease says. Each entry names the
+# application by the app_id it reports to the compositor, and grants action kinds —
+# move, click, double_click, drag, scroll, text, key, focus — nothing implicitly.
+#
+# Text defaults to public-only. Typed text can never contain control characters, so a
+# newline is always an Enter key, and Enter is where a policy can ask for a person.
+# Super and Ctrl+Alt chords are never sent, whatever an entry says.
+#
+# Installed to /etc/archie/stage/apps.toml. Edit that copy on a node.
+
+[[app]]
+app_id = "foot"
+display_name = "foot (terminal)"
+allow = ["move", "click", "scroll", "text", "key", "focus"]
+max_text_grade = "internal"
+max_text_chars = 512
+allow_modified_keys = true
+# Enter runs whatever was typed. A person approves each command before it runs.
+approval_keys = ["enter"]
+
+[[app]]
+app_id = "org.freecad.FreeCAD"
+display_name = "FreeCAD"
+allow = ["move", "click", "double_click", "drag", "scroll", "text", "key", "focus"]
+max_text_grade = "internal"
+max_text_chars = 256
+allow_modified_keys = true
+# Delete removes geometry from a document; undo exists, but a person should see it.
+approval_keys = ["delete"]

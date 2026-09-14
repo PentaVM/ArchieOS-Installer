@@ -81,10 +81,12 @@ dependencies = [
  "archie-memory",
  "archie-model-runtime",
  "archie-observability",
+ "archie-policy",
  "archie-registry",
  "archie-router",
  "archie-search",
  "archie-speech",
+ "archie-stage",
  "archie-types",
  "archie-vault",
  "serde",
@@ -379,6 +381,22 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "zeroize",
+]
+
+[[package]]
+name = "archie-stage"
+version = "0.1.0"
+dependencies = [
+ "archie-policy",
+ "archie-types",
+ "hex",
+ "ring",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "toml",
  "zeroize",
 ]
 

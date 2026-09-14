@@ -1,0 +1,22 @@
+[package]
+name = "archie-stage"
+description = "The agent's hands on the stage: input actions proposed, gated by policy leases, sealed for the compositor, and the protocol the compositor answers with."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+archie-policy.workspace = true
+archie-types.workspace = true
+hex.workspace = true
+ring.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util", "net", "rt", "time", "macros"] }
+toml.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-util"] }

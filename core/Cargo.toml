@@ -33,6 +33,7 @@ members = [
     "crates/archie-vault",
     "crates/archie-mcp",
     "crates/archie-search",
+    "crates/archie-stage",
     "crates/archie-cerebra",
     "crates/archie-workstation",
     "crates/archie-iris",
@@ -70,6 +71,7 @@ archie-model-runtime = { path = "crates/archie-model-runtime" }
 archie-vault = { path = "crates/archie-vault" }
 archie-mcp = { path = "crates/archie-mcp" }
 archie-search = { path = "crates/archie-search" }
+archie-stage = { path = "crates/archie-stage" }
 archie-cerebra = { path = "crates/archie-cerebra" }
 archie-workstation = { path = "crates/archie-workstation" }
 archie-iris = { path = "crates/archie-iris" }

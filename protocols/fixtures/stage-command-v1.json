@@ -1,0 +1,6 @@
+{
+  "description": "One sealed Archie Stage command. The MAC is HMAC-SHA256 over the bytes 'archie-stage/1' NUL followed by the payload bytes, keyed with key_hex. Computed independently with openssl; archie-stage (Rust) and the compositor (C++) must both open this line with this key.",
+  "key_hex": "4242424242424242424242424242424242424242424242424242424242424242",
+  "now_ms": 1760000001000,
+  "line": "{\"v\":1,\"payload\":\"{\\\"v\\\":1,\\\"seq\\\":7,\\\"issued_at_ms\\\":1760000000000,\\\"expires_at_ms\\\":1760000002000,\\\"operation_id\\\":9,\\\"surface\\\":4,\\\"app_id\\\":\\\"org.freecad.FreeCAD\\\",\\\"geometry_revision\\\":77,\\\"action\\\":{\\\"kind\\\":\\\"click\\\",\\\"x\\\":10,\\\"y\\\":20,\\\"button\\\":\\\"left\\\"},\\\"trace_id\\\":\\\"golden\\\"}\",\"mac\":\"e0fa73578d0458f25d3693cbeee90fbb4119a1654f38a869c149f8bff52f7ba9\"}\n"
+}

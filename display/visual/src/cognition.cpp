@@ -125,11 +125,13 @@ std::size_t ring_index(LoopStage stage) noexcept {
 }
 
 CognitionParse parse_cognition(const Value& projection) {
-    CognitionParse result;
-    const auto fail = [&result](std::string message) {
-        result.error = std::move(message);
-        result.reading.reset();
-        return result;
+    // Each failure builds its own empty result. Copying one shared result out of a lambda
+    // left GCC 16's optimiser unable to prove the optional reading was never engaged, and
+    // under -O2 with -Werror that is a build failure on every optimised Linux build.
+    const auto fail = [](std::string message) {
+        CognitionParse failed;
+        failed.error = std::move(message);
+        return failed;
     };
 
     const std::vector<Member>* members = projection.as_object();
@@ -204,6 +206,7 @@ CognitionParse parse_cognition(const Value& projection) {
         reading.context_source_count = static_cast<int>(*number);
     }
 
+    CognitionParse result;
     result.reading = std::move(reading);
     return result;
 }

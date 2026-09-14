@@ -7,10 +7,12 @@ use archie_memory::floor::{decide_floor, FloorOutput};
 use archie_observability::{
     CognitiveTrace, Stage, StageCost, StageOutcome, StageRecord, Subject, TraceError,
 };
+use archie_policy::{Lease, Principal};
 use archie_registry::ModelRegistry;
 use archie_router::{Router, RoutingOutcome, RoutingRequest};
 use archie_search::{SearchAdmission, SearchAuthority, SearchGate, SearchProposal, SearchRegistry};
-use archie_types::{Capability, Locality, ModelId, TraceId};
+use archie_stage::{StageAction, StageAdmission, StageGate, StagePolicy, StageProposal};
+use archie_types::{Capability, Locality, ModelId, PrivacyGrade, Timestamp, TraceId};
 use archie_vault::{ContextCapsule, ContextGateway, ContextRequest, GatewayError, Vault};
 use std::collections::BTreeSet;
 
@@ -362,6 +364,57 @@ impl Cerebra {
                     tool: "search".into(),
                 })
                 .handling(proposal.query_grade),
+        )?;
+        Ok(admission)
+    }
+
+    /// Put an action on an application — a click, a drag, typed text — through the stage
+    /// gate, and record what happened.
+    ///
+    /// Recorded at [`Stage::Authorize`], because that is what the gate decides, so a hold
+    /// for approval is exactly what the HUD's authorisation field shows. The trace names
+    /// the kind of action and the grade of any text. It never records the text, and it
+    /// does not record the application: the compositor draws that locally, and a trace is
+    /// the thing that travels.
+    #[allow(clippy::too_many_arguments)]
+    pub fn propose_stage_action(
+        &self,
+        trace: &mut CognitiveTrace,
+        policy: &StagePolicy,
+        lease: &Lease,
+        principal: &Principal,
+        user_present: bool,
+        proposal: &StageProposal,
+        now_ms: i64,
+    ) -> Result<StageAdmission, TraceError> {
+        let admission = StageGate::authorize(
+            policy,
+            lease,
+            principal,
+            user_present,
+            proposal,
+            Timestamp::from_millis(now_ms),
+        );
+        let outcome = match &admission {
+            StageAdmission::Allowed(_) => StageOutcome::Proceeded,
+            StageAdmission::NeedsApproval { .. } => StageOutcome::AwaitingApproval {
+                reason: "operator_approval_required".into(),
+            },
+            StageAdmission::Refused(refusal) => StageOutcome::Refused {
+                reason: refusal.code().into(),
+            },
+        };
+        let grade = match proposal.action {
+            StageAction::Text { .. } => proposal.text_grade,
+            _ => PrivacyGrade::Public,
+        };
+        trace.record(
+            StageRecord::new(Stage::Authorize, now_ms, outcome)
+                .about(Subject::Tool {
+                    server: "stage".into(),
+                    tool: proposal.action.kind().as_str().into(),
+                })
+                .handling(grade),
         )?;
         Ok(admission)
     }
