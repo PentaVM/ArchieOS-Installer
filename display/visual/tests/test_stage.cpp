@@ -271,6 +271,7 @@ void commands_are_rechecked_against_the_stage_as_it_is_now() {
 
     CHECK(std::string(refusal_code(CommandRefusal::SurfaceProtected)) == "surface_protected");
     CHECK(std::string(refusal_code(CommandRefusal::NotTypeable)) == "not_typeable");
+    CHECK(std::string(refusal_code(CommandRefusal::CaptureFailed)) == "capture_failed");
 }
 
 void the_pointer_moves_like_a_hand_and_always_arrives() {
@@ -478,6 +479,44 @@ void typing_and_chords_are_counted_not_carried() {
     CHECK_EQ(focused.state(), PlaybackState::Finished);
 }
 
+void a_capture_is_checked_like_a_touch_and_held_on_screen() {
+    CASE("a snapshot is one capture step, re-checked like any command, and visible for a moment");
+
+    SurfaceTable table = table_with_terminal();
+    InputAuthority authority;
+    const PlaybackPolicy policy;
+
+    StageCommand look = click_on(table, 7, 0, 0);
+    look.action = StageAction::Snapshot;
+    CHECK_BECAUSE(!check_command(look, table, authority, 0, T0).has_value(),
+                  "a capture names no point, so no point can be outside the surface");
+
+    InputAuthority paused;
+    paused.pause_chord(T0);
+    CHECK_BECAUSE(check_command(look, table, paused, 0, T0) == CommandRefusal::Paused,
+                  "a paused stage is not looked at either");
+    SurfaceTable guarded;
+    guarded.map(7, "org.codeberg.dnkl.foot", IRect{100, 80, 800, 600}, true);
+    CHECK_BECAUSE(check_command(look, guarded, authority, 0, T0) == CommandRefusal::SurfaceProtected,
+                  "a protected surface is never captured, whatever the policy allowed");
+    SurfaceTable moved = table_with_terminal();
+    moved.move(7, IRect{140, 80, 800, 600});
+    CHECK(check_command(look, moved, authority, 0, T0) == CommandRefusal::SurfaceChanged);
+
+    Playback capture = Playback::start(look, *table.find(7), PointF{5.0F, 5.0F}, T0, policy);
+    CHECK_EQ(capture.schedule().size(), std::size_t{1});
+    CHECK(capture.schedule()[0].kind == StepKind::Capture && capture.schedule()[0].at_ms == T0);
+    CHECK_EQ(capture.ends_ms(), T0 + policy.capture_hold_ms);
+    CHECK_EQ(capture.due(T0).size(), std::size_t{1});
+    CHECK_BECAUSE(capture.state() == PlaybackState::Running,
+                  "the receipt waits for the hold, so the capture has been rendered and seen");
+    (void)capture.due(T0 + policy.capture_hold_ms);
+    CHECK_EQ(capture.state(), PlaybackState::Finished);
+    Playback interrupted = Playback::start(look, *table.find(7), PointF{}, T0, policy);
+    (void)interrupted.due(T0);
+    CHECK_BECAUSE(interrupted.cancel(T0 + 10).empty(), "a capture holds nothing that needs letting go");
+}
+
 }  // namespace
 
 int main() {
@@ -491,5 +530,6 @@ int main() {
     a_click_arrives_before_it_presses_even_on_a_late_frame();
     an_interrupted_drag_lets_go();
     typing_and_chords_are_counted_not_carried();
+    a_capture_is_checked_like_a_touch_and_held_on_screen();
     return archie::visual::test::report();
 }

@@ -18,6 +18,8 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWrite
 pub const MAX_EVENT_BYTES: usize = 16 * 1024;
 const MAX_DAMAGE_RECTS: usize = 64;
 const MAX_CODE_CHARS: usize = 64;
+/// The widest or tallest capture believed.
+pub const MAX_SNAPSHOT_SIDE: u32 = 16_384;
 
 /// Who holds the stage's input. Mirrors `archie::visual::AuthorityMode`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,6 +76,16 @@ pub enum StageEvent {
         outcome: String,
         observed_revision: u64,
     },
+    /// Where the capture a snapshot command asked for was written. Sent only to the
+    /// connection that sent the command, before its receipt.
+    Snapshot {
+        seq: u64,
+        surface: u32,
+        width: u32,
+        height: u32,
+        sha256: String,
+        path: String,
+    },
 }
 
 fn is_code(text: &str) -> bool {
@@ -105,6 +117,22 @@ impl StageEvent {
             }
             Self::Authority { reason, .. } => is_code(reason),
             Self::Receipt { outcome, .. } => is_code(outcome),
+            Self::Snapshot {
+                width,
+                height,
+                sha256,
+                path,
+                ..
+            } => {
+                (1..=MAX_SNAPSHOT_SIDE).contains(width)
+                    && (1..=MAX_SNAPSHOT_SIDE).contains(height)
+                    && sha256.len() == 64
+                    && sha256
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                    && !path.is_empty()
+                    && path.len() <= 4096
+            }
         }
     }
 }
@@ -179,6 +207,8 @@ impl StageWorld {
             StageEvent::Receipt { seq, outcome, .. } => {
                 self.last_receipt = Some((*seq, outcome.clone()));
             }
+            // A capture is for the caller that asked; it changes nothing in the mirror.
+            StageEvent::Snapshot { .. } => {}
         }
     }
 

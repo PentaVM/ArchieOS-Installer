@@ -2,7 +2,11 @@
 #
 # Anything not listed here is refused, whatever a lease says. Each entry names the
 # application by the app_id it reports to the compositor, and grants action kinds —
-# move, click, double_click, drag, scroll, text, key, focus — nothing implicitly.
+# move, click, double_click, drag, scroll, text, key, focus, snapshot — nothing implicitly.
+#
+# snapshot lets Archie capture that window's pixels and send them to whichever grounding
+# model it chose. Nothing here grants it: add it only for an application whose windows may
+# be seen by that model.
 #
 # Text defaults to public-only. Typed text can never contain control characters, so a
 # newline is always an Enter key, and Enter is where a policy can ask for a person.

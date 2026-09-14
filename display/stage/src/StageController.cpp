@@ -1,5 +1,7 @@
 #include "StageController.h"
 
+#include <QBuffer>
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -10,6 +12,7 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QQuickItem>
+#include <QSaveFile>
 #include <QQuickWindow>
 #include <QWaylandCompositor>
 #include <QWaylandQuickItem>
@@ -26,6 +29,8 @@ namespace {
 
 constexpr int kMaxClients = 8;
 constexpr std::int64_t kInputIntervalMs = 16;
+/// How long a capture may keep rendering past its hold before it counts as failed.
+constexpr std::int64_t kCaptureTimeoutMs = 2'000;
 
 QString mode_name(AuthorityMode mode)
 {
@@ -80,6 +85,8 @@ QString verb_code(CaptionVerb verb)
         return QStringLiteral("pressing_keys");
     case CaptionVerb::Focusing:
         return QStringLiteral("focusing");
+    case CaptionVerb::Observing:
+        return QStringLiteral("observing");
     case CaptionVerb::Interrupted:
         return QStringLiteral("interrupted");
     case CaptionVerb::Refused:
@@ -543,6 +550,8 @@ void StageController::handleLine(QLocalSocket *socket, const QByteArray &line)
     const Surface *surface = m_table.find(command.surface);
     m_active = std::move(*decoded.command);
     m_textRoute.reset();
+    m_commandSocket = socket;
+    m_capture.reset();
     m_playback = Playback::start(m_active->command, *surface, m_pointer, now, m_playbackPolicy);
     m_director.command_started(m_active->command, *surface, *m_playback, now);
     tick();
@@ -624,6 +633,19 @@ void StageController::deliver(const InputStep &step)
         // does both, and an input method that never hears of the focus never turns on.
         item->takeFocus(s);
         break;
+    case StepKind::Capture: {
+        // The surface item alone, at its own size: the window as its application drew it,
+        // with no camera zoom, cursor, caption or neighbouring window in it.
+        m_capture = Capture{m_active->command.sequence, m_active->command.surface, m_commandSocket};
+        m_grab = item->grabToImage();
+        if (!m_grab) {
+            m_capture->done = true;
+            break;
+        }
+        const std::uint64_t sequence = m_active->command.sequence;
+        connect(m_grab.data(), &QQuickItemGrabResult::ready, this, [this, sequence] { finishCapture(sequence); });
+        break;
+    }
     case StepKind::TextUnit:
         if (step.index < static_cast<std::size_t>(m_active->text.size())) {
             const char32_t unit = m_active->text.at(static_cast<qsizetype>(step.index));
@@ -650,6 +672,59 @@ void StageController::deliver(const InputStep &step)
         }
         break;
     }
+}
+
+QString StageController::snapshotDirectory() const
+{
+    return QFileInfo(m_options.control_socket).absolutePath() + QStringLiteral("/snapshots");
+}
+
+void StageController::finishCapture(std::uint64_t sequence)
+{
+    if (!m_capture || m_capture->sequence != sequence || !m_grab) {
+        return; // abandoned: the command stopped while the frame was rendering
+    }
+    const QImage image = m_grab->image();
+    m_grab.reset();
+    m_capture->done = true;
+    if (image.isNull()) {
+        return;
+    }
+    QByteArray png;
+    {
+        QBuffer buffer(&png);
+        if (!buffer.open(QIODevice::WriteOnly) || !image.save(&buffer, "PNG")) {
+            return;
+        }
+    }
+    // Beside the control socket, in a directory only this account can enter. The pixels go
+    // to one file for the connection that asked; that client verifies the digest it is
+    // given and deletes the file.
+    const QString directory = snapshotDirectory();
+    if (!QDir().mkpath(directory) ||
+        !QFile::setPermissions(directory, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner)) {
+        return;
+    }
+    const QString path = directory + QStringLiteral("/") + QString::number(sequence) + QStringLiteral(".png");
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly) || file.write(png) != png.size() || !file.commit()) {
+        return;
+    }
+    QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    m_capture->ok = true;
+    if (m_capture->socket && m_capture->socket->state() == QLocalSocket::ConnectedState) {
+        m_capture->socket->write(line_of(QJsonObject{
+            {QStringLiteral("event"), QStringLiteral("snapshot")},
+            {QStringLiteral("seq"), static_cast<qint64>(sequence)},
+            {QStringLiteral("surface"), static_cast<qint64>(m_capture->surface)},
+            {QStringLiteral("width"), image.width()},
+            {QStringLiteral("height"), image.height()},
+            {QStringLiteral("sha256"),
+             QString::fromLatin1(QCryptographicHash::hash(png, QCryptographicHash::Sha256).toHex())},
+            {QStringLiteral("path"), path},
+        }));
+    }
+    tick();
 }
 
 void StageController::cancelPlayback(const char *outcome)
@@ -685,9 +760,12 @@ void StageController::stopPlayback(const QString &outcome, std::optional<Command
     }
     m_pointer = m_playback->pointer_at(now);
     m_playback.reset();
-    // The text and keys are dropped with the playback that needed them.
+    // The text and keys are dropped with the playback that needed them, and a capture
+    // still rendering is abandoned: its result is never written.
     m_active.reset();
     m_textRoute.reset();
+    m_capture.reset();
+    m_grab.reset();
 }
 
 void StageController::noteAuthority(AuthorityMode before)
@@ -830,11 +908,24 @@ void StageController::tick()
             deliver(step);
         }
         if (m_playback && m_playback->state() == PlaybackState::Finished) {
-            sendReceipt(m_active->command.sequence, QStringLiteral("executed"));
-            m_director.command_ended(PlaybackState::Finished, now);
-            m_playback.reset();
-            m_active.reset();
-            m_textRoute.reset();
+            const bool capture = m_active->command.action == StageAction::Snapshot;
+            if (capture && !(m_capture && m_capture->ok)) {
+                // A capture renders on the next frame, which is usually long done by now.
+                // One that is still pending gets a little longer; one that failed, or never
+                // finishes, is reported as failed, never as executed.
+                const bool pending = m_capture && !m_capture->done && now - m_playback->started_ms() < kCaptureTimeoutMs;
+                if (!pending) {
+                    failPlayback(CommandRefusal::CaptureFailed);
+                }
+            } else {
+                sendReceipt(m_active->command.sequence, QStringLiteral("executed"));
+                m_director.command_ended(PlaybackState::Finished, now);
+                m_playback.reset();
+                m_active.reset();
+                m_textRoute.reset();
+                m_capture.reset();
+                m_grab.reset();
+            }
         }
     }
     m_director.tick(now);

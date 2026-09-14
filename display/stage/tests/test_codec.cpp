@@ -127,6 +127,11 @@ void a_verifying_payload_must_still_be_a_command() {
     CHECK(refused(R"({"kind":"key","modifiers":["ctrl","ctrl"],"key":"s"})").error == QStringLiteral("command_malformed"));
     CHECK(refused(R"({"kind":"key","modifiers":[],"key":"Enter"})").error == QStringLiteral("command_malformed"));
     CHECK(refused(R"({"kind":"scroll","x":1,"y":1,"steps_x":0,"steps_y":61})").error == QStringLiteral("command_malformed"));
+    CHECK_BECAUSE(refused(R"({"kind":"snapshot","x":0,"y":0,"width":10,"height":10})").error ==
+                      QStringLiteral("command_malformed"),
+                  "a capture takes the whole surface; a caller cannot aim it at part of another window");
+    const auto look = refused(R"({"kind":"snapshot"})");
+    CHECK(look.command.has_value() && look.command->command.action == archie::visual::StageAction::Snapshot);
 }
 
 void text_and_chords_arrive_as_units() {

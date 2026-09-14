@@ -205,6 +205,9 @@ enum class StageAction {
     Text,
     Key,
     Focus,
+    /// Capture what the surface shows. It changes nothing in the application, and it is
+    /// still a command: pixels are a disclosure, so looking is authorised like touching.
+    Snapshot,
 };
 
 enum class PointerButton {
@@ -261,6 +264,8 @@ enum class CommandRefusal {
     /// knows its keymap, so `check_command` never returns this; the compositor does, before
     /// a playback starts or when one has to stop.
     NotTypeable,
+    /// The compositor could not render or store the capture a snapshot asked for.
+    CaptureFailed,
 };
 
 [[nodiscard]] const char* refusal_code(CommandRefusal refusal) noexcept;
@@ -326,6 +331,8 @@ enum class StepKind {
     KeyRelease,
     /// Give keyboard focus to the command's surface.
     FocusSurface,
+    /// Capture the command's surface.
+    Capture,
 };
 
 struct InputStep {
@@ -357,6 +364,9 @@ struct PlaybackPolicy {
     std::int64_t focus_settle_ms = 120;
     /// Hold before a drag starts moving, so the application registers the press.
     std::int64_t drag_hold_ms = 80;
+    /// How long a capture stays on screen as an action before its receipt: long enough for
+    /// a person watching to see that the agent looked, and for the frame to be rendered.
+    std::int64_t capture_hold_ms = 450;
 };
 
 enum class PlaybackState {

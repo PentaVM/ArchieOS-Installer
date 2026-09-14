@@ -111,6 +111,8 @@ enum class CaptionVerb {
     Typing,
     PressingKeys,
     Focusing,
+    /// The agent captured what a window shows.
+    Observing,
     /// A person took over mid-action and the action was stopped.
     Interrupted,
     /// The stage refused the command.

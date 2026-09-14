@@ -32,6 +32,7 @@ pub enum ActionKind {
     Text,
     Key,
     Focus,
+    Snapshot,
 }
 
 impl ActionKind {
@@ -45,6 +46,16 @@ impl ActionKind {
             Self::Text => "text",
             Self::Key => "key",
             Self::Focus => "focus",
+            Self::Snapshot => "snapshot",
+        }
+    }
+
+    /// What the action does in policy terms. A capture changes nothing in the
+    /// application, so it reads; everything else operates it.
+    pub fn policy_action(&self) -> archie_policy::Action {
+        match self {
+            Self::Snapshot => archie_policy::Action::Read,
+            _ => archie_policy::Action::Execute,
         }
     }
 }
@@ -340,6 +351,8 @@ pub enum StageAction {
         chord: KeyChord,
     },
     Focus,
+    /// Capture what the whole surface shows.
+    Snapshot,
 }
 
 impl StageAction {
@@ -353,6 +366,7 @@ impl StageAction {
             Self::Text { .. } => ActionKind::Text,
             Self::Key { .. } => ActionKind::Key,
             Self::Focus => ActionKind::Focus,
+            Self::Snapshot => ActionKind::Snapshot,
         }
     }
 
@@ -366,7 +380,7 @@ impl StageAction {
             Self::Drag {
                 x, y, to_x, to_y, ..
             } => vec![(*x, *y), (*to_x, *to_y)],
-            Self::Text { .. } | Self::Key { .. } | Self::Focus => Vec::new(),
+            Self::Text { .. } | Self::Key { .. } | Self::Focus | Self::Snapshot => Vec::new(),
         }
     }
 }

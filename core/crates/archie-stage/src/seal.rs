@@ -112,6 +112,7 @@ pub enum WireAction {
         key: Key,
     },
     Focus,
+    Snapshot,
 }
 
 impl From<&StageAction> for WireAction {
@@ -158,6 +159,7 @@ impl From<&StageAction> for WireAction {
                 key: chord.key,
             },
             StageAction::Focus => Self::Focus,
+            StageAction::Snapshot => Self::Snapshot,
         }
     }
 }
@@ -192,7 +194,7 @@ impl WireAction {
                 };
                 chord.modifiers.len() == modifiers.len() && !chord.is_reserved()
             }
-            Self::Focus => true,
+            Self::Focus | Self::Snapshot => true,
         }
     }
 }

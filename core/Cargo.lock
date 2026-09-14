@@ -386,6 +386,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "archie-sight"
+version = "0.1.0"
+dependencies = [
+ "archie-iris",
+ "archie-model-runtime",
+ "archie-policy",
+ "archie-stage",
+ "archie-types",
+ "archie-vault",
+ "hex",
+ "ring",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "archie-speech"
 version = "0.1.0"
 dependencies = [

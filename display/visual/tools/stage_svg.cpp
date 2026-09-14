@@ -147,6 +147,9 @@ std::string caption_text(const Caption& caption) {
         case CaptionVerb::Focusing:
             std::snprintf(buffer, sizeof buffer, "enfocando · %s", app);
             break;
+        case CaptionVerb::Observing:
+            std::snprintf(buffer, sizeof buffer, "mirando · %s", app);
+            break;
         case CaptionVerb::Interrupted:
             std::snprintf(buffer, sizeof buffer, "acción detenida · tomaste el control");
             break;

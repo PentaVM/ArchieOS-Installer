@@ -161,6 +161,35 @@ from executed builds on identified hardware.
 - Not done: `.tar.xz`, `.tar.zst` and `.zip` artifacts, a published catalog or release
   repositories, registering installed capabilities, and revocation.
 
+### Archie looks before it acts
+
+- Added `archie-sight` and `archie-look` ([docs/STAGE.md](docs/STAGE.md#finding-what-a-task-names)).
+  Given a description such as "el botón Guardar", Archie captures the window, asks a
+  grounding model through IRIS's LocateAnything adapter where that is, and clicks it
+  through the stage gate. It then captures again, and a click that changed nothing is
+  reported as a failure. The crate joins IRIS and the stage and adds no authority.
+- Looking is gated like touching, because a capture is a disclosure:
+  - It needs the application's `snapshot` grant and a read lease. A read lease cannot
+    click, and a click lease cannot look.
+  - The compositor re-checks the command, grabs only that window, writes it owner-only,
+    and tells only the connection that asked where the file is.
+  - The caller accepts the file only if its digest and PNG signature match, then deletes
+    it.
+  - The shipped policy grants no capture.
+- The description reaches the model in a one-entry Vault capsule for that task, next to a
+  digest-bound image. A window declared internal is refused before egress to a cloud model
+  whose retention nobody has verified.
+- Live in WSLg through Nebius Token Factory, with nobody touching the mouse:
+  - `moonshotai/Kimi-K3` placed the demo form's field and button within a pixel of their
+    real centres.
+  - Archie clicked the field, typed, and pressed Guardar, and the form's own log recorded
+    the note.
+  - On the same capture, `google/gemma-3-27b-it` kept the output format but missed by
+    100 px or more; its click changed nothing and was reported as failed.
+  - `openbmb/MiniCPM-V-4_5` came within 3 px but ignored the format, so IRIS refused it.
+- Not done: menus and popups, more than one target per call, verification stronger than
+  "the window changed", and a run of LocateAnything-3B itself.
+
 ### Cerebra runtime additions
 
 - Added a bounded advisory interpreter as an optional continuation after Cerebra's

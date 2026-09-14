@@ -314,6 +314,9 @@ DecodeResult decode_command(const QByteArray& raw_line, const QByteArray& key, s
     } else if (kind == QLatin1String("focus")) {
         if (!exact_keys(action, {"kind"})) return fail("command_malformed");
         c.action = StageAction::Focus;
+    } else if (kind == QLatin1String("snapshot")) {
+        if (!exact_keys(action, {"kind"})) return fail("command_malformed");
+        c.action = StageAction::Snapshot;
     } else {
         return fail("command_malformed");
     }

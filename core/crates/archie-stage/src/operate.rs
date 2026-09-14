@@ -11,10 +11,11 @@
 use crate::action::StageAction;
 use crate::gate::{stage_resource, StageAdmission, StageGate, StageProposal};
 use crate::policy::StagePolicy;
-use crate::protocol::{ClientError, StageClient, StageEvent, StageWorld};
+use crate::protocol::{ClientError, StageClient, StageEvent, StageSurface, StageWorld};
 use crate::seal::{CommandKey, SealError, Sealer};
-use archie_policy::{Action, CapabilityRequest, Constraints, PolicyEngine, Principal, Scope};
+use archie_policy::{CapabilityRequest, Constraints, PolicyEngine, Principal, Scope};
 use archie_types::{PrivacyGrade, TaskId, Timestamp, TraceId};
+use std::path::Path;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -69,6 +70,16 @@ pub enum OperateError {
     Closed,
     #[error("no receipt within {0:?}")]
     NoReceipt(Duration),
+    #[error("look takes a snapshot action")]
+    NotACapture,
+    #[error("the compositor reported a capture it never described")]
+    CaptureMissing,
+    #[error("the compositor named a capture outside its snapshot directory; it was not read")]
+    CaptureOutside,
+    #[error("the capture does not match the digest the compositor announced")]
+    CaptureInvalid,
+    #[error("reading the capture: {0}")]
+    CaptureIo(#[from] std::io::Error),
 }
 
 /// Reads what the compositor says for `settle`, into `world`. The compositor greets
@@ -133,6 +144,73 @@ impl Operator {
         R: AsyncRead + Unpin,
         W: AsyncWrite + Unpin,
     {
+        Ok(self
+            .perform(client, world, request, receipt_timeout)
+            .await?
+            .outcome)
+    }
+
+    /// Captures a surface: `request.action` must be [`StageAction::Snapshot`]. The capture
+    /// is read from `snapshot_dir`, where the compositor beside this control socket keeps
+    /// captures, checked against the digest it announced, and removed.
+    pub async fn look<R, W>(
+        &mut self,
+        client: &mut StageClient<R, W>,
+        world: &mut StageWorld,
+        request: &ActRequest,
+        snapshot_dir: &Path,
+        receipt_timeout: Duration,
+    ) -> Result<LookOutcome, OperateError>
+    where
+        R: AsyncRead + Unpin,
+        W: AsyncWrite + Unpin,
+    {
+        if request.action != StageAction::Snapshot {
+            return Err(OperateError::NotACapture);
+        }
+        let performed = self
+            .perform(client, world, request, receipt_timeout)
+            .await?;
+        if !performed.outcome.executed() {
+            if let Some(capture) = &performed.capture {
+                // A capture written for a command that did not complete is not used.
+                let _ = std::fs::remove_file(&capture.path);
+            }
+            return Ok(LookOutcome::NotCaptured(performed.outcome));
+        }
+        let (Some(capture), Some(surface)) = (performed.capture, performed.surface) else {
+            return Err(OperateError::CaptureMissing);
+        };
+        let png = take_capture(&capture.path, &capture.sha256, snapshot_dir)?;
+        Ok(LookOutcome::Captured(Snapshot {
+            surface: surface.surface,
+            app_id: surface.app_id,
+            geometry_revision: surface.geometry_revision,
+            width: capture.width,
+            height: capture.height,
+            captured_at_ms: performed.sent_at_ms,
+            sha256: capture.sha256,
+            png,
+        }))
+    }
+
+    async fn perform<R, W>(
+        &mut self,
+        client: &mut StageClient<R, W>,
+        world: &mut StageWorld,
+        request: &ActRequest,
+        receipt_timeout: Duration,
+    ) -> Result<Performed, OperateError>
+    where
+        R: AsyncRead + Unpin,
+        W: AsyncWrite + Unpin,
+    {
+        let unsent = |outcome| Performed {
+            outcome,
+            capture: None,
+            surface: None,
+            sent_at_ms: 0,
+        };
         let surface = match request.surface {
             Some(id) => world
                 .surface(id)
@@ -141,11 +219,11 @@ impl Operator {
             None => world.surfaces_of(&request.app_id).next().cloned(),
         };
         let Some(surface) = surface else {
-            return Ok(ActOutcome::NoSurface);
+            return Ok(unsent(ActOutcome::NoSurface));
         };
 
         // One operation, on this application, for this principal. Policy decides whether
-        // there is a lease at all.
+        // there is a lease at all, and a capture asks only to read.
         let now = Timestamp::now();
         let operation = u64::from(surface.surface) << 32 | (now.as_millis() as u64 & 0xffff_ffff);
         let decision = self.engine.decide(&CapabilityRequest {
@@ -154,14 +232,14 @@ impl Operator {
             principal: request.principal.clone(),
             resource: stage_resource(&request.app_id),
             scope: Scope::OneOperation { operation },
-            constraints: Constraints::with_actions([Action::Execute]),
+            constraints: Constraints::with_actions([request.action.kind().policy_action()]),
             justification: request.justification.clone(),
         });
         let Some(lease) = decision.lease else {
-            return Ok(ActOutcome::Refused {
+            return Ok(unsent(ActOutcome::Refused {
                 code: "no_lease",
                 message: "policy did not grant a lease for this application".into(),
-            });
+            }));
         };
 
         let proposal = StageProposal {
@@ -185,15 +263,15 @@ impl Operator {
             StageAdmission::Allowed(command) => command,
             StageAdmission::NeedsApproval { command, .. } if request.approved => command,
             StageAdmission::NeedsApproval { reason, .. } => {
-                return Ok(ActOutcome::NeedsApproval {
+                return Ok(unsent(ActOutcome::NeedsApproval {
                     reason: reason.to_string(),
-                })
+                }))
             }
             StageAdmission::Refused(refusal) => {
-                return Ok(ActOutcome::Refused {
+                return Ok(unsent(ActOutcome::Refused {
                     code: refusal.code(),
                     message: refusal.to_string(),
-                })
+                }))
             }
         };
 
@@ -202,6 +280,7 @@ impl Operator {
         let sealed = self.sealer.seal(&command, now, COMMAND_TTL_MS)?;
         client.send(&sealed).await?;
 
+        let mut capture = None;
         let deadline = tokio::time::sleep(receipt_timeout);
         tokio::pin!(deadline);
         loop {
@@ -213,7 +292,17 @@ impl Operator {
                     {
                         // Sequence 0 answers a line the compositor could not verify, and
                         // it only ever goes back to the connection that sent the line.
-                        return Ok(ActOutcome::Receipt { sequence: seq, outcome });
+                        return Ok(Performed {
+                            outcome: ActOutcome::Receipt { sequence: seq, outcome },
+                            capture,
+                            surface: Some(surface),
+                            sent_at_ms: now.as_millis(),
+                        });
+                    }
+                    Some(StageEvent::Snapshot { seq, surface: captured, width, height, sha256, path })
+                        if seq == sealed.sequence() && captured == surface.surface =>
+                    {
+                        capture = Some(CaptureEvent { width, height, sha256, path });
                     }
                     Some(event) => world.apply(&event),
                     None => return Err(OperateError::Closed),
@@ -221,4 +310,88 @@ impl Operator {
             }
         }
     }
+}
+
+struct Performed {
+    outcome: ActOutcome,
+    capture: Option<CaptureEvent>,
+    surface: Option<StageSurface>,
+    sent_at_ms: i64,
+}
+
+struct CaptureEvent {
+    width: u32,
+    height: u32,
+    sha256: String,
+    path: String,
+}
+
+/// The largest capture read back.
+pub const MAX_CAPTURE_BYTES: u64 = 64 * 1024 * 1024;
+const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+
+/// A captured surface, verified, with its file already removed.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Snapshot {
+    pub surface: u32,
+    pub app_id: String,
+    /// The surface's geometry revision the capture was requested against.
+    pub geometry_revision: u64,
+    pub width: u32,
+    pub height: u32,
+    pub captured_at_ms: i64,
+    pub sha256: String,
+    pub png: Vec<u8>,
+}
+
+impl std::fmt::Debug for Snapshot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // What the window showed is not for logs.
+        f.debug_struct("Snapshot")
+            .field("surface", &self.surface)
+            .field("app_id", &self.app_id)
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("bytes", &self.png.len())
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug)]
+pub enum LookOutcome {
+    Captured(Snapshot),
+    /// Not captured, and the reason: a refusal, a missing surface, or the compositor's
+    /// receipt, such as `capture_failed` or `operator_has_control`.
+    NotCaptured(ActOutcome),
+}
+
+/// Reads a capture where only this stage's compositor writes them, checks it is the file
+/// that was announced, and removes it whatever the check says.
+fn take_capture(path: &str, sha256: &str, snapshot_dir: &Path) -> Result<Vec<u8>, OperateError> {
+    let path = Path::new(path);
+    let inside = match (
+        path.parent().map(std::fs::canonicalize),
+        std::fs::canonicalize(snapshot_dir),
+    ) {
+        (Some(Ok(parent)), Ok(expected)) => parent == expected,
+        _ => false,
+    };
+    if !inside {
+        // A message naming a file anywhere else is not followed, and nothing is removed.
+        return Err(OperateError::CaptureOutside);
+    }
+    let read = (|| {
+        let metadata = std::fs::symlink_metadata(path)?;
+        if !metadata.file_type().is_file() || metadata.len() > MAX_CAPTURE_BYTES {
+            return Err(OperateError::CaptureInvalid);
+        }
+        let bytes = std::fs::read(path)?;
+        let digest = hex::encode(ring::digest::digest(&ring::digest::SHA256, &bytes).as_ref());
+        if digest != sha256 || !bytes.starts_with(PNG_SIGNATURE) {
+            return Err(OperateError::CaptureInvalid);
+        }
+        Ok(bytes)
+    })();
+    let _ = std::fs::remove_file(path);
+    read
 }

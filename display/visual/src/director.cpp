@@ -36,6 +36,8 @@ constexpr std::size_t kMaxRememberedPresses = 32;
             return CaptionVerb::PressingKeys;
         case StageAction::Focus:
             return CaptionVerb::Focusing;
+        case StageAction::Snapshot:
+            return CaptionVerb::Observing;
     }
     return CaptionVerb::Moving;
 }
@@ -218,6 +220,7 @@ void StageDirector::command_started(const StageCommand& command, const Surface& 
             case StepKind::KeyPress:
             case StepKind::KeyRelease:
             case StepKind::FocusSurface:
+            case StepKind::Capture:
                 break;
         }
     }
@@ -225,7 +228,7 @@ void StageDirector::command_started(const StageCommand& command, const Surface& 
         include(playback.pointer_at(now_ms));
     } else {
         // Typing lands wherever the application put its caret, which this code cannot
-        // see. Frame the whole window the characters are going into.
+        // see, and a capture takes the whole window. Frame all of it.
         include(PointF{static_cast<float>(surface.geometry.x), static_cast<float>(surface.geometry.y)});
         include(PointF{static_cast<float>(surface.geometry.x + surface.geometry.w),
                        static_cast<float>(surface.geometry.y + surface.geometry.h)});

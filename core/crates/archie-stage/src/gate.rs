@@ -9,7 +9,7 @@ use crate::action::{
     ActionKind, Key, StageAction, MAX_COORDINATE, MAX_SCROLL_STEPS, MAX_TEXT_CHARS,
 };
 use crate::policy::StagePolicy;
-use archie_policy::{Action, Lease, LeaseRejection, Operation, Principal, Resource};
+use archie_policy::{Lease, LeaseRejection, Operation, Principal, Resource};
 use archie_types::{PrivacyGrade, TaskId, Timestamp};
 use serde::{Deserialize, Serialize};
 
@@ -237,7 +237,9 @@ impl StageGate {
         let operation = Operation {
             principal: principal.clone(),
             resource: stage_resource(&app.app_id),
-            action: Action::Execute,
+            // A capture needs a lease to read the application, and a read lease grants no
+            // touch; everything else needs one to operate it.
+            action: kind.policy_action(),
             task_id: proposal.task_id,
             user_present,
         };
@@ -305,7 +307,8 @@ impl StageGate {
             | StageAction::Click { .. }
             | StageAction::DoubleClick { .. }
             | StageAction::Drag { .. }
-            | StageAction::Focus => {}
+            | StageAction::Focus
+            | StageAction::Snapshot => {}
         }
         if app.requires_approval.contains(&kind) {
             approval = Some("policy requires approval for this action");

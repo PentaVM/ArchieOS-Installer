@@ -67,11 +67,13 @@ pub use gate::{
     stage_resource, AuthorizedStageCommand, StageAdmission, StageGate, StageProposal, StageReceipt,
     StageRefusal,
 };
-pub use operate::{learn, ActOutcome, ActRequest, OperateError, Operator};
+pub use operate::{
+    learn, ActOutcome, ActRequest, LookOutcome, OperateError, Operator, Snapshot, MAX_CAPTURE_BYTES,
+};
 pub use policy::{AppPolicy, PolicyError, StagePolicy};
 pub use protocol::{
     AuthorityMode, ClientError, DamageRect, StageClient, StageEvent, StageSurface, StageWorld,
-    MAX_EVENT_BYTES,
+    MAX_EVENT_BYTES, MAX_SNAPSHOT_SIDE,
 };
 pub use seal::{
     open, CommandKey, SealError, SealedCommand, Sealer, WireAction, WireCommand,

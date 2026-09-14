@@ -73,6 +73,13 @@ skipped, because only its output can be sealed.
 8. **Protected surfaces cannot be targeted.** The model refuses them. The compositor does not
    mark any surface protected yet; approval prompts and a lock screen are what the flag is
    for.
+9. **Looking is authorised like touching.** A capture needs the application's `snapshot`
+   grant and a lease to read it. A read lease cannot click, and a lease to click cannot
+   look. The compositor checks a capture like any other command, grabs only that window, and
+   writes it owner-only under `snapshots/` beside the control socket. It names the file only
+   to the connection that asked, and the caption says "mirando" while it happens. The caller
+   believes the file only if its SHA-256 and PNG signature match, and deletes it once read.
+   The shipped policy grants no capture of anything.
 
 ## Typing
 
@@ -125,6 +132,38 @@ with no Qt, no clock and no socket, tested on machines without a display.
 `archie-visual-stage` replays a scripted 16-second session through the same model and
 writes an animated SVG. It uses 609 frames where a 60 fps loop would draw 960.
 
+## Finding what a task names
+
+`archie-sight` lets Archie act on something it is told about ("el botón Guardar") rather
+than on coordinates. It joins IRIS and the stage and adds no authority of its own:
+
+```text
+ look      Operator::look               snapshot grant, read lease, compositor checks → PNG
+ ground    LocateAnythingClient         the description in a one-entry Vault capsule for this
+                                        task, the capture bound to its SHA-256 → one box
+ activate  MotorController + Operator   a lease on the IRIS source, then an ordinary stage
+                                        click at the box's centre: stage policy and lease again
+ verify    Operator::look               350 ms later, another capture; unchanged pixels fail
+```
+
+```bash
+archie-look --socket "$XDG_RUNTIME_DIR/archie-stage/control.sock" --key-file /etc/archie/stage/key --policy apps.toml --app org.qt-project.qml --find "el botón Guardar" --node form:save --kind button --model moonshotai/Kimi-K3 --screen public --keep /tmp/look
+```
+
+- The model answers with `<box> x1, y1, x2, y2 </box>` in 0–1000 coordinates, or IRIS
+  refuses the answer. The box becomes window coordinates, and its centre is where Archie
+  clicks.
+- A click after which the window's pixels did not change ends with "world verification
+  did not observe a newer scene revision" and exit code 4, not success.
+- `--screen` is the caller's statement of what the window shows. Without `--endpoint`, the
+  model is reached through Nebius Token Factory and is cleared for public windows only,
+  because nobody has verified what it retains. An internal window is refused before a byte
+  leaves: "privacy grade internal is not permitted for model …". `--endpoint` names a local
+  OpenAI-compatible server, such as a NIM serving LocateAnything, which may see internal
+  windows.
+- The Nebius key is read from `NEBIUS_TOKEN_FACTORY_KEY` and never printed. `--keep` saves
+  the captures before and after, owner-readable.
+
 ## Running it
 
 ### WSLg, for development
@@ -167,6 +206,13 @@ Other actions: `right-click x y`, `double-click x y`, `move x y`, `drag x y to_x
 refused before sending, 3 needs approval (`--approve` is the person at the keyboard
 giving it), 4 the compositor did not run it.
 
+```bash
+archie-stage-cli look --socket "$XDG_RUNTIME_DIR/archie-stage/control.sock" --key-file /etc/archie/stage/key --app org.qt-project.qml --out form.png
+```
+
+`look` saves one window as an owner-readable PNG, if the policy grants that application
+`snapshot`.
+
 ### On a node
 
 `archie-stage` runs full screen on DRM/KMS through EGLFS (`QT_QPA_PLATFORM=eglfs`). The
@@ -179,11 +225,22 @@ only by its owner.
   two of the library's 18 suites. Each rule was broken on purpose and a test failed for
   it: 42 mutants against the first version, then 14 more against the focus settle, the
   failure caption and the activity strip.
-- `display/stage/tests/test_codec`: 40 checks on the C++ side of the sealed format, against
+- `display/stage/tests/test_codec`: 42 checks on the C++ side of the sealed format, against
   `protocols/fixtures/stage-command-v1.json`, whose MAC was computed independently with
   `openssl`.
 - `archie-stage`: gate, sealing, protocol client and `Operator`, with an in-memory
-  compositor.
+  compositor. For captures, the tests check four things:
+  - A capture is read, verified and removed.
+  - A capture whose digest is wrong, or whose file is outside the snapshot directory, is
+    not believed.
+  - A capture needs its own grant.
+  - A read lease never touches.
+- `archie-sight`, with a mock compositor and a loopback model:
+  - A named button is found, clicked and seen to change, and the model receives the capsule
+    and the image.
+  - A window that does not change is not verification.
+  - A cloud model whose retention is unknown never sees an internal window, and nothing is
+    clicked.
 - In WSLg, against real clients, reading their Wayland protocol traces:
   - The demo form saved "Archie escribió esto solo".
   - A Ctrl+A chord replaced a draft, and "Hola, ñandú: 100% listo!" arrived whole and in
@@ -193,6 +250,21 @@ only by its owner.
   - "ñ" into that terminal was refused as `not_typeable`.
   - Once, a mouse moved over the window took the stage, and Archie resumed on its own
     afterwards.
+  - Through Nebius Token Factory, `moonshotai/Kimi-K3` placed the demo form's text field
+    and its Guardar button within a pixel of the centres the form itself reports. Archie
+    clicked the field, saw it change, typed, pressed Guardar and saw that change too. The
+    form logged `saved "Archie encontró este campo mirando"`, and the snapshot directory
+    was empty afterwards.
+  - Other vision models Nebius offered, on the same capture:
+    - `google/gemma-3-27b-it` kept the box format but pointed 100 px or more away. Its click
+      changed nothing, and `archie-look` reported that as a failure.
+    - `openbmb/MiniCPM-V-4_5` came within 3 px but answered without `<box>`, which IRIS
+      refuses.
+    - `MiniMaxAI/MiniMax-M3` answered in format and missed.
+    - `moonshotai/Kimi-K2.6` and `Kimi-K2.7-Code` used up 512 tokens reasoning.
+    - Qwen3.5, GLM-5.3 and the Nemotron models refuse images.
+  - The same window declared internal was refused before egress, and a policy without
+    `snapshot` refused the capture with `stage_action_not_allowed`.
 
 ## Not working yet
 
@@ -207,6 +279,11 @@ only by its owner.
   frame, weston-terminal among them.
 - **No XWayland**, so X11-only applications do not run.
 - **Nothing has run on DRM/KMS hardware.**
-- **Perception is not here.** The stage publishes surfaces and damage rectangles, not
-  pixels. Iris (`archie-iris`) owns perception, and its `MotorExecutor` is meant to act
-  through `archie_stage::Operator`; that integration is not written.
+- **Seeing is one window and one target per call.** A capture is the toplevel's own
+  buffer, so menus and popups are neither in the picture nor within reach of the click.
+- **"Changed" is not "right".** Verification shows that the window's pixels changed, not
+  that the intended thing happened. A click that only takes focus away from a field
+  passes.
+- **LocateAnything-3B itself has not run.** Its adapter was exercised with cloud vision
+  models standing in for it. Kimi-K3 took 11 to 28 s to find each target, too slow for
+  anything but a demonstration.

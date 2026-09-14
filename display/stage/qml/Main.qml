@@ -45,6 +45,7 @@ WaylandCompositor {
         case "typing": return "escribiendo " + stage.captionCount + " caracteres · " + app
         case "pressing_keys": return "pulsando " + stage.captionCount + (stage.captionCount === 1 ? " tecla · " : " teclas · ") + app
         case "focusing": return "enfocando · " + app
+        case "observing": return "mirando · " + app
         case "interrupted": return "acción detenida · el control es tuyo"
         case "refused": return "rechazado · " + refusalText(stage.captionRefusal) + " · " + app
         }
@@ -62,6 +63,7 @@ WaylandCompositor {
         case "typing": return "escribió " + entry.count + " car. · " + entry.app
         case "pressing_keys": return (entry.count === 1 ? "tecla · " : "atajo · ") + entry.app
         case "focusing": return "enfocó · " + entry.app
+        case "observing": return "miró · " + entry.app
         case "interrupted": return "detenida por ti · " + entry.app
         case "refused": return "no se hizo: " + refusalText(entry.refusal) + " · " + entry.app
         }
@@ -80,6 +82,7 @@ WaylandCompositor {
         case "command_expired": return "orden vencida"
         case "command_replayed": return "orden repetida"
         case "not_typeable": return "ese texto no se puede escribir aquí"
+        case "capture_failed": return "no se pudo capturar la ventana"
         }
         return code
     }

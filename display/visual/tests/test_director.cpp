@@ -275,6 +275,15 @@ void captions_say_what_without_saying_the_text() {
     CHECK_BECAUSE(inside(region, PointF{560.0F, 240.0F}) && inside(region, PointF{1360.0F, 840.0F}),
                   "the caret is somewhere this code cannot see, so the whole window is in frame");
 
+    // Looking at a window says so, and shows the whole window being looked at.
+    Fixture watched;
+    watched.table.map(6, "org.gnome.TextEditor", IRect{560, 240, 800, 600});
+    const auto look = watched.command(6, StageAction::Snapshot, 0, 0);
+    (void)watched.run(look, PointF{960.0F, 540.0F}, T0);
+    CHECK_EQ(watched.director.frame(T0 + 50, RenderTier::Normal).caption->verb, CaptionVerb::Observing);
+    const VisibleRegion seen = visible_region(watched.director.camera_target(), 1920, 1080);
+    CHECK(inside(seen, PointF{560.0F, 240.0F}) && inside(seen, PointF{1360.0F, 840.0F}));
+
     auto refused = f.command(2, StageAction::Click, 10, 10);
     f.director.command_refused(refused, CommandRefusal::SurfaceChanged, T0 + 200);
     const StageFrame said = f.director.frame(T0 + 300, RenderTier::Normal);

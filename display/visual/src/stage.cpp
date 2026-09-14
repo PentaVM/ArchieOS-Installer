@@ -206,6 +206,8 @@ const char* refusal_code(CommandRefusal refusal) noexcept {
             return "chord_out_of_bounds";
         case CommandRefusal::NotTypeable:
             return "not_typeable";
+        case CommandRefusal::CaptureFailed:
+            return "capture_failed";
     }
     return "command_refused";
 }
@@ -283,6 +285,7 @@ std::optional<CommandRefusal> check_command(const StageCommand& command,
             }
             break;
         case StageAction::Focus:
+        case StageAction::Snapshot:
             break;
     }
     return std::nullopt;
@@ -479,6 +482,10 @@ Playback Playback::start(const StageCommand& command, const Surface& surface, Po
             step(now_ms, StepKind::FocusSurface, pointer_now, PointerButton::Left, 0);
             end = now_ms;
             break;
+        case StageAction::Snapshot:
+            step(now_ms, StepKind::Capture, pointer_now, PointerButton::Left, 0);
+            end = now_ms + policy.capture_hold_ms;
+            break;
     }
 
     std::stable_sort(steps.begin(), steps.end(),
@@ -535,6 +542,7 @@ std::vector<InputStep> Playback::due(std::int64_t now_ms) {
             case StepKind::Wheel:
             case StepKind::TextUnit:
             case StepKind::FocusSurface:
+            case StepKind::Capture:
                 break;
         }
         out.push_back(next);

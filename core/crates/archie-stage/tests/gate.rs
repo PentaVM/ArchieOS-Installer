@@ -124,15 +124,37 @@ fn only_the_action_kinds_an_entry_lists_are_allowed() {
 fn no_lease_for_this_application_means_no_command() {
     let principal = agent();
     let policy = policy();
-    let now = Timestamp::now();
-
-    // A lease for another application.
     let other = lease_for(
         &principal,
         stage_resource(TERMINAL),
         Action::Execute,
         OPERATION,
     );
+    let read = lease_for(&principal, stage_resource(FREECAD), Action::Read, OPERATION);
+    let elsewhere = lease_for(
+        &principal,
+        stage_resource(FREECAD),
+        Action::Execute,
+        OPERATION + 1,
+    );
+    let mine = lease_for(
+        &principal,
+        stage_resource(FREECAD),
+        Action::Execute,
+        OPERATION,
+    );
+    let mut revoked = lease_for(
+        &principal,
+        stage_resource(FREECAD),
+        Action::Execute,
+        OPERATION,
+    );
+    revoked.revoke();
+    // Read after every lease is issued: an instant before one of them is a clock that went
+    // backwards, which the lease refuses before it looks at anything else.
+    let now = Timestamp::now();
+
+    // A lease for another application.
     let admission = StageGate::authorize(
         &policy,
         &other,
@@ -147,7 +169,6 @@ fn no_lease_for_this_application_means_no_command() {
     );
 
     // A read-only lease.
-    let read = lease_for(&principal, stage_resource(FREECAD), Action::Read, OPERATION);
     let admission = StageGate::authorize(
         &policy,
         &read,
@@ -162,12 +183,6 @@ fn no_lease_for_this_application_means_no_command() {
     );
 
     // A lease granted for a different prepared operation.
-    let elsewhere = lease_for(
-        &principal,
-        stage_resource(FREECAD),
-        Action::Execute,
-        OPERATION + 1,
-    );
     let admission = StageGate::authorize(
         &policy,
         &elsewhere,
@@ -182,12 +197,6 @@ fn no_lease_for_this_application_means_no_command() {
     );
 
     // Somebody else's lease.
-    let mine = lease_for(
-        &principal,
-        stage_resource(FREECAD),
-        Action::Execute,
-        OPERATION,
-    );
     let admission = StageGate::authorize(
         &policy,
         &mine,
@@ -202,13 +211,6 @@ fn no_lease_for_this_application_means_no_command() {
     );
 
     // A revoked one.
-    let mut revoked = lease_for(
-        &principal,
-        stage_resource(FREECAD),
-        Action::Execute,
-        OPERATION,
-    );
-    revoked.revoke();
     let admission = StageGate::authorize(
         &policy,
         &revoked,
@@ -503,4 +505,64 @@ fn every_refusal_has_a_stable_code() {
         );
         assert!(code.len() <= 64);
     }
+}
+
+#[test]
+fn looking_needs_a_read_lease_and_a_read_lease_never_touches() {
+    let policy = StagePolicy::parse(
+        r#"
+[[app]]
+app_id = "org.freecad.FreeCAD"
+display_name = "FreeCAD"
+allow = ["click", "snapshot"]
+"#,
+    )
+    .unwrap();
+    let principal = agent();
+    let authorize = |lease: &Lease, action: StageAction| {
+        StageGate::authorize(
+            &policy,
+            lease,
+            &principal,
+            false,
+            &proposal(FREECAD, action),
+            Timestamp::now(),
+        )
+    };
+    let read = lease_for(&principal, stage_resource(FREECAD), Action::Read, OPERATION);
+    let execute = lease_for(
+        &principal,
+        stage_resource(FREECAD),
+        Action::Execute,
+        OPERATION,
+    );
+
+    assert!(matches!(
+        authorize(&read, StageAction::Snapshot),
+        StageAdmission::Allowed(_)
+    ));
+    assert!(
+        matches!(
+            authorize(&read, click()),
+            StageAdmission::Refused(StageRefusal::Lease(LeaseRejection::ActionNotPermitted))
+        ),
+        "a lease to look is not a lease to click"
+    );
+    assert!(
+        matches!(
+            authorize(&execute, StageAction::Snapshot),
+            StageAdmission::Refused(StageRefusal::Lease(LeaseRejection::ActionNotPermitted))
+        ),
+        "nor is a lease to click one to look"
+    );
+    assert!(
+        matches!(
+            gate(FREECAD, StageAction::Snapshot),
+            StageAdmission::Refused(StageRefusal::ActionNotAllowed {
+                kind: ActionKind::Snapshot,
+                ..
+            })
+        ),
+        "the shipped policy grants no capture of anything"
+    );
 }

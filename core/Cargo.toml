@@ -36,6 +36,7 @@ members = [
     "crates/archie-stage",
     "crates/archie-mcp-server",
     "crates/archie-toolpack",
+    "crates/archie-sight",
     "crates/archie-cerebra",
     "crates/archie-workstation",
     "crates/archie-iris",
@@ -76,6 +77,7 @@ archie-search = { path = "crates/archie-search" }
 archie-stage = { path = "crates/archie-stage" }
 archie-mcp-server = { path = "crates/archie-mcp-server" }
 archie-toolpack = { path = "crates/archie-toolpack" }
+archie-sight = { path = "crates/archie-sight" }
 archie-cerebra = { path = "crates/archie-cerebra" }
 archie-workstation = { path = "crates/archie-workstation" }
 archie-iris = { path = "crates/archie-iris" }

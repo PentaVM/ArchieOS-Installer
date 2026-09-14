@@ -16,7 +16,9 @@
 #include <QLocalSocket>
 #include <QObject>
 #include <QPointer>
+#include <QQuickItemGrabResult>
 #include <QQuickWindow>
+#include <QSharedPointer>
 #include <QTimer>
 #include <QVariantList>
 #include <QWaylandCompositor>
@@ -156,6 +158,8 @@ private:
     void watchSeat();
     void handleKeyboardFocus(QWaylandSurface *newFocus);
     KeyTyper *typer();
+    void finishCapture(std::uint64_t sequence);
+    QString snapshotDirectory() const;
     void noteAuthority(archie::visual::AuthorityMode before);
     void tick();
     void publish(const archie::visual::StageFrame &frame);
@@ -187,6 +191,17 @@ private:
     std::optional<archie::stage::DecodedCommand> m_active;
     /// The route the active text takes, chosen at its first character.
     std::optional<KeyTyper::Route> m_textRoute;
+    /// The connection the active command came from. A capture's pixels go back to it alone.
+    QPointer<QLocalSocket> m_commandSocket;
+    struct Capture {
+        std::uint64_t sequence = 0;
+        archie::visual::SurfaceId surface = 0;
+        QPointer<QLocalSocket> socket;
+        bool done = false;
+        bool ok = false;
+    };
+    std::optional<Capture> m_capture;
+    QSharedPointer<QQuickItemGrabResult> m_grab;
     archie::visual::PointF m_pointer{};
     std::uint64_t m_lastSequence = 0;
     archie::visual::SurfaceId m_nextSurface = 1;
