@@ -31,6 +31,8 @@ a specific way a status display lies:
 | `geo.hpp` | A globe that looks plausible and is mirrored, or puts an event off Fiji somewhere off Somalia. Landmarks, antipodes and handedness are pinned. |
 | `history.hpp` | Answering "what was true at 14:02" with the state from 14:05. |
 | `observatory.hpp` | The places where two correct modules still add up to a bug. |
+| `stage.hpp` | An agent that cannot be stopped, or that clicks where a window used to be. Any physical input takes the Archie Stage from the agent and the agent's own input never can; a command is bound to its surface's geometry revision; a pointer path always arrives, and a cancelled one releases what it held. |
+| `director.hpp` | Cinematics that chase the cursor, fight the person who took over, or put typed text on screen. The camera frames the region an action spans and re-frames only when an action leaves it; a takeover cuts to the whole stage; captions and the activity strip carry verbs, applications and counts, never text. Any application, because nothing here knows what one is. |
 
 ## Using it
 
@@ -62,7 +64,7 @@ cmake --build build/visual
 ctest --test-dir build/visual --output-on-failure
 ```
 
-16 suites, 7159 checks, `-Wall -Wextra -Wpedantic -Wswitch-enum -Werror`. Every module has
+18 suites, 7378 checks, `-Wall -Wextra -Wpedantic -Wswitch-enum -Werror`. Every module has
 been mutation-tested: each rule above was deliberately broken to confirm a test fails.
 Where a mutation survived, it was because the code was unreachable or the test was weak,
 and both were fixed rather than recorded as passing.
@@ -106,3 +108,16 @@ projection arrives and at `next_frame_at_ms`, and never on a timer of its own. O
 integration requirement follows from the freshness rule: while a pass is running or
 held for approval, `archie-displayd` must re-publish the HUD projection within the
 lagging window, or the panel will — correctly — dim a pass it can no longer vouch for.
+
+## Seeing the stage cinematics
+
+```bash
+cmake --build build/visual --target archie-visual-stage
+build/visual/archie-visual-stage stage-motion.svg --snapshots stage-frames
+```
+
+Plays a scripted 16-second session through the same checks, playback and director that the
+Archie Stage compositor (`display/stage`, [docs/STAGE.md](../../docs/STAGE.md)) uses. The
+agent works a CAD package, a terminal and a file manager, a person takes over mid-action,
+a stale command is refused, and a pause chord stops everything. It writes an animated SVG
+of exactly the frames the director asked for: 609, against 960 for a 60 fps loop.

@@ -30,12 +30,12 @@ fn main() -> std::process::ExitCode {
 
 #[cfg(unix)]
 mod unix {
-    use archie_policy::{Action, CapabilityRequest, Constraints, PolicyEngine, Principal, Scope};
+    use archie_policy::{PolicyEngine, Principal};
     use archie_stage::{
-        stage_resource, CommandKey, Key, KeyChord, Modifier, PointerButton, Sealer, StageAction, StageAdmission,
-        StageClient, StageEvent, StageGate, StagePolicy, StageProposal, StageText, StageWorld,
+        learn, ActOutcome, ActRequest, CommandKey, KeyChord, Operator, PointerButton, StageAction, StageClient,
+        StagePolicy, StageText, StageWorld,
     };
-    use archie_types::{PrivacyGrade, Timestamp, TraceId};
+    use archie_types::PrivacyGrade;
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     use std::process::ExitCode;
@@ -154,18 +154,7 @@ mod unix {
             },
             "key" => {
                 let spec = words.get(1).ok_or("key needs a key")?;
-                let mut parts: Vec<&str> = spec.split('+').collect();
-                let key = Key::parse(parts.pop().unwrap_or_default()).ok_or("not a key this stage can press")?;
-                let mut chord = KeyChord::key(key);
-                for part in parts {
-                    chord = chord.with(match part {
-                        "ctrl" => Modifier::Ctrl,
-                        "shift" => Modifier::Shift,
-                        "alt" => Modifier::Alt,
-                        "super" => Modifier::Super,
-                        other => return Err(format!("{other:?} is not a modifier")),
-                    });
-                }
+                let chord = KeyChord::parse(spec).ok_or("not a key this stage can press, like enter or ctrl+s")?;
                 StageAction::Key { chord }
             }
             "focus" => StageAction::Focus,
@@ -178,113 +167,72 @@ mod unix {
         let socket = take(&mut args, "--socket").ok_or("act needs --socket")?;
         let key = load_key(&take(&mut args, "--key-file").ok_or("act needs --key-file")?)?;
         let app = take(&mut args, "--app").ok_or("act needs --app")?;
-        let wanted_surface = take(&mut args, "--surface").map(|s| s.parse::<u32>()).transpose().map_err(|_| "--surface is a number")?;
+        let surface = take(&mut args, "--surface")
+            .map(|s| s.parse::<u32>())
+            .transpose()
+            .map_err(|_| "--surface is a number")?;
         let policy_path = take(&mut args, "--policy").unwrap_or_else(|| DEFAULT_POLICY.into());
         let sequence = take(&mut args, "--sequence")
             .map(|s| s.parse::<u64>())
             .transpose()
             .map_err(|_| "--sequence is a number")?;
-        let approve = flag(&mut args, "--approve");
-        let (action, grade) = parse_action(&args)?;
+        let approved = flag(&mut args, "--approve");
+        let (action, text_grade) = parse_action(&args)?;
         let policy = StagePolicy::load(&policy_path).map_err(|e| e.to_string())?;
 
         let stream = UnixStream::connect(&socket).await.map_err(|e| format!("{socket}: {e}"))?;
         let (read, write) = stream.into_split();
         let mut client = StageClient::new(read, write);
-
-        // Learn the stage as it is: the compositor greets every connection with its surfaces
-        // and the current authority.
         let mut world = StageWorld::default();
-        let settle = tokio::time::sleep(Duration::from_millis(400));
-        tokio::pin!(settle);
-        loop {
-            tokio::select! {
-                _ = &mut settle => break,
-                event = client.next_event() => match event.map_err(|e| e.to_string())? {
-                    Some(event) => world.apply(&event),
-                    None => return Err("the compositor closed the connection".into()),
-                },
-            }
-        }
-        let surface = match wanted_surface {
-            Some(id) => world.surface(id).cloned(),
-            None => world.surfaces_of(&app).next().cloned(),
-        }
-        .ok_or_else(|| format!("no surface of {app} is on the stage"))?;
+        learn(&mut client, &mut world, Duration::from_millis(400))
+            .await
+            .map_err(|e| e.to_string())?;
 
-        // The operator running this command is the principal, and asks for exactly one
-        // operation on this application.
-        let principal = Principal::Human {
-            id: "stage-cli".into(),
-            authenticated: true,
-        };
-        let operation = u64::from(surface.surface) << 32 | (Timestamp::now().as_millis() as u64 & 0xffff_ffff);
-        let lease = PolicyEngine::default()
-            .decide(&CapabilityRequest {
-                trace_id: TraceId::new(),
-                task_id: None,
-                principal: principal.clone(),
-                resource: stage_resource(&app),
-                scope: Scope::OneOperation { operation },
-                constraints: Constraints::with_actions([Action::Execute]),
-                justification: "operator action from archie-stage-cli".into(),
-            })
-            .lease
-            .ok_or("policy did not grant a lease")?;
-        let proposal = StageProposal {
+        let mut operator = Operator::new(key, policy, PolicyEngine::default());
+        if let Some(sequence) = sequence {
+            operator.advance_sequence(sequence);
+        }
+        // The operator running this command is the principal, at the keyboard.
+        let request = ActRequest {
             app_id: app.clone(),
-            surface: surface.surface,
-            geometry_revision: surface.geometry_revision,
+            surface,
             action,
-            text_grade: grade,
-            operation_id: operation,
+            text_grade,
+            principal: Principal::Human {
+                id: "stage-cli".into(),
+                authenticated: true,
+            },
             task_id: None,
-            trace_id: "stage-cli".into(),
+            user_present: true,
+            approved,
+            justification: "operator action from archie-stage-cli".into(),
         };
-        let command = match StageGate::authorize(&policy, &lease, &principal, true, &proposal, Timestamp::now()) {
-            StageAdmission::Allowed(command) => command,
-            StageAdmission::NeedsApproval { command, reason } if approve => {
-                eprintln!("approved by the operator: {reason}");
-                command
+        println!("sending {} to {app}", request.action.kind().as_str());
+        let outcome = operator
+            .act(&mut client, &mut world, &request, Duration::from_secs(30))
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(match outcome {
+            ActOutcome::Receipt { sequence: 0, outcome } => {
+                println!("receipt: {outcome} (the compositor could not verify the command)");
+                ExitCode::from(4)
             }
-            StageAdmission::NeedsApproval { reason, .. } => {
+            ActOutcome::Receipt { outcome, .. } => {
+                println!("receipt: {outcome}");
+                if outcome == "executed" { ExitCode::SUCCESS } else { ExitCode::from(4) }
+            }
+            ActOutcome::NeedsApproval { reason } => {
                 eprintln!("needs approval ({reason}); rerun with --approve if you are the person approving it");
-                return Ok(ExitCode::from(3));
+                ExitCode::from(3)
             }
-            StageAdmission::Refused(refusal) => {
-                eprintln!("refused ({}): {refusal}", refusal.code());
-                return Ok(ExitCode::from(2));
+            ActOutcome::Refused { code, message } => {
+                eprintln!("refused ({code}): {message}");
+                ExitCode::from(2)
             }
-        };
-
-        // Sequences must rise above anything the compositor accepted; the clock is a
-        // simple source of that for a hand-driven tool.
-        let first = sequence.unwrap_or_else(|| Timestamp::now().as_millis() as u64);
-        let mut sealer = Sealer::new(key, first);
-        let sealed = sealer.seal(&command, Timestamp::now(), 5_000).map_err(|e| e.to_string())?;
-        client.send(&sealed).await.map_err(|e| e.to_string())?;
-        println!("sent seq {} ({:?})", sealed.sequence(), command.receipt().action);
-
-        let deadline = tokio::time::sleep(Duration::from_secs(30));
-        tokio::pin!(deadline);
-        loop {
-            tokio::select! {
-                _ = &mut deadline => return Err("no receipt within 30 s".into()),
-                event = client.next_event() => match event.map_err(|e| e.to_string())? {
-                    Some(StageEvent::Receipt { seq, outcome, .. }) if seq == sealed.sequence() => {
-                        println!("receipt: {outcome}");
-                        return Ok(if outcome == "executed" { ExitCode::SUCCESS } else { ExitCode::from(4) });
-                    }
-                    // The compositor could not verify a line from this connection, and so
-                    // could not read its sequence either; it answers only the sender.
-                    Some(StageEvent::Receipt { seq: 0, outcome, .. }) => {
-                        println!("receipt: {outcome} (the compositor could not verify the command)");
-                        return Ok(ExitCode::from(4));
-                    }
-                    Some(event) => world.apply(&event),
-                    None => return Err("the compositor closed the connection".into()),
-                },
+            ActOutcome::NoSurface => {
+                eprintln!("no surface of {app} is on the stage");
+                ExitCode::from(2)
             }
-        }
+        })
     }
 }

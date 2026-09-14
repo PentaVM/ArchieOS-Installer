@@ -186,6 +186,11 @@ impl StageWorld {
         self.surfaces.get(&id)
     }
 
+    /// Every surface, in id order.
+    pub fn surfaces(&self) -> impl Iterator<Item = &StageSurface> {
+        self.surfaces.values()
+    }
+
     /// Surfaces belonging to an application, in id order.
     pub fn surfaces_of<'a>(
         &'a self,

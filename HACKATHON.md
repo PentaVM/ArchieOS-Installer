@@ -97,6 +97,53 @@ from executed builds on identified hardware.
   the other. The test was fixed rather than recorded as passing. `extract`, `crawl` and
   credit accounting are not implemented.
 
+### The Archie Stage
+
+- Added the Archie Stage (`display/stage`, [docs/STAGE.md](docs/STAGE.md)), a Wayland
+  compositor in which Archie operates applications with a visible pointer and keystrokes,
+  with nobody's mouse needed and nobody's mouse locked out. Any physical input takes the
+  stage back at once. The agent resumes after eight quiet seconds, and a pause chord holds
+  it until a person resumes it. The agent's own input goes through the seat and cannot
+  trigger either.
+- An action takes one path, whoever asks: `Cerebra::propose_stage_action` or
+  `archie_stage::Operator`, then the stage policy, a one-operation lease, a gate whose
+  output is the only thing that can be sealed, an HMAC-sealed line, and the compositor's
+  own re-check against the window's geometry revision.
+- Applications get text the way they get a person's: keys found on the keymap they were
+  given, with Shift, AltGr and modifier state moved as a physical key moves them. A text
+  with characters off the keymap goes whole through the application's input method. With
+  neither route, the receipt says `not_typeable` instead of `executed`. Qt's public seat
+  API sends Ctrl+C as a plain "c" and drops text for applications without text-input, so
+  this uses the private calls Qt's own keyboard handling uses.
+- Cinematics for any application come from a pure, display-free model (`director.hpp`).
+  The camera frames the action and does not chase the cursor, and cuts to the whole stage
+  on a takeover. Pointer paths are Fitts-timed, and ripples are bounded. Captions and a
+  strip of recent actions carry verbs, applications and counts, never typed text. Frames
+  are requested only while something moves: 609 in a scripted 16 s session, against 960
+  at 60 fps.
+- Verified in WSLg against real clients, reading their Wayland protocol traces:
+  - A demo form saved "Archie escribió esto solo" with no human input.
+  - A Ctrl+A chord replaced a draft, and "Hola, ñandú: 100% listo!" arrived in order.
+  - `weston-terminal` ran a typed shell command with quotes and redirection.
+  - A mouse moved over the window during one run took the stage, and the agent resumed.
+- Not working: `foot` (it needs protocol versions Qt 6.11's compositor does not offer),
+  Alacritty at full size, targeting popups, XWayland, and any run on DRM/KMS hardware.
+
+### Archie for IDE agents
+
+- Added `archie-mcp-server`, which serves Archie's tools over MCP on stdio to VS Code's agent
+  mode, Claude Code, Zed and any other MCP client. It is one Rust binary, with no IDE
+  extension. The research behind the choice, including why Live Share is not viable and
+  why Zed is the recommended editor for the image, is in
+  [docs/research/IDE.md](docs/research/IDE.md).
+- A tool result leaves the node for a model Archie cannot see, so each tool declares a
+  privacy grade. The server's clearance defaults to public and cannot go above internal.
+  Node status is an allowlist that leaves out the hostname, network interfaces and
+  location.
+- Operating stage applications is opt-in, goes through the same `Operator` and gate, runs
+  as the IDE agent's own principal, and can never obtain an approval or clear a person's
+  takeover.
+
 ### Cerebra runtime additions
 
 - Added a bounded advisory interpreter as an optional continuation after Cerebra's

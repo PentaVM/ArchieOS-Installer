@@ -277,6 +277,14 @@ impl Sealer {
         }
     }
 
+    /// Never seal below `sequence` again. Several control-plane processes can share one
+    /// compositor, and its sequence check is global: a sealer that keeps up with the wall
+    /// clock cannot fall behind another process's counter and have everything refused as
+    /// a replay.
+    pub fn advance_to(&mut self, sequence: u64) {
+        self.next_sequence = self.next_sequence.max(sequence);
+    }
+
     pub fn seal(
         &mut self,
         command: &AuthorizedStageCommand,

@@ -1,0 +1,19 @@
+[package]
+name = "archie-mcp-server"
+description = "Archie as a Model Context Protocol server over stdio, so an IDE agent (VS Code, Claude Code, Zed) can work with the node as a collaborator."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+archie-core.workspace = true
+archie-policy.workspace = true
+archie-stage.workspace = true
+archie-state.workspace = true
+archie-types.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "rt", "time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

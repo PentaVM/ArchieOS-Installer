@@ -271,6 +271,23 @@ impl KeyChord {
         self
     }
 
+    /// `enter`, `ctrl+s`, `ctrl+shift+z`: modifiers first, the key last, joined by `+`.
+    /// Parsing says nothing about whether a chord may be sent; the gate decides that.
+    pub fn parse(spec: &str) -> Option<Self> {
+        let mut parts: Vec<&str> = spec.split('+').collect();
+        let mut chord = Self::key(Key::parse(parts.pop()?)?);
+        for part in parts {
+            chord = chord.with(match part {
+                "ctrl" => Modifier::Ctrl,
+                "shift" => Modifier::Shift,
+                "alt" => Modifier::Alt,
+                "super" => Modifier::Super,
+                _ => return None,
+            });
+        }
+        Some(chord)
+    }
+
     /// Keys pressed, counting modifiers. At most five by construction.
     pub fn key_count(&self) -> usize {
         self.modifiers.len() + 1
@@ -357,6 +374,23 @@ impl StageAction {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chords_parse_modifiers_then_one_key() {
+        assert_eq!(
+            KeyChord::parse("ctrl+shift+z"),
+            Some(
+                KeyChord::key(Key::Char('z'))
+                    .with(Modifier::Ctrl)
+                    .with(Modifier::Shift)
+            )
+        );
+        assert_eq!(KeyChord::parse("enter"), Some(KeyChord::key(Key::Named(NamedKey::Enter))));
+        assert_eq!(KeyChord::parse("ctrl+"), None, "a chord needs a key");
+        assert_eq!(KeyChord::parse("hyper+a"), None);
+        assert_eq!(KeyChord::parse("a+ctrl"), None, "the key comes last");
+        assert_eq!(KeyChord::parse(""), None);
+    }
 
     #[test]
     fn keys_parse_names_and_single_characters_only() {
