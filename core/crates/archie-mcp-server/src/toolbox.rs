@@ -87,5 +87,9 @@ pub trait Toolbox {
     fn tools(&self) -> Vec<ToolSpec>;
 
     /// Runs a tool the server has already checked exists and is within clearance.
-    fn call(&mut self, name: &str, arguments: Map<String, Value>) -> impl Future<Output = ToolOutcome>;
+    fn call(
+        &mut self,
+        name: &str,
+        arguments: Map<String, Value>,
+    ) -> impl Future<Output = ToolOutcome>;
 }

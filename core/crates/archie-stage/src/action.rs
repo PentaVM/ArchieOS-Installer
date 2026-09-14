@@ -385,7 +385,10 @@ mod tests {
                     .with(Modifier::Shift)
             )
         );
-        assert_eq!(KeyChord::parse("enter"), Some(KeyChord::key(Key::Named(NamedKey::Enter))));
+        assert_eq!(
+            KeyChord::parse("enter"),
+            Some(KeyChord::key(Key::Named(NamedKey::Enter)))
+        );
         assert_eq!(KeyChord::parse("ctrl+"), None, "a chord needs a key");
         assert_eq!(KeyChord::parse("hyper+a"), None);
         assert_eq!(KeyChord::parse("a+ctrl"), None, "the key comes last");

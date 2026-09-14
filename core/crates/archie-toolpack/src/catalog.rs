@@ -102,7 +102,9 @@ pub enum CatalogError {
     Duplicate(String),
     #[error("tool {0}: version {1:?} is not a plain version string")]
     VersionString(String, String),
-    #[error("tool {0}: the artifact URL must be https without credentials, or http to this machine")]
+    #[error(
+        "tool {0}: the artifact URL must be https without credentials, or http to this machine"
+    )]
     Url(String),
     #[error("tool {0}: sha256 must be 64 lowercase hex characters")]
     Digest(String),
@@ -125,7 +127,8 @@ impl Catalog {
         if text.len() > MAX_CATALOG_BYTES {
             return Err(CatalogError::TooLarge);
         }
-        let catalog: Catalog = toml::from_str(text).map_err(|e| CatalogError::Syntax(e.message().to_string()))?;
+        let catalog: Catalog =
+            toml::from_str(text).map_err(|e| CatalogError::Syntax(e.message().to_string()))?;
         catalog.validate()?;
         Ok(catalog)
     }
@@ -141,7 +144,9 @@ impl Catalog {
         for host in &self.redirect_hosts {
             if host.is_empty()
                 || host.len() > 253
-                || !host.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-')
+                || !host
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-')
             {
                 return Err(CatalogError::RedirectHost(host.clone()));
             }
@@ -164,16 +169,18 @@ pub(crate) fn plain_name(text: &str, extra: &[u8]) -> bool {
         && text != "."
         && text != ".."
         && text.as_bytes()[0].is_ascii_alphanumeric()
-        && text
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || extra.contains(&b))
+        && text.bytes().all(|b| {
+            b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || extra.contains(&b)
+        })
 }
 
 pub(crate) fn plain_version(text: &str) -> bool {
     !text.is_empty()
         && text.len() <= 64
         && text.as_bytes()[0].is_ascii_alphanumeric()
-        && text.bytes().all(|b| b.is_ascii_alphanumeric() || b"._+-".contains(&b))
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"._+-".contains(&b))
 }
 
 fn validate_tool(tool: &ToolEntry) -> Result<(), CatalogError> {
@@ -182,7 +189,10 @@ fn validate_tool(tool: &ToolEntry) -> Result<(), CatalogError> {
         return Err(CatalogError::Id(id.clone()));
     }
     if !plain_version(&tool.version) {
-        return Err(CatalogError::VersionString(id.clone(), tool.version.clone()));
+        return Err(CatalogError::VersionString(
+            id.clone(),
+            tool.version.clone(),
+        ));
     }
     if tool.risk == Risk::SystemAdmin {
         return Err(CatalogError::SystemAdmin(id.clone()));
@@ -191,7 +201,9 @@ fn validate_tool(tool: &ToolEntry) -> Result<(), CatalogError> {
         let well_formed = capability.split('.').all(|word| {
             !word.is_empty()
                 && word.as_bytes()[0].is_ascii_lowercase()
-                && word.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+                && word
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
         });
         if !well_formed {
             return Err(CatalogError::Capability(id.clone(), capability.clone()));
@@ -202,7 +214,12 @@ fn validate_tool(tool: &ToolEntry) -> Result<(), CatalogError> {
     if !url_allowed(&artifact.url) {
         return Err(CatalogError::Url(id.clone()));
     }
-    if artifact.sha256.len() != 64 || !artifact.sha256.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+    if artifact.sha256.len() != 64
+        || !artifact
+            .sha256
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
         return Err(CatalogError::Digest(id.clone()));
     }
     if artifact.size == 0 || artifact.size > MAX_ARTIFACT_BYTES {
@@ -217,7 +234,8 @@ fn validate_tool(tool: &ToolEntry) -> Result<(), CatalogError> {
         }
     }
     if artifact.format == Format::Binary
-        && (artifact.binaries.len() != 1 || Path::new(&artifact.binaries[0]).components().count() != 1)
+        && (artifact.binaries.len() != 1
+            || Path::new(&artifact.binaries[0]).components().count() != 1)
     {
         return Err(CatalogError::BinaryArtifact(id.clone()));
     }
@@ -230,7 +248,9 @@ pub(crate) fn inside(path: &str) -> bool {
         && path.len() <= 255
         && !path.contains('\\')
         && !path.contains('\0')
-        && Path::new(path).components().all(|c| matches!(c, Component::Normal(_)))
+        && Path::new(path)
+            .components()
+            .all(|c| matches!(c, Component::Normal(_)))
 }
 
 pub(crate) fn url_allowed(url: &str) -> bool {
@@ -243,7 +263,10 @@ pub(crate) fn url_allowed(url: &str) -> bool {
     match parsed.scheme() {
         "https" => parsed.host_str().is_some(),
         // A mirror on this machine. Nothing leaves it, and the digest still decides.
-        "http" => matches!(parsed.host_str(), Some("127.0.0.1") | Some("localhost") | Some("[::1]")),
+        "http" => matches!(
+            parsed.host_str(),
+            Some("127.0.0.1") | Some("localhost") | Some("[::1]")
+        ),
         _ => false,
     }
 }

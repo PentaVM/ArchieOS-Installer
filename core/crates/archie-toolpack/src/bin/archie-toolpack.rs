@@ -17,8 +17,8 @@
 
 use archie_policy::{Action, CapabilityRequest, Constraints, PolicyEngine, Principal, Scope};
 use archie_toolpack::{
-    download, open_catalog, sign, tool_resource, Catalog, InstallAdmission, InstallGate, InstallProposal, ToolRoot,
-    TrustedKeys,
+    download, open_catalog, sign, tool_resource, Catalog, InstallAdmission, InstallGate,
+    InstallProposal, ToolRoot, TrustedKeys,
 };
 use archie_types::{Timestamp, TraceId};
 use ed25519_dalek::SigningKey;
@@ -65,15 +65,20 @@ impl Args {
 }
 
 fn load_catalog(args: &mut Args) -> Result<Catalog, String> {
-    let path = PathBuf::from(args.take("--catalog").unwrap_or_else(|| DEFAULT_CATALOG.into()));
+    let path = PathBuf::from(
+        args.take("--catalog")
+            .unwrap_or_else(|| DEFAULT_CATALOG.into()),
+    );
     let keys_path = args.take("--keys").unwrap_or_else(|| DEFAULT_KEYS.into());
     let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let signature_path = path.with_file_name(format!(
         "{}.sig",
-        path.file_name().and_then(|n| n.to_str()).unwrap_or("catalog.toml")
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("catalog.toml")
     ));
-    let signature =
-        std::fs::read_to_string(&signature_path).map_err(|e| format!("{}: {e}", signature_path.display()))?;
+    let signature = std::fs::read_to_string(&signature_path)
+        .map_err(|e| format!("{}: {e}", signature_path.display()))?;
     let keys_text = std::fs::read_to_string(&keys_path).map_err(|e| format!("{keys_path}: {e}"))?;
     let keys = TrustedKeys::parse(&keys_text).map_err(|e| format!("{keys_path}: {e}"))?;
     open_catalog(&bytes, &signature, &keys).map_err(|e| format!("{}: {e}", path.display()))
@@ -123,7 +128,15 @@ async fn install(mut args: Args) -> Result<ExitCode, String> {
         operation_id: operation,
         task_id: None,
     };
-    let authorized = match InstallGate::authorize(&catalog, root.path(), &lease, &principal, true, &proposal, Timestamp::now()) {
+    let authorized = match InstallGate::authorize(
+        &catalog,
+        root.path(),
+        &lease,
+        &principal,
+        true,
+        &proposal,
+        Timestamp::now(),
+    ) {
         InstallAdmission::Allowed(install) => install,
         InstallAdmission::NeedsApproval { install, reason } if approve => {
             eprintln!("approved by the operator: {reason}");
@@ -144,7 +157,12 @@ async fn install(mut args: Args) -> Result<ExitCode, String> {
     if let Some(parent) = download_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
     }
-    println!("downloading {} {} ({} bytes)", id, authorized.tool().version, artifact.size);
+    println!(
+        "downloading {} {} ({} bytes)",
+        id,
+        authorized.tool().version,
+        artifact.size
+    );
     if let Err(error) = download(&authorized, &download_path, DOWNLOAD_TIMEOUT).await {
         eprintln!("download failed ({}): {error}", error.code());
         return Ok(ExitCode::from(4));
@@ -157,7 +175,10 @@ async fn install(mut args: Args) -> Result<ExitCode, String> {
         "installed {} {}{}",
         installed.id,
         installed.version,
-        installed.previous.map(|p| format!(" (previous: {p})")).unwrap_or_default()
+        installed
+            .previous
+            .map(|p| format!(" (previous: {p})"))
+            .unwrap_or_default()
     );
     for binary in installed.binaries {
         println!("  {}", binary.display());
@@ -206,27 +227,37 @@ fn keygen(mut args: Args) -> Result<ExitCode, String> {
     let public = PathBuf::from(args.positional("the public key file")?);
     let key = SigningKey::generate(&mut rand::rngs::OsRng);
     write_private(&secret, &format!("{}\n", hex::encode(key.to_bytes())))?;
-    std::fs::write(&public, format!("{}\n", hex::encode(key.verifying_key().to_bytes())))
-        .map_err(|e| format!("{}: {e}", public.display()))?;
-    println!("wrote {} (keep it off the node) and {}", secret.display(), public.display());
+    std::fs::write(
+        &public,
+        format!("{}\n", hex::encode(key.verifying_key().to_bytes())),
+    )
+    .map_err(|e| format!("{}: {e}", public.display()))?;
+    println!(
+        "wrote {} (keep it off the node) and {}",
+        secret.display(),
+        public.display()
+    );
     Ok(ExitCode::SUCCESS)
 }
 
 fn sign_catalog(mut args: Args) -> Result<ExitCode, String> {
     let catalog_path = PathBuf::from(args.positional("the catalog to sign")?);
     let secret_path = args.take("--secret-key").ok_or("sign needs --secret-key")?;
-    let bytes = std::fs::read(&catalog_path).map_err(|e| format!("{}: {e}", catalog_path.display()))?;
+    let bytes =
+        std::fs::read(&catalog_path).map_err(|e| format!("{}: {e}", catalog_path.display()))?;
     // Never sign something that would not install.
     let text = std::str::from_utf8(&bytes).map_err(|_| "the catalog is not UTF-8".to_string())?;
     Catalog::parse(text).map_err(|e| format!("{}: {e}", catalog_path.display()))?;
-    let secret_text = std::fs::read_to_string(&secret_path).map_err(|e| format!("{secret_path}: {e}"))?;
+    let secret_text =
+        std::fs::read_to_string(&secret_path).map_err(|e| format!("{secret_path}: {e}"))?;
     let secret: [u8; 32] = hex::decode(secret_text.trim())
         .ok()
         .and_then(|b| b.try_into().ok())
         .ok_or_else(|| format!("{secret_path}: not a 32-byte hex key"))?;
     let signature = sign(&bytes, &SigningKey::from_bytes(&secret));
     let signature_path = PathBuf::from(format!("{}.sig", catalog_path.display()));
-    std::fs::write(&signature_path, format!("{signature}\n")).map_err(|e| format!("{}: {e}", signature_path.display()))?;
+    std::fs::write(&signature_path, format!("{signature}\n"))
+        .map_err(|e| format!("{}: {e}", signature_path.display()))?;
     println!("wrote {}", signature_path.display());
     Ok(ExitCode::SUCCESS)
 }
@@ -234,7 +265,11 @@ fn sign_catalog(mut args: Args) -> Result<ExitCode, String> {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
     let mut words: Vec<String> = std::env::args().skip(1).collect();
-    let command = if words.is_empty() { String::new() } else { words.remove(0) };
+    let command = if words.is_empty() {
+        String::new()
+    } else {
+        words.remove(0)
+    };
     let args = Args { words };
     let result = match command.as_str() {
         "list" => list(args),

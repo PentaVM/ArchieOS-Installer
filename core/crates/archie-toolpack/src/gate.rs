@@ -102,7 +102,9 @@ impl InstallGate {
             return InstallAdmission::Refused(InstallRefusal::NoOperation);
         }
         let Some(tool) = catalog.tool(&proposal.tool_id) else {
-            return InstallAdmission::Refused(InstallRefusal::UnknownTool(proposal.tool_id.clone()));
+            return InstallAdmission::Refused(InstallRefusal::UnknownTool(
+                proposal.tool_id.clone(),
+            ));
         };
         let operation = Operation {
             principal: principal.clone(),
@@ -111,7 +113,9 @@ impl InstallGate {
             task_id: proposal.task_id,
             user_present,
         };
-        if let Err(rejection) = lease.authorises_one_operation(&operation, proposal.operation_id, now) {
+        if let Err(rejection) =
+            lease.authorises_one_operation(&operation, proposal.operation_id, now)
+        {
             return InstallAdmission::Refused(InstallRefusal::Lease(rejection));
         }
         let install = AuthorizedInstall {

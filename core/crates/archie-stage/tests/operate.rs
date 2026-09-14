@@ -17,7 +17,8 @@ const GREETING: &[u8] = b"{\"event\":\"surface\",\"surface\":4,\"app_id\":\"org.
 type Client = StageClient<ReadHalf<DuplexStream>, WriteHalf<DuplexStream>>;
 
 fn policy() -> StagePolicy {
-    StagePolicy::load(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("policy/apps.toml")).unwrap()
+    StagePolicy::load(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("policy/apps.toml"))
+        .unwrap()
 }
 
 fn request(app: &str, action: StageAction) -> ActRequest {
@@ -74,7 +75,9 @@ async fn start(outcome: &'static str) -> (Client, tokio::task::JoinHandle<Vec<Wi
 
 async fn learned(client: &mut Client) -> StageWorld {
     let mut world = StageWorld::default();
-    learn(client, &mut world, Duration::from_millis(50)).await.unwrap();
+    learn(client, &mut world, Duration::from_millis(50))
+        .await
+        .unwrap();
     world
 }
 
@@ -82,21 +85,35 @@ async fn learned(client: &mut Client) -> StageWorld {
 async fn an_allowed_click_is_sealed_sent_and_confirmed() {
     let (mut client, compositor) = start("executed").await;
     let mut world = learned(&mut client).await;
-    let mut operator = Operator::new(CommandKey::from_bytes(&KEY), policy(), PolicyEngine::default());
+    let mut operator = Operator::new(
+        CommandKey::from_bytes(&KEY),
+        policy(),
+        PolicyEngine::default(),
+    );
     let click = StageAction::Click {
         x: 40,
         y: 50,
         button: PointerButton::Left,
     };
     let outcome = operator
-        .act(&mut client, &mut world, &request("org.freecad.FreeCAD", click), Duration::from_secs(5))
+        .act(
+            &mut client,
+            &mut world,
+            &request("org.freecad.FreeCAD", click),
+            Duration::from_secs(5),
+        )
         .await
         .unwrap();
     assert!(outcome.executed(), "{outcome:?}");
 
     // A second action from the same operator seals a higher sequence and is accepted too.
     let focus = operator
-        .act(&mut client, &mut world, &request("org.freecad.FreeCAD", StageAction::Focus), Duration::from_secs(5))
+        .act(
+            &mut client,
+            &mut world,
+            &request("org.freecad.FreeCAD", StageAction::Focus),
+            Duration::from_secs(5),
+        )
         .await
         .unwrap();
     assert!(focus.executed(), "{focus:?}");
@@ -110,7 +127,11 @@ async fn an_allowed_click_is_sealed_sent_and_confirmed() {
 async fn nothing_is_sent_for_an_application_or_action_policy_does_not_allow() {
     let (mut client, compositor) = start("executed").await;
     let mut world = learned(&mut client).await;
-    let mut operator = Operator::new(CommandKey::from_bytes(&KEY), policy(), PolicyEngine::default());
+    let mut operator = Operator::new(
+        CommandKey::from_bytes(&KEY),
+        policy(),
+        PolicyEngine::default(),
+    );
 
     // foot is in the policy, but dragging in it is not.
     let drag = StageAction::Drag {
@@ -121,7 +142,12 @@ async fn nothing_is_sent_for_an_application_or_action_policy_does_not_allow() {
         button: PointerButton::Left,
     };
     let refused = operator
-        .act(&mut client, &mut world, &request("foot", drag), Duration::from_secs(1))
+        .act(
+            &mut client,
+            &mut world,
+            &request("foot", drag),
+            Duration::from_secs(1),
+        )
         .await
         .unwrap();
     assert!(matches!(refused, ActOutcome::Refused { .. }), "{refused:?}");
@@ -131,14 +157,24 @@ async fn nothing_is_sent_for_an_application_or_action_policy_does_not_allow() {
         chord: KeyChord::key(Key::Named(NamedKey::Enter)),
     };
     let held = operator
-        .act(&mut client, &mut world, &request("foot", enter), Duration::from_secs(1))
+        .act(
+            &mut client,
+            &mut world,
+            &request("foot", enter),
+            Duration::from_secs(1),
+        )
         .await
         .unwrap();
     assert!(matches!(held, ActOutcome::NeedsApproval { .. }), "{held:?}");
 
     // An application with no surface on the stage.
     let absent = operator
-        .act(&mut client, &mut world, &request("org.gnome.Nautilus", StageAction::Focus), Duration::from_secs(1))
+        .act(
+            &mut client,
+            &mut world,
+            &request("org.gnome.Nautilus", StageAction::Focus),
+            Duration::from_secs(1),
+        )
         .await
         .unwrap();
     assert_eq!(absent, ActOutcome::NoSurface);
@@ -153,7 +189,10 @@ async fn nothing_is_sent_for_an_application_or_action_policy_does_not_allow() {
     assert_eq!(borrowed, ActOutcome::NoSurface);
 
     drop(client);
-    assert!(compositor.await.unwrap().is_empty(), "none of those may reach the compositor");
+    assert!(
+        compositor.await.unwrap().is_empty(),
+        "none of those may reach the compositor"
+    );
 }
 
 #[tokio::test]
@@ -169,16 +208,29 @@ async fn an_approved_action_goes_through_and_a_wrong_key_is_answered_with_sequen
     );
     approved.approved = true;
     approved.user_present = true;
-    let mut operator = Operator::new(CommandKey::from_bytes(&KEY), policy(), PolicyEngine::default());
+    let mut operator = Operator::new(
+        CommandKey::from_bytes(&KEY),
+        policy(),
+        PolicyEngine::default(),
+    );
     let outcome = operator
         .act(&mut client, &mut world, &approved, Duration::from_secs(5))
         .await
         .unwrap();
     assert!(outcome.executed(), "{outcome:?}");
 
-    let mut impostor = Operator::new(CommandKey::from_bytes(&[1; 32]), policy(), PolicyEngine::default());
+    let mut impostor = Operator::new(
+        CommandKey::from_bytes(&[1; 32]),
+        policy(),
+        PolicyEngine::default(),
+    );
     let rejected = impostor
-        .act(&mut client, &mut world, &request("foot", StageAction::Focus), Duration::from_secs(5))
+        .act(
+            &mut client,
+            &mut world,
+            &request("foot", StageAction::Focus),
+            Duration::from_secs(5),
+        )
         .await
         .unwrap();
     match rejected {

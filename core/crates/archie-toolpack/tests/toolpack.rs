@@ -1,11 +1,13 @@
 //! Catalog, signature, gate, unpacking and installation, each against the way it would be
 //! attacked or would fail.
 
-use archie_policy::{Action, CapabilityRequest, Constraints, Lease, PolicyEngine, Principal, Scope};
+use archie_policy::{
+    Action, CapabilityRequest, Constraints, Lease, PolicyEngine, Principal, Scope,
+};
 use archie_toolpack::{
-    open_catalog, sign, tool_resource, unpack_tar_gz, AuthorizedInstall, Catalog, CatalogError, InstallAdmission,
-    InstallError, InstallGate, InstallProposal, InstallRefusal, Limits, OpenError, SignatureError, ToolRoot,
-    TrustedKeys, UnpackError,
+    open_catalog, sign, tool_resource, unpack_tar_gz, AuthorizedInstall, Catalog, CatalogError,
+    InstallAdmission, InstallError, InstallGate, InstallProposal, InstallRefusal, Limits,
+    OpenError, SignatureError, ToolRoot, TrustedKeys, UnpackError,
 };
 use archie_types::{AgentId, Timestamp, TraceId};
 use ed25519_dalek::{Signer, SigningKey};
@@ -125,7 +127,10 @@ fn allowed(catalog: &Catalog, root: &Path, operation: u64) -> AuthorizedInstall 
 
 /// A tar.gz of `(path, contents, mode)` files, paths written into the header byte for byte.
 fn tarball(path: &Path, files: &[(&[u8], &[u8], u32)]) {
-    let mut builder = Builder::new(GzEncoder::new(std::fs::File::create(path).unwrap(), Compression::fast()));
+    let mut builder = Builder::new(GzEncoder::new(
+        std::fs::File::create(path).unwrap(),
+        Compression::fast(),
+    ));
     for (name, contents, mode) in files {
         let mut header = Header::new_gnu();
         header.as_gnu_mut().unwrap().name[..name.len()].copy_from_slice(name);
@@ -150,7 +155,10 @@ fn a_catalog_is_checked_like_input_from_outside() {
         url: "http://127.0.0.1:8080/rendertool.tar.gz",
         ..Entry::default()
     };
-    assert!(Catalog::parse(&catalog_text(&loopback)).is_ok(), "a mirror on this machine may be plain http");
+    assert!(
+        Catalog::parse(&catalog_text(&loopback)).is_ok(),
+        "a mirror on this machine may be plain http"
+    );
 
     let refused = |entry: Entry| Catalog::parse(&catalog_text(&entry)).unwrap_err();
     for url in [
@@ -160,27 +168,100 @@ fn a_catalog_is_checked_like_input_from_outside() {
         "file:///tmp/x.tar.gz",
         "not a url",
     ] {
-        assert!(matches!(refused(Entry { url, ..Entry::default() }), CatalogError::Url(_)), "{url}");
-    }
-    assert!(matches!(refused(Entry { sha256: "A".repeat(64), ..Entry::default() }), CatalogError::Digest(_)));
-    assert!(matches!(refused(Entry { sha256: "a".repeat(63), ..Entry::default() }), CatalogError::Digest(_)));
-    assert!(matches!(refused(Entry { size: 0, ..Entry::default() }), CatalogError::Size(_)));
-    assert!(matches!(refused(Entry { size: 3 << 30, ..Entry::default() }), CatalogError::Size(_)));
-    for binaries in [r#""../evil""#, r#""/usr/bin/render""#, r#""a\\b""#, r#""./render""#, ""] {
-        assert!(matches!(refused(Entry { binaries, ..Entry::default() }), CatalogError::Binary(..)), "{binaries}");
+        assert!(
+            matches!(
+                refused(Entry {
+                    url,
+                    ..Entry::default()
+                }),
+                CatalogError::Url(_)
+            ),
+            "{url}"
+        );
     }
     assert!(matches!(
-        refused(Entry { format: "binary", binaries: r#""bin/render""#, ..Entry::default() }),
+        refused(Entry {
+            sha256: "A".repeat(64),
+            ..Entry::default()
+        }),
+        CatalogError::Digest(_)
+    ));
+    assert!(matches!(
+        refused(Entry {
+            sha256: "a".repeat(63),
+            ..Entry::default()
+        }),
+        CatalogError::Digest(_)
+    ));
+    assert!(matches!(
+        refused(Entry {
+            size: 0,
+            ..Entry::default()
+        }),
+        CatalogError::Size(_)
+    ));
+    assert!(matches!(
+        refused(Entry {
+            size: 3 << 30,
+            ..Entry::default()
+        }),
+        CatalogError::Size(_)
+    ));
+    for binaries in [
+        r#""../evil""#,
+        r#""/usr/bin/render""#,
+        r#""a\\b""#,
+        r#""./render""#,
+        "",
+    ] {
+        assert!(
+            matches!(
+                refused(Entry {
+                    binaries,
+                    ..Entry::default()
+                }),
+                CatalogError::Binary(..)
+            ),
+            "{binaries}"
+        );
+    }
+    assert!(matches!(
+        refused(Entry {
+            format: "binary",
+            binaries: r#""bin/render""#,
+            ..Entry::default()
+        }),
         CatalogError::BinaryArtifact(_)
     ));
-    assert!(matches!(refused(Entry { risk: "system_admin", ..Entry::default() }), CatalogError::SystemAdmin(_)));
-    assert!(matches!(refused(Entry { version: "../1", ..Entry::default() }), CatalogError::VersionString(..)));
+    assert!(matches!(
+        refused(Entry {
+            risk: "system_admin",
+            ..Entry::default()
+        }),
+        CatalogError::SystemAdmin(_)
+    ));
+    assert!(matches!(
+        refused(Entry {
+            version: "../1",
+            ..Entry::default()
+        }),
+        CatalogError::VersionString(..)
+    ));
 
     let text = catalog_text(&Entry::default());
     let unknown_field = text.replace("license = ", "homepage = \"x\"\nlicense = ");
-    assert!(matches!(Catalog::parse(&unknown_field), Err(CatalogError::Syntax(_))));
-    assert!(matches!(Catalog::parse(&text.replace("version = 1\n", "version = 2\n")), Err(CatalogError::Version(2))));
-    assert!(matches!(Catalog::parse(&text.replace("id = \"rendertool\"", "id = \"Render\"")), Err(CatalogError::Id(_))));
+    assert!(matches!(
+        Catalog::parse(&unknown_field),
+        Err(CatalogError::Syntax(_))
+    ));
+    assert!(matches!(
+        Catalog::parse(&text.replace("version = 1\n", "version = 2\n")),
+        Err(CatalogError::Version(2))
+    ));
+    assert!(matches!(
+        Catalog::parse(&text.replace("id = \"rendertool\"", "id = \"Render\"")),
+        Err(CatalogError::Id(_))
+    ));
     assert!(matches!(
         Catalog::parse(&text.replace("document.render", "Document")),
         Err(CatalogError::Capability(..))
@@ -190,7 +271,10 @@ fn a_catalog_is_checked_like_input_from_outside() {
         Err(CatalogError::RedirectHost(_))
     ));
     let twice = format!("{text}{}", &text[text.find("[[tool]]").unwrap()..]);
-    assert!(matches!(Catalog::parse(&twice), Err(CatalogError::Duplicate(_))));
+    assert!(matches!(
+        Catalog::parse(&twice),
+        Err(CatalogError::Duplicate(_))
+    ));
 }
 
 #[test]
@@ -204,24 +288,46 @@ fn only_a_trusted_signature_opens_a_catalog() {
     let mut tampered = bytes.clone();
     let at = tampered.iter().position(|b| *b == b'2').unwrap();
     tampered[at] = b'9';
-    assert_eq!(open_catalog(&tampered, &signature, &keys).unwrap_err(), OpenError::Signature(SignatureError::Untrusted));
+    assert_eq!(
+        open_catalog(&tampered, &signature, &keys).unwrap_err(),
+        OpenError::Signature(SignatureError::Untrusted)
+    );
 
     let stranger = SigningKey::from_bytes(&[8; 32]);
-    assert_eq!(keys.verify(&bytes, &sign(&bytes, &stranger)), Err(SignatureError::Untrusted));
+    assert_eq!(
+        keys.verify(&bytes, &sign(&bytes, &stranger)),
+        Err(SignatureError::Untrusted)
+    );
     assert_eq!(
         keys.verify(&bytes, &hex::encode(key.sign(&bytes).to_bytes())),
         Err(SignatureError::Untrusted),
         "a signature over the bare bytes, made for some other purpose, is not a catalog signature"
     );
-    assert_eq!(TrustedKeys::from_keys(vec![]).verify(&bytes, &signature), Err(SignatureError::NoKeys));
+    assert_eq!(
+        TrustedKeys::from_keys(vec![]).verify(&bytes, &signature),
+        Err(SignatureError::NoKeys)
+    );
     assert_eq!(keys.verify(&bytes, "zz"), Err(SignatureError::Malformed));
 
-    let listed = format!("# release key\n\n{}\n", hex::encode(key.verifying_key().to_bytes()));
-    assert!(TrustedKeys::parse(&listed).unwrap().verify(&bytes, &signature).is_ok());
-    assert_eq!(TrustedKeys::parse("# ok\nnot-a-key\n").unwrap_err(), SignatureError::Key(2));
+    let listed = format!(
+        "# release key\n\n{}\n",
+        hex::encode(key.verifying_key().to_bytes())
+    );
+    assert!(TrustedKeys::parse(&listed)
+        .unwrap()
+        .verify(&bytes, &signature)
+        .is_ok());
+    assert_eq!(
+        TrustedKeys::parse("# ok\nnot-a-key\n").unwrap_err(),
+        SignatureError::Key(2)
+    );
 
     // Signed, and still invalid: the signature vouches for the bytes, not for their sense.
-    let invalid = catalog_text(&Entry { size: 0, ..Entry::default() }).into_bytes();
+    let invalid = catalog_text(&Entry {
+        size: 0,
+        ..Entry::default()
+    })
+    .into_bytes();
     assert!(matches!(
         open_catalog(&invalid, &sign(&invalid, &key), &keys),
         Err(OpenError::Catalog(CatalogError::Size(_)))
@@ -232,12 +338,29 @@ fn only_a_trusted_signature_opens_a_catalog() {
 fn the_gate_decides_by_lease_and_risk() {
     let root = scratch("gate");
     let workspace = Catalog::parse(&catalog_text(&Entry::default())).unwrap();
-    assert!(matches!(authorize(&workspace, &root, 11), InstallAdmission::Allowed(_)));
+    assert!(matches!(
+        authorize(&workspace, &root, 11),
+        InstallAdmission::Allowed(_)
+    ));
 
-    let network = Catalog::parse(&catalog_text(&Entry { risk: "network_egress", ..Entry::default() })).unwrap();
-    assert!(matches!(authorize(&network, &root, 12), InstallAdmission::NeedsApproval { .. }));
-    let devices = Catalog::parse(&catalog_text(&Entry { risk: "device_access", ..Entry::default() })).unwrap();
-    assert!(matches!(authorize(&devices, &root, 13), InstallAdmission::NeedsApproval { .. }));
+    let network = Catalog::parse(&catalog_text(&Entry {
+        risk: "network_egress",
+        ..Entry::default()
+    }))
+    .unwrap();
+    assert!(matches!(
+        authorize(&network, &root, 12),
+        InstallAdmission::NeedsApproval { .. }
+    ));
+    let devices = Catalog::parse(&catalog_text(&Entry {
+        risk: "device_access",
+        ..Entry::default()
+    }))
+    .unwrap();
+    assert!(matches!(
+        authorize(&devices, &root, 13),
+        InstallAdmission::NeedsApproval { .. }
+    ));
 
     let principal = agent();
     let other_tool = lease_for(&root, "sometool", &principal, 14);
@@ -246,7 +369,15 @@ fn the_gate_decides_by_lease_and_risk() {
         operation_id: 14,
         task_id: None,
     };
-    match InstallGate::authorize(&workspace, &root, &other_tool, &principal, false, &proposal, Timestamp::now()) {
+    match InstallGate::authorize(
+        &workspace,
+        &root,
+        &other_tool,
+        &principal,
+        false,
+        &proposal,
+        Timestamp::now(),
+    ) {
         InstallAdmission::Refused(InstallRefusal::Lease(_)) => {}
         other => panic!("a lease for another tool must not install this one: {other:?}"),
     }
@@ -255,7 +386,15 @@ fn the_gate_decides_by_lease_and_risk() {
         ..proposal.clone()
     };
     assert!(matches!(
-        InstallGate::authorize(&workspace, &root, &other_tool, &principal, false, &unknown, Timestamp::now()),
+        InstallGate::authorize(
+            &workspace,
+            &root,
+            &other_tool,
+            &principal,
+            false,
+            &unknown,
+            Timestamp::now()
+        ),
         InstallAdmission::Refused(InstallRefusal::UnknownTool(_))
     ));
     let no_operation = InstallProposal {
@@ -263,18 +402,33 @@ fn the_gate_decides_by_lease_and_risk() {
         ..proposal
     };
     assert!(matches!(
-        InstallGate::authorize(&workspace, &root, &other_tool, &principal, false, &no_operation, Timestamp::now()),
+        InstallGate::authorize(
+            &workspace,
+            &root,
+            &other_tool,
+            &principal,
+            false,
+            &no_operation,
+            Timestamp::now()
+        ),
         InstallAdmission::Refused(InstallRefusal::NoOperation)
     ));
 }
 
 fn raw_tarball(path: &Path, name: &[u8], kind: EntryType, link: Option<&str>) {
-    let mut builder = Builder::new(GzEncoder::new(std::fs::File::create(path).unwrap(), Compression::fast()));
+    let mut builder = Builder::new(GzEncoder::new(
+        std::fs::File::create(path).unwrap(),
+        Compression::fast(),
+    ));
     let mut header = Header::new_gnu();
     header.as_gnu_mut().unwrap().name[..name.len()].copy_from_slice(name);
     header.set_entry_type(kind);
     header.set_mode(0o644);
-    let contents: &[u8] = if kind == EntryType::Regular { b"payload" } else { b"" };
+    let contents: &[u8] = if kind == EntryType::Regular {
+        b"payload"
+    } else {
+        b""
+    };
     header.set_size(contents.len() as u64);
     if let Some(link) = link {
         // Written raw: the builder would refuse to create the entry this test is about.
@@ -292,12 +446,23 @@ fn unpacking_refuses_paths_and_entries_that_escape() {
 
     let escape = dir.join("escape.tar.gz");
     raw_tarball(&escape, b"../evil", EntryType::Regular, None);
-    assert!(matches!(unpack_tar_gz(&escape, &dest, Limits::default()), Err(UnpackError::UnsafePath(_))));
+    assert!(matches!(
+        unpack_tar_gz(&escape, &dest, Limits::default()),
+        Err(UnpackError::UnsafePath(_))
+    ));
     assert!(!dir.join("evil").exists(), "nothing was written outside");
 
     let absolute = dir.join("absolute.tar.gz");
-    raw_tarball(&absolute, b"/tmp/archie-toolpack-absolute", EntryType::Regular, None);
-    assert!(matches!(unpack_tar_gz(&absolute, &dest, Limits::default()), Err(UnpackError::UnsafePath(_))));
+    raw_tarball(
+        &absolute,
+        b"/tmp/archie-toolpack-absolute",
+        EntryType::Regular,
+        None,
+    );
+    assert!(matches!(
+        unpack_tar_gz(&absolute, &dest, Limits::default()),
+        Err(UnpackError::UnsafePath(_))
+    ));
 
     let symlink = dir.join("symlink.tar.gz");
     raw_tarball(&symlink, b"bin", EntryType::Symlink, Some("/etc"));
@@ -313,7 +478,13 @@ fn unpacking_refuses_paths_and_entries_that_escape() {
     ));
 
     let good = dir.join("good.tar.gz");
-    tarball(&good, &[(b"tool/bin/run", b"#!/bin/sh\n", 0o4755), (b"tool/README", b"hello", 0o666)]);
+    tarball(
+        &good,
+        &[
+            (b"tool/bin/run", b"#!/bin/sh\n", 0o4755),
+            (b"tool/README", b"hello", 0o666),
+        ],
+    );
     let fresh = dir.join("fresh");
     let unpacked = unpack_tar_gz(&good, &fresh, Limits::default()).unwrap();
     assert_eq!(unpacked.files, 2);
@@ -321,25 +492,50 @@ fn unpacking_refuses_paths_and_entries_that_escape() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(fresh.join("tool/bin/run")).unwrap().permissions().mode() & 0o7777;
+        let mode = std::fs::metadata(fresh.join("tool/bin/run"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o7777;
         assert_eq!(mode, 0o755, "setuid is dropped, execute is kept");
-        let mode = std::fs::metadata(fresh.join("tool/README")).unwrap().permissions().mode() & 0o7777;
+        let mode = std::fs::metadata(fresh.join("tool/README"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o7777;
         assert_eq!(mode, 0o644, "world-writable is dropped");
     }
 
     let duplicate = dir.join("duplicate.tar.gz");
-    tarball(&duplicate, &[(b"x", b"first", 0o644), (b"x", b"second", 0o644)]);
+    tarball(
+        &duplicate,
+        &[(b"x", b"first", 0o644), (b"x", b"second", 0o644)],
+    );
     assert!(
         unpack_tar_gz(&duplicate, &dir.join("dup"), Limits::default()).is_err(),
         "an archive cannot overwrite a file, not even its own"
     );
 
     assert!(matches!(
-        unpack_tar_gz(&good, &dir.join("few"), Limits { max_entries: 1, max_bytes: 1 << 20 }),
+        unpack_tar_gz(
+            &good,
+            &dir.join("few"),
+            Limits {
+                max_entries: 1,
+                max_bytes: 1 << 20
+            }
+        ),
         Err(UnpackError::TooManyEntries(1))
     ));
     assert!(matches!(
-        unpack_tar_gz(&good, &dir.join("small"), Limits { max_entries: 10, max_bytes: 8 }),
+        unpack_tar_gz(
+            &good,
+            &dir.join("small"),
+            Limits {
+                max_entries: 10,
+                max_bytes: 8
+            }
+        ),
         Err(UnpackError::TooLarge(8))
     ));
 }
@@ -376,15 +572,28 @@ fn installs_are_atomic_and_roll_back() {
 
     assert_eq!(root.rollback("rendertool").unwrap(), "1.2.0");
     assert_eq!(root.current("rendertool").as_deref(), Some("1.2.0"));
-    assert_eq!(root.rollback("rendertool").unwrap(), "1.3.0", "a second rollback undoes the first");
+    assert_eq!(
+        root.rollback("rendertool").unwrap(),
+        "1.3.0",
+        "a second rollback undoes the first"
+    );
 
     // An artifact without the binary it promises changes nothing.
-    let broken = install_version("1.4.0", &[(b"rendertool/README", b"no binary here", 0o644)], 23);
+    let broken = install_version(
+        "1.4.0",
+        &[(b"rendertool/README", b"no binary here", 0o644)],
+        23,
+    );
     assert!(matches!(broken, Err(InstallError::MissingBinary(_))));
     assert_eq!(root.current("rendertool").as_deref(), Some("1.3.0"));
     assert!(!root.path().join("rendertool/1.4.0").exists());
-    let staging: Vec<_> = std::fs::read_dir(root.path().join(".staging")).unwrap().collect();
-    assert!(staging.is_empty(), "a failed install leaves no staging behind");
+    let staging: Vec<_> = std::fs::read_dir(root.path().join(".staging"))
+        .unwrap()
+        .collect();
+    assert!(
+        staging.is_empty(),
+        "a failed install leaves no staging behind"
+    );
 
     // Installing a version that is already there just points at it again.
     let again = install_version("1.2.0", render, 24).unwrap();
@@ -404,9 +613,13 @@ fn installs_are_atomic_and_roll_back() {
         ..Entry::default()
     }))
     .unwrap();
-    root.install(&allowed(&catalog, root.path(), 25), &plain).unwrap();
+    root.install(&allowed(&catalog, root.path(), 25), &plain)
+        .unwrap();
     assert!(root.binary("rendertool", "render").is_some());
 
     let fresh = ToolRoot::new(dir.join("empty"));
-    assert!(matches!(fresh.rollback("rendertool"), Err(InstallError::NothingToRollBack(_))));
+    assert!(matches!(
+        fresh.rollback("rendertool"),
+        Err(InstallError::NothingToRollBack(_))
+    ));
 }

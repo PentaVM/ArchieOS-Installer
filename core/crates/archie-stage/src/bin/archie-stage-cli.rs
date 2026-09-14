@@ -24,7 +24,9 @@ fn main() -> std::process::ExitCode {
 
 #[cfg(not(unix))]
 fn main() -> std::process::ExitCode {
-    eprintln!("archie-stage-cli talks to the compositor over a Unix socket; run it on the stage's host");
+    eprintln!(
+        "archie-stage-cli talks to the compositor over a Unix socket; run it on the stage's host"
+    );
     std::process::ExitCode::FAILURE
 }
 
@@ -32,8 +34,8 @@ fn main() -> std::process::ExitCode {
 mod unix {
     use archie_policy::{PolicyEngine, Principal};
     use archie_stage::{
-        learn, ActOutcome, ActRequest, CommandKey, KeyChord, Operator, PointerButton, StageAction, StageClient,
-        StagePolicy, StageText, StageWorld,
+        learn, ActOutcome, ActRequest, CommandKey, KeyChord, Operator, PointerButton, StageAction,
+        StageClient, StagePolicy, StageText, StageWorld,
     };
     use archie_types::PrivacyGrade;
     use std::io::Write;
@@ -46,7 +48,10 @@ mod unix {
 
     pub fn main() -> ExitCode {
         let args: Vec<String> = std::env::args().skip(1).collect();
-        let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
             Ok(runtime) => runtime,
             Err(e) => {
                 eprintln!("archie-stage-cli: {e}");
@@ -83,7 +88,11 @@ mod unix {
     }
 
     async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
-        let command = if args.is_empty() { String::new() } else { args.remove(0) };
+        let command = if args.is_empty() {
+            String::new()
+        } else {
+            args.remove(0)
+        };
         match command.as_str() {
             "keygen" => keygen(args),
             "watch" => watch(args).await,
@@ -118,11 +127,16 @@ mod unix {
 
     async fn watch(mut args: Vec<String>) -> Result<ExitCode, String> {
         let socket = take(&mut args, "--socket").ok_or("watch needs --socket")?;
-        let stream = UnixStream::connect(&socket).await.map_err(|e| format!("{socket}: {e}"))?;
+        let stream = UnixStream::connect(&socket)
+            .await
+            .map_err(|e| format!("{socket}: {e}"))?;
         let (read, write) = stream.into_split();
         let mut client = StageClient::new(read, write);
         while let Some(event) = client.next_event().await.map_err(|e| e.to_string())? {
-            println!("{}", serde_json::to_string(&event).map_err(|e| e.to_string())?);
+            println!(
+                "{}",
+                serde_json::to_string(&event).map_err(|e| e.to_string())?
+            );
         }
         Ok(ExitCode::SUCCESS)
     }
@@ -137,10 +151,25 @@ mod unix {
         };
         let verb = words.first().ok_or("act needs an action")?;
         let action = match verb.as_str() {
-            "click" => StageAction::Click { x: int(1)?, y: int(2)?, button: PointerButton::Left },
-            "right-click" => StageAction::Click { x: int(1)?, y: int(2)?, button: PointerButton::Right },
-            "double-click" => StageAction::DoubleClick { x: int(1)?, y: int(2)?, button: PointerButton::Left },
-            "move" => StageAction::Move { x: int(1)?, y: int(2)? },
+            "click" => StageAction::Click {
+                x: int(1)?,
+                y: int(2)?,
+                button: PointerButton::Left,
+            },
+            "right-click" => StageAction::Click {
+                x: int(1)?,
+                y: int(2)?,
+                button: PointerButton::Right,
+            },
+            "double-click" => StageAction::DoubleClick {
+                x: int(1)?,
+                y: int(2)?,
+                button: PointerButton::Left,
+            },
+            "move" => StageAction::Move {
+                x: int(1)?,
+                y: int(2)?,
+            },
             "drag" => StageAction::Drag {
                 x: int(1)?,
                 y: int(2)?,
@@ -148,13 +177,19 @@ mod unix {
                 to_y: int(4)?,
                 button: PointerButton::Left,
             },
-            "scroll" => StageAction::Scroll { x: int(1)?, y: int(2)?, steps_x: 0, steps_y: int(3)? },
+            "scroll" => StageAction::Scroll {
+                x: int(1)?,
+                y: int(2)?,
+                steps_x: 0,
+                steps_y: int(3)?,
+            },
             "type" => StageAction::Text {
                 text: StageText::new(words[1..].join(" ")),
             },
             "key" => {
                 let spec = words.get(1).ok_or("key needs a key")?;
-                let chord = KeyChord::parse(spec).ok_or("not a key this stage can press, like enter or ctrl+s")?;
+                let chord = KeyChord::parse(spec)
+                    .ok_or("not a key this stage can press, like enter or ctrl+s")?;
                 StageAction::Key { chord }
             }
             "focus" => StageAction::Focus,
@@ -180,7 +215,9 @@ mod unix {
         let (action, text_grade) = parse_action(&args)?;
         let policy = StagePolicy::load(&policy_path).map_err(|e| e.to_string())?;
 
-        let stream = UnixStream::connect(&socket).await.map_err(|e| format!("{socket}: {e}"))?;
+        let stream = UnixStream::connect(&socket)
+            .await
+            .map_err(|e| format!("{socket}: {e}"))?;
         let (read, write) = stream.into_split();
         let mut client = StageClient::new(read, write);
         let mut world = StageWorld::default();
@@ -213,13 +250,20 @@ mod unix {
             .await
             .map_err(|e| e.to_string())?;
         Ok(match outcome {
-            ActOutcome::Receipt { sequence: 0, outcome } => {
+            ActOutcome::Receipt {
+                sequence: 0,
+                outcome,
+            } => {
                 println!("receipt: {outcome} (the compositor could not verify the command)");
                 ExitCode::from(4)
             }
             ActOutcome::Receipt { outcome, .. } => {
                 println!("receipt: {outcome}");
-                if outcome == "executed" { ExitCode::SUCCESS } else { ExitCode::from(4) }
+                if outcome == "executed" {
+                    ExitCode::SUCCESS
+                } else {
+                    ExitCode::from(4)
+                }
             }
             ActOutcome::NeedsApproval { reason } => {
                 eprintln!("needs approval ({reason}); rerun with --approve if you are the person approving it");

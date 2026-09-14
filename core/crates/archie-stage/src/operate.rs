@@ -134,7 +134,10 @@ impl Operator {
         W: AsyncWrite + Unpin,
     {
         let surface = match request.surface {
-            Some(id) => world.surface(id).filter(|s| s.app_id == request.app_id).cloned(),
+            Some(id) => world
+                .surface(id)
+                .filter(|s| s.app_id == request.app_id)
+                .cloned(),
             None => world.surfaces_of(&request.app_id).next().cloned(),
         };
         let Some(surface) = surface else {

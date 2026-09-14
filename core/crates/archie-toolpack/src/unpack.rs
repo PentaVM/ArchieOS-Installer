@@ -64,7 +64,8 @@ pub fn unpack_tar_gz(archive: &Path, dest: &Path, limits: Limits) -> Result<Unpa
         }
         let raw = entry.path()?.into_owned();
         let shown = raw.to_string_lossy().into_owned();
-        let relative = relative_inside(&raw).ok_or_else(|| UnpackError::UnsafePath(shown.clone()))?;
+        let relative =
+            relative_inside(&raw).ok_or_else(|| UnpackError::UnsafePath(shown.clone()))?;
         let kind = entry.header().entry_type();
         match kind {
             // Metadata records carry no file of their own.
@@ -90,7 +91,10 @@ pub fn unpack_tar_gz(archive: &Path, dest: &Path, limits: Limits) -> Result<Unpa
                     fs::create_dir_all(parent)?;
                 }
                 // create_new: never over an existing file, and never through a link.
-                let mut out = OpenOptions::new().write(true).create_new(true).open(&target)?;
+                let mut out = OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&target)?;
                 let copied = std::io::copy(&mut (&mut entry).take(size), &mut out)?;
                 if copied != size {
                     return Err(UnpackError::Truncated(shown));

@@ -87,11 +87,15 @@ fn load_key(path: &PathBuf) -> Result<CommandKey, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let text = text.trim();
     if text.len() != 64 || !text.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(format!("{}: a stage key is 64 hex characters", path.display()));
+        return Err(format!(
+            "{}: a stage key is 64 hex characters",
+            path.display()
+        ));
     }
     let mut bytes = [0_u8; 32];
     for (i, byte) in bytes.iter_mut().enumerate() {
-        *byte = u8::from_str_radix(&text[2 * i..2 * i + 2], 16).map_err(|_| "not hex".to_string())?;
+        *byte =
+            u8::from_str_radix(&text[2 * i..2 * i + 2], 16).map_err(|_| "not hex".to_string())?;
     }
     Ok(CommandKey::from_bytes(&bytes))
 }
@@ -104,7 +108,11 @@ enum Line {
 
 /// Reads one line into `out`, keeping at most `limit` bytes of it. A longer line is read to
 /// its end and dropped, so the next message still starts where it should.
-async fn read_line<R: AsyncBufRead + Unpin>(reader: &mut R, out: &mut Vec<u8>, limit: usize) -> std::io::Result<Line> {
+async fn read_line<R: AsyncBufRead + Unpin>(
+    reader: &mut R,
+    out: &mut Vec<u8>,
+    limit: usize,
+) -> std::io::Result<Line> {
     out.clear();
     let mut too_long = false;
     let mut read_any = false;
@@ -135,7 +143,11 @@ async fn read_line<R: AsyncBufRead + Unpin>(reader: &mut R, out: &mut Vec<u8>, l
         };
         reader.consume(consumed);
         if newline {
-            return Ok(if too_long { Line::TooLong } else { Line::Complete });
+            return Ok(if too_long {
+                Line::TooLong
+            } else {
+                Line::Complete
+            });
         }
     }
 }
@@ -166,7 +178,10 @@ async fn main() -> ExitCode {
         let policy = match StagePolicy::load(&config.stage_policy) {
             Ok(policy) => policy,
             Err(error) => {
-                eprintln!("archie-mcp-server: {}: {error}", config.stage_policy.display());
+                eprintln!(
+                    "archie-mcp-server: {}: {error}",
+                    config.stage_policy.display()
+                );
                 return ExitCode::from(2);
             }
         };
@@ -183,7 +198,11 @@ async fn main() -> ExitCode {
     eprintln!(
         "archie-mcp-server: ready, clearance {:?}, stage actions {}",
         config.clearance,
-        if config.allow_stage_actions { "on" } else { "off" }
+        if config.allow_stage_actions {
+            "on"
+        } else {
+            "off"
+        }
     );
 
     let mut reader = BufReader::with_capacity(64 * 1024, tokio::io::stdin());

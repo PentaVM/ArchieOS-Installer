@@ -42,7 +42,10 @@ pub mod unpack;
 
 pub use catalog::{Artifact, Catalog, CatalogError, Format, Risk, ToolEntry, CATALOG_VERSION};
 pub use fetch::{download, FetchError};
-pub use gate::{tool_resource, AuthorizedInstall, InstallAdmission, InstallGate, InstallProposal, InstallRefusal};
+pub use gate::{
+    tool_resource, AuthorizedInstall, InstallAdmission, InstallGate, InstallProposal,
+    InstallRefusal,
+};
 pub use install::{InstallError, Installed, ToolRoot};
 pub use signature::{open_catalog, sign, OpenError, SignatureError, TrustedKeys};
 pub use unpack::{unpack_tar_gz, Limits, UnpackError, Unpacked};

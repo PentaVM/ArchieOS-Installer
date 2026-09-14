@@ -44,7 +44,9 @@ impl FetchError {
             Self::Http(_) => "fetch_unreachable",
             Self::Status(_) => "fetch_status",
             Self::RedirectRefused => "fetch_redirect_refused",
-            Self::AnnouncedSize { .. } | Self::TooLarge(_) | Self::Truncated { .. } => "fetch_size_mismatch",
+            Self::AnnouncedSize { .. } | Self::TooLarge(_) | Self::Truncated { .. } => {
+                "fetch_size_mismatch"
+            }
             Self::Digest => "fetch_digest_mismatch",
             Self::Io(_) => "fetch_io",
         }
@@ -53,8 +55,16 @@ impl FetchError {
 
 /// Downloads `install`'s artifact to `dest`, which must not exist. On any error after the
 /// file is created, it is removed again; a file that was already there is never touched.
-pub async fn download(install: &AuthorizedInstall, dest: &Path, timeout: Duration) -> Result<(), FetchError> {
-    let file = tokio::fs::OpenOptions::new().write(true).create_new(true).open(dest).await?;
+pub async fn download(
+    install: &AuthorizedInstall,
+    dest: &Path,
+    timeout: Duration,
+) -> Result<(), FetchError> {
+    let file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(dest)
+        .await?;
     let result = download_into(install, file, timeout).await;
     if result.is_err() {
         let _ = tokio::fs::remove_file(dest).await;
@@ -62,7 +72,11 @@ pub async fn download(install: &AuthorizedInstall, dest: &Path, timeout: Duratio
     result
 }
 
-async fn download_into(install: &AuthorizedInstall, mut file: tokio::fs::File, timeout: Duration) -> Result<(), FetchError> {
+async fn download_into(
+    install: &AuthorizedInstall,
+    mut file: tokio::fs::File,
+    timeout: Duration,
+) -> Result<(), FetchError> {
     let artifact = install.artifact();
     let hosts: Arc<Vec<String>> = Arc::new(install.redirect_hosts().to_vec());
     let policy = Policy::custom(move |attempt| {
@@ -71,7 +85,9 @@ async fn download_into(install: &AuthorizedInstall, mut file: tokio::fs::File, t
         }
         let url = attempt.url();
         let allowed = url.scheme() == "https"
-            && url.host_str().is_some_and(|host| hosts.iter().any(|allowed| allowed == host));
+            && url
+                .host_str()
+                .is_some_and(|host| hosts.iter().any(|allowed| allowed == host));
         if allowed {
             attempt.follow()
         } else {

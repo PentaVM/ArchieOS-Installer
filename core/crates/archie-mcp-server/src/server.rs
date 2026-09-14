@@ -67,7 +67,11 @@ impl<T: Toolbox> McpServer<T> {
         let id = message.get("id").cloned();
         if let Some(id) = &id {
             if !(id.is_string() || id.is_i64() || id.is_u64()) {
-                return Some(error(Value::Null, INVALID_REQUEST, "an id is a string or an integer"));
+                return Some(error(
+                    Value::Null,
+                    INVALID_REQUEST,
+                    "an id is a string or an integer",
+                ));
             }
         }
         if message.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
@@ -84,7 +88,11 @@ impl<T: Toolbox> McpServer<T> {
         })
     }
 
-    async fn dispatch(&mut self, method: &str, params: Value) -> Result<Value, (i64, &'static str)> {
+    async fn dispatch(
+        &mut self,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, (i64, &'static str)> {
         match method {
             "initialize" => Ok(self.initialize(&params)),
             "ping" => Ok(json!({})),
@@ -161,7 +169,10 @@ impl<T: Toolbox> McpServer<T> {
         }
         let outcome = self.toolbox.call(&name, arguments).await;
         let (text, is_error) = if outcome.text.len() > MAX_RESULT_BYTES {
-            ("the result was larger than this server returns".to_string(), true)
+            (
+                "the result was larger than this server returns".to_string(),
+                true,
+            )
         } else {
             (outcome.text, outcome.is_error)
         };

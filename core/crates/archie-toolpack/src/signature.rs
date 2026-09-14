@@ -53,7 +53,9 @@ impl TrustedKeys {
                 .ok()
                 .and_then(|bytes| bytes.try_into().ok())
                 .ok_or(SignatureError::Key(number + 1))?;
-            keys.push(VerifyingKey::from_bytes(&bytes).map_err(|_| SignatureError::Key(number + 1))?);
+            keys.push(
+                VerifyingKey::from_bytes(&bytes).map_err(|_| SignatureError::Key(number + 1))?,
+            );
         }
         Ok(Self { keys })
     }
@@ -75,7 +77,11 @@ impl TrustedKeys {
             .ok_or(SignatureError::Malformed)?;
         let signature = Signature::from_bytes(&bytes);
         let message = signing_message(catalog);
-        if self.keys.iter().any(|key| key.verify_strict(&message, &signature).is_ok()) {
+        if self
+            .keys
+            .iter()
+            .any(|key| key.verify_strict(&message, &signature).is_ok())
+        {
             Ok(())
         } else {
             Err(SignatureError::Untrusted)
@@ -96,7 +102,11 @@ pub fn sign(catalog: &[u8], key: &SigningKey) -> String {
 }
 
 /// Verifies, and only then parses.
-pub fn open_catalog(catalog: &[u8], signature_hex: &str, keys: &TrustedKeys) -> Result<Catalog, OpenError> {
+pub fn open_catalog(
+    catalog: &[u8],
+    signature_hex: &str,
+    keys: &TrustedKeys,
+) -> Result<Catalog, OpenError> {
     keys.verify(catalog, signature_hex)?;
     let text = std::str::from_utf8(catalog).map_err(|_| OpenError::Encoding)?;
     Ok(Catalog::parse(text)?)

@@ -1,7 +1,9 @@
 //! Downloads against a loopback server that misbehaves in each of the ways a real one can.
 
 use archie_policy::{Action, CapabilityRequest, Constraints, PolicyEngine, Principal, Scope};
-use archie_toolpack::{download, tool_resource, Catalog, FetchError, InstallAdmission, InstallGate, InstallProposal};
+use archie_toolpack::{
+    download, tool_resource, Catalog, FetchError, InstallAdmission, InstallGate, InstallProposal,
+};
 use archie_types::{AgentId, Timestamp, TraceId};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -17,7 +19,9 @@ async fn server() -> u16 {
     let port = listener.local_addr().unwrap().port();
     tokio::spawn(async move {
         loop {
-            let Ok((mut socket, _)) = listener.accept().await else { return };
+            let Ok((mut socket, _)) = listener.accept().await else {
+                return;
+            };
             tokio::spawn(async move {
                 let mut request = Vec::new();
                 let mut buffer = [0u8; 1024];
@@ -44,7 +48,12 @@ async fn server() -> u16 {
     port
 }
 
-fn authorized(url: &str, sha256: &str, size: usize, root: &Path) -> archie_toolpack::AuthorizedInstall {
+fn authorized(
+    url: &str,
+    sha256: &str,
+    size: usize,
+    root: &Path,
+) -> archie_toolpack::AuthorizedInstall {
     let catalog = Catalog::parse(&format!(
         r#"version = 1
 name = "fetch tests"
@@ -66,7 +75,9 @@ binaries = ["fetched"]
 "#
     ))
     .unwrap();
-    let principal = Principal::Agent { agent: AgentId::new() };
+    let principal = Principal::Agent {
+        agent: AgentId::new(),
+    };
     let lease = PolicyEngine::default()
         .decide(&CapabilityRequest {
             trace_id: TraceId::new(),
@@ -79,15 +90,30 @@ binaries = ["fetched"]
         })
         .lease
         .unwrap();
-    let proposal = InstallProposal { tool_id: "fetched".into(), operation_id: 5, task_id: None };
-    match InstallGate::authorize(&catalog, root, &lease, &principal, false, &proposal, Timestamp::now()) {
+    let proposal = InstallProposal {
+        tool_id: "fetched".into(),
+        operation_id: 5,
+        task_id: None,
+    };
+    match InstallGate::authorize(
+        &catalog,
+        root,
+        &lease,
+        &principal,
+        false,
+        &proposal,
+        Timestamp::now(),
+    ) {
         InstallAdmission::Allowed(install) => install,
         other => panic!("{other:?}"),
     }
 }
 
 fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("archie-toolpack-fetch-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "archie-toolpack-fetch-{name}-{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
@@ -100,38 +126,84 @@ async fn a_download_is_believed_only_when_size_and_digest_match() {
     let sha = hex::encode(Sha256::digest(BODY));
     let timeout = Duration::from_secs(10);
 
-    let good = authorized(&format!("http://127.0.0.1:{port}/good"), &sha, BODY.len(), &dir);
+    let good = authorized(
+        &format!("http://127.0.0.1:{port}/good"),
+        &sha,
+        BODY.len(),
+        &dir,
+    );
     let dest = dir.join("good");
     download(&good, &dest, timeout).await.unwrap();
     assert_eq!(std::fs::read(&dest).unwrap(), BODY);
 
-    let wrong = authorized(&format!("http://127.0.0.1:{port}/good"), &"0".repeat(64), BODY.len(), &dir);
+    let wrong = authorized(
+        &format!("http://127.0.0.1:{port}/good"),
+        &"0".repeat(64),
+        BODY.len(),
+        &dir,
+    );
     let dest = dir.join("wrong");
-    assert!(matches!(download(&wrong, &dest, timeout).await, Err(FetchError::Digest)));
+    assert!(matches!(
+        download(&wrong, &dest, timeout).await,
+        Err(FetchError::Digest)
+    ));
     assert!(!dest.exists(), "a file that failed its digest is removed");
 
-    let longer = authorized(&format!("http://127.0.0.1:{port}/longer"), &sha, BODY.len(), &dir);
+    let longer = authorized(
+        &format!("http://127.0.0.1:{port}/longer"),
+        &sha,
+        BODY.len(),
+        &dir,
+    );
     let dest = dir.join("longer");
-    assert!(matches!(download(&longer, &dest, timeout).await, Err(FetchError::TooLarge(_))));
+    assert!(matches!(
+        download(&longer, &dest, timeout).await,
+        Err(FetchError::TooLarge(_))
+    ));
     assert!(!dest.exists());
 
-    let announced = authorized(&format!("http://127.0.0.1:{port}/announced"), &sha, BODY.len(), &dir);
+    let announced = authorized(
+        &format!("http://127.0.0.1:{port}/announced"),
+        &sha,
+        BODY.len(),
+        &dir,
+    );
     assert!(matches!(
         download(&announced, &dir.join("announced"), timeout).await,
         Err(FetchError::AnnouncedSize { .. })
     ));
 
-    let redirected = authorized(&format!("http://127.0.0.1:{port}/redirect"), &sha, BODY.len(), &dir);
+    let redirected = authorized(
+        &format!("http://127.0.0.1:{port}/redirect"),
+        &sha,
+        BODY.len(),
+        &dir,
+    );
     let dest = dir.join("redirected");
-    assert!(matches!(download(&redirected, &dest, timeout).await, Err(FetchError::RedirectRefused)));
+    assert!(matches!(
+        download(&redirected, &dest, timeout).await,
+        Err(FetchError::RedirectRefused)
+    ));
     assert!(!dest.exists());
 
-    let missing = authorized(&format!("http://127.0.0.1:{port}/missing"), &sha, BODY.len(), &dir);
-    assert!(matches!(download(&missing, &dir.join("missing"), timeout).await, Err(FetchError::Status(404))));
+    let missing = authorized(
+        &format!("http://127.0.0.1:{port}/missing"),
+        &sha,
+        BODY.len(),
+        &dir,
+    );
+    assert!(matches!(
+        download(&missing, &dir.join("missing"), timeout).await,
+        Err(FetchError::Status(404))
+    ));
 
     // An existing file at the destination is never overwritten.
     let occupied = dir.join("occupied");
     std::fs::write(&occupied, b"keep me").unwrap();
     assert!(download(&good, &occupied, timeout).await.is_err());
-    assert_eq!(std::fs::read(&occupied).unwrap(), b"keep me", "and a failure does not delete it either");
+    assert_eq!(
+        std::fs::read(&occupied).unwrap(),
+        b"keep me",
+        "and a failure does not delete it either"
+    );
 }

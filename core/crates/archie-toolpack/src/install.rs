@@ -59,9 +59,12 @@ impl ToolRoot {
     /// Where an authorised install's artifact is downloaded to before it is installed.
     pub fn download_path(&self, install: &AuthorizedInstall) -> PathBuf {
         let tool = install.tool();
-        self.root
-            .join(".downloads")
-            .join(format!("{}-{}-{}", tool.id, tool.version, install.operation_id()))
+        self.root.join(".downloads").join(format!(
+            "{}-{}-{}",
+            tool.id,
+            tool.version,
+            install.operation_id()
+        ))
     }
 
     pub fn current(&self, id: &str) -> Option<String> {
@@ -93,17 +96,23 @@ impl ToolRoot {
     }
 
     /// Installs a verified artifact for an authorised install and makes it current.
-    pub fn install(&self, install: &AuthorizedInstall, artifact_file: &Path) -> Result<Installed, InstallError> {
+    pub fn install(
+        &self,
+        install: &AuthorizedInstall,
+        artifact_file: &Path,
+    ) -> Result<Installed, InstallError> {
         let tool = install.tool();
         let tool_dir = self.root.join(&tool.id);
         let version_dir = tool_dir.join(&tool.version);
         fs::create_dir_all(&tool_dir)?;
 
         if !version_dir.is_dir() {
-            let staging = self
-                .root
-                .join(".staging")
-                .join(format!("{}-{}-{}", tool.id, tool.version, install.operation_id()));
+            let staging = self.root.join(".staging").join(format!(
+                "{}-{}-{}",
+                tool.id,
+                tool.version,
+                install.operation_id()
+            ));
             if staging.exists() {
                 fs::remove_dir_all(&staging)?;
             }
@@ -134,11 +143,21 @@ impl ToolRoot {
             id: tool.id.clone(),
             version: tool.version.clone(),
             previous: previous.filter(|p| p != &tool.version),
-            binaries: tool.artifact.binaries.iter().map(|b| version_dir.join(b)).collect(),
+            binaries: tool
+                .artifact
+                .binaries
+                .iter()
+                .map(|b| version_dir.join(b))
+                .collect(),
         })
     }
 
-    fn stage(&self, install: &AuthorizedInstall, artifact_file: &Path, staging: &Path) -> Result<(), InstallError> {
+    fn stage(
+        &self,
+        install: &AuthorizedInstall,
+        artifact_file: &Path,
+        staging: &Path,
+    ) -> Result<(), InstallError> {
         let artifact = install.artifact();
         match artifact.format {
             Format::TarGz => {
@@ -166,7 +185,9 @@ impl ToolRoot {
     /// rollback undoes the first.
     pub fn rollback(&self, id: &str) -> Result<String, InstallError> {
         let tool_dir = self.root.join(id);
-        let previous = self.previous(id).ok_or_else(|| InstallError::NothingToRollBack(id.to_string()))?;
+        let previous = self
+            .previous(id)
+            .ok_or_else(|| InstallError::NothingToRollBack(id.to_string()))?;
         if !tool_dir.join(&previous).is_dir() {
             return Err(InstallError::PreviousMissing {
                 id: id.to_string(),

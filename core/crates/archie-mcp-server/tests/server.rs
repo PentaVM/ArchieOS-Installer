@@ -1,7 +1,8 @@
 //! The protocol rules, against a toolbox whose tools only record that they ran.
 
 use archie_mcp_server::{
-    Clearance, Effect, McpServer, ToolOutcome, ToolSpec, Toolbox, MAX_RESULT_BYTES, SUPPORTED_VERSIONS,
+    Clearance, Effect, McpServer, ToolOutcome, ToolSpec, Toolbox, MAX_RESULT_BYTES,
+    SUPPORTED_VERSIONS,
 };
 use archie_types::PrivacyGrade;
 use serde_json::{json, Map, Value};
@@ -79,7 +80,10 @@ async fn initialize_agrees_on_a_version_the_server_speaks() {
     .await;
     assert_eq!(old["id"], "a", "string ids are echoed as strings");
     assert_eq!(old["result"]["protocolVersion"], "2024-11-05");
-    assert_eq!(old["result"]["capabilities"], json!({"tools": {"listChanged": false}}));
+    assert_eq!(
+        old["result"]["capabilities"],
+        json!({"tools": {"listChanged": false}})
+    );
     assert_eq!(old["result"]["serverInfo"]["name"], "archie");
 
     let mut server = McpServer::new(Recorder::default(), Clearance::Public);
@@ -97,9 +101,17 @@ async fn initialize_agrees_on_a_version_the_server_speaks() {
 #[tokio::test]
 async fn nothing_but_ping_works_before_initialize() {
     let mut server = McpServer::new(Recorder::default(), Clearance::Internal);
-    let pong = reply(&mut server, json!({"jsonrpc": "2.0", "id": 1, "method": "ping"})).await;
+    let pong = reply(
+        &mut server,
+        json!({"jsonrpc": "2.0", "id": 1, "method": "ping"}),
+    )
+    .await;
     assert_eq!(pong["result"], json!({}));
-    let early = reply(&mut server, json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})).await;
+    let early = reply(
+        &mut server,
+        json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+    )
+    .await;
     assert_eq!(early["error"]["code"], -32002);
     let call = reply(
         &mut server,
@@ -112,7 +124,11 @@ async fn nothing_but_ping_works_before_initialize() {
 #[tokio::test]
 async fn a_tool_above_the_clearance_is_neither_listed_nor_callable() {
     let mut public = initialized(Clearance::Public).await;
-    let list = reply(&mut public, json!({"jsonrpc": "2.0", "id": 5, "method": "tools/list"})).await;
+    let list = reply(
+        &mut public,
+        json!({"jsonrpc": "2.0", "id": 5, "method": "tools/list"}),
+    )
+    .await;
     assert_eq!(names(&list), vec!["open_door", "fail", "flood"]);
     let hidden = reply(
         &mut public,
@@ -124,18 +140,31 @@ async fn a_tool_above_the_clearance_is_neither_listed_nor_callable() {
         json!({"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "no_such_tool"}}),
     )
     .await;
-    assert_eq!(hidden["error"], missing["error"], "a hidden tool and a missing one look the same");
+    assert_eq!(
+        hidden["error"], missing["error"],
+        "a hidden tool and a missing one look the same"
+    );
     assert_eq!(hidden["error"]["code"], -32602);
 
     let mut internal = initialized(Clearance::Internal).await;
-    let list = reply(&mut internal, json!({"jsonrpc": "2.0", "id": 8, "method": "tools/list"})).await;
-    assert_eq!(names(&list), vec!["open_door", "read_diary", "fail", "flood"]);
+    let list = reply(
+        &mut internal,
+        json!({"jsonrpc": "2.0", "id": 8, "method": "tools/list"}),
+    )
+    .await;
+    assert_eq!(
+        names(&list),
+        vec!["open_door", "read_diary", "fail", "flood"]
+    );
     let sensitive = reply(
         &mut internal,
         json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": {"name": "find_house"}}),
     )
     .await;
-    assert_eq!(sensitive["error"]["code"], -32602, "internal is the ceiling");
+    assert_eq!(
+        sensitive["error"]["code"], -32602,
+        "internal is the ceiling"
+    );
 
     assert_eq!(Clearance::parse("sensitive"), None);
     assert_eq!(Clearance::parse("secret"), None);
@@ -151,7 +180,8 @@ async fn tool_results_and_tool_failures_are_results() {
     .await;
     assert_eq!(ok["result"]["isError"], false);
     assert_eq!(ok["result"]["content"][0]["type"], "text");
-    let text: Value = serde_json::from_str(ok["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let text: Value =
+        serde_json::from_str(ok["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(text, json!({"ran": "open_door"}));
 
     let failed = reply(
@@ -167,10 +197,23 @@ async fn tool_results_and_tool_failures_are_results() {
         json!({"jsonrpc": "2.0", "id": 12, "method": "tools/call", "params": {"name": "flood"}}),
     )
     .await;
-    assert_eq!(flooded["result"]["isError"], true, "an oversized result is refused, never cut");
-    assert!(flooded["result"]["content"][0]["text"].as_str().unwrap().len() < 200);
+    assert_eq!(
+        flooded["result"]["isError"], true,
+        "an oversized result is refused, never cut"
+    );
+    assert!(
+        flooded["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .len()
+            < 200
+    );
 
-    let list = reply(&mut server, json!({"jsonrpc": "2.0", "id": 13, "method": "tools/list"})).await;
+    let list = reply(
+        &mut server,
+        json!({"jsonrpc": "2.0", "id": 13, "method": "tools/list"}),
+    )
+    .await;
     let fail = &list["result"]["tools"][1];
     assert_eq!(fail["annotations"]["readOnlyHint"], false);
     assert_eq!(fail["annotations"]["destructiveHint"], true);
@@ -201,12 +244,24 @@ async fn malformed_calls_never_reach_a_tool() {
     )
     .unwrap();
     assert_eq!(batch["error"]["code"], -32600, "batches are not accepted");
-    let bad_id = reply(&mut server, json!({"jsonrpc": "2.0", "id": {"x": 1}, "method": "ping"})).await;
+    let bad_id = reply(
+        &mut server,
+        json!({"jsonrpc": "2.0", "id": {"x": 1}, "method": "ping"}),
+    )
+    .await;
     assert_eq!(bad_id["error"]["code"], -32600);
     assert_eq!(bad_id["id"], Value::Null);
-    let wrong_version = reply(&mut server, json!({"jsonrpc": "1.0", "id": 4, "method": "ping"})).await;
+    let wrong_version = reply(
+        &mut server,
+        json!({"jsonrpc": "1.0", "id": 4, "method": "ping"}),
+    )
+    .await;
     assert_eq!(wrong_version["error"]["code"], -32600);
-    let unknown = reply(&mut server, json!({"jsonrpc": "2.0", "id": 5, "method": "resources/list"})).await;
+    let unknown = reply(
+        &mut server,
+        json!({"jsonrpc": "2.0", "id": 5, "method": "resources/list"}),
+    )
+    .await;
     assert_eq!(unknown["error"]["code"], -32601);
     assert!(
         !unknown.to_string().contains("resources/list"),

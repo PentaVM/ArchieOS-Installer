@@ -53,7 +53,11 @@ pub struct ArchieToolbox {
 }
 
 impl ArchieToolbox {
-    pub fn new(paths: StatePaths, stage_socket: Option<PathBuf>, operator: Option<Operator>) -> Self {
+    pub fn new(
+        paths: StatePaths,
+        stage_socket: Option<PathBuf>,
+        operator: Option<Operator>,
+    ) -> Self {
         Self {
             paths,
             stage_socket,
@@ -65,7 +69,9 @@ impl ArchieToolbox {
     }
 
     async fn daemon(&self, request: ControlRequest) -> Result<ControlResponse, String> {
-        let mut stream = endpoint::connect(&self.paths).await.map_err(|e| e.to_string())?;
+        let mut stream = endpoint::connect(&self.paths)
+            .await
+            .map_err(|e| e.to_string())?;
         match tokio::time::timeout(DAEMON_TIMEOUT, request_over(&mut stream, &request)).await {
             Err(_) => Err(format!("archied did not answer within {DAEMON_TIMEOUT:?}")),
             Ok(Err(e)) => Err(e.to_string()),
@@ -94,11 +100,17 @@ impl ArchieToolbox {
                 let full = serde_json::to_value(&*status).unwrap_or(Value::Null);
                 let kept: Map<String, Value> = STATUS_FIELDS
                     .iter()
-                    .filter_map(|field| full.get(*field).map(|value| ((*field).to_string(), value.clone())))
+                    .filter_map(|field| {
+                        full.get(*field)
+                            .map(|value| ((*field).to_string(), value.clone()))
+                    })
                     .collect();
                 Value::Object(kept)
             }
-            ControlResponse::Modules { modules, load_order } => {
+            ControlResponse::Modules {
+                modules,
+                load_order,
+            } => {
                 json!({"modules": modules, "load_order": load_order})
             }
             ControlResponse::Providers { providers, active } => {
@@ -114,12 +126,18 @@ impl ArchieToolbox {
         &self,
     ) -> Result<
         (
-            archie_stage::StageClient<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
+            archie_stage::StageClient<
+                tokio::net::unix::OwnedReadHalf,
+                tokio::net::unix::OwnedWriteHalf,
+            >,
             archie_stage::StageWorld,
         ),
         String,
     > {
-        let socket = self.stage_socket.as_ref().ok_or("no stage socket is configured")?;
+        let socket = self
+            .stage_socket
+            .as_ref()
+            .ok_or("no stage socket is configured")?;
         let stream = tokio::net::UnixStream::connect(socket)
             .await
             .map_err(|e| format!("the stage is not reachable at {}: {e}", socket.display()))?;
@@ -237,8 +255,12 @@ fn act_schema() -> Value {
 }
 
 /// A stage action from tool arguments. Nothing about whether it may run: that is policy's.
-pub fn parse_act(arguments: &Map<String, Value>) -> Result<(String, Option<u32>, StageAction), String> {
-    const KNOWN: [&str; 10] = ["app_id", "surface", "action", "x", "y", "to_x", "to_y", "steps", "text", "key"];
+pub fn parse_act(
+    arguments: &Map<String, Value>,
+) -> Result<(String, Option<u32>, StageAction), String> {
+    const KNOWN: [&str; 10] = [
+        "app_id", "surface", "action", "x", "y", "to_x", "to_y", "steps", "text", "key",
+    ];
     if let Some(unknown) = arguments.keys().find(|key| !KNOWN.contains(&key.as_str())) {
         return Err(format!("unexpected argument {unknown:?}"));
     }
@@ -314,7 +336,10 @@ pub fn parse_act(arguments: &Map<String, Value>) -> Result<(String, Option<u32>,
 
 impl Toolbox for ArchieToolbox {
     fn tools(&self) -> Vec<ToolSpec> {
-        let read_only = |name: &'static str, title: &'static str, description: &'static str, grade: PrivacyGrade| ToolSpec {
+        let read_only = |name: &'static str,
+                         title: &'static str,
+                         description: &'static str,
+                         grade: PrivacyGrade| ToolSpec {
             name,
             title,
             description,
