@@ -250,11 +250,12 @@ only by its owner.
   - "ñ" into that terminal was refused as `not_typeable`.
   - Once, a mouse moved over the window took the stage, and Archie resumed on its own
     afterwards.
-  - Through Nebius Token Factory, `moonshotai/Kimi-K3` placed the demo form's text field
-    and its Guardar button within a pixel of the centres the form itself reports. Archie
-    clicked the field, saw it change, typed, pressed Guardar and saw that change too. The
-    form logged `saved "Archie encontró este campo mirando"`, and the snapshot directory
-    was empty afterwards.
+  - Through Nebius Token Factory, `moonshotai/Kimi-K3` completed one full demo flow. It
+    placed the form's text field and Guardar button within a pixel of the centres the form
+    itself reports; Archie clicked, typed and saved, and the snapshot directory was empty
+    afterwards. This was not reliable: across five grounding calls it returned a usable
+    answer three times. In the latest two timed calls it consumed the 512-token output
+    budget while reasoning and returned no box.
   - Other vision models Nebius offered, on the same capture:
     - `google/gemma-3-27b-it` kept the box format but pointed 100 px or more away. Its click
       changed nothing, and `archie-look` reported that as a failure.
@@ -285,5 +286,13 @@ only by its owner.
   that the intended thing happened. A click that only takes focus away from a field
   passes.
 - **LocateAnything-3B itself has not run.** Its adapter was exercised with cloud vision
-  models standing in for it. Kimi-K3 took 11 to 28 s to find each target, too slow for
-  anything but a demonstration.
+  models standing in for it. The measured Nebius round trip was about 255 ms, a new TLS
+  connection about 510 ms, and vision calls with Gemma or MiniCPM took 1.32–1.69 s.
+  Kimi-K3 took 27.3–33.5 s in the latest measurements and sometimes returned no box. Cloud
+  grounding is therefore a slow-path Cortex operation, not an interactive click loop.
+- **The fast visual loop is not connected.** A verified click currently includes a
+  blocking capture, the visible pointer trajectory, a fixed 350 ms repaint wait and a
+  second capture. Even with zero model latency this measured about 1.9 s. The intended
+  path is a persistent Sight service that resolves live scene-graph coordinates from
+  structured accessibility first, then the local Reflex, and asks the Cortex only for a
+  new or ambiguous target.

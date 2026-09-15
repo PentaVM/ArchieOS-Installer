@@ -180,15 +180,19 @@ from executed builds on identified hardware.
   digest-bound image. A window declared internal is refused before egress to a cloud model
   whose retention nobody has verified.
 - Live in WSLg through Nebius Token Factory, with nobody touching the mouse:
-  - `moonshotai/Kimi-K3` placed the demo form's field and button within a pixel of their
-    real centres.
+  - `moonshotai/Kimi-K3` completed one flow and placed the demo form's field and button
+    within a pixel of their real centres, but returned a usable answer in only three of
+    five calls. The latest two calls exhausted 512 output tokens while reasoning.
   - Archie clicked the field, typed, and pressed Guardar, and the form's own log recorded
     the note.
   - On the same capture, `google/gemma-3-27b-it` kept the output format but missed by
     100 px or more; its click changed nothing and was reported as failed.
   - `openbmb/MiniCPM-V-4_5` came within 3 px but ignored the format, so IRIS refused it.
 - Not done: menus and popups, more than one target per call, verification stronger than
-  "the window changed", and a run of LocateAnything-3B itself.
+  "the window changed", the persistent structured/Reflex fast path, and a run of
+  LocateAnything-3B itself. Measured cloud vision latency was 1.32–1.69 s for Gemma or
+  MiniCPM and 27.3–33.5 s for Kimi-K3, so the cloud adapter is a Cortex fallback rather
+  than the interactive loop.
 
 ### Cerebra runtime additions
 
