@@ -147,7 +147,7 @@ than on coordinates. It joins IRIS and the stage and adds no authority of its ow
 ```
 
 ```bash
-archie-look --socket "$XDG_RUNTIME_DIR/archie-stage/control.sock" --key-file /etc/archie/stage/key --policy apps.toml --app org.qt-project.qml --find "el botón Guardar" --node form:save --kind button --model moonshotai/Kimi-K3 --screen public --keep /tmp/look
+archie-look --socket "$XDG_RUNTIME_DIR/archie-stage/control.sock" --key-file /etc/archie/stage/key --policy apps.toml --app org.qt-project.qml --find "el botón Guardar" --node form:save --kind button --model moonshotai/Kimi-K3 --screen public
 ```
 
 - The model answers with `<box> x1, y1, x2, y2 </box>` in 0–1000 coordinates, or IRIS
@@ -161,8 +161,9 @@ archie-look --socket "$XDG_RUNTIME_DIR/archie-stage/control.sock" --key-file /et
   leaves: "privacy grade internal is not permitted for model …". `--endpoint` names a local
   OpenAI-compatible server, such as a NIM serving LocateAnything, which may see internal
   windows.
-- The Nebius key is read from `NEBIUS_TOKEN_FACTORY_KEY` and never printed. `--keep` saves
-  the captures before and after, owner-readable.
+- The Nebius key is read from `NEBIUS_TOKEN_FACTORY_KEY` and never printed. Captures have
+  no persistence option: the verified temporary file is removed after it enters the
+  bounded in-memory pass.
 
 ## Running it
 
@@ -205,13 +206,6 @@ Other actions: `right-click x y`, `double-click x y`, `move x y`, `drag x y to_x
 `scroll x y steps`, `type text…`, `key ctrl+s`, `focus`. Exit codes: 0 executed, 2
 refused before sending, 3 needs approval (`--approve` is the person at the keyboard
 giving it), 4 the compositor did not run it.
-
-```bash
-archie-stage-cli look --socket "$XDG_RUNTIME_DIR/archie-stage/control.sock" --key-file /etc/archie/stage/key --app org.qt-project.qml --out form.png
-```
-
-`look` saves one window as an owner-readable PNG, if the policy grants that application
-`snapshot`.
 
 ### On a node
 

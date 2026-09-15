@@ -11,7 +11,6 @@
 //! archie-stage-cli act    --socket <path> --key-file <path> --app <app_id> <action...>
 //!     click <x> <y> | double-click <x> <y> | move <x> <y> | drag <x> <y> <to_x> <to_y>
 //!     scroll <x> <y> <steps_y> | type <text> | key [ctrl+][shift+][alt+]<key> | focus
-//! archie-stage-cli look   --socket <path> --key-file <path> --app <app_id> --out <file.png>
 //! ```
 //!
 //! Coordinates are surface-local. `--surface` picks a surface when an application has more
@@ -98,81 +97,7 @@ mod unix {
             "keygen" => keygen(args),
             "watch" => watch(args).await,
             "act" => act(args).await,
-            "look" => look(args).await,
-            _ => Err("usage: archie-stage-cli keygen|watch|act|look …".into()),
-        }
-    }
-
-    /// Captures a surface to a file only its owner can read.
-    async fn look(mut args: Vec<String>) -> Result<ExitCode, String> {
-        let socket = take(&mut args, "--socket").ok_or("look needs --socket")?;
-        let key = load_key(&take(&mut args, "--key-file").ok_or("look needs --key-file")?)?;
-        let app = take(&mut args, "--app").ok_or("look needs --app")?;
-        let out = take(&mut args, "--out").ok_or("look needs --out")?;
-        let surface = take(&mut args, "--surface")
-            .map(|s| s.parse::<u32>())
-            .transpose()
-            .map_err(|_| "--surface is a number")?;
-        let policy_path = take(&mut args, "--policy").unwrap_or_else(|| DEFAULT_POLICY.into());
-        let policy = StagePolicy::load(&policy_path).map_err(|e| e.to_string())?;
-        let snapshot_dir = std::path::Path::new(&socket)
-            .parent()
-            .ok_or("--socket has no directory")?
-            .join("snapshots");
-
-        let stream = UnixStream::connect(&socket)
-            .await
-            .map_err(|e| format!("{socket}: {e}"))?;
-        let (read, write) = stream.into_split();
-        let mut client = StageClient::new(read, write);
-        let mut world = StageWorld::default();
-        learn(&mut client, &mut world, Duration::from_millis(400))
-            .await
-            .map_err(|e| e.to_string())?;
-        let mut operator = Operator::new(key, policy, PolicyEngine::default());
-        let request = ActRequest {
-            app_id: app.clone(),
-            surface,
-            action: StageAction::Snapshot,
-            text_grade: PrivacyGrade::Public,
-            principal: Principal::Human {
-                id: "stage-cli".into(),
-                authenticated: true,
-            },
-            task_id: None,
-            user_present: true,
-            approved: false,
-            justification: "operator capture from archie-stage-cli".into(),
-        };
-        let outcome = operator
-            .look(
-                &mut client,
-                &mut world,
-                &request,
-                &snapshot_dir,
-                Duration::from_secs(30),
-            )
-            .await
-            .map_err(|e| e.to_string())?;
-        match outcome {
-            archie_stage::LookOutcome::Captured(snapshot) => {
-                let mut file = std::fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .mode(0o600)
-                    .open(&out)
-                    .map_err(|e| format!("{out}: {e}"))?;
-                file.write_all(&snapshot.png).map_err(|e| e.to_string())?;
-                println!(
-                    "captured surface {} of {app}: {}x{}, sha256 {}",
-                    snapshot.surface, snapshot.width, snapshot.height, snapshot.sha256
-                );
-                Ok(ExitCode::SUCCESS)
-            }
-            archie_stage::LookOutcome::NotCaptured(outcome) => {
-                eprintln!("not captured: {outcome:?}");
-                Ok(ExitCode::from(4))
-            }
+            _ => Err("usage: archie-stage-cli keygen|watch|act …".into()),
         }
     }
 
@@ -353,5 +278,18 @@ mod unix {
                 ExitCode::from(2)
             }
         })
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::run;
+
+        #[tokio::test]
+        async fn raw_capture_is_not_a_cli_command() {
+            let error = run(vec!["look".into(), "--out".into(), "/tmp/frame.png".into()])
+                .await
+                .expect_err("the CLI must not persist raw captures");
+            assert_eq!(error, "usage: archie-stage-cli keygen|watch|act …");
+        }
     }
 }

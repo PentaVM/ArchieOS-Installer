@@ -4,15 +4,13 @@
 //! archie-look --socket <path> --key-file <path> --policy <apps.toml> --app <app_id>
 //!             --find <description> [--node button:save] [--kind button]
 //!             --model <provider model> [--endpoint <url>] [--screen public|internal]
-//!             [--keep <dir>]
 //! ```
 //!
 //! The grounding model is reached through Nebius Token Factory unless `--endpoint` names a
 //! local OpenAI-compatible server such as a NIM; the Nebius credential is read from
 //! `NEBIUS_TOKEN_FACTORY_KEY` and never printed. `--screen` states what the window shows
 //! (default: public); a cloud model whose retention nobody verified is only ever given
-//! public windows. `--keep` saves the captures before and after, owner-readable, for someone
-//! to look at.
+//! public windows. Captures remain ephemeral and are never exposed as a persistence option.
 
 #[cfg(unix)]
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
@@ -40,9 +38,7 @@ mod unix {
         PrivacyGrade, ProviderKind, TokenCost, TraceId,
     };
     use std::collections::BTreeMap;
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
     use std::process::ExitCode;
     use std::time::Duration;
     use tokio::net::UnixStream;
@@ -85,20 +81,6 @@ mod unix {
             cause = inner.source();
         }
         message
-    }
-
-    fn keep(dir: &Path, name: &str, png: &[u8]) -> Result<PathBuf, String> {
-        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        let path = dir.join(name);
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&path)
-            .map_err(|e| format!("{}: {e}", path.display()))?;
-        file.write_all(png).map_err(|e| e.to_string())?;
-        Ok(path)
     }
 
     fn descriptor(
@@ -167,6 +149,9 @@ mod unix {
     }
 
     async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
+        if args.iter().any(|argument| argument == "--keep") {
+            return Err("raw_frame_retention_forbidden".into());
+        }
         let socket = take(&mut args, "--socket").ok_or("--socket is required")?;
         let key = load_key(&take(&mut args, "--key-file").ok_or("--key-file is required")?)?;
         let policy_path = take(&mut args, "--policy").ok_or("--policy is required")?;
@@ -191,7 +176,6 @@ mod unix {
             "internal" => PrivacyGrade::Internal,
             _ => return Err("--screen is public or internal".into()),
         };
-        let keep_dir = take(&mut args, "--keep").map(PathBuf::from);
         if !args.is_empty() {
             return Err(format!("unexpected arguments: {args:?}"));
         }
@@ -257,10 +241,9 @@ mod unix {
             }
         };
         println!(
-            "captured {}x{} (sha256 {}); grounded at x={} y={} {}x{}; clicked ({}, {}); {}",
+            "captured {}x{}; grounded at x={} y={} {}x{}; clicked ({}, {}); {}",
             sighting.before.width,
             sighting.before.height,
-            &sighting.before.sha256[..16],
             sighting.bbox.x,
             sighting.bbox.y,
             sighting.bbox.width,
@@ -269,15 +252,19 @@ mod unix {
             sighting.point.y,
             sighting.outcome.outcome_code
         );
-        if let Some(dir) = keep_dir {
-            println!(
-                "kept {}",
-                keep(&dir, "before.png", &sighting.before.png)?.display()
-            );
-            if let Some(after) = &sighting.after {
-                println!("kept {}", keep(&dir, "after.png", &after.png)?.display());
-            }
-        }
         Ok(ExitCode::SUCCESS)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::run;
+
+        #[tokio::test]
+        async fn raw_frame_retention_is_rejected_before_io() {
+            let error = run(vec!["--keep".into(), "/tmp/captures".into()])
+                .await
+                .expect_err("raw frame retention must fail");
+            assert_eq!(error, "raw_frame_retention_forbidden");
+        }
     }
 }
