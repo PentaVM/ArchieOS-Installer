@@ -31,6 +31,8 @@ constexpr int kMaxClients = 8;
 constexpr std::int64_t kInputIntervalMs = 16;
 /// How long a capture may keep rendering past its hold before it counts as failed.
 constexpr std::int64_t kCaptureTimeoutMs = 2'000;
+/// How many damage rectangles are worth naming one by one before the bounding box will do.
+constexpr int kMaxDamageRects = 16;
 
 QString mode_name(AuthorityMode mode)
 {
@@ -132,6 +134,7 @@ StageController::StageController(Options options, QObject *parent)
     DirectorPolicy policy;
     policy.reduced_motion = m_options.reduced_motion;
     m_director = StageDirector(policy);
+    m_playbackPolicy = m_options.playback;
 
     m_clock.start();
     m_timer.setSingleShot(true);
@@ -320,17 +323,36 @@ void StageController::registerSurface(QWaylandQuickItem *item, const QString &ap
     });
     if (QWaylandSurface *surface = item->surface()) {
         connect(surface, &QWaylandSurface::damaged, this, [this, id](const QRegion &region) {
-            const QRect bounds = region.boundingRect();
-            if (bounds.isEmpty() || !m_table.find(id)) {
+            if (region.isEmpty() || !m_table.find(id)) {
                 return;
             }
-            QJsonObject rect{{QStringLiteral("x"), bounds.x()},
-                             {QStringLiteral("y"), bounds.y()},
-                             {QStringLiteral("width"), bounds.width()},
-                             {QStringLiteral("height"), bounds.height()}};
+            // The rectangles themselves while there are few: perception asks whether one
+            // control repainted, and a single bounding box over a whole window answers yes
+            // to everything. Past that the bounding box is honest and much cheaper.
+            QJsonArray rects;
+            if (region.rectCount() <= kMaxDamageRects) {
+                for (const QRect &rect : region) {
+                    if (!rect.isEmpty()) {
+                        rects.append(QJsonObject{{QStringLiteral("x"), rect.x()},
+                                                 {QStringLiteral("y"), rect.y()},
+                                                 {QStringLiteral("width"), rect.width()},
+                                                 {QStringLiteral("height"), rect.height()}});
+                    }
+                }
+            }
+            if (rects.isEmpty()) {
+                const QRect bounds = region.boundingRect();
+                if (bounds.isEmpty()) {
+                    return;
+                }
+                rects.append(QJsonObject{{QStringLiteral("x"), bounds.x()},
+                                         {QStringLiteral("y"), bounds.y()},
+                                         {QStringLiteral("width"), bounds.width()},
+                                         {QStringLiteral("height"), bounds.height()}});
+            }
             QJsonObject event{{QStringLiteral("event"), QStringLiteral("damage")},
                               {QStringLiteral("surface"), static_cast<qint64>(id)},
-                              {QStringLiteral("rects"), QJsonArray{rect}}};
+                              {QStringLiteral("rects"), rects}};
             broadcast(line_of(event));
         });
     }

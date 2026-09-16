@@ -79,6 +79,9 @@ public:
         QByteArray key;
         bool reduced_motion = false;
         archie::visual::RenderTier tier = archie::visual::RenderTier::Normal;
+        /// How fast the agent's input plays: a person's tempo, to be watched, or
+        /// `PlaybackPolicy::agent_tempo()`, to work at the agent's own speed.
+        archie::visual::PlaybackPolicy playback{};
     };
 
     explicit StageController(Options options, QObject *parent = nullptr);

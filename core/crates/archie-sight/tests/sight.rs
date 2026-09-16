@@ -1,10 +1,10 @@
-//! Look, ground, activate, verify: against an in-memory compositor and a loopback grounding
+//! Look, ground, act, verify: against an in-memory compositor and a loopback grounding
 //! server, so every step is the real code and nothing leaves the machine.
 
 use archie_iris::{LocateAnythingClient, LocateAnythingError, MotorError, NodeId, NodeKind};
 use archie_model_runtime::{ProviderEndpoint, RuntimeError};
 use archie_policy::{PolicyEngine, Principal};
-use archie_sight::{Sight, SightError, Target};
+use archie_sight::{Knowledge, Sight, SightError, Target};
 use archie_stage::{
     learn, open, CommandKey, Operator, StageClient, StagePolicy, StageWorld, WireAction,
 };
@@ -13,7 +13,7 @@ use archie_types::{
     PrivacyGrade, ProviderKind, Timestamp, TokenCost,
 };
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -21,6 +21,11 @@ use tokio::net::TcpListener;
 
 const KEY: [u8; 32] = [5; 32];
 const APP: &str = "org.example.Form";
+/// Where the window draws its save button, which is also what the grounding server points
+/// at: 500..600 permille of 640x480.
+const BUTTON: (u32, u32, u32, u32) = (320, 240, 64, 48);
+/// And its note field: 100..300 by 100..150 permille.
+const FIELD: (u32, u32, u32, u32) = (64, 48, 128, 24);
 
 fn policy() -> StagePolicy {
     StagePolicy::parse(
@@ -41,25 +46,77 @@ fn scratch(name: &str) -> PathBuf {
     dir
 }
 
-#[derive(Default)]
-struct Seen {
+/// The window this compositor draws, and what it has been asked to do.
+struct Stage {
     clicks: Vec<(i32, i32)>,
     captures: usize,
+    /// How many marks the button is drawn with. Changing it redraws a different control.
+    bars: usize,
+    /// Whether a click makes the window redraw where it landed.
+    reacts: bool,
 }
 
-/// A compositor with one 640x480 window. `changes` decides whether a capture after a click
-/// differs from the one before it.
+impl Default for Stage {
+    fn default() -> Self {
+        Self {
+            clicks: Vec::new(),
+            captures: 0,
+            bars: 3,
+            reacts: true,
+        }
+    }
+}
+
+/// A 640x480 window with a field and a button in it, in grey.
+fn window_png(bars: usize) -> Vec<u8> {
+    let (width, height) = (640_u32, 480_u32);
+    let mut pixels = vec![0xf2_u8; (width * height) as usize];
+    let mut draw = |(bx, by, bw, bh): (u32, u32, u32, u32), marks: usize| {
+        for y in by..by + bh {
+            for x in bx..bx + bw {
+                let edge = x == bx || x == bx + bw - 1 || y == by || y == by + bh - 1;
+                pixels[(y * width + x) as usize] = if edge { 0x40 } else { 0xd8 };
+            }
+        }
+        for mark in 0..marks {
+            let left = bx + 6 + mark as u32 * 7;
+            if left + 3 >= bx + bw {
+                break;
+            }
+            for y in by + 6..by + bh - 6 {
+                for x in left..left + 3 {
+                    pixels[(y * width + x) as usize] = 0x10;
+                }
+            }
+        }
+    };
+    draw(FIELD, 2);
+    draw(BUTTON, bars);
+    let mut png = Vec::new();
+    let mut encoder = png::Encoder::new(&mut png, width, height);
+    encoder.set_color(png::ColorType::Grayscale);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder
+        .write_header()
+        .unwrap()
+        .write_image_data(&pixels)
+        .unwrap();
+    png
+}
+
+type Pipe = StageClient<
+    tokio::io::ReadHalf<tokio::io::DuplexStream>,
+    tokio::io::WriteHalf<tokio::io::DuplexStream>,
+>;
+
+/// A compositor with that one window. It captures what it draws, clicks where it is told,
+/// and redraws a patch where a click landed, which is the only thing that verifies one.
+/// The returned sender injects raw events, for a window that resizes or redraws itself.
 async fn compositor(
     dir: PathBuf,
-    changes: bool,
-) -> (
-    StageClient<
-        tokio::io::ReadHalf<tokio::io::DuplexStream>,
-        tokio::io::WriteHalf<tokio::io::DuplexStream>,
-    >,
-    Arc<Mutex<Seen>>,
-) {
-    let (client_side, compositor_side) = tokio::io::duplex(256 * 1024);
+    stage: Arc<Mutex<Stage>>,
+) -> (Pipe, tokio::sync::mpsc::UnboundedSender<String>) {
+    let (client_side, compositor_side) = tokio::io::duplex(1024 * 1024);
     let (client_read, client_write) = tokio::io::split(client_side);
     let (compositor_read, mut compositor_write) = tokio::io::split(compositor_side);
     compositor_write
@@ -69,13 +126,27 @@ async fn compositor(
         )
         .await
         .unwrap();
-    let seen = Arc::new(Mutex::new(Seen::default()));
-    let record = seen.clone();
+    let (inject, mut injected) = tokio::sync::mpsc::unbounded_channel::<String>();
     tokio::spawn(async move {
         let key = CommandKey::from_bytes(&KEY);
         let mut lines = BufReader::new(compositor_read).lines();
         let mut last = 0;
-        while let Ok(Some(line)) = lines.next_line().await {
+        loop {
+            let line = tokio::select! {
+                line = lines.next_line() => match line {
+                    Ok(Some(line)) => line,
+                    _ => break,
+                },
+                event = injected.recv() => match event {
+                    Some(event) => {
+                        if compositor_write.write_all(event.as_bytes()).await.is_err() {
+                            break;
+                        }
+                        continue;
+                    }
+                    None => break,
+                },
+            };
             let Ok(command) = open(&key, format!("{line}\n").as_bytes(), last, Timestamp::now())
             else {
                 continue;
@@ -84,20 +155,11 @@ async fn compositor(
             let mut reply = String::new();
             match command.action {
                 WireAction::Snapshot => {
-                    let index = {
-                        let mut seen = record.lock().unwrap();
-                        seen.captures += 1;
-                        if changes {
-                            seen.captures
-                        } else {
-                            1
-                        }
+                    let png = {
+                        let mut stage = stage.lock().unwrap();
+                        stage.captures += 1;
+                        window_png(stage.bars)
                     };
-                    let png: Vec<u8> = [
-                        b"\x89PNG\r\n\x1a\n".as_slice(),
-                        format!("window as drawn, version {index}").as_bytes(),
-                    ]
-                    .concat();
                     let path = dir.join("snapshots").join(format!("{}.png", command.seq));
                     std::fs::write(&path, &png).unwrap();
                     let digest =
@@ -108,7 +170,20 @@ async fn compositor(
                         serde_json::to_string(&path.to_string_lossy()).unwrap()
                     ));
                 }
-                WireAction::Click { x, y, .. } => record.lock().unwrap().clicks.push((x, y)),
+                WireAction::Click { x, y, .. } => {
+                    let reacts = {
+                        let mut stage = stage.lock().unwrap();
+                        stage.clicks.push((x, y));
+                        stage.reacts
+                    };
+                    if reacts {
+                        reply.push_str(&format!(
+                            "{{\"event\":\"damage\",\"surface\":4,\"rects\":[{{\"x\":{},\"y\":{},\"width\":20,\"height\":20}}]}}\n",
+                            x - 10,
+                            y - 10
+                        ));
+                    }
+                }
                 _ => {}
             }
             reply.push_str(&format!(
@@ -120,13 +195,13 @@ async fn compositor(
             }
         }
     });
-    (StageClient::new(client_read, client_write), seen)
+    (StageClient::new(client_read, client_write), inject)
 }
 
-/// A grounding server that answers every request with one box and records what it was sent.
+/// A grounding server that answers by what the request asks for, and keeps every request.
 async fn grounding_server(
     provider_model: &'static str,
-    reply_box: &'static str,
+    boxes: &'static [(&'static str, &'static str)],
 ) -> (String, Arc<Mutex<Vec<String>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -158,12 +233,15 @@ async fn grounding_server(
                     }
                 }
             }
-            record
-                .lock()
-                .unwrap()
-                .push(String::from_utf8_lossy(&bytes).into_owned());
+            let request = String::from_utf8_lossy(&bytes).into_owned();
+            let answer = boxes
+                .iter()
+                .find(|(asked, _)| request.contains(asked))
+                .map(|(_, reply)| *reply)
+                .unwrap_or(boxes[0].1);
+            record.lock().unwrap().push(request);
             let response = format!(
-                r#"{{"model":"{provider_model}","choices":[{{"message":{{"role":"assistant","content":"{reply_box}"}},"finish_reason":"stop"}}]}}"#
+                r#"{{"model":"{provider_model}","choices":[{{"message":{{"role":"assistant","content":"{answer}"}},"finish_reason":"stop"}}]}}"#
             );
             let _ = socket
                 .write_all(
@@ -202,56 +280,75 @@ fn local_model() -> ModelDescriptor {
     }
 }
 
-fn target(screen: PrivacyGrade) -> Target {
+const SAVE: &str = "the save button";
+const NOTE: &str = "the note field";
+
+fn target(node: &str, description: &str, screen: PrivacyGrade) -> Target {
     Target {
         app_id: APP.into(),
-        node: NodeId::new("button:save").unwrap(),
+        node: NodeId::new(node.to_string()).unwrap(),
         kind: NodeKind::Button,
-        description: "the save button".into(),
+        description: description.into(),
         description_grade: PrivacyGrade::Public,
         screen_grade: screen,
         task_id: "sight-test".into(),
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_named_button_is_seen_grounded_clicked_and_seen_to_change() {
-    let dir = scratch("changes");
-    let (mut client, seen) = compositor(dir.clone(), true).await;
+/// A session against that compositor and that grounding server.
+async fn session(
+    dir: &Path,
+    client: Pipe,
+) -> Sight<
+    tokio::io::ReadHalf<tokio::io::DuplexStream>,
+    tokio::io::WriteHalf<tokio::io::DuplexStream>,
+> {
+    let mut client = client;
     let mut world = StageWorld::default();
     learn(&mut client, &mut world, Duration::from_millis(50))
         .await
         .unwrap();
-    let (url, requests) = grounding_server(
-        "nvidia/LocateAnything-3B",
-        "<box> 500, 500, 600, 600 </box>",
-    )
-    .await;
-    let grounding = LocateAnythingClient::new(
-        ProviderEndpoint::nvidia_nim(&url, Locality::Local).unwrap(),
-        local_model(),
-    )
-    .unwrap();
-
-    let mut operator = Operator::new(
+    let operator = Operator::new(
         CommandKey::from_bytes(&KEY),
         policy(),
         PolicyEngine::default(),
     );
-    let mut sight = Sight {
-        operator: &mut operator,
-        client: &mut client,
-        world: &mut world,
-        snapshot_dir: dir.join("snapshots"),
-        principal: Principal::Agent {
+    Sight::new(
+        operator,
+        client,
+        world,
+        dir.join("snapshots"),
+        Principal::Agent {
             agent: AgentId::new(),
         },
-        engine: PolicyEngine::default(),
-        timeout: Duration::from_secs(5),
-    };
+    )
+    .with_timeouts(Duration::from_secs(5), Duration::from_millis(500))
+}
+
+fn client_for(url: &str) -> LocateAnythingClient {
+    LocateAnythingClient::new(
+        ProviderEndpoint::nvidia_nim(url, Locality::Local).unwrap(),
+        local_model(),
+    )
+    .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_named_button_is_found_clicked_and_seen_to_redraw() {
+    let dir = scratch("found");
+    let stage = Arc::new(Mutex::new(Stage::default()));
+    let (client, _inject) = compositor(dir.clone(), stage.clone()).await;
+    let (url, requests) = grounding_server(
+        "nvidia/LocateAnything-3B",
+        &[(SAVE, "<box> 500, 500, 600, 600 </box>")],
+    )
+    .await;
+    let grounding = client_for(&url);
+    let mut sight = session(&dir, client).await;
+
     let sighting = sight
         .find_and_activate(
-            &target(PrivacyGrade::Internal),
+            &target("button:save", SAVE, PrivacyGrade::Internal),
             &grounding,
             Locality::Local,
             77,
@@ -270,25 +367,25 @@ async fn a_named_button_is_seen_grounded_clicked_and_seen_to_change() {
         (320, 240, 64, 48)
     );
     assert_eq!((sighting.point.x, sighting.point.y), (352, 264));
+    assert_eq!(sighting.knowledge, Knowledge::Grounded);
+    assert_eq!(sighting.outcome.outcome_code, "clicked_and_repainted");
     assert_eq!(
-        seen.lock().unwrap().clicks,
+        stage.lock().unwrap().clicks,
         vec![(352, 264)],
         "the click lands where grounding said, in surface coordinates"
     );
     assert_eq!(
-        seen.lock().unwrap().captures,
-        2,
-        "one look before, one after"
+        stage.lock().unwrap().captures,
+        1,
+        "one look, and the window's own redraw is the verification"
     );
-    assert_eq!(sighting.outcome.outcome_code, "clicked_and_changed");
-    assert!(sighting.after.is_some());
 
     let wire = requests.lock().unwrap().join("\n");
     assert!(
         wire.contains("[vault:stage/target"),
         "the target travels as a capsule entry"
     );
-    assert!(wire.contains("the save button"));
+    assert!(wire.contains(SAVE));
     assert!(
         wire.contains("data:image/png;base64,"),
         "and the capture goes with it"
@@ -301,65 +398,210 @@ async fn a_named_button_is_seen_grounded_clicked_and_seen_to_change() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_window_that_did_not_change_is_not_verification() {
-    let dir = scratch("still");
-    let (mut client, seen) = compositor(dir.clone(), false).await;
-    let mut world = StageWorld::default();
-    learn(&mut client, &mut world, Duration::from_millis(50))
-        .await
-        .unwrap();
-    let (url, _) = grounding_server(
+async fn the_model_is_asked_once_and_the_window_confirms_the_rest() {
+    let dir = scratch("confirm");
+    let stage = Arc::new(Mutex::new(Stage::default()));
+    let (client, _inject) = compositor(dir.clone(), stage.clone()).await;
+    let (url, requests) = grounding_server(
         "nvidia/LocateAnything-3B",
-        "<box> 100, 100, 200, 200 </box>",
+        &[(SAVE, "<box> 500, 500, 600, 600 </box>")],
     )
     .await;
-    let grounding = LocateAnythingClient::new(
-        ProviderEndpoint::nvidia_nim(&url, Locality::Local).unwrap(),
-        local_model(),
-    )
-    .unwrap();
-    let mut operator = Operator::new(
-        CommandKey::from_bytes(&KEY),
-        policy(),
-        PolicyEngine::default(),
+    let grounding = client_for(&url);
+    let mut sight = session(&dir, client).await;
+    let save = target("button:save", SAVE, PrivacyGrade::Internal);
+
+    for pass in 0..3 {
+        let sighting = sight
+            .find_and_activate(&save, &grounding, Locality::Local, 100 + pass)
+            .await
+            .unwrap();
+        assert_eq!(sighting.outcome.outcome_code, "clicked_and_repainted");
+        assert_eq!(
+            sighting.knowledge,
+            if pass == 0 {
+                Knowledge::Grounded
+            } else {
+                // Its own click redrew it, so it is looked at again, and the box still
+                // holds the same control.
+                Knowledge::Confirmed
+            }
+        );
+    }
+    assert_eq!(
+        requests.lock().unwrap().len(),
+        1,
+        "the model is asked once, however many times the button is pressed"
     );
-    let mut sight = Sight {
-        operator: &mut operator,
-        client: &mut client,
-        world: &mut world,
-        snapshot_dir: dir.join("snapshots"),
-        principal: Principal::Agent {
-            agent: AgentId::new(),
-        },
-        engine: PolicyEngine::default(),
-        timeout: Duration::from_secs(5),
-    };
-    let result = sight
-        .find_and_activate(
-            &target(PrivacyGrade::Public),
-            &grounding,
-            Locality::Local,
-            78,
-        )
+    assert_eq!(stage.lock().unwrap().captures, 3);
+    assert_eq!(stage.lock().unwrap().clicks.len(), 3);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_target_nothing_has_touched_is_used_without_looking() {
+    let dir = scratch("trusted");
+    let stage = Arc::new(Mutex::new(Stage::default()));
+    let (client, _inject) = compositor(dir.clone(), stage.clone()).await;
+    let (url, requests) = grounding_server(
+        "nvidia/LocateAnything-3B",
+        &[
+            (SAVE, "<box> 500, 500, 600, 600 </box>"),
+            (NOTE, "<box> 100, 100, 300, 150 </box>"),
+        ],
+    )
+    .await;
+    let grounding = client_for(&url);
+    let mut sight = session(&dir, client).await;
+    let save = target("button:save", SAVE, PrivacyGrade::Internal);
+    let note = target("input:note", NOTE, PrivacyGrade::Internal);
+
+    let first = sight
+        .find_and_activate(&save, &grounding, Locality::Local, 200)
+        .await
+        .unwrap();
+    assert_eq!(first.knowledge, Knowledge::Grounded);
+    // Looking for the field also confirms the button, which is still drawn as it was.
+    let field = sight
+        .find_and_activate(&note, &grounding, Locality::Local, 201)
+        .await
+        .unwrap();
+    assert_eq!(field.knowledge, Knowledge::Grounded);
+    assert_eq!((field.point.x, field.point.y), (128, 60));
+
+    let again = sight
+        .find_and_activate(&save, &grounding, Locality::Local, 202)
+        .await
+        .unwrap();
+    assert_eq!(
+        again.knowledge,
+        Knowledge::Trusted,
+        "nothing was drawn over the button since it was last seen there"
+    );
+    assert!(again.before.is_none(), "so nothing was captured for it");
+    assert_eq!(again.timings.look_ms, 0);
+    assert_eq!(again.timings.ground_ms, 0);
+    assert_eq!(stage.lock().unwrap().captures, 2);
+    assert_eq!(requests.lock().unwrap().len(), 2);
+    assert_eq!(stage.lock().unwrap().clicks.len(), 3);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_click_that_changes_nothing_is_not_verification() {
+    let dir = scratch("inert");
+    let stage = Arc::new(Mutex::new(Stage {
+        reacts: false,
+        ..Stage::default()
+    }));
+    let (client, _inject) = compositor(dir.clone(), stage.clone()).await;
+    let (url, requests) = grounding_server(
+        "nvidia/LocateAnything-3B",
+        &[(SAVE, "<box> 500, 500, 600, 600 </box>")],
+    )
+    .await;
+    let grounding = client_for(&url);
+    let mut sight = session(&dir, client).await;
+    let save = target("button:save", SAVE, PrivacyGrade::Internal);
+
+    let refused = sight
+        .find_and_activate(&save, &grounding, Locality::Local, 300)
         .await;
     assert!(
         matches!(
-            result,
+            refused,
             Err(SightError::Motor(MotorError::VerificationFailed))
         ),
-        "a click the window does not show is reported as unverified: {result:?}"
+        "{refused:?}"
     );
-    assert_eq!(seen.lock().unwrap().clicks.len(), 1);
+    let _ = sight
+        .find_and_activate(&save, &grounding, Locality::Local, 301)
+        .await;
+    assert_eq!(
+        requests.lock().unwrap().len(),
+        2,
+        "a position that did not work is not kept"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_control_that_was_replaced_is_found_again() {
+    let dir = scratch("replaced");
+    let stage = Arc::new(Mutex::new(Stage::default()));
+    let (client, inject) = compositor(dir.clone(), stage.clone()).await;
+    let (url, requests) = grounding_server(
+        "nvidia/LocateAnything-3B",
+        &[(SAVE, "<box> 500, 500, 600, 600 </box>")],
+    )
+    .await;
+    let grounding = client_for(&url);
+    let mut sight = session(&dir, client).await;
+    let save = target("button:save", SAVE, PrivacyGrade::Internal);
+
+    sight
+        .find_and_activate(&save, &grounding, Locality::Local, 400)
+        .await
+        .unwrap();
+    // The window now draws something else in that box, and says so.
+    stage.lock().unwrap().bars = 8;
+    inject
+        .send(
+            "{\"event\":\"damage\",\"surface\":4,\"rects\":[{\"x\":320,\"y\":240,\"width\":64,\"height\":48}]}\n"
+                .to_string(),
+        )
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(30)).await;
+
+    let after = sight
+        .find_and_activate(&save, &grounding, Locality::Local, 401)
+        .await
+        .unwrap();
+    assert_eq!(
+        after.knowledge,
+        Knowledge::Grounded,
+        "a box holding something else is not the control it held"
+    );
+    assert_eq!(requests.lock().unwrap().len(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_window_that_moved_is_looked_at_again() {
+    let dir = scratch("moved");
+    let stage = Arc::new(Mutex::new(Stage::default()));
+    let (client, inject) = compositor(dir.clone(), stage.clone()).await;
+    let (url, requests) = grounding_server(
+        "nvidia/LocateAnything-3B",
+        &[(SAVE, "<box> 500, 500, 600, 600 </box>")],
+    )
+    .await;
+    let grounding = client_for(&url);
+    let mut sight = session(&dir, client).await;
+    let save = target("button:save", SAVE, PrivacyGrade::Internal);
+
+    sight
+        .find_and_activate(&save, &grounding, Locality::Local, 500)
+        .await
+        .unwrap();
+    inject
+        .send("{\"event\":\"surface\",\"surface\":4,\"app_id\":\"org.example.Form\",\"x\":10,\"y\":10,\"width\":640,\"height\":480,\"geometry_revision\":10}\n".to_string())
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(30)).await;
+
+    let after = sight
+        .find_and_activate(&save, &grounding, Locality::Local, 501)
+        .await
+        .unwrap();
+    assert_eq!(
+        after.knowledge,
+        Knowledge::Grounded,
+        "where a control was in the old geometry says nothing about the new one"
+    );
+    assert_eq!(requests.lock().unwrap().len(), 2);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_cloud_model_of_unknown_retention_never_sees_an_internal_window() {
     let dir = scratch("cloud");
-    let (mut client, seen) = compositor(dir.clone(), true).await;
-    let mut world = StageWorld::default();
-    learn(&mut client, &mut world, Duration::from_millis(50))
-        .await
-        .unwrap();
+    let stage = Arc::new(Mutex::new(Stage::default()));
+    let (client, _inject) = compositor(dir.clone(), stage.clone()).await;
     let mut cloud = local_model();
     cloud.provider = ProviderKind::NebiusTokenFactory;
     cloud.locality = Locality::Cloud;
@@ -370,25 +612,11 @@ async fn a_cloud_model_of_unknown_retention_never_sees_an_internal_window() {
         cloud,
     )
     .unwrap();
-    let mut operator = Operator::new(
-        CommandKey::from_bytes(&KEY),
-        policy(),
-        PolicyEngine::default(),
-    );
-    let mut sight = Sight {
-        operator: &mut operator,
-        client: &mut client,
-        world: &mut world,
-        snapshot_dir: dir.join("snapshots"),
-        principal: Principal::Agent {
-            agent: AgentId::new(),
-        },
-        engine: PolicyEngine::default(),
-        timeout: Duration::from_secs(5),
-    };
+    let mut sight = session(&dir, client).await;
+
     let result = sight
         .find_and_activate(
-            &target(PrivacyGrade::Internal),
+            &target("button:save", SAVE, PrivacyGrade::Internal),
             &grounding,
             Locality::Cloud,
             79,
@@ -407,7 +635,7 @@ async fn a_cloud_model_of_unknown_retention_never_sees_an_internal_window() {
         "{result:?}"
     );
     assert!(
-        seen.lock().unwrap().clicks.is_empty(),
+        stage.lock().unwrap().clicks.is_empty(),
         "nothing is clicked on a grounding that never happened"
     );
 }

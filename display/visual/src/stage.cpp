@@ -318,6 +318,18 @@ constexpr float kMaxBowPx = 120.0F;
 
 }  // namespace
 
+PlaybackPolicy PlaybackPolicy::agent_tempo() noexcept {
+    PlaybackPolicy policy;
+    // A quarter of a brisk person's time over the same path: about 130 ms for 150 px
+    // instead of 530, which is still eight frames of movement to watch.
+    policy.trajectory.pace = 0.25F;
+    // Two frames: a press and its release stay separate events for the application.
+    policy.press_dwell_ms = 32;
+    // The caption still says the agent looked. The receipt no longer waits for it.
+    policy.capture_hold_ms = 0;
+    return policy;
+}
+
 PointerTrajectory PointerTrajectory::plan(PointF from, PointF to, std::int64_t start_ms,
                                           const TrajectoryPolicy& policy) {
     PointerTrajectory trajectory;

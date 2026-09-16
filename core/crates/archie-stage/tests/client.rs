@@ -2,11 +2,12 @@
 
 use archie_policy::{Action, CapabilityRequest, Constraints, PolicyEngine, Principal, Scope};
 use archie_stage::{
-    open, stage_resource, AuthorityMode, ClientError, CommandKey, PointerButton, Sealer,
-    StageAction, StageClient, StageEvent, StageGate, StagePolicy, StageProposal, StageWorld,
-    MAX_EVENT_BYTES,
+    open, stage_resource, AuthorityMode, ClientError, CommandKey, DamageRect, PointerButton,
+    Repainted, Sealer, StageAction, StageClient, StageEvent, StageGate, StagePolicy, StageProposal,
+    StageWorld, MAX_EVENT_BYTES,
 };
 use archie_types::{AgentId, PrivacyGrade, Timestamp, TraceId};
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 const KEY: [u8; 32] = [3; 32];
@@ -175,4 +176,128 @@ async fn an_unbounded_or_invalid_event_is_not_believed() {
     );
 
     drop(compositor_write);
+}
+
+#[tokio::test]
+async fn a_wait_that_gives_up_mid_line_keeps_its_place() {
+    let (client_side, compositor_side) = tokio::io::duplex(64 * 1024);
+    let (client_read, client_write) = tokio::io::split(client_side);
+    let (_compositor_read, mut compositor_write) = tokio::io::split(compositor_side);
+    let mut client = StageClient::new(client_read, client_write);
+
+    // Half an event, and a caller that stops waiting for the rest of it.
+    compositor_write
+        .write_all(b"{\"event\":\"damage\",\"surface\":4,\"rects\":[{\"x\":10,\"y\":")
+        .await
+        .unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(30), client.next_event())
+            .await
+            .is_err(),
+        "nothing to report yet"
+    );
+    compositor_write
+        .write_all(b"20,\"width\":30,\"height\":40}]}\n")
+        .await
+        .unwrap();
+    assert_eq!(
+        client.next_event().await.unwrap().unwrap(),
+        StageEvent::Damage {
+            surface: 4,
+            rects: vec![DamageRect {
+                x: 10,
+                y: 20,
+                width: 30,
+                height: 40
+            }]
+        },
+        "the line resumes where the abandoned read left it, not in the middle of it"
+    );
+}
+
+#[test]
+fn the_mirror_remembers_what_repainted_where() {
+    let mut world = StageWorld::default();
+    let button = DamageRect {
+        x: 100,
+        y: 100,
+        width: 40,
+        height: 20,
+    };
+    let ring = DamageRect {
+        x: 96,
+        y: 96,
+        width: 2,
+        height: 2,
+    };
+    assert!(!button.intersects(&ring));
+    assert!(
+        button.grown(8).intersects(&ring),
+        "a focus ring is drawn just outside the control it belongs to"
+    );
+
+    let before = world.damage_mark();
+    assert_eq!(world.repainted_since(before, 4, &button), Repainted::No);
+    world.apply(&StageEvent::Damage {
+        surface: 4,
+        rects: vec![DamageRect {
+            x: 0,
+            y: 0,
+            width: 10,
+            height: 10,
+        }],
+    });
+    assert_eq!(
+        world.repainted_since(before, 4, &button),
+        Repainted::No,
+        "a corner of the window is not that button"
+    );
+    world.apply(&StageEvent::Damage {
+        surface: 4,
+        rects: vec![DamageRect {
+            x: 130,
+            y: 110,
+            width: 20,
+            height: 20,
+        }],
+    });
+    assert_eq!(world.repainted_since(before, 4, &button), Repainted::Yes);
+
+    let after = world.damage_mark();
+    assert_eq!(
+        world.repainted_since(after, 4, &button),
+        Repainted::No,
+        "asked again, it is a new question"
+    );
+    world.apply(&StageEvent::Damage {
+        surface: 5,
+        rects: vec![DamageRect {
+            x: 130,
+            y: 110,
+            width: 20,
+            height: 20,
+        }],
+    });
+    assert_eq!(
+        world.repainted_since(after, 4, &button),
+        Repainted::No,
+        "another window redrawing itself says nothing about this one"
+    );
+
+    for _ in 0..600 {
+        world.apply(&StageEvent::Damage {
+            surface: 4,
+            rects: vec![DamageRect {
+                x: 0,
+                y: 0,
+                width: 1,
+                height: 1,
+            }],
+        });
+    }
+    assert_eq!(
+        world.repainted_since(after, 4, &button),
+        Repainted::Unknown,
+        "past what it keeps, the mirror says it cannot tell instead of guessing"
+    );
 }

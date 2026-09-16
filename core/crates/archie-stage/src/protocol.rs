@@ -11,12 +11,15 @@
 
 use crate::seal::SealedCommand;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
 /// The longest event line accepted, newline included.
 pub const MAX_EVENT_BYTES: usize = 16 * 1024;
 const MAX_DAMAGE_RECTS: usize = 64;
+/// How many damage rectangles the mirror keeps, so a caller can ask what repainted since
+/// it last looked without holding a frame of anything.
+const DAMAGE_MEMORY: usize = 512;
 const MAX_CODE_CHARS: usize = 64;
 /// The widest or tallest capture believed.
 pub const MAX_SNAPSHOT_SIDE: u32 = 16_384;
@@ -37,6 +40,40 @@ pub struct DamageRect {
     pub y: i32,
     pub width: i32,
     pub height: i32,
+}
+
+impl DamageRect {
+    /// Whether two rectangles share a pixel.
+    pub fn intersects(&self, other: &Self) -> bool {
+        let right = |r: &Self| i64::from(r.x) + i64::from(r.width);
+        let bottom = |r: &Self| i64::from(r.y) + i64::from(r.height);
+        i64::from(self.x) < right(other)
+            && i64::from(other.x) < right(self)
+            && i64::from(self.y) < bottom(other)
+            && i64::from(other.y) < bottom(self)
+    }
+
+    /// The same rectangle with `margin` pixels on every side. A control's own box is not
+    /// quite where it repaints: a focus ring is drawn just outside it.
+    pub fn grown(&self, margin: i32) -> Self {
+        Self {
+            x: self.x.saturating_sub(margin),
+            y: self.y.saturating_sub(margin),
+            width: self.width.saturating_add(margin.saturating_mul(2)),
+            height: self.height.saturating_add(margin.saturating_mul(2)),
+        }
+    }
+}
+
+/// What the mirror can say about whether something repainted since a mark.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Repainted {
+    /// A rectangle overlapping the area was redrawn after the mark.
+    Yes,
+    /// Nothing overlapping it was, and the mirror still holds every rectangle since then.
+    No,
+    /// More has been redrawn since the mark than the mirror remembers, so it cannot say.
+    Unknown,
 }
 
 /// One message from the compositor.
@@ -156,6 +193,10 @@ pub struct StageWorld {
     focus: Option<u32>,
     authority: AuthorityMode,
     last_receipt: Option<(u64, String)>,
+    /// Recent damage, oldest first: (where in the record, surface, rectangle).
+    damage: VecDeque<(u64, u32, DamageRect)>,
+    /// How many rectangles have ever been recorded, which is also the newest mark.
+    damage_seen: u64,
 }
 
 impl Default for StageWorld {
@@ -166,6 +207,8 @@ impl Default for StageWorld {
             // Until the compositor says otherwise, nobody has handed the agent anything.
             authority: AuthorityMode::Paused,
             last_receipt: None,
+            damage: VecDeque::new(),
+            damage_seen: 0,
         }
     }
 }
@@ -202,7 +245,15 @@ impl StageWorld {
                 }
             }
             StageEvent::Focus { surface } => self.focus = *surface,
-            StageEvent::Damage { .. } => {}
+            StageEvent::Damage { surface, rects } => {
+                for rect in rects {
+                    self.damage_seen += 1;
+                    self.damage.push_back((self.damage_seen, *surface, *rect));
+                }
+                while self.damage.len() > DAMAGE_MEMORY {
+                    self.damage.pop_front();
+                }
+            }
             StageEvent::Authority { mode, .. } => self.authority = *mode,
             StageEvent::Receipt { seq, outcome, .. } => {
                 self.last_receipt = Some((*seq, outcome.clone()));
@@ -243,6 +294,31 @@ impl StageWorld {
         self.authority == AuthorityMode::Autonomous
     }
 
+    /// A place in the record of what has been redrawn, to ask about later.
+    pub fn damage_mark(&self) -> u64 {
+        self.damage_seen
+    }
+
+    /// Whether `surface` redrew anything overlapping `area` after `mark`.
+    ///
+    /// This is the cheap half of perception. The compositor already says which rectangles
+    /// a client redrew, so a caller can ask whether the control it just clicked reacted at
+    /// all without looking at one pixel.
+    pub fn repainted_since(&self, mark: u64, surface: u32, area: &DamageRect) -> Repainted {
+        if self
+            .damage
+            .iter()
+            .any(|(at, id, rect)| *at > mark && *id == surface && rect.intersects(area))
+        {
+            return Repainted::Yes;
+        }
+        // "No" only means anything while everything since the mark is still here.
+        match self.damage.front() {
+            Some((oldest, _, _)) if *oldest > mark.saturating_add(1) => Repainted::Unknown,
+            _ => Repainted::No,
+        }
+    }
+
     pub fn last_receipt(&self) -> Option<(u64, &str)> {
         self.last_receipt
             .as_ref()
@@ -266,6 +342,8 @@ pub struct StageClient<R, W> {
     reader: BufReader<R>,
     writer: W,
     poisoned: bool,
+    /// Bytes of a line whose read was abandoned, kept so the next call resumes it.
+    partial: Vec<u8>,
 }
 
 impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> StageClient<R, W> {
@@ -274,6 +352,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> StageClient<R, W> {
             reader: BufReader::new(reader),
             writer,
             poisoned: false,
+            partial: Vec::new(),
         }
     }
 
@@ -285,28 +364,37 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> StageClient<R, W> {
 
     /// The next event, or `None` when the compositor closed the stream.
     ///
+    /// Safe to give up on: a caller waiting inside `select!` with a deadline keeps the
+    /// bytes it had already read, so the next call finishes that line instead of starting
+    /// in the middle of it. A control loop that waits for a repaint for a moment, then
+    /// goes back to work, would otherwise lose its place in the stream.
+    ///
     /// An oversized line poisons the client: after one, there is no way to know where the
     /// next message starts, so every later call fails too.
     pub async fn next_event(&mut self) -> Result<Option<StageEvent>, ClientError> {
         if self.poisoned {
             return Err(ClientError::LineTooLong);
         }
-        let mut line = Vec::new();
-        let limit = (MAX_EVENT_BYTES + 1) as u64;
+        let room = (MAX_EVENT_BYTES + 1 - self.partial.len()) as u64;
         let read = (&mut self.reader)
-            .take(limit)
-            .read_until(b'\n', &mut line)
+            .take(room)
+            .read_until(b'\n', &mut self.partial)
             .await?;
-        if read == 0 {
-            return Ok(None);
-        }
-        if line.len() > MAX_EVENT_BYTES || !line.ends_with(b"\n") {
-            if line.len() > MAX_EVENT_BYTES {
+        if !self.partial.ends_with(b"\n") {
+            if self.partial.len() > MAX_EVENT_BYTES {
                 self.poisoned = true;
+                self.partial.clear();
                 return Err(ClientError::LineTooLong);
             }
-            // The stream ended mid-line.
+            // Nothing arrived to finish the line: the stream ended, mid-line or not.
+            debug_assert_eq!(read, 0);
+            self.partial.clear();
             return Ok(None);
+        }
+        let line = std::mem::take(&mut self.partial);
+        if line.len() > MAX_EVENT_BYTES {
+            self.poisoned = true;
+            return Err(ClientError::LineTooLong);
         }
         let event: StageEvent =
             serde_json::from_slice(&line[..line.len() - 1]).map_err(|_| ClientError::Malformed)?;

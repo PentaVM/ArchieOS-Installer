@@ -1,6 +1,6 @@
 [package]
 name = "archie-sight"
-description = "Archie looks at a window on the stage, finds what a task names in it through IRIS grounding, acts on it through the stage gate, and checks that the window changed."
+description = "Archie looks at a window on the stage, finds what a task names in it through IRIS grounding, acts on it through the stage gate, and checks that the window reacted."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,7 +13,9 @@ archie-policy.workspace = true
 archie-stage.workspace = true
 archie-types.workspace = true
 archie-vault.workspace = true
+png.workspace = true
 ring.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "time"] }
 

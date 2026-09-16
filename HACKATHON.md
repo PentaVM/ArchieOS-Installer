@@ -166,8 +166,9 @@ from executed builds on identified hardware.
 - Added `archie-sight` and `archie-look` ([docs/STAGE.md](docs/STAGE.md#finding-what-a-task-names)).
   Given a description such as "el botón Guardar", Archie captures the window, asks a
   grounding model through IRIS's LocateAnything adapter where that is, and clicks it
-  through the stage gate. It then captures again, and a click that changed nothing is
-  reported as a failure. The crate joins IRIS and the stage and adds no authority.
+  through the stage gate. It then waits for the control to redraw itself, and a click that
+  changed nothing is reported as a failure. The crate joins IRIS and the stage and adds no
+  authority.
 - Looking is gated like touching, because a capture is a disclosure:
   - It needs the application's `snapshot` grant and a read lease. A read lease cannot
     click, and a click lease cannot look.
@@ -179,17 +180,30 @@ from executed builds on identified hardware.
 - The description reaches the model in a one-entry Vault capsule for that task, next to a
   digest-bound image. A window declared internal is refused before egress to a cloud model
   whose retention nobody has verified.
+- The model is not in the loop. A session keeps the stage connection and remembers where
+  it found each control: a box nothing has been drawn over is used as it is, a box
+  something was drawn over is confirmed from one capture whose shape must still match, and
+  only a box that fails that is grounded again. One capture re-confirms every control the
+  session knows in that window, and a click that is not followed by a repaint forgets the
+  position it used.
+- `--tempo agent` plays the same checked, sealed commands on a quarter of the clock, and a
+  click is verified by the compositor's damage events instead of a fixed wait and a second
+  capture. Twelve activations of the demo form then ran at 1.56 a second, all verified,
+  with grounding served by a local stand-in so the number is Archie's own; the capture that
+  confirms a control is now the slow part of it, at 135–590 ms.
 - Live in WSLg through Nebius Token Factory, with nobody touching the mouse:
   - `moonshotai/Kimi-K3` completed one flow and placed the demo form's field and button
     within a pixel of their real centres, but returned a usable answer in only three of
-    five calls. The latest two calls exhausted 512 output tokens while reasoning.
+    five calls: two exhausted 512 output tokens while reasoning, and on a later day it
+    answered nothing at all, timing out on every request while Gemma answered in about a
+    second on the same account.
   - Archie clicked the field, typed, and pressed Guardar, and the form's own log recorded
     the note.
   - On the same capture, `google/gemma-3-27b-it` kept the output format but missed by
     100 px or more; its click changed nothing and was reported as failed.
   - `openbmb/MiniCPM-V-4_5` came within 3 px but ignored the format, so IRIS refused it.
 - Not done: menus and popups, more than one target per call, verification stronger than
-  "the window changed", the persistent structured/Reflex fast path, and a run of
+  "the control redrew", a structured accessibility source, a local Reflex model, and a run of
   LocateAnything-3B itself. Measured cloud vision latency was 1.32–1.69 s for Gemma or
   MiniCPM and 27.3–33.5 s for Kimi-K3, so the cloud adapter is a Cortex fallback rather
   than the interactive loop.

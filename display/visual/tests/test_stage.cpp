@@ -517,6 +517,35 @@ void a_capture_is_checked_like_a_touch_and_held_on_screen() {
     CHECK_BECAUSE(interrupted.cancel(T0 + 10).empty(), "a capture holds nothing that needs letting go");
 }
 
+
+void an_agent_tempo_is_the_same_playback_on_a_faster_clock() {
+    CASE("at agent tempo the same steps happen sooner, and looking holds nothing");
+
+    SurfaceTable table = table_with_terminal();
+    const PlaybackPolicy person;
+    const PlaybackPolicy agent = PlaybackPolicy::agent_tempo();
+
+    const StageCommand click = click_on(table, 7, 400, 300);
+    Playback watched = Playback::start(click, *table.find(7), PointF{100.0F, 100.0F}, T0, person);
+    Playback working = Playback::start(click, *table.find(7), PointF{100.0F, 100.0F}, T0, agent);
+    CHECK_EQ(working.schedule().size(), watched.schedule().size());
+    for (std::size_t i = 0; i < working.schedule().size(); ++i) {
+        CHECK_BECAUSE(working.schedule()[i].kind == watched.schedule()[i].kind,
+                      "the same steps in the same order: only the clock changes");
+    }
+    CHECK_BECAUSE((working.ends_ms() - T0) * 3 < watched.ends_ms() - T0,
+                  "a click that took over half a second takes under two hundred milliseconds");
+    CHECK_BECAUSE(working.due(working.ends_ms()).back().kind == StepKind::Release,
+                  "and it still ends by letting go");
+
+    StageCommand look = click_on(table, 7, 0, 0);
+    look.action = StageAction::Snapshot;
+    Playback capture = Playback::start(look, *table.find(7), PointF{}, T0, agent);
+    CHECK_EQ(capture.ends_ms(), T0);
+    (void)capture.due(T0);
+    CHECK_BECAUSE(capture.state() == PlaybackState::Finished,
+                  "an agent at work does not wait 450 ms for anyone to see that it looked");
+}
 }  // namespace
 
 int main() {
@@ -531,5 +560,6 @@ int main() {
     an_interrupted_drag_lets_go();
     typing_and_chords_are_counted_not_carried();
     a_capture_is_checked_like_a_touch_and_held_on_screen();
+    an_agent_tempo_is_the_same_playback_on_a_faster_clock();
     return archie::visual::test::report();
 }

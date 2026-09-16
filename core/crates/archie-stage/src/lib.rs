@@ -68,12 +68,13 @@ pub use gate::{
     StageRefusal,
 };
 pub use operate::{
-    learn, ActOutcome, ActRequest, LookOutcome, OperateError, Operator, Snapshot, MAX_CAPTURE_BYTES,
+    drain, learn, wait_until, ActOutcome, ActRequest, LookOutcome, OperateError, Operator,
+    Snapshot, MAX_CAPTURE_BYTES,
 };
 pub use policy::{AppPolicy, PolicyError, StagePolicy};
 pub use protocol::{
-    AuthorityMode, ClientError, DamageRect, StageClient, StageEvent, StageSurface, StageWorld,
-    MAX_EVENT_BYTES, MAX_SNAPSHOT_SIDE,
+    AuthorityMode, ClientError, DamageRect, Repainted, StageClient, StageEvent, StageSurface,
+    StageWorld, MAX_EVENT_BYTES, MAX_SNAPSHOT_SIDE,
 };
 pub use seal::{
     open, CommandKey, SealError, SealedCommand, Sealer, WireAction, WireCommand,

@@ -396,6 +396,7 @@ dependencies = [
  "archie-types",
  "archie-vault",
  "hex",
+ "png",
  "ring",
  "serde_json",
  "thiserror",

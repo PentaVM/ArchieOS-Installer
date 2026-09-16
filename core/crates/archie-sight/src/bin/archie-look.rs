@@ -2,9 +2,16 @@
 //!
 //! ```text
 //! archie-look --socket <path> --key-file <path> --policy <apps.toml> --app <app_id>
-//!             --find <description> [--node button:save] [--kind button]
 //!             --model <provider model> [--endpoint <url>] [--screen public|internal]
+//!             --find <description> [--node button:save] [--kind button]
+//!
+//! archie-look … --session      one target per line on stdin: <node> <kind> <description>
 //! ```
+//!
+//! A session keeps the stage connection, what it has learned about each target and the
+//! connection to the grounding model, and prints one JSON line per activation saying how
+//! the position was known and where the time went. That is the loop IRIS needs: the model
+//! is asked once per target, not once per click.
 //!
 //! The grounding model is reached through Nebius Token Factory unless `--endpoint` names a
 //! local OpenAI-compatible server such as a NIM; the Nebius credential is read from
@@ -31,16 +38,18 @@ mod unix {
     use archie_iris::{LocateAnythingClient, NodeId, NodeKind};
     use archie_model_runtime::ProviderEndpoint;
     use archie_policy::{PolicyEngine, Principal};
-    use archie_sight::{Sight, Target};
+    use archie_sight::{Sight, Sighting, Target};
     use archie_stage::{learn, CommandKey, Operator, StageClient, StagePolicy, StageWorld};
     use archie_types::{
         AgentId, Availability, Capability, DataRetention, Locality, ModelDescriptor, ModelId,
         PrivacyGrade, ProviderKind, TokenCost, TraceId,
     };
     use std::collections::BTreeMap;
+    use std::io::{BufRead, Write};
+    use std::os::unix::fs::OpenOptionsExt;
     use std::path::Path;
     use std::process::ExitCode;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
     use tokio::net::UnixStream;
 
     fn take(args: &mut Vec<String>, flag: &str) -> Option<String> {
@@ -51,6 +60,16 @@ mod unix {
         let value = args.remove(at + 1);
         args.remove(at);
         Some(value)
+    }
+
+    fn flag(args: &mut Vec<String>, flag: &str) -> bool {
+        match args.iter().position(|a| a == flag) {
+            Some(at) => {
+                args.remove(at);
+                true
+            }
+            None => false,
+        }
     }
 
     fn load_key(path: &str) -> Result<CommandKey, String> {
@@ -81,6 +100,19 @@ mod unix {
             cause = inner.source();
         }
         message
+    }
+
+    fn kind_of(name: &str) -> Result<NodeKind, String> {
+        const KINDS: &str = "button, input, link, checkbox, tab, menu_item";
+        match name {
+            "button" => Ok(NodeKind::Button),
+            "input" => Ok(NodeKind::Input),
+            "link" => Ok(NodeKind::Link),
+            "checkbox" => Ok(NodeKind::Checkbox),
+            "tab" => Ok(NodeKind::Tab),
+            "menu_item" => Ok(NodeKind::MenuItem),
+            other => Err(format!("--kind {other:?} is not one of {KINDS}")),
+        }
     }
 
     fn descriptor(
@@ -150,25 +182,18 @@ mod unix {
 
     async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         if args.iter().any(|argument| argument == "--keep") {
+            // Window pixels stay inside the bounded pass: there is no option that writes
+            // them somewhere for later.
             return Err("raw_frame_retention_forbidden".into());
         }
         let socket = take(&mut args, "--socket").ok_or("--socket is required")?;
         let key = load_key(&take(&mut args, "--key-file").ok_or("--key-file is required")?)?;
         let policy_path = take(&mut args, "--policy").ok_or("--policy is required")?;
         let app = take(&mut args, "--app").ok_or("--app is required")?;
-        let description = take(&mut args, "--find").ok_or("--find is required")?;
-        let node = NodeId::new(take(&mut args, "--node").unwrap_or_else(|| "stage:target".into()))
-            .map_err(|_| "--node is not a scene node id")?;
-        const KINDS: &str = "button, input, link, checkbox, tab, menu_item";
-        let kind = match take(&mut args, "--kind").as_deref().unwrap_or("button") {
-            "button" => NodeKind::Button,
-            "input" => NodeKind::Input,
-            "link" => NodeKind::Link,
-            "checkbox" => NodeKind::Checkbox,
-            "tab" => NodeKind::Tab,
-            "menu_item" => NodeKind::MenuItem,
-            other => return Err(format!("--kind {other:?} is not one of {KINDS}")),
-        };
+        let session = flag(&mut args, "--session");
+        let description = take(&mut args, "--find");
+        let node = take(&mut args, "--node").unwrap_or_else(|| "stage:target".into());
+        let kind = take(&mut args, "--kind").unwrap_or_else(|| "button".into());
         let provider_model = take(&mut args, "--model").ok_or("--model is required")?;
         let endpoint_url = take(&mut args, "--endpoint");
         let screen = match take(&mut args, "--screen").as_deref().unwrap_or("public") {
@@ -176,8 +201,12 @@ mod unix {
             "internal" => PrivacyGrade::Internal,
             _ => return Err("--screen is public or internal".into()),
         };
+
         if !args.is_empty() {
             return Err(format!("unexpected arguments: {args:?}"));
+        }
+        if session == description.is_some() {
+            return Err("give either --find <description> or --session".into());
         }
 
         let cloud = endpoint_url.is_none();
@@ -205,33 +234,19 @@ mod unix {
         learn(&mut client, &mut world, Duration::from_millis(400))
             .await
             .map_err(|e| e.to_string())?;
-        let mut operator = Operator::new(key, policy, PolicyEngine::default());
-
-        let target = Target {
-            app_id: app.clone(),
-            node,
-            kind,
-            description,
-            description_grade: PrivacyGrade::Public,
-            screen_grade: screen,
-            task_id: format!("look-{}", TraceId::new()),
-        };
+        let operator = Operator::new(key, policy, PolicyEngine::default());
         let principal = Principal::Agent {
             agent: AgentId::new(),
         };
-        let mut sight = Sight {
-            operator: &mut operator,
-            client: &mut client,
-            world: &mut world,
-            snapshot_dir,
-            principal,
-            engine: PolicyEngine::default(),
-            timeout: Duration::from_secs(30),
-        };
-        let operation_id = (archie_types::Timestamp::now().as_millis() as u64).max(1);
+        let mut sight = Sight::new(operator, client, world, snapshot_dir, principal);
+
+        if session {
+            return session_loop(&mut sight, &app, screen, &grounding, locality).await;
+        }
+        let target = target_for(&app, &node, &kind, &description.unwrap_or_default(), screen)?;
         println!("looking at {app} and asking {provider_model} where the target is");
         let sighting = match sight
-            .find_and_activate(&target, &grounding, locality, operation_id)
+            .find_and_activate(&target, &grounding, locality, operation_id())
             .await
         {
             Ok(sighting) => sighting,
@@ -240,31 +255,137 @@ mod unix {
                 return Ok(ExitCode::from(4));
             }
         };
+        report(&sighting);
+        Ok(ExitCode::SUCCESS)
+    }
+
+    fn operation_id() -> u64 {
+        (archie_types::Timestamp::now().as_millis() as u64).max(1)
+    }
+
+    fn target_for(
+        app: &str,
+        node: &str,
+        kind: &str,
+        description: &str,
+        screen: PrivacyGrade,
+    ) -> Result<Target, String> {
+        Ok(Target {
+            app_id: app.to_string(),
+            node: NodeId::new(node.to_string()).map_err(|_| "--node is not a scene node id")?,
+            kind: kind_of(kind)?,
+            description: description.to_string(),
+            description_grade: PrivacyGrade::Public,
+            screen_grade: screen,
+            task_id: format!("look-{}", TraceId::new()),
+        })
+    }
+
+    fn report(sighting: &Sighting) {
+        let capture = match &sighting.before {
+            Some(before) => format!(
+                "captured {}x{} (sha256 {}); ",
+                before.width,
+                before.height,
+                &before.sha256[..16]
+            ),
+            None => String::new(),
+        };
         println!(
-            "captured {}x{}; grounded at x={} y={} {}x{}; clicked ({}, {}); {}",
-            sighting.before.width,
-            sighting.before.height,
+            "{capture}{} at x={} y={} {}x{}; clicked ({}, {}) in {} ms; {}",
+            sighting.knowledge.as_str(),
             sighting.bbox.x,
             sighting.bbox.y,
             sighting.bbox.width,
             sighting.bbox.height,
             sighting.point.x,
             sighting.point.y,
+            sighting.timings.total_ms,
             sighting.outcome.outcome_code
         );
-        Ok(ExitCode::SUCCESS)
     }
 
-    #[cfg(test)]
-    mod tests {
-        use super::run;
-
-        #[tokio::test]
-        async fn raw_frame_retention_is_rejected_before_io() {
-            let error = run(vec!["--keep".into(), "/tmp/captures".into()])
+    /// One target per line: `<node> <kind> <description…>`. Blank lines and `#` are
+    /// ignored. Every line answers with one JSON object, and the last one sums up the run.
+    async fn session_loop<R, W>(
+        sight: &mut Sight<R, W>,
+        app: &str,
+        screen: PrivacyGrade,
+        grounding: &LocateAnythingClient,
+        locality: Locality,
+    ) -> Result<ExitCode, String>
+    where
+        R: tokio::io::AsyncRead + Unpin,
+        W: tokio::io::AsyncWrite + Unpin,
+    {
+        let started = Instant::now();
+        let (mut done, mut failed) = (0_u64, 0_u64);
+        for line in std::io::stdin().lock().lines() {
+            let line = line.map_err(|e| e.to_string())?;
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let mut words = line.splitn(3, char::is_whitespace);
+            let (Some(node), Some(kind), Some(description)) =
+                (words.next(), words.next(), words.next())
+            else {
+                return Err(format!("{line:?} is not <node> <kind> <description>"));
+            };
+            let target = target_for(app, node, kind, description.trim(), screen)?;
+            let at = Instant::now();
+            match sight
+                .find_and_activate(&target, grounding, locality, operation_id())
                 .await
-                .expect_err("raw frame retention must fail");
-            assert_eq!(error, "raw_frame_retention_forbidden");
+            {
+                Ok(sighting) => {
+                    done += 1;
+                    let timings = sighting.timings;
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "node": node,
+                            "known": sighting.knowledge.as_str(),
+                            "x": sighting.point.x,
+                            "y": sighting.point.y,
+                            "look_ms": timings.look_ms,
+                            "ground_ms": timings.ground_ms,
+                            "act_ms": timings.act_ms,
+                            "verify_ms": timings.verify_ms,
+                            "total_ms": timings.total_ms,
+                            "outcome": sighting.outcome.outcome_code,
+                        })
+                    );
+                }
+                Err(error) => {
+                    failed += 1;
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "node": node,
+                            "error": explain(&error),
+                            "total_ms": at.elapsed().as_millis() as u64,
+                        })
+                    );
+                }
+            }
+            std::io::stdout().flush().map_err(|e| e.to_string())?;
         }
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        println!(
+            "{}",
+            serde_json::json!({
+                "session": app,
+                "activated": done,
+                "failed": failed,
+                "elapsed_ms": elapsed_ms,
+                "per_second": if elapsed_ms == 0 { 0.0 } else { done as f64 * 1_000.0 / elapsed_ms as f64 },
+            })
+        );
+        Ok(if failed == 0 {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::from(4)
+        })
     }
 }

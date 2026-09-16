@@ -106,6 +106,61 @@ where
     }
 }
 
+/// Applies every event already waiting, and returns without waiting for more. A loop that
+/// works in bursts catches up on what the compositor said while nobody was listening.
+pub async fn drain<R, W>(
+    client: &mut StageClient<R, W>,
+    world: &mut StageWorld,
+) -> Result<(), OperateError>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    loop {
+        match tokio::time::timeout(Duration::ZERO, client.next_event()).await {
+            Err(_) => return Ok(()),
+            Ok(event) => match event? {
+                Some(event) => world.apply(&event),
+                None => return Err(OperateError::Closed),
+            },
+        }
+    }
+}
+
+/// Reads events into `world` until `settled` holds, or `timeout` passes. Says whether it
+/// holds. A control loop waits this way for an application to redraw what it just did,
+/// and goes back to work the moment it does.
+pub async fn wait_until<R, W>(
+    client: &mut StageClient<R, W>,
+    world: &mut StageWorld,
+    timeout: Duration,
+    mut settled: impl FnMut(&StageWorld) -> bool,
+) -> Result<bool, OperateError>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    if settled(world) {
+        return Ok(true);
+    }
+    let deadline = tokio::time::sleep(timeout);
+    tokio::pin!(deadline);
+    loop {
+        tokio::select! {
+            _ = &mut deadline => return Ok(false),
+            event = client.next_event() => match event? {
+                Some(event) => {
+                    world.apply(&event);
+                    if settled(world) {
+                        return Ok(true);
+                    }
+                }
+                None => return Err(OperateError::Closed),
+            },
+        }
+    }
+}
+
 /// Operates applications on one compositor.
 #[derive(Debug)]
 pub struct Operator {

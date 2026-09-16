@@ -40,6 +40,9 @@ int main(int argc, char *argv[])
                                            QStringLiteral("Cut instead of easing; no ripples."));
     const QCommandLineOption tier(QStringLiteral("tier"), QStringLiteral("normal, conserve or ultra."),
                                   QStringLiteral("tier"), QStringLiteral("normal"));
+    const QCommandLineOption tempo(QStringLiteral("tempo"),
+                                   QStringLiteral("person, to be watched, or agent, four actions a second."),
+                                   QStringLiteral("tempo"), QStringLiteral("person"));
     const QCommandLineOption windowed(QStringLiteral("windowed"), QStringLiteral("Do not go full screen."));
     const QCommandLineOption width(QStringLiteral("width"), QStringLiteral("Window width."), QStringLiteral("px"),
                                    QStringLiteral("1600"));
@@ -54,7 +57,7 @@ int main(int argc, char *argv[])
                                        QStringLiteral("ms"));
     const QCommandLineOption quitAfter(QStringLiteral("quit-after-ms"), QStringLiteral("Exit after this long."),
                                        QStringLiteral("ms"));
-    parser.addOptions({socketName, control, keyFile, reducedMotion, tier, windowed, width, height, grab, grabAfter,
+    parser.addOptions({socketName, control, keyFile, reducedMotion, tier, tempo, windowed, width, height, grab, grabAfter,
                        grabEvery, quitAfter});
     parser.process(app);
 
@@ -77,6 +80,13 @@ int main(int argc, char *argv[])
         }
     }
     options.reduced_motion = parser.isSet(reducedMotion);
+    if (parser.value(tempo) == QLatin1String("agent")) {
+        // What IRIS needs to work an application: the same checks, the same cinematics,
+        // on a clock that fits four actions in a second.
+        options.playback = archie::visual::PlaybackPolicy::agent_tempo();
+    } else if (parser.value(tempo) != QLatin1String("person")) {
+        qWarning("archie-stage: --tempo is person or agent");
+    }
     if (parser.value(tier) == QLatin1String("conserve")) {
         options.tier = archie::visual::RenderTier::Conserve;
     } else if (parser.value(tier) == QLatin1String("ultra")) {

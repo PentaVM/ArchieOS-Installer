@@ -367,6 +367,12 @@ struct PlaybackPolicy {
     /// How long a capture stays on screen as an action before its receipt: long enough for
     /// a person watching to see that the agent looked, and for the frame to be rendered.
     std::int64_t capture_hold_ms = 450;
+
+    /// The tempo of an agent at work, rather than one demonstrating itself: the pointer
+    /// covers a path in a quarter of the time, a press lasts two frames, and a capture
+    /// does not hold the stage at all. Every movement is still drawn, and nothing about
+    /// what is checked, sealed or refused changes with it.
+    [[nodiscard]] static PlaybackPolicy agent_tempo() noexcept;
 };
 
 enum class PlaybackState {

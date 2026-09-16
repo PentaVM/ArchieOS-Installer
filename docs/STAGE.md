@@ -128,6 +128,11 @@ with no Qt, no clock and no socket, tested on machines without a display.
 - **Motion costs frames only while something moves.** Each frame names when the next one is
   needed; a still stage requests nothing. Reduced motion cuts instead of easing and drops
   ripples. The conserve tier drops ripples. Headless draws nothing.
+- **The tempo is a choice.** By default the pointer moves at a brisk person's speed, so
+  somebody watching can follow it. `--tempo agent` runs the same playback on a quarter of
+  the clock — a 150 px move in about 130 ms — and stops holding a capture on screen, which
+  is what a four-action-a-second control loop needs. Nothing about what is checked, sealed
+  or refused changes with it.
 
 `archie-visual-stage` replays a scripted 16-second session through the same model and
 writes an animated SVG. It uses 609 frames where a 60 fps loop would draw 960.
@@ -143,24 +148,54 @@ than on coordinates. It joins IRIS and the stage and adds no authority of its ow
                                         task, the capture bound to its SHA-256 → one box
  activate  MotorController + Operator   a lease on the IRIS source, then an ordinary stage
                                         click at the box's centre: stage policy and lease again
- verify    Operator::look               350 ms later, another capture; unchanged pixels fail
+ verify    the compositor's damage      the control redrew itself within 300 ms, or the
+                                        click is reported as having done nothing
 ```
+
+A grounding model answers in seconds and a hand works in tenths of one, so the model is
+not in the loop. A session remembers where it found each control and asks again only when
+it has to:
+
+- **trusted**: nothing has been drawn over the box since it was found, so it is used as it
+  is — no capture, no model;
+- **confirmed**: something has, so Archie looks once, and the box still holds the same
+  control. One capture also re-confirms every other control it knows in that window;
+- **grounded**: it does not, or the window resized, so the model is asked again.
+
+What confirms a box is its own shape: a 9×8 grid of average brightness over it, compared
+after bringing both to the same brightness. Hover, focus and a press move the whole box
+and leave the shape alone; different writing in the same place does not. It is a stand-in
+for the local model IRIS's fast path is meant to have, and it decides nothing — it only
+says whether to look again or to ask again.
 
 ```bash
 archie-look --socket "$XDG_RUNTIME_DIR/archie-stage/control.sock" --key-file /etc/archie/stage/key --policy apps.toml --app org.qt-project.qml --find "el botón Guardar" --node form:save --kind button --model moonshotai/Kimi-K3 --screen public
 ```
 
+```bash
+archie-look --socket … --key-file … --policy apps.toml --app org.qt-project.qml --model moonshotai/Kimi-K3 --session
+```
+
 - The model answers with `<box> x1, y1, x2, y2 </box>` in 0–1000 coordinates, or IRIS
   refuses the answer. The box becomes window coordinates, and its centre is where Archie
   clicks.
-- A click after which the window's pixels did not change ends with "world verification
-  did not observe a newer scene revision" and exit code 4, not success.
+- A click after which the control did not redraw ends with "world verification did not
+  observe a newer scene revision" and exit code 4, not success, and the position is
+  forgotten.
+- `--session` reads one target per line — `<node> <kind> <description>` — keeping the
+  stage connection, what it has learned and the connection to the model, and answers with
+  one JSON line per activation: how the position was known, where the click went, and how
+  many milliseconds each step took.
 - `--screen` is the caller's statement of what the window shows. Without `--endpoint`, the
   model is reached through Nebius Token Factory and is cleared for public windows only,
   because nobody has verified what it retains. An internal window is refused before a byte
   leaves: "privacy grade internal is not permitted for model …". `--endpoint` names a local
   OpenAI-compatible server, such as a NIM serving LocateAnything, which may see internal
   windows.
+- The crate's `grounding_stub` example answers the same contract instantly from a box
+  given on the command line, for driving the loop where no model runs and for measuring
+  what the loop itself costs:
+  `cargo run -p archie-sight --example grounding_stub -- --port 8099 --model local/stub --box "el botón Guardar=376,507,428,565"`.
 - The Nebius key is read from `NEBIUS_TOKEN_FACTORY_KEY` and never printed. Captures have
   no persistence option: the verified temporary file is removed after it enters the
   bounded in-memory pass.
@@ -223,18 +258,30 @@ only by its owner.
   `protocols/fixtures/stage-command-v1.json`, whose MAC was computed independently with
   `openssl`.
 - `archie-stage`: gate, sealing, protocol client and `Operator`, with an in-memory
-  compositor. For captures, the tests check four things:
+  compositor. For captures and repaints, the tests check six things:
   - A capture is read, verified and removed.
   - A capture whose digest is wrong, or whose file is outside the snapshot directory, is
     not believed.
   - A capture needs its own grant.
   - A read lease never touches.
-- `archie-sight`, with a mock compositor and a loopback model:
-  - A named button is found, clicked and seen to change, and the model receives the capsule
+  - A read abandoned halfway through a line resumes that line instead of starting inside
+    it, which is what a loop that waits briefly for a repaint does all day.
+  - The mirror answers what repainted where since a mark, says nothing about another
+    window's repaints, and says it cannot tell rather than guessing once more has been
+    redrawn than it keeps.
+- `archie-sight`, with a mock compositor that redraws what it is clicked on and a loopback
+  model:
+  - A named button is found, clicked and seen to redraw, and the model receives the capsule
     and the image.
-  - A window that does not change is not verification.
+  - The model is asked once, however many times the button is pressed: the passes after it
+    look and confirm.
+  - A control nothing has been drawn over is used without looking at all.
+  - A click after which nothing redraws is not verification, and that position is not kept.
+  - A box holding something else is grounded again, and so is one in a window that moved.
   - A cloud model whose retention is unknown never sees an internal window, and nothing is
     clicked.
+  - What confirms a box tells a hovered or pressed control, and a caret blinking in a
+    field, from different writing in the same place.
 - In WSLg, against real clients, reading their Wayland protocol traces:
   - The demo form saved "Archie escribió esto solo".
   - A Ctrl+A chord replaced a draft, and "Hola, ñandú: 100% listo!" arrived whole and in
@@ -260,6 +307,14 @@ only by its owner.
     - Qwen3.5, GLM-5.3 and the Nemotron models refuse images.
   - The same window declared internal was refused before egress, and a policy without
     `snapshot` refused the capture with `stage_action_not_allowed`.
+  - At `--tempo agent`, with grounding served by the crate's `grounding_stub` example so
+    the numbers are Archie's own and not a provider's, twelve activations of the form's
+    field and button ran back to back: all twelve clicked and were seen to redraw, in
+    7.7 s — 1.56 a second. The two that had to ask took about 1.07 s each; the other ten
+    confirmed what they already knew in 422–706 ms, averaging 550. Of that the click
+    itself was 170–200 ms and waiting for the redraw was none of it, because the control
+    had already redrawn by the time the receipt arrived. The form logged its six saves and
+    no capture was left on disk.
 
 ## Not working yet
 
@@ -282,11 +337,19 @@ only by its owner.
 - **LocateAnything-3B itself has not run.** Its adapter was exercised with cloud vision
   models standing in for it. The measured Nebius round trip was about 255 ms, a new TLS
   connection about 510 ms, and vision calls with Gemma or MiniCPM took 1.32–1.69 s.
-  Kimi-K3 took 27.3–33.5 s in the latest measurements and sometimes returned no box. Cloud
-  grounding is therefore a slow-path Cortex operation, not an interactive click loop.
-- **The fast visual loop is not connected.** A verified click currently includes a
-  blocking capture, the visible pointer trajectory, a fixed 350 ms repaint wait and a
-  second capture. Even with zero model latency this measured about 1.9 s. The intended
-  path is a persistent Sight service that resolves live scene-graph coordinates from
-  structured accessibility first, then the local Reflex, and asks the Cortex only for a
-  new or ambiguous target.
+  Kimi-K3 took 27.3–33.5 s when it answered, returned no box in two of five calls, and on
+  a later day answered nothing at all: every request timed out while Gemma answered in
+  about a second on the same account. Cloud grounding is a slow-path Cortex operation, not
+  an interactive click loop.
+- **The fast path is half connected.** A session keeps the stage connection, remembers
+  where it found each control and confirms it from one capture, so a grounding model is
+  asked once per target rather than once per click. What is missing is the structured
+  accessibility source and a local Reflex model, which are what would take pixels out of
+  the loop altogether.
+- **The confirmation capture is the slow part now.** Of a 550 ms confirmed activation the
+  capture is 135–590 ms: the compositor renders the whole window, encodes a PNG and writes
+  it, and Sight then reads, digests and decodes it. Capturing the box alone, or not needing
+  pixels at all, is what would take the loop to four actions a second.
+- **Damage is often the whole window.** Qt Quick's software backend reported 1534×696 for
+  16 of the 27 repaints in that run, so "the control redrew" frequently means no more than
+  "the window redrew", and a control nothing has touched is rarely trusted without a look.
