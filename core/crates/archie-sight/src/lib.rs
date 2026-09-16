@@ -49,6 +49,7 @@
 mod appearance;
 
 pub use appearance::{appearance_of, Appearance, AppearanceError};
+pub use archie_a11y::{control_named, Control, DeclareError};
 
 use archie_iris::{
     CortexRequest, GroundingProposal, KeyframeReference, LocateAnythingClient, LocateAnythingError,
@@ -124,6 +125,9 @@ pub struct Target {
 /// How a target's position was known when it was used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Knowledge {
+    /// The application itself said where it is, through the accessibility bus. No
+    /// capture, no model: the fastest and the most exact of the four.
+    Declared,
     /// A grounding model was asked, because nothing usable was known.
     Grounded,
     /// Known already, and nothing had been drawn over it since.
@@ -136,6 +140,7 @@ pub enum Knowledge {
 impl Knowledge {
     pub fn as_str(&self) -> &'static str {
         match self {
+            Self::Declared => "declared",
             Self::Grounded => "grounded",
             Self::Trusted => "trusted",
             Self::Confirmed => "confirmed",
@@ -146,6 +151,8 @@ impl Knowledge {
 /// Where the time went, in milliseconds.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Timings {
+    /// Asking the application what it declares, when there is a bus to ask.
+    pub declare_ms: u64,
     /// Capturing the window, when this pass needed a capture.
     pub look_ms: u64,
     /// Waiting for the grounding model, when this pass had to ask it.
@@ -182,6 +189,35 @@ struct Known {
     mark: u64,
     /// When it was last used, for forgetting the least used first.
     used: u64,
+}
+
+/// Something that can say what an application declares about its own controls, such as
+/// `archie_a11y::Accessibility`.
+///
+/// This is perception and grants nothing. What it returns is a proposal like a grounding
+/// model's: the stage gate still has to allow the click, and the window still has to react
+/// to it.
+pub trait Declares: Send + Sync {
+    fn controls<'a>(
+        &'a self,
+        pid: u32,
+        window: (i32, i32),
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<Control>, DeclareError>> + Send + 'a>,
+    >;
+}
+
+#[cfg(unix)]
+impl Declares for archie_a11y::Accessibility {
+    fn controls<'a>(
+        &'a self,
+        pid: u32,
+        window: (i32, i32),
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<Control>, DeclareError>> + Send + 'a>,
+    > {
+        Box::pin(self.controls_of(pid, Some(window)))
+    }
 }
 
 /// The IRIS source a stage surface is.
@@ -396,6 +432,8 @@ pub struct Sight<R, W> {
     receipt_timeout: Duration,
     repaint_timeout: Duration,
     known: BTreeMap<(String, String), Known>,
+    /// What applications say about themselves, when a session has somewhere to ask.
+    declares: Option<Box<dyn Declares>>,
     uses: u64,
 }
 
@@ -417,8 +455,34 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
             receipt_timeout: RECEIPT_TIMEOUT,
             repaint_timeout: REPAINT_TIMEOUT,
             known: BTreeMap::new(),
+            declares: None,
             uses: 0,
         }
+    }
+
+    /// Reads applications' own accounts of their controls before looking at any pixels.
+    pub fn asking(mut self, declares: Box<dyn Declares>) -> Self {
+        self.declares = Some(declares);
+        self
+    }
+
+    /// Where the application says the target is, if it says anything unambiguous about it.
+    /// Nothing is remembered from this: it is read again each time, so it cannot go stale.
+    async fn declared(
+        &self,
+        target: &Target,
+        surface: &archie_stage::StageSurface,
+    ) -> Option<Rect> {
+        let declares = self.declares.as_ref()?;
+        if surface.pid == 0 {
+            return None;
+        }
+        let controls = declares
+            .controls(surface.pid, (surface.width, surface.height))
+            .await
+            .ok()?;
+        let control = control_named(&controls, &target.description, target.kind)?;
+        Some(control.bounds)
     }
 
     pub fn with_timeouts(mut self, receipt: Duration, repaint: Duration) -> Self {
@@ -577,50 +641,61 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
                 && known.kind == target.kind
         });
 
-        let (bbox, knowledge, before) = match remembered {
-            Some(known)
-                if self
-                    .world
-                    .repainted_since(known.mark, known.surface, &watched(known.bbox))
-                    == Repainted::No =>
-            {
-                (known.bbox, Knowledge::Trusted, None)
-            }
-            Some(known) => {
-                // Something was drawn where it was: look once before believing the old box.
-                let mark = self.world.damage_mark();
-                let at = Instant::now();
-                let snapshot = self.look(&target.app_id, Some(known.surface)).await?;
-                timings.look_ms = at.elapsed().as_millis() as u64;
-                self.confirm_known(&snapshot, mark);
-                match self.known.get(&key).cloned() {
-                    Some(fresh) if fresh.mark == mark => {
-                        (fresh.bbox, Knowledge::Confirmed, Some(snapshot))
-                    }
-                    _ => {
-                        let at = Instant::now();
-                        let bbox = self
-                            .ground(target, &snapshot, grounding, grounding_locality)
-                            .await?;
-                        timings.ground_ms = at.elapsed().as_millis() as u64;
-                        self.remember(&key, target, &snapshot, bbox, mark)?;
-                        (bbox, Knowledge::Grounded, Some(snapshot))
+        // What the application says about itself comes first: it is exact, it is live,
+        // and it costs neither a capture nor a model.
+        let at = Instant::now();
+        let declared = self.declared(target, &surface).await;
+        timings.declare_ms = at.elapsed().as_millis() as u64;
+
+        let (bbox, knowledge, before) = if let Some(bbox) = declared {
+            (bbox, Knowledge::Declared, None)
+        } else {
+            match remembered {
+                Some(known)
+                    if self.world.repainted_since(
+                        known.mark,
+                        known.surface,
+                        &watched(known.bbox),
+                    ) == Repainted::No =>
+                {
+                    (known.bbox, Knowledge::Trusted, None)
+                }
+                Some(known) => {
+                    // Something was drawn where it was: look once before believing the old box.
+                    let mark = self.world.damage_mark();
+                    let at = Instant::now();
+                    let snapshot = self.look(&target.app_id, Some(known.surface)).await?;
+                    timings.look_ms = at.elapsed().as_millis() as u64;
+                    self.confirm_known(&snapshot, mark);
+                    match self.known.get(&key).cloned() {
+                        Some(fresh) if fresh.mark == mark => {
+                            (fresh.bbox, Knowledge::Confirmed, Some(snapshot))
+                        }
+                        _ => {
+                            let at = Instant::now();
+                            let bbox = self
+                                .ground(target, &snapshot, grounding, grounding_locality)
+                                .await?;
+                            timings.ground_ms = at.elapsed().as_millis() as u64;
+                            self.remember(&key, target, &snapshot, bbox, mark)?;
+                            (bbox, Knowledge::Grounded, Some(snapshot))
+                        }
                     }
                 }
-            }
-            None => {
-                let mark = self.world.damage_mark();
-                let at = Instant::now();
-                let snapshot = self.look(&target.app_id, Some(surface.surface)).await?;
-                timings.look_ms = at.elapsed().as_millis() as u64;
-                self.confirm_known(&snapshot, mark);
-                let at = Instant::now();
-                let bbox = self
-                    .ground(target, &snapshot, grounding, grounding_locality)
-                    .await?;
-                timings.ground_ms = at.elapsed().as_millis() as u64;
-                self.remember(&key, target, &snapshot, bbox, mark)?;
-                (bbox, Knowledge::Grounded, Some(snapshot))
+                None => {
+                    let mark = self.world.damage_mark();
+                    let at = Instant::now();
+                    let snapshot = self.look(&target.app_id, Some(surface.surface)).await?;
+                    timings.look_ms = at.elapsed().as_millis() as u64;
+                    self.confirm_known(&snapshot, mark);
+                    let at = Instant::now();
+                    let bbox = self
+                        .ground(target, &snapshot, grounding, grounding_locality)
+                        .await?;
+                    timings.ground_ms = at.elapsed().as_millis() as u64;
+                    self.remember(&key, target, &snapshot, bbox, mark)?;
+                    (bbox, Knowledge::Grounded, Some(snapshot))
+                }
             }
         };
 

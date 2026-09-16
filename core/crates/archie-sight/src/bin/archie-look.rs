@@ -3,7 +3,7 @@
 //! ```text
 //! archie-look --socket <path> --key-file <path> --policy <apps.toml> --app <app_id>
 //!             --model <provider model> [--endpoint <url>] [--screen public|internal]
-//!             --find <description> [--node button:save] [--kind button]
+//!             --find <description> [--node button:save] [--kind button] [--no-a11y]
 //!
 //! archie-look … --session      one target per line on stdin: <node> <kind> <description>
 //! ```
@@ -46,7 +46,6 @@ mod unix {
     };
     use std::collections::BTreeMap;
     use std::io::{BufRead, Write};
-    use std::os::unix::fs::OpenOptionsExt;
     use std::path::Path;
     use std::process::ExitCode;
     use std::time::{Duration, Instant};
@@ -191,6 +190,9 @@ mod unix {
         let policy_path = take(&mut args, "--policy").ok_or("--policy is required")?;
         let app = take(&mut args, "--app").ok_or("--app is required")?;
         let session = flag(&mut args, "--session");
+        // Applications describe their own controls for screen readers; that is the fastest
+        // and most exact way to find one, and `--no-a11y` is for measuring without it.
+        let ask_applications = !flag(&mut args, "--no-a11y");
         let description = take(&mut args, "--find");
         let node = take(&mut args, "--node").unwrap_or_else(|| "stage:target".into());
         let kind = take(&mut args, "--kind").unwrap_or_else(|| "button".into());
@@ -239,6 +241,14 @@ mod unix {
             agent: AgentId::new(),
         };
         let mut sight = Sight::new(operator, client, world, snapshot_dir, principal);
+        if ask_applications {
+            match archie_a11y::Accessibility::connect().await {
+                Ok(bus) => sight = sight.asking(Box::new(bus)),
+                Err(error) => eprintln!(
+                    "archie-look: nothing to ask about controls ({error}); looking instead"
+                ),
+            }
+        }
 
         if session {
             return session_loop(&mut sight, &app, screen, &grounding, locality).await;
@@ -348,6 +358,7 @@ mod unix {
                             "known": sighting.knowledge.as_str(),
                             "x": sighting.point.x,
                             "y": sighting.point.y,
+                            "declare_ms": timings.declare_ms,
                             "look_ms": timings.look_ms,
                             "ground_ms": timings.ground_ms,
                             "act_ms": timings.act_ms,

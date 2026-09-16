@@ -7,6 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+archie-a11y.workspace = true
 archie-iris.workspace = true
 archie-model-runtime.workspace = true
 archie-policy.workspace = true

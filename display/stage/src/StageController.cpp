@@ -14,6 +14,7 @@
 #include <QQuickItem>
 #include <QSaveFile>
 #include <QQuickWindow>
+#include <QWaylandClient>
 #include <QWaylandCompositor>
 #include <QWaylandQuickItem>
 #include <QWaylandSeat>
@@ -311,6 +312,7 @@ void StageController::registerSurface(QWaylandQuickItem *item, const QString &ap
         const SurfaceId gone = *found;
         m_ids.remove(item);
         m_items.remove(gone);
+        m_pids.remove(gone);
         if (m_active && m_active->command.surface == gone) {
             cancelPlayback("surface_unmapped");
         }
@@ -322,6 +324,9 @@ void StageController::registerSurface(QWaylandQuickItem *item, const QString &ap
         emit surfacesChanged();
     });
     if (QWaylandSurface *surface = item->surface()) {
+        if (QWaylandClient *client = surface->client()) {
+            m_pids.insert(id, static_cast<qint64>(client->processId()));
+        }
         connect(surface, &QWaylandSurface::damaged, this, [this, id](const QRegion &region) {
             if (region.isEmpty() || !m_table.find(id)) {
                 return;
@@ -410,6 +415,7 @@ void StageController::unregisterSurface(QWaylandQuickItem *item)
     }
     m_ids.remove(item);
     m_items.remove(id);
+    m_pids.remove(id);
     if (m_table.unmap(id)) {
         broadcast(line_of(QJsonObject{{QStringLiteral("event"), QStringLiteral("unmapped")},
                                       {QStringLiteral("surface"), static_cast<qint64>(id)}}));
@@ -444,6 +450,9 @@ QByteArray StageController::surfaceEvent(SurfaceId id) const
         {QStringLiteral("width"), surface->geometry.w},
         {QStringLiteral("height"), surface->geometry.h},
         {QStringLiteral("geometry_revision"), static_cast<qint64>(surface->geometry_revision)},
+        // Which process draws it: how something that reads an application's own account of
+        // its controls, on another bus, finds the same window.
+        {QStringLiteral("pid"), m_pids.value(id, 0)},
     });
 }
 

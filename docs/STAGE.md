@@ -153,14 +153,25 @@ than on coordinates. It joins IRIS and the stage and adds no authority of its ow
 ```
 
 A grounding model answers in seconds and a hand works in tenths of one, so the model is
-not in the loop. A session remembers where it found each control and asks again only when
-it has to:
+not in the loop. Archie asks the cheapest thing that can answer, in this order:
 
-- **trusted**: nothing has been drawn over the box since it was found, so it is used as it
-  is — no capture, no model;
+- **declared**: the application itself says where the control is, over the accessibility
+  bus, in the coordinates of its own window. Every toolkit publishes this so that screen
+  readers work, and `archie-a11y` reads it the same way. No capture, no model, about 11 ms;
+- **trusted**: nothing has been drawn over a box it found earlier, so it is used as it is —
+  no capture, no model;
 - **confirmed**: something has, so Archie looks once, and the box still holds the same
   control. One capture also re-confirms every other control it knows in that window;
-- **grounded**: it does not, or the window resized, so the model is asked again.
+- **grounded**: nothing else could say, or the window resized, so a grounding model is
+  asked.
+
+The declared answer is read again for every action, so it cannot go stale, and it is only
+used when it is unambiguous: a control whose name the task's words contain, of the kind the
+task asked for, and exactly one of them. Anything else — a window that names nothing, two
+controls with the same name, a toolkit with no bridge — falls through to looking. The
+window is matched by the process the compositor reported for that surface, and when an
+application has more than one window, by that window's size, because coordinates from the
+wrong window are a click in the wrong place.
 
 What confirms a box is its own shape: a 9×8 grid of average brightness over it, compared
 after bringing both to the same brightness. Hover, focus and a press move the whole box
@@ -192,6 +203,14 @@ archie-look --socket … --key-file … --policy apps.toml --app org.qt-project.
   leaves: "privacy grade internal is not permitted for model …". `--endpoint` names a local
   OpenAI-compatible server, such as a NIM serving LocateAnything, which may see internal
   windows.
+- Reading what an application declares needs an accessibility bus in the session
+  (`at-spi2-core`, which `at-spi-bus-launcher` starts under a `dbus-run-session`), and a
+  toolkit that publishes to it — Qt does with `QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1`. With
+  none of that, `archie-look` says so once and goes on looking. `--no-a11y` skips it, which
+  is how the difference was measured.
+- `cargo run -p archie-a11y --example declared -- <pid>` prints what one application says
+  about its own controls, for telling "it declares nothing" apart from "Archie is asking
+  the wrong window".
 - The crate's `grounding_stub` example answers the same contract instantly from a box
   given on the command line, for driving the loop where no model runs and for measuring
   what the loop itself costs:
@@ -315,6 +334,10 @@ only by its owner.
     itself was 170–200 ms and waiting for the redraw was none of it, because the control
     had already redrawn by the time the receipt arrived. The form logged its six saves and
     no capture was left on disk.
+  - With the accessibility bus in the session and the form naming its field, the same
+    twelve activations ran entirely on what the application declares: no capture and no
+    model at all, 4.84 a second, every one clicked and seen to redraw. Asking the
+    application took about 11 ms, the click 166–208 ms, and the form logged its six saves.
 
 ## Not working yet
 
@@ -341,15 +364,14 @@ only by its owner.
   a later day answered nothing at all: every request timed out while Gemma answered in
   about a second on the same account. Cloud grounding is a slow-path Cortex operation, not
   an interactive click loop.
-- **The fast path is half connected.** A session keeps the stage connection, remembers
-  where it found each control and confirms it from one capture, so a grounding model is
-  asked once per target rather than once per click. What is missing is the structured
-  accessibility source and a local Reflex model, which are what would take pixels out of
-  the loop altogether.
-- **The confirmation capture is the slow part now.** Of a 550 ms confirmed activation the
-  capture is 135–590 ms: the compositor renders the whole window, encodes a PNG and writes
-  it, and Sight then reads, digests and decodes it. Capturing the box alone, or not needing
-  pixels at all, is what would take the loop to four actions a second.
+- **A window that declares nothing is still slow.** The fast path needs a toolkit that
+  publishes to the accessibility bus and a control with a name on it. Without both — an
+  unnamed field, a canvas, a game, a remote desktop — an activation falls back to a capture
+  and, the first time, to a grounding model. A local Reflex model is what would make that
+  fallback fast; it does not exist yet.
+- **A capture costs 135–590 ms** when one is needed: the compositor renders the whole
+  window, encodes a PNG and writes it, and Sight then reads, digests and decodes it.
+  Capturing the box alone is the obvious next saving.
 - **Damage is often the whole window.** Qt Quick's software backend reported 1534×696 for
-  16 of the 27 repaints in that run, so "the control redrew" frequently means no more than
+  16 of the 27 repaints in one run, so "the control redrew" frequently means no more than
   "the window redrew", and a control nothing has touched is rarely trusted without a look.

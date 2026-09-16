@@ -210,6 +210,8 @@ private:
     archie::visual::SurfaceId m_nextSurface = 1;
     QHash<archie::visual::SurfaceId, QPointer<QWaylandQuickItem>> m_items;
     QHash<QWaylandQuickItem *, archie::visual::SurfaceId> m_ids;
+    /// The process behind each surface, as the compositor was told when it connected.
+    QHash<archie::visual::SurfaceId, qint64> m_pids;
     QPointer<QObject> m_focusedItem;
 
     QPointF m_lastPhysicalPointer;

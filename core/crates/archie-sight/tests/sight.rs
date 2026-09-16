@@ -121,7 +121,7 @@ async fn compositor(
     let (compositor_read, mut compositor_write) = tokio::io::split(compositor_side);
     compositor_write
         .write_all(
-            b"{\"event\":\"surface\",\"surface\":4,\"app_id\":\"org.example.Form\",\"x\":40,\"y\":60,\"width\":640,\"height\":480,\"geometry_revision\":9}\n\
+            b"{\"event\":\"surface\",\"surface\":4,\"app_id\":\"org.example.Form\",\"x\":40,\"y\":60,\"width\":640,\"height\":480,\"geometry_revision\":9,\"pid\":4321}\n\
               {\"event\":\"authority\",\"mode\":\"autonomous\",\"reason\":\"start\"}\n",
         )
         .await
@@ -638,4 +638,111 @@ async fn a_cloud_model_of_unknown_retention_never_sees_an_internal_window() {
         stage.lock().unwrap().clicks.is_empty(),
         "nothing is clicked on a grounding that never happened"
     );
+}
+
+/// An application that declares its own controls, as a toolkit's accessibility bridge does.
+struct Declaring(Vec<archie_sight::Control>);
+
+impl archie_sight::Declares for Declaring {
+    fn controls(
+        &self,
+        pid: u32,
+        window: (i32, i32),
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<Vec<archie_sight::Control>, archie_sight::DeclareError>,
+                > + Send
+                + '_,
+        >,
+    > {
+        let controls = self.0.clone();
+        let matches_window = window == (640, 480);
+        Box::pin(async move {
+            if pid == 4321 && matches_window {
+                Ok(controls)
+            } else {
+                Err(archie_sight::DeclareError::NoApplication(pid))
+            }
+        })
+    }
+}
+
+fn declared_button() -> archie_sight::Control {
+    archie_sight::Control {
+        name: "Save".into(),
+        kind: NodeKind::Button,
+        bounds: archie_iris::Rect::new(320, 240, 64, 48).unwrap(),
+        path: "/org/a11y/atspi/accessible/7".into(),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_application_that_says_where_its_button_is_needs_no_model() {
+    let dir = scratch("declared");
+    let stage = Arc::new(Mutex::new(Stage::default()));
+    let (client, _inject) = compositor(dir.clone(), stage.clone()).await;
+    let (url, requests) = grounding_server(
+        "nvidia/LocateAnything-3B",
+        &[(SAVE, "<box> 500, 500, 600, 600 </box>")],
+    )
+    .await;
+    let grounding = client_for(&url);
+    let mut sight = session(&dir, client)
+        .await
+        .asking(Box::new(Declaring(vec![declared_button()])));
+
+    let sighting = sight
+        .find_and_activate(
+            &target("button:save", SAVE, PrivacyGrade::Internal),
+            &grounding,
+            Locality::Local,
+            600,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(sighting.knowledge, Knowledge::Declared);
+    assert_eq!((sighting.point.x, sighting.point.y), (352, 264));
+    assert_eq!(sighting.outcome.outcome_code, "clicked_and_repainted");
+    assert!(sighting.before.is_none(), "nothing was captured");
+    assert_eq!(stage.lock().unwrap().captures, 0);
+    assert!(
+        requests.lock().unwrap().is_empty(),
+        "and no model was asked where a button the application named already is"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_control_the_application_does_not_name_still_goes_to_the_model() {
+    let dir = scratch("undeclared");
+    let stage = Arc::new(Mutex::new(Stage::default()));
+    let (client, _inject) = compositor(dir.clone(), stage.clone()).await;
+    let (url, requests) = grounding_server(
+        "nvidia/LocateAnything-3B",
+        &[(SAVE, "<box> 500, 500, 600, 600 </box>")],
+    )
+    .await;
+    let grounding = client_for(&url);
+    // Two controls with the same name: the window cannot say which one was meant.
+    let mut sight = session(&dir, client).await.asking(Box::new(Declaring(vec![
+        declared_button(),
+        archie_sight::Control {
+            name: "Save".into(),
+            ..declared_button()
+        },
+    ])));
+
+    let sighting = sight
+        .find_and_activate(
+            &target("button:save", SAVE, PrivacyGrade::Internal),
+            &grounding,
+            Locality::Local,
+            601,
+        )
+        .await
+        .unwrap();
+    assert_eq!(sighting.knowledge, Knowledge::Grounded);
+    assert_eq!(stage.lock().unwrap().captures, 1);
+    assert_eq!(requests.lock().unwrap().len(), 1);
 }

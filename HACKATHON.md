@@ -191,6 +191,19 @@ from executed builds on identified hardware.
   capture. Twelve activations of the demo form then ran at 1.56 a second, all verified,
   with grounding served by a local stand-in so the number is Archie's own; the capture that
   confirms a control is now the slow part of it, at 135–590 ms.
+- Added `archie-a11y`: what an application says about its own controls, read over the
+  accessibility bus in Rust. Every toolkit publishes its buttons, fields and menu items so
+  that screen readers work, and that is a structured source in IRIS's sense — no pixels, no
+  model, no guess. The compositor now reports which process owns each surface, so the
+  window on the stage and the application on that bus are known to be the same one, and a
+  second window of the same application is told apart by its size.
+- A declared answer is used only when it is unambiguous: a control whose name the task's
+  words contain, of the kind the task asked for, and exactly one of them. A window that
+  names nothing, or two controls with the same name, falls through to looking and to the
+  model. It is read again for every action, so it cannot go stale.
+- With that path, the same twelve activations of the demo form ran with no capture and no
+  model at all: 4.84 a second, every one clicked and seen to redraw. Asking the application
+  took about 11 ms and the click 166–208 ms.
 - Live in WSLg through Nebius Token Factory, with nobody touching the mouse:
   - `moonshotai/Kimi-K3` completed one flow and placed the demo form's field and button
     within a pixel of their real centres, but returned a usable answer in only three of
@@ -203,7 +216,7 @@ from executed builds on identified hardware.
     100 px or more; its click changed nothing and was reported as failed.
   - `openbmb/MiniCPM-V-4_5` came within 3 px but ignored the format, so IRIS refused it.
 - Not done: menus and popups, more than one target per call, verification stronger than
-  "the control redrew", a structured accessibility source, a local Reflex model, and a run of
+  "the control redrew", a local Reflex model for windows that declare nothing, and a run of
   LocateAnything-3B itself. Measured cloud vision latency was 1.32–1.69 s for Gemma or
   MiniCPM and 27.3–33.5 s for Kimi-K3, so the cloud adapter is a Cortex fallback rather
   than the interactive loop.

@@ -80,7 +80,9 @@ pub enum Repainted {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case", deny_unknown_fields)]
 pub enum StageEvent {
-    /// A surface appeared, moved or resized.
+    /// A surface appeared, moved or resized. `pid` is the client process that owns it,
+    /// which is how a structured source finds the same window on another bus; 0 when the
+    /// compositor could not tell.
     Surface {
         surface: u32,
         app_id: String,
@@ -89,6 +91,8 @@ pub enum StageEvent {
         width: i32,
         height: i32,
         geometry_revision: u64,
+        #[serde(default)]
+        pid: u32,
     },
     Unmapped {
         surface: u32,
@@ -184,6 +188,8 @@ pub struct StageSurface {
     pub width: i32,
     pub height: i32,
     pub geometry_revision: u64,
+    /// The client process that owns it, or 0 when the compositor could not tell.
+    pub pid: u32,
 }
 
 /// The control plane's mirror of the stage.
@@ -224,6 +230,7 @@ impl StageWorld {
                 width,
                 height,
                 geometry_revision,
+                pid,
             } => {
                 self.surfaces.insert(
                     *surface,
@@ -235,6 +242,7 @@ impl StageWorld {
                         width: *width,
                         height: *height,
                         geometry_revision: *geometry_revision,
+                        pid: *pid,
                     },
                 );
             }

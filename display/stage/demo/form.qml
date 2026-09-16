@@ -31,6 +31,9 @@ Window {
             id: field
             width: 380
             placeholderText: "escribe aquí"
+            // What the field is called, for anything that reads this window instead of
+            // looking at it: a screen reader, or Archie.
+            Accessible.name: "Nota rápida"
             font.pixelSize: 16
             onTextChanged: console.log("form: text length", text.length)
         }

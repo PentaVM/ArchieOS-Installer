@@ -1,0 +1,17 @@
+[package]
+name = "archie-a11y"
+description = "What an application says about its own controls, read over the accessibility bus, so Archie can act on a window without looking at its pixels."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+archie-iris.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[target.'cfg(unix)'.dependencies]
+zbus = { workspace = true }
