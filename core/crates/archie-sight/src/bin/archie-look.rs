@@ -48,6 +48,7 @@ mod unix {
     use std::io::{BufRead, Write};
     use std::path::Path;
     use std::process::ExitCode;
+    use std::sync::Arc;
     use std::time::{Duration, Instant};
     use tokio::net::UnixStream;
 
@@ -219,8 +220,9 @@ mod unix {
         .map_err(|e| e.to_string())?;
         let descriptor = descriptor(&provider_model, cloud, screen)?;
         let locality = descriptor.locality;
+        // One client for the whole session: a background ask holds it while the loop works.
         let grounding =
-            LocateAnythingClient::new(endpoint, descriptor).map_err(|e| e.to_string())?;
+            Arc::new(LocateAnythingClient::new(endpoint, descriptor).map_err(|e| e.to_string())?);
 
         let policy = StagePolicy::load(&policy_path).map_err(|e| e.to_string())?;
         let snapshot_dir = Path::new(&socket)
@@ -316,20 +318,24 @@ mod unix {
     }
 
     /// One target per line: `<node> <kind> <description…>`. Blank lines and `#` are
-    /// ignored. Every line answers with one JSON object, and the last one sums up the run.
+    /// ignored.
+    ///
+    /// The whole list is read before anything is done with it, so that a grounding model
+    /// can be asked about the targets nothing else can answer for while the ones that are
+    /// already known are being worked. Every line answers with one JSON object saying how
+    /// its position was known and where each millisecond went, and the last one sums up.
     async fn session_loop<R, W>(
         sight: &mut Sight<R, W>,
         app: &str,
         screen: PrivacyGrade,
-        grounding: &LocateAnythingClient,
+        grounding: &Arc<LocateAnythingClient>,
         locality: Locality,
     ) -> Result<ExitCode, String>
     where
         R: tokio::io::AsyncRead + Unpin,
         W: tokio::io::AsyncWrite + Unpin,
     {
-        let started = Instant::now();
-        let (mut done, mut failed) = (0_u64, 0_u64);
+        let mut targets = Vec::new();
         for line in std::io::stdin().lock().lines() {
             let line = line.map_err(|e| e.to_string())?;
             let line = line.trim();
@@ -342,10 +348,19 @@ mod unix {
             else {
                 return Err(format!("{line:?} is not <node> <kind> <description>"));
             };
-            let target = target_for(app, node, kind, description.trim(), screen)?;
+            targets.push(target_for(app, node, kind, description.trim(), screen)?);
+        }
+
+        let started = Instant::now();
+        let asking = sight
+            .start_finding(&targets, grounding, locality)
+            .await
+            .map_err(|error| explain(&error))?;
+        let (mut done, mut failed) = (0_u64, 0_u64);
+        for target in &targets {
             let at = Instant::now();
             match sight
-                .find_and_activate(&target, grounding, locality, operation_id())
+                .find_and_activate(target, grounding, locality, operation_id())
                 .await
             {
                 Ok(sighting) => {
@@ -354,7 +369,7 @@ mod unix {
                     println!(
                         "{}",
                         serde_json::json!({
-                            "node": node,
+                            "node": target.node.as_str(),
                             "known": sighting.knowledge.as_str(),
                             "x": sighting.point.x,
                             "y": sighting.point.y,
@@ -373,7 +388,7 @@ mod unix {
                     println!(
                         "{}",
                         serde_json::json!({
-                            "node": node,
+                            "node": target.node.as_str(),
                             "error": explain(&error),
                             "total_ms": at.elapsed().as_millis() as u64,
                         })
@@ -387,6 +402,7 @@ mod unix {
             "{}",
             serde_json::json!({
                 "session": app,
+                "asked_in_background": asking,
                 "activated": done,
                 "failed": failed,
                 "elapsed_ms": elapsed_ms,

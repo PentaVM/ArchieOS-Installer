@@ -202,6 +202,7 @@ async fn compositor(
 async fn grounding_server(
     provider_model: &'static str,
     boxes: &'static [(&'static str, &'static str)],
+    slowly: Duration,
 ) -> (String, Arc<Mutex<Vec<String>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -232,6 +233,9 @@ async fn grounding_server(
                         break;
                     }
                 }
+            }
+            if !slowly.is_zero() {
+                tokio::time::sleep(slowly).await;
             }
             let request = String::from_utf8_lossy(&bytes).into_owned();
             let answer = boxes
@@ -341,6 +345,7 @@ async fn a_named_button_is_found_clicked_and_seen_to_redraw() {
     let (url, requests) = grounding_server(
         "nvidia/LocateAnything-3B",
         &[(SAVE, "<box> 500, 500, 600, 600 </box>")],
+        Duration::ZERO,
     )
     .await;
     let grounding = client_for(&url);
@@ -405,6 +410,7 @@ async fn the_model_is_asked_once_and_the_window_confirms_the_rest() {
     let (url, requests) = grounding_server(
         "nvidia/LocateAnything-3B",
         &[(SAVE, "<box> 500, 500, 600, 600 </box>")],
+        Duration::ZERO,
     )
     .await;
     let grounding = client_for(&url);
@@ -448,6 +454,7 @@ async fn a_target_nothing_has_touched_is_used_without_looking() {
             (SAVE, "<box> 500, 500, 600, 600 </box>"),
             (NOTE, "<box> 100, 100, 300, 150 </box>"),
         ],
+        Duration::ZERO,
     )
     .await;
     let grounding = client_for(&url);
@@ -496,6 +503,7 @@ async fn a_click_that_changes_nothing_is_not_verification() {
     let (url, requests) = grounding_server(
         "nvidia/LocateAnything-3B",
         &[(SAVE, "<box> 500, 500, 600, 600 </box>")],
+        Duration::ZERO,
     )
     .await;
     let grounding = client_for(&url);
@@ -530,6 +538,7 @@ async fn a_control_that_was_replaced_is_found_again() {
     let (url, requests) = grounding_server(
         "nvidia/LocateAnything-3B",
         &[(SAVE, "<box> 500, 500, 600, 600 </box>")],
+        Duration::ZERO,
     )
     .await;
     let grounding = client_for(&url);
@@ -570,6 +579,7 @@ async fn a_window_that_moved_is_looked_at_again() {
     let (url, requests) = grounding_server(
         "nvidia/LocateAnything-3B",
         &[(SAVE, "<box> 500, 500, 600, 600 </box>")],
+        Duration::ZERO,
     )
     .await;
     let grounding = client_for(&url);
@@ -685,6 +695,7 @@ async fn an_application_that_says_where_its_button_is_needs_no_model() {
     let (url, requests) = grounding_server(
         "nvidia/LocateAnything-3B",
         &[(SAVE, "<box> 500, 500, 600, 600 </box>")],
+        Duration::ZERO,
     )
     .await;
     let grounding = client_for(&url);
@@ -721,6 +732,7 @@ async fn a_control_the_application_does_not_name_still_goes_to_the_model() {
     let (url, requests) = grounding_server(
         "nvidia/LocateAnything-3B",
         &[(SAVE, "<box> 500, 500, 600, 600 </box>")],
+        Duration::ZERO,
     )
     .await;
     let grounding = client_for(&url);
@@ -744,5 +756,68 @@ async fn a_control_the_application_does_not_name_still_goes_to_the_model() {
         .unwrap();
     assert_eq!(sighting.knowledge, Knowledge::Grounded);
     assert_eq!(stage.lock().unwrap().captures, 1);
+    assert_eq!(requests.lock().unwrap().len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_slow_model_does_not_stop_the_work() {
+    let dir = scratch("asking");
+    let stage = Arc::new(Mutex::new(Stage::default()));
+    let (client, _inject) = compositor(dir.clone(), stage.clone()).await;
+    let (url, requests) = grounding_server(
+        "nvidia/LocateAnything-3B",
+        &[(SAVE, "<box> 500, 500, 600, 600 </box>")],
+        Duration::from_millis(900),
+    )
+    .await;
+    let grounding = std::sync::Arc::new(client_for(&url));
+    // The application names its field and says nothing about its save button.
+    let mut sight =
+        session(&dir, client)
+            .await
+            .asking(Box::new(Declaring(vec![archie_sight::Control {
+                name: "Note".into(),
+                kind: NodeKind::Input,
+                bounds: archie_iris::Rect::new(64, 48, 128, 24).unwrap(),
+                path: "/org/a11y/atspi/accessible/9".into(),
+            }])));
+    let save = target("button:save", SAVE, PrivacyGrade::Internal);
+    let mut note = target("input:note", "the Note field", PrivacyGrade::Internal);
+    note.kind = NodeKind::Input;
+
+    let asked = sight
+        .start_finding(std::slice::from_ref(&save), &grounding, Locality::Local)
+        .await
+        .unwrap();
+    assert_eq!(asked, 1, "one target nothing else can answer for");
+
+    // While that model thinks, the field the application named is clicked anyway.
+    let started = std::time::Instant::now();
+    let field = sight
+        .find_and_activate(&note, &grounding, Locality::Local, 700)
+        .await
+        .unwrap();
+    assert_eq!(field.knowledge, Knowledge::Declared);
+    assert!(
+        started.elapsed() < Duration::from_millis(800),
+        "the work did not wait for the model: {:?}",
+        started.elapsed()
+    );
+
+    let button = sight
+        .find_and_activate(&save, &grounding, Locality::Local, 701)
+        .await
+        .unwrap();
+    assert_eq!(button.knowledge, Knowledge::Grounded);
+    assert_eq!((button.point.x, button.point.y), (352, 264));
+    assert!(
+        button.before.is_none(),
+        "the capture it was found in was taken before, not now"
+    );
+    assert_eq!(
+        stage.lock().unwrap().captures,
+        1,
+        "one capture for the asking, and none for the clicking"
+    );
     assert_eq!(requests.lock().unwrap().len(), 1);
 }

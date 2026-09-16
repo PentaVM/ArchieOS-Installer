@@ -72,6 +72,7 @@ use archie_vault::{
 use ring::rand::{SecureRandom, SystemRandom};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -101,6 +102,8 @@ pub enum SightError {
     Motor(#[from] MotorError),
     #[error("the capture says nothing about that box: {0}")]
     Appearance(#[from] AppearanceError),
+    #[error("an ask that was already under way did not finish")]
+    Interrupted,
     #[error("policy did not grant a lease to act on this source")]
     NoLease,
     #[error("this surface cannot be named as an IRIS source")]
@@ -432,6 +435,9 @@ pub struct Sight<R, W> {
     receipt_timeout: Duration,
     repaint_timeout: Duration,
     known: BTreeMap<(String, String), Known>,
+    /// Targets a grounding model is being asked about right now. Asking takes seconds; the
+    /// loop goes on working and waits for an answer only when it needs that one.
+    pending: BTreeMap<(String, String), tokio::task::JoinHandle<Result<Found, SightError>>>,
     /// What applications say about themselves, when a session has somewhere to ask.
     declares: Option<Box<dyn Declares>>,
     uses: u64,
@@ -455,6 +461,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
             receipt_timeout: RECEIPT_TIMEOUT,
             repaint_timeout: REPAINT_TIMEOUT,
             known: BTreeMap::new(),
+            pending: BTreeMap::new(),
             declares: None,
             uses: 0,
         }
@@ -498,6 +505,9 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
 
     /// Forgets every position, so the next pass asks the grounding model again.
     pub fn forget_all(&mut self) {
+        for (_, handle) in std::mem::take(&mut self.pending) {
+            handle.abort();
+        }
         self.known.clear();
     }
 
@@ -534,6 +544,119 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
         }
     }
 
+    /// Starts finding targets nothing else can answer for, without acting on any of them:
+    /// one capture now, and a grounding model asked about each of them in the background.
+    /// Returns how many are being asked about.
+    ///
+    /// This is what keeps a slow model out of the way. While it thinks, Archie goes on
+    /// clicking the controls it already knows, and a target whose answer has arrived by the
+    /// time it is wanted costs nothing at all.
+    pub async fn start_finding(
+        &mut self,
+        targets: &[Target],
+        grounding: &Arc<LocateAnythingClient>,
+        destination: Locality,
+    ) -> Result<usize, SightError> {
+        drain(&mut self.client, &mut self.world).await?;
+        self.collect_found().await;
+        self.collect_found().await;
+        let mut asking = Vec::new();
+        for target in targets {
+            let key = (target.app_id.clone(), target.node.as_str().to_string());
+            if self.pending.contains_key(&key)
+                || self.known.contains_key(&key)
+                || asking.iter().any(|(asked, _, _)| asked == &key)
+            {
+                continue;
+            }
+            let Some(surface) = self.world.surfaces_of(&target.app_id).next().cloned() else {
+                continue;
+            };
+            // A control the application itself names needs no model, now or later.
+            if self.declared(target, &surface).await.is_some() {
+                continue;
+            }
+            asking.push((key, target.clone(), surface));
+        }
+        if asking.is_empty() {
+            return Ok(0);
+        }
+
+        let mut started = 0;
+        // One capture answers for every target in the same window.
+        let mut captured: BTreeMap<u32, (Arc<Snapshot>, u64)> = BTreeMap::new();
+        for (key, target, surface) in asking {
+            let (snapshot, mark) = match captured.get(&surface.surface) {
+                Some(taken) => taken.clone(),
+                None => {
+                    let mark = self.world.damage_mark();
+                    let snapshot =
+                        Arc::new(self.look(&target.app_id, Some(surface.surface)).await?);
+                    self.confirm_known(&snapshot, mark);
+                    captured.insert(surface.surface, (snapshot.clone(), mark));
+                    (snapshot, mark)
+                }
+            };
+            self.pending.insert(
+                key,
+                tokio::spawn(find_in_background(
+                    target.clone(),
+                    snapshot,
+                    grounding.clone(),
+                    destination,
+                    mark,
+                )),
+            );
+            started += 1;
+        }
+        Ok(started)
+    }
+
+    /// Takes in every answer that has arrived, and leaves the rest still being asked.
+    async fn collect_found(&mut self) {
+        let arrived: Vec<(String, String)> = self
+            .pending
+            .iter()
+            .filter(|(_, handle)| handle.is_finished())
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in arrived {
+            if let Some(handle) = self.pending.remove(&key) {
+                if let Ok(Ok(found)) = handle.await {
+                    self.keep(&key, found);
+                }
+            }
+        }
+    }
+
+    /// Remembers what a background ask found, as if this session had just seen it.
+    fn keep(&mut self, key: &(String, String), found: Found) {
+        self.uses += 1;
+        if self.known.len() >= REMEMBERED_TARGETS && !self.known.contains_key(key) {
+            if let Some(stale) = self
+                .known
+                .iter()
+                .min_by_key(|(_, known)| known.used)
+                .map(|(key, _)| key.clone())
+            {
+                self.known.remove(&stale);
+            }
+        }
+        self.known.insert(
+            key.clone(),
+            Known {
+                surface: found.surface,
+                geometry_revision: found.geometry_revision,
+                description: found.description,
+                kind: found.kind,
+                bbox: found.bbox,
+                appearance: found.appearance,
+                mark: found.mark,
+                used: self.uses,
+            },
+        );
+    }
+
     async fn ground(
         &self,
         target: &Target,
@@ -541,19 +664,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
         grounding: &LocateAnythingClient,
         destination: Locality,
     ) -> Result<Rect, SightError> {
-        let now_ms = Timestamp::now().as_millis();
-        let capsule = target_capsule(target, destination, now_ms)?;
-        let request = grounding_request(snapshot, target)?;
-        let proposal: GroundingProposal = grounding
-            .ground(
-                &target.task_id,
-                &request,
-                &capsule,
-                vision_image(snapshot),
-                now_ms,
-            )
-            .await?;
-        Ok(proposal.bbox)
+        ground(target, snapshot, grounding, destination).await
     }
 
     /// One capture says something about every control this session knows in that window.
@@ -646,9 +757,23 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
         let at = Instant::now();
         let declared = self.declared(target, &surface).await;
         timings.declare_ms = at.elapsed().as_millis() as u64;
+        // An answer already on its way is the next cheapest thing after a declaration.
+        let waiting = if declared.is_none() && remembered.is_none() {
+            self.pending.remove(&key)
+        } else {
+            None
+        };
 
         let (bbox, knowledge, before) = if let Some(bbox) = declared {
             (bbox, Knowledge::Declared, None)
+        } else if let Some(handle) = waiting {
+            // Asked already, while Archie was doing something else.
+            let at = Instant::now();
+            let found = handle.await.map_err(|_| SightError::Interrupted)??;
+            timings.ground_ms = at.elapsed().as_millis() as u64;
+            let bbox = found.bbox;
+            self.keep(&key, found);
+            (bbox, Knowledge::Grounded, None)
         } else {
             match remembered {
                 Some(known)
@@ -768,4 +893,58 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
             }
         }
     }
+}
+
+/// Asks a grounding model where one target is in one capture.
+async fn ground(
+    target: &Target,
+    snapshot: &Snapshot,
+    grounding: &LocateAnythingClient,
+    destination: Locality,
+) -> Result<Rect, SightError> {
+    let now_ms = Timestamp::now().as_millis();
+    let capsule = target_capsule(target, destination, now_ms)?;
+    let request = grounding_request(snapshot, target)?;
+    let proposal: GroundingProposal = grounding
+        .ground(
+            &target.task_id,
+            &request,
+            &capsule,
+            vision_image(snapshot),
+            now_ms,
+        )
+        .await?;
+    Ok(proposal.bbox)
+}
+
+/// A position a grounding model found, ready to be remembered.
+struct Found {
+    bbox: Rect,
+    appearance: Appearance,
+    mark: u64,
+    surface: u32,
+    geometry_revision: u64,
+    description: String,
+    kind: NodeKind,
+}
+
+/// One background ask: the model, then the shape of what it pointed at, so the session can
+/// recognise that control again without asking anything.
+async fn find_in_background(
+    target: Target,
+    snapshot: Arc<Snapshot>,
+    grounding: Arc<LocateAnythingClient>,
+    destination: Locality,
+    mark: u64,
+) -> Result<Found, SightError> {
+    let bbox = ground(&target, &snapshot, &grounding, destination).await?;
+    Ok(Found {
+        bbox,
+        appearance: appearance_of(&snapshot.png, bbox)?,
+        mark,
+        surface: snapshot.surface,
+        geometry_revision: snapshot.geometry_revision,
+        description: target.description,
+        kind: target.kind,
+    })
 }

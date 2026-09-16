@@ -173,6 +173,14 @@ window is matched by the process the compositor reported for that surface, and w
 application has more than one window, by that window's size, because coordinates from the
 wrong window are a click in the wrong place.
 
+A session can be told the whole list of targets before it starts. `start_finding` takes one
+capture, asks a grounding model about everything nothing else can answer for, and returns
+at once; Archie goes on clicking what it already knows while the answers arrive, and a
+target whose answer is in by the time it comes up costs nothing more than a click.
+`archie-look --session` does that with the list on its input: in one run against a model
+told to take 800 ms, the target that needed it waited 88 ms of that, because the asking had
+happened while three other controls were being clicked.
+
 What confirms a box is its own shape: a 9×8 grid of average brightness over it, compared
 after bringing both to the same brightness. Hover, focus and a press move the whole box
 and leave the shape alone; different writing in the same place does not. It is a stand-in
@@ -338,6 +346,10 @@ only by its owner.
     twelve activations ran entirely on what the application declares: no capture and no
     model at all, 4.84 a second, every one clicked and seen to redraw. Asking the
     application took about 11 ms, the click 166–208 ms, and the form logged its six saves.
+  - With one target the application does not name and a stand-in model told to take 800 ms
+    over it, eight activations ran in 2.0 s — 3.98 a second — and the one that needed the
+    model waited 88 ms, because it had been asked while three other controls were being
+    clicked.
 
 ## Not working yet
 

@@ -204,6 +204,10 @@ from executed builds on identified hardware.
 - With that path, the same twelve activations of the demo form ran with no capture and no
   model at all: 4.84 a second, every one clicked and seen to redraw. Asking the application
   took about 11 ms and the click 166–208 ms.
+- A grounding model is no longer in the way when it is needed: a session can be given the
+  whole list of targets, take one capture, and ask about all of them in the background
+  while it works on what it already knows. In one run against a model told to take 800 ms,
+  the target that needed it waited 88 ms, and eight activations ran at 3.98 a second.
 - Live in WSLg through Nebius Token Factory, with nobody touching the mouse:
   - `moonshotai/Kimi-K3` completed one flow and placed the demo form's field and button
     within a pixel of their real centres, but returned a usable answer in only three of
