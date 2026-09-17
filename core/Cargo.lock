@@ -337,6 +337,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "archie-reflex"
+version = "0.1.0"
+dependencies = [
+ "archie-iris",
+ "png",
+ "ring",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "archie-registry"
 version = "0.1.0"
 dependencies = [
@@ -403,6 +415,7 @@ dependencies = [
  "archie-iris",
  "archie-model-runtime",
  "archie-policy",
+ "archie-reflex",
  "archie-stage",
  "archie-types",
  "archie-vault",

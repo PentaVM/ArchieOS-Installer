@@ -162,8 +162,12 @@ not in the loop. Archie asks the cheapest thing that can answer, in this order:
   no capture, no model;
 - **confirmed**: something has, so Archie looks once, and the box still holds the same
   control. One capture also re-confirms every other control it knows in that window;
+- **refound**: the box no longer holds it, so the local model in `archie-reflex` says where
+  the controls in that capture are, and the one of about the same size and the same shape,
+  nearest to where it was, is that control moved. Nothing is asked over a network;
 - **grounded**: nothing else could say, or the window resized, so a grounding model is
-  asked.
+  asked — and where the local model sees a control under that answer, the control is what
+  is clicked, not the box the model drew.
 
 The declared answer is read again for every action, so it cannot go stale, and it is only
 used when it is unambiguous: a control whose name the task's words contain, of the kind the
@@ -183,9 +187,53 @@ happened while three other controls were being clicked.
 
 What confirms a box is its own shape: a 9×8 grid of average brightness over it, compared
 after bringing both to the same brightness. Hover, focus and a press move the whole box
-and leave the shape alone; different writing in the same place does not. It is a stand-in
-for the local model IRIS's fast path is meant to have, and it decides nothing — it only
-says whether to look again or to ask again.
+and leave the shape alone; different writing in the same place does not. It decides
+nothing — it only says whether to look again or to ask again.
+
+### The local model
+
+`archie-reflex` is the fast path IRIS's Visual Reflex contract describes, trained in this
+repository in Rust: three convolutions and a head, about five thousand numbers, 5 KB
+quantised to int8, one window looked at in about 9 ms on one core. It says where the
+controls in a capture are and nothing else — not what they say, not what they do. Sight
+uses it three ways:
+
+- a grounding model points near a control; the local model knows where the control is, so
+  the box that gets clicked is the control, not the answer;
+- a box that no longer holds what it held is looked for again nearby, by size and by the
+  same 9×8 shape, without asking anything over a network (**refound**);
+- what there is to click at all, in a window that declares nothing.
+
+Nobody labelled its corpus and no screen of anybody's was in it: applications that publish
+their controls for screen readers label their own captures. `archie-teach` takes the
+capture through the stage's snapshot gate, asks that application over the accessibility bus
+where its controls are, and keeps the pair — a 160×96 grey tile, too small to read, and the
+boxes in the tile's own coordinates. The corpus in `models/reflex/corpus` is 448 windows
+and 3424 controls collected that way from `display/stage/demo/controls.qml`, which
+rearranges itself every second and a half, under Qt's Basic, Fusion and Material styles.
+
+```bash
+cargo run --release -p archie-reflex --bin archie-reflex -- train --corpus models/reflex/corpus --out models/reflex/controls --epochs 200
+cargo run --release -p archie-reflex --bin archie-reflex -- check --model models/reflex/controls --corpus models/reflex/corpus
+archie-look … --reflex models/reflex/controls
+```
+
+On the 89 windows it was never taught, at the confidence Sight requires of it, it finds
+740 of every 1000 declared controls, 672 of them near enough to click, and says 344 things
+per 1000 that nothing declared. That last number is an upper bound on mistakes rather than
+a count of them: an application declares its buttons and fields, not its labels and
+panels, so a box around something real but undeclared counts against it here. `check`
+sweeps the confidence so the trade is visible: at 600 it finds 784 and invents 453.
+
+Training is plain stochastic gradient descent, written out rather than pulled in, and
+seeded, so the same corpus gives the same model anywhere. Two numbers per epoch say
+whether a run is still a run: **spread**, how much the model's answer varies from cell to
+cell, and **alive**, how much of it still fires. The first attempt at this model learned
+for one epoch, pushed three quarters of its own rectifiers permanently under zero with too
+large a step, and then said the same thing about every cell — at a loss that looked
+respectable, because saying "nothing is here" everywhere is nearly right. Rectifiers that
+leak and a step ten times smaller fixed it; the two numbers are printed so that it cannot
+happen quietly again.
 
 ```bash
 archie-look --socket "$XDG_RUNTIME_DIR/archie-stage/control.sock" --key-file /etc/archie/stage/key --policy apps.toml --app org.qt-project.qml --find "el botón Guardar" --node form:save --kind button --model moonshotai/Kimi-K3 --screen public
@@ -219,6 +267,12 @@ archie-look --socket … --key-file … --policy apps.toml --app org.qt-project.
 - `cargo run -p archie-a11y --example declared -- <pid>` prints what one application says
   about its own controls, for telling "it declares nothing" apart from "Archie is asking
   the wrong window".
+- `--reflex <dir>` loads the local model, and without it a grounding answer stands exactly
+  as it came. Measured in WSLg on the demo form, with a stand-in model answering 15 px up
+  and to the left of the button — near it, not on it: without the local model four clicks
+  out of four landed on nothing, were reported as having changed nothing, and the form
+  never saved; with it, all four landed on the button, the form saved four times, and the
+  run went at 3.81 activations a second.
 - The crate's `grounding_stub` example answers the same contract instantly from a box
   given on the command line, for driving the loop where no model runs and for measuring
   what the loop itself costs:
@@ -376,11 +430,18 @@ only by its owner.
   a later day answered nothing at all: every request timed out while Gemma answered in
   about a second on the same account. Cloud grounding is a slow-path Cortex operation, not
   an interactive click loop.
-- **A window that declares nothing is still slow.** The fast path needs a toolkit that
-  publishes to the accessibility bus and a control with a name on it. Without both — an
-  unnamed field, a canvas, a game, a remote desktop — an activation falls back to a capture
-  and, the first time, to a grounding model. A local Reflex model is what would make that
-  fallback fast; it does not exist yet.
+- **A window that declares nothing still costs a capture.** The fastest path needs a
+  toolkit that publishes to the accessibility bus and a control with a name on it. Without
+  both — an unnamed field, a canvas, a game, a remote desktop — an activation falls back to
+  a capture, and the first time to a grounding model, which the local model then puts on a
+  real control. The local model itself costs about 9 ms; the capture around it is what
+  costs.
+- **The local model is small, and trained on one toolkit.** Its corpus is Qt windows from
+  one demo, collected on one machine in an afternoon. It finds 740 of every 1000 declared
+  controls on windows it never saw and draws 344 boxes per 1000 around things nothing
+  declared. **refound** — a control found again after the window moved it, without asking
+  anything — is covered by tests but has not been measured live: the demo that moves
+  controls draws different ones each time, so there is nothing there to find again.
 - **A capture costs 135–590 ms** when one is needed: the compositor renders the whole
   window, encodes a PNG and writes it, and Sight then reads, digests and decodes it.
   Capturing the box alone is the obvious next saving.

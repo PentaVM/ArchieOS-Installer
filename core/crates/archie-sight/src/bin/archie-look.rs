@@ -4,6 +4,7 @@
 //! archie-look --socket <path> --key-file <path> --policy <apps.toml> --app <app_id>
 //!             --model <provider model> [--endpoint <url>] [--screen public|internal]
 //!             --find <description> [--node button:save] [--kind button] [--no-a11y]
+//!             [--reflex <dir with reflex.checkpoint>]
 //!
 //! archie-look … --session      one target per line on stdin: <node> <kind> <description>
 //! ```
@@ -194,6 +195,10 @@ mod unix {
         // Applications describe their own controls for screen readers; that is the fastest
         // and most exact way to find one, and `--no-a11y` is for measuring without it.
         let ask_applications = !flag(&mut args, "--no-a11y");
+        // The local model, when one has been trained. It never names anything; it says
+        // where the controls are, which is enough to put a grounding answer on a real one
+        // and to find a control again after the window moved it.
+        let reflex = take(&mut args, "--reflex");
         let description = take(&mut args, "--find");
         let node = take(&mut args, "--node").unwrap_or_else(|| "stage:target".into());
         let kind = take(&mut args, "--kind").unwrap_or_else(|| "button".into());
@@ -248,6 +253,15 @@ mod unix {
                 Ok(bus) => sight = sight.asking(Box::new(bus)),
                 Err(error) => eprintln!(
                     "archie-look: nothing to ask about controls ({error}); looking instead"
+                ),
+            }
+        }
+
+        if let Some(dir) = &reflex {
+            match archie_reflex::Deployed::load(Path::new(dir)) {
+                Ok(model) => sight = sight.recognising(Arc::new(model)),
+                Err(error) => eprintln!(
+                    "archie-look: no local model in {dir} ({error}); every answer stands as it came"
                 ),
             }
         }
@@ -376,6 +390,7 @@ mod unix {
                             "declare_ms": timings.declare_ms,
                             "look_ms": timings.look_ms,
                             "ground_ms": timings.ground_ms,
+                            "recognise_ms": timings.recognise_ms,
                             "act_ms": timings.act_ms,
                             "verify_ms": timings.verify_ms,
                             "total_ms": timings.total_ms,

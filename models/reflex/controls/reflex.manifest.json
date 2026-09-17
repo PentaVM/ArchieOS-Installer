@@ -1,0 +1,8 @@
+{
+  "model_id": "archie.reflex-controls",
+  "revision": "1",
+  "checkpoint_sha256": "d84e5a1b1edf5f3c08d24dbaf196d1b32448096fa429713ad5b06cae831c6068",
+  "input_width": 160,
+  "input_height": 96,
+  "quantization": "int8"
+}

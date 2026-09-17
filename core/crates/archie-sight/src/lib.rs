@@ -128,6 +128,9 @@ pub struct Target {
 /// How a target's position was known when it was used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Knowledge {
+    /// It had moved, and the local model found it again in a fresh capture without
+    /// anybody being asked.
+    Refound,
     /// The application itself said where it is, through the accessibility bus. No
     /// capture, no model: the fastest and the most exact of the four.
     Declared,
@@ -144,6 +147,7 @@ impl Knowledge {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Declared => "declared",
+            Self::Refound => "refound",
             Self::Grounded => "grounded",
             Self::Trusted => "trusted",
             Self::Confirmed => "confirmed",
@@ -154,6 +158,8 @@ impl Knowledge {
 /// Where the time went, in milliseconds.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Timings {
+    /// Asking the local model what there is to click in a capture.
+    pub recognise_ms: u64,
     /// Asking the application what it declares, when there is a bus to ask.
     pub declare_ms: u64,
     /// Capturing the window, when this pass needed a capture.
@@ -223,7 +229,73 @@ impl Declares for archie_a11y::Accessibility {
     }
 }
 
-/// The IRIS source a stage surface is.
+
+/// Something that can find controls in a picture of a window, such as the local model in
+/// `archie-reflex`.
+///
+/// It says where things that look like controls are, never what they say. Naming is what
+/// an application's declarations are for, and what a grounding model is asked for when
+/// nothing declares. Like every other seam here, it advises: the stage gate still has to
+/// allow the click and the window still has to react.
+pub trait Sees: Send + Sync {
+    /// Every control it finds in that capture, in the window's own coordinates.
+    fn controls_in(&self, png: &[u8]) -> Vec<Rect>;
+}
+
+impl Sees for archie_reflex::Deployed {
+    fn controls_in(&self, png: &[u8]) -> Vec<Rect> {
+        let Ok(tile) = archie_reflex::Tile::from_png(png) else {
+            return Vec::new();
+        };
+        self.detect(&tile, RECOGNISED_CONFIDENCE)
+            .into_iter()
+            .filter_map(|found| {
+                let (x, y, width, height) =
+                    found.control.in_window(tile.source_width, tile.source_height);
+                Rect::new(x.max(0), y.max(0), width, height).ok()
+            })
+            .collect()
+    }
+}
+
+/// How sure the local model has to be before its box is worth using. Swept on the windows
+/// the trained model was never taught (`archie-reflex check`): at 600 it finds 784 of every
+/// 1000 declared controls and says 453 things per 1000 that nothing declared, at 800 it
+/// finds 740 and says 344. This moves a mouse, so it takes the surer end of that.
+pub const RECOGNISED_CONFIDENCE: u16 = 800;
+
+/// The share of the smaller box two boxes share.
+fn shared(a: Rect, b: Rect) -> f32 {
+    let x = (a.right().min(b.right()) - i64::from(a.x).max(i64::from(b.x))) as f32;
+    let y = (a.bottom().min(b.bottom()) - i64::from(a.y).max(i64::from(b.y))) as f32;
+    if x <= 0.0 || y <= 0.0 {
+        return 0.0;
+    }
+    let smaller = ((a.width * a.height).min(b.width * b.height)).max(1) as f32;
+    (x * y) / smaller
+}
+
+/// A grounding model points near a control; the local model knows where the control
+/// actually is. When the two are about the same thing, the control wins. It is the same
+/// rule wherever an answer arrives, in the foreground or from a background ask.
+fn snapped_to(sees: Option<&Arc<dyn Sees>>, png: &[u8], bbox: Rect) -> Rect {
+    nearest_control(sees, png, bbox).unwrap_or(bbox)
+}
+
+/// The control the local model sees nearest to where something else pointed, when it is
+/// near enough to be about the same thing.
+fn nearest_control(sees: Option<&Arc<dyn Sees>>, png: &[u8], bbox: Rect) -> Option<Rect> {
+    sees?
+        .controls_in(png)
+        .into_iter()
+        .filter(|control| shared(*control, bbox) >= 0.3)
+        .max_by(|a, b| {
+            shared(*a, bbox)
+                .partial_cmp(&shared(*b, bbox))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+}
+
 pub fn stage_source(surface: u32) -> Result<SourceId, SightError> {
     SourceId::new(format!("stage:{surface}")).map_err(|_| SightError::Identifier)
 }
@@ -435,6 +507,8 @@ pub struct Sight<R, W> {
     receipt_timeout: Duration,
     repaint_timeout: Duration,
     known: BTreeMap<(String, String), Known>,
+    /// The local model that finds controls in a picture, when one is loaded.
+    sees: Option<Arc<dyn Sees>>,
     /// Targets a grounding model is being asked about right now. Asking takes seconds; the
     /// loop goes on working and waits for an answer only when it needs that one.
     pending: BTreeMap<(String, String), tokio::task::JoinHandle<Result<Found, SightError>>>,
@@ -461,10 +535,70 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
             receipt_timeout: RECEIPT_TIMEOUT,
             repaint_timeout: REPAINT_TIMEOUT,
             known: BTreeMap::new(),
+            sees: None,
             pending: BTreeMap::new(),
             declares: None,
             uses: 0,
         }
+    }
+
+
+    /// Uses a local model to see what there is to click in a window, which puts a
+    /// grounding model's answer on a real control and finds a control that has moved.
+    pub fn recognising(mut self, sees: Arc<dyn Sees>) -> Self {
+        self.sees = Some(sees);
+        self
+    }
+
+
+    /// The same control somewhere else: what the local model sees that is about the size
+    /// of the box that was there, and still looks like what was there.
+    fn refind(&self, known: &Known, snapshot: &Snapshot) -> Option<Rect> {
+        let sees = self.sees.as_ref()?;
+        let mut best: Option<(Rect, f32)> = None;
+        let (was_x, was_y) = (
+            known.bbox.x as f32 + known.bbox.width as f32 / 2.0,
+            known.bbox.y as f32 + known.bbox.height as f32 / 2.0,
+        );
+        for control in sees.controls_in(&snapshot.png) {
+            let alike = |a: u32, b: u32| a as f32 >= b as f32 * 0.5 && a as f32 <= b as f32 * 1.8;
+            if !alike(control.width, known.bbox.width) || !alike(control.height, known.bbox.height) {
+                continue;
+            }
+            let Ok(now) = appearance_of(&snapshot.png, control) else {
+                continue;
+            };
+            if !now.matches(&known.appearance) {
+                continue;
+            }
+            let distance = ((control.x as f32 + control.width as f32 / 2.0 - was_x).powi(2)
+                + (control.y as f32 + control.height as f32 / 2.0 - was_y).powi(2))
+            .sqrt();
+            if best.is_none() || best.is_some_and(|(_, so_far)| distance < so_far) {
+                best = Some((control, distance));
+            }
+        }
+        best.map(|(control, _)| control)
+    }
+
+    /// Remembers a control that moved, keeping what it looked like when it was found.
+    fn moved_to(&mut self, key: &(String, String), known: &Known, bbox: Rect, mark: u64) {
+        self.uses += 1;
+        self.known.insert(
+            key.clone(),
+            Known {
+                bbox,
+                mark,
+                used: self.uses,
+                ..known.clone()
+            },
+        );
+    }
+
+
+    /// The same rule as `snapped_to`, for a session that has a capture in hand.
+    fn snapped(&self, snapshot: &Snapshot, bbox: Rect) -> Rect {
+        snapped_to(self.sees.as_ref(), &snapshot.png, bbox)
     }
 
     /// Reads applications' own accounts of their controls before looking at any pixels.
@@ -605,6 +739,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
                     grounding.clone(),
                     destination,
                     mark,
+                    self.sees.clone(),
                 )),
             );
             started += 1;
@@ -797,13 +932,24 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
                             (fresh.bbox, Knowledge::Confirmed, Some(snapshot))
                         }
                         _ => {
+                            // Not where it was. Before asking a model again, the local one
+                            // is asked whether the same control is somewhere near.
                             let at = Instant::now();
-                            let bbox = self
-                                .ground(target, &snapshot, grounding, grounding_locality)
-                                .await?;
-                            timings.ground_ms = at.elapsed().as_millis() as u64;
-                            self.remember(&key, target, &snapshot, bbox, mark)?;
-                            (bbox, Knowledge::Grounded, Some(snapshot))
+                            let moved = self.refind(&known, &snapshot);
+                            timings.recognise_ms = at.elapsed().as_millis() as u64;
+                            if let Some(bbox) = moved {
+                                self.moved_to(&key, &known, bbox, mark);
+                                (bbox, Knowledge::Refound, Some(snapshot))
+                            } else {
+                                let at = Instant::now();
+                                let bbox = self
+                                    .ground(target, &snapshot, grounding, grounding_locality)
+                                    .await?;
+                                timings.ground_ms = at.elapsed().as_millis() as u64;
+                                let bbox = self.snapped(&snapshot, bbox);
+                                self.remember(&key, target, &snapshot, bbox, mark)?;
+                                (bbox, Knowledge::Grounded, Some(snapshot))
+                            }
                         }
                     }
                 }
@@ -818,6 +964,9 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
                         .ground(target, &snapshot, grounding, grounding_locality)
                         .await?;
                     timings.ground_ms = at.elapsed().as_millis() as u64;
+                    let at = Instant::now();
+                    let bbox = self.snapped(&snapshot, bbox);
+                    timings.recognise_ms = at.elapsed().as_millis() as u64;
                     self.remember(&key, target, &snapshot, bbox, mark)?;
                     (bbox, Knowledge::Grounded, Some(snapshot))
                 }
@@ -936,8 +1085,10 @@ async fn find_in_background(
     grounding: Arc<LocateAnythingClient>,
     destination: Locality,
     mark: u64,
+    sees: Option<Arc<dyn Sees>>,
 ) -> Result<Found, SightError> {
     let bbox = ground(&target, &snapshot, &grounding, destination).await?;
+    let bbox = snapped_to(sees.as_ref(), &snapshot.png, bbox);
     Ok(Found {
         bbox,
         appearance: appearance_of(&snapshot.png, bbox)?,

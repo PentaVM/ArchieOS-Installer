@@ -23,3 +23,7 @@ distro/**            text eol=lf
 *.jpg                binary
 *.glb                binary
 *.gltf               binary
+# A tile corpus and a model checkpoint are bytes that happen to contain no zero in
+# their first few thousand, so git would otherwise take them for text.
+*.bin                binary
+*.checkpoint         binary

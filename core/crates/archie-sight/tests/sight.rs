@@ -821,3 +821,57 @@ async fn a_slow_model_does_not_stop_the_work() {
     );
     assert_eq!(requests.lock().unwrap().len(), 1);
 }
+
+/// A local model that sees two controls in every window, as `archie-reflex` does.
+struct Seeing(Vec<archie_iris::Rect>);
+
+impl archie_sight::Sees for Seeing {
+    fn controls_in(&self, _png: &[u8]) -> Vec<archie_iris::Rect> {
+        self.0.clone()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_model_that_points_near_a_control_is_put_on_it() {
+    let dir = scratch("snapped");
+    let stage = Arc::new(Mutex::new(Stage::default()));
+    let (client, _inject) = compositor(dir.clone(), stage.clone()).await;
+    // The grounding model points 12 px above and left of the button the window draws.
+    let (url, _requests) = grounding_server(
+        "nvidia/LocateAnything-3B",
+        &[(SAVE, "<box> 481, 475, 581, 575 </box>")],
+        Duration::ZERO,
+    )
+    .await;
+    let grounding = client_for(&url);
+    let button = archie_iris::Rect::new(320, 240, 64, 48).unwrap();
+    let mut sight = session(&dir, client)
+        .await
+        .recognising(std::sync::Arc::new(Seeing(vec![
+            button,
+            archie_iris::Rect::new(64, 48, 128, 24).unwrap(),
+        ])));
+
+    let sighting = sight
+        .find_and_activate(
+            &target("button:save", SAVE, PrivacyGrade::Internal),
+            &grounding,
+            Locality::Local,
+            800,
+        )
+        .await
+        .unwrap();
+    assert_eq!(sighting.knowledge, Knowledge::Grounded);
+    assert_eq!(
+        (
+            sighting.bbox.x,
+            sighting.bbox.y,
+            sighting.bbox.width,
+            sighting.bbox.height
+        ),
+        (320, 240, 64, 48),
+        "the box became the control the local model sees, not the one the model drew"
+    );
+    assert_eq!((sighting.point.x, sighting.point.y), (352, 264));
+    assert_eq!(stage.lock().unwrap().clicks, vec![(352, 264)]);
+}

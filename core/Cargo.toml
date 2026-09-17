@@ -38,6 +38,7 @@ members = [
     "crates/archie-toolpack",
     "crates/archie-sight",
     "crates/archie-a11y",
+    "crates/archie-reflex",
     "crates/archie-cerebra",
     "crates/archie-workstation",
     "crates/archie-iris",
@@ -80,6 +81,7 @@ archie-mcp-server = { path = "crates/archie-mcp-server" }
 archie-toolpack = { path = "crates/archie-toolpack" }
 archie-sight = { path = "crates/archie-sight" }
 archie-a11y = { path = "crates/archie-a11y" }
+archie-reflex = { path = "crates/archie-reflex" }
 archie-cerebra = { path = "crates/archie-cerebra" }
 archie-workstation = { path = "crates/archie-workstation" }
 archie-iris = { path = "crates/archie-iris" }

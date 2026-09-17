@@ -1,0 +1,15 @@
+[package]
+name = "archie-reflex"
+description = "A small local model that finds an application's controls in a capture, trained on what applications that declare themselves already say, so Archie can work windows that declare nothing."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+archie-iris.workspace = true
+png.workspace = true
+ring.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true

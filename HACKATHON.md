@@ -219,11 +219,34 @@ from executed builds on identified hardware.
   - On the same capture, `google/gemma-3-27b-it` kept the output format but missed by
     100 px or more; its click changed nothing and was reported as failed.
   - `openbmb/MiniCPM-V-4_5` came within 3 px but ignored the format, so IRIS refused it.
+- Added `archie-reflex`: the local model IRIS's Visual Reflex contract describes, trained
+  in this repository in Rust — three convolutions and a head, about five thousand numbers,
+  5 KB as int8, one window looked at in about 9 ms on one core. It says where a window's
+  controls are and nothing else: no words, no meaning, no decision.
+- Nobody labelled its corpus and no screen of anybody's was in it. Applications that
+  publish their controls so screen readers work label their own captures: `archie-teach`
+  takes a capture through the stage's snapshot gate, asks that application over the
+  accessibility bus where its controls are, and keeps a 160×96 grey tile — too small to
+  read — with the boxes. 448 windows and 3424 controls, from a demo window that rearranges
+  itself every second and a half under three Qt styles.
+- What it buys, measured live in WSLg: a stand-in grounding model was made to answer 15 px
+  off the demo form's button — near it, not on it. Without the local model, four clicks of
+  four landed on nothing, each was reported as having changed nothing, and the form never
+  saved. With it, the answer was put on the control the model saw underneath, all four
+  clicks landed, the form saved four times, and the run went at 3.81 activations a second.
+- On the 89 windows it was never taught it finds 740 of every 1000 declared controls, 672
+  near enough to click, and draws 344 boxes per 1000 around things nothing declared — an
+  upper bound on its mistakes, since applications declare buttons and fields but not their
+  labels and panels. `archie-reflex check` sweeps the confidence so the trade is visible.
+- The first run of that trainer collapsed: it learned for one epoch, pushed three quarters
+  of its own rectifiers permanently under zero with too large a step, then said the same
+  thing about every cell at a loss that looked respectable. Rectifiers that leak and a step
+  ten times smaller fixed it, and every epoch now prints how much the model still varies
+  and how much of it still fires, so it cannot happen quietly again.
 - Not done: menus and popups, more than one target per call, verification stronger than
-  "the control redrew", a local Reflex model for windows that declare nothing, and a run of
-  LocateAnything-3B itself. Measured cloud vision latency was 1.32–1.69 s for Gemma or
-  MiniCPM and 27.3–33.5 s for Kimi-K3, so the cloud adapter is a Cortex fallback rather
-  than the interactive loop.
+  "the control redrew", and a run of LocateAnything-3B itself. Measured cloud vision latency
+  was 1.32–1.69 s for Gemma or MiniCPM and 27.3–33.5 s for Kimi-K3, so the cloud adapter is
+  a Cortex fallback rather than the interactive loop.
 
 ### Cerebra runtime additions
 
@@ -293,8 +316,11 @@ Built for this hackathon:
   The returned proposal was mapped into Archie scene coordinates. This is one functional
   smoke test and carries no grounding-accuracy claim.
 
-The checked-in Visual Reflex checkpoint and its 1000/1000 sealed result use only the
-declared synthetic generator; they are pipeline validation, not a production accuracy
-claim. Production UI/camera adapters, OCR/grounding providers, real labelled benchmarks
-and Nebius cloud training remain unvalidated. No private frames, audio, transcripts or
-biometric examples are retained.
+The Visual Reflex checkpoint in `models/iris/champion` and its 1000/1000 sealed result
+use only the declared synthetic generator; they are pipeline validation, not a production
+accuracy claim. The separate model in `models/reflex/controls` is a real one, trained on
+captures of Qt windows that those applications labelled themselves, and what it scores on
+windows it was never taught is in `models/reflex/README.md`. Production UI/camera
+adapters, OCR/grounding providers, real labelled benchmarks and Nebius cloud training
+remain unvalidated. No private frames, audio, transcripts or biometric examples are
+retained.
