@@ -666,8 +666,13 @@ void StageController::deliver(const InputStep &step)
         break;
     case StepKind::Capture: {
         // The surface item alone, at its own size: the window as its application drew it,
-        // with no camera zoom, cursor, caption or neighbouring window in it.
+        // with no camera zoom, cursor, caption or neighbouring window in it. A command may
+        // ask for one box of it instead, and then only that box is kept.
         m_capture = Capture{m_active->command.sequence, m_active->command.surface, m_commandSocket};
+        m_capture->region = snapshot_region(m_active->command, *surface);
+        m_capture->surface_width = surface->geometry.w;
+        m_capture->surface_height = surface->geometry.h;
+        m_capture->asked_at_ms = QDateTime::currentMSecsSinceEpoch();
         m_grab = item->grabToImage();
         if (!m_grab) {
             m_capture->done = true;
@@ -715,12 +720,28 @@ void StageController::finishCapture(std::uint64_t sequence)
     if (!m_capture || m_capture->sequence != sequence || !m_grab) {
         return; // abandoned: the command stopped while the frame was rendering
     }
-    const QImage image = m_grab->image();
+    const QImage grabbed = m_grab->image();
     m_grab.reset();
     m_capture->done = true;
-    if (image.isNull()) {
+    if (grabbed.isNull()) {
         return;
     }
+    const qint64 grabbed_at_ms = QDateTime::currentMSecsSinceEpoch();
+    // The window as the compositor rendered it may be larger than the window as the
+    // application measures it; the part asked for is in the application's pixels.
+    const double sx = m_capture->surface_width > 0
+                          ? static_cast<double>(grabbed.width()) / m_capture->surface_width
+                          : 1.0;
+    const double sy = m_capture->surface_height > 0
+                          ? static_cast<double>(grabbed.height()) / m_capture->surface_height
+                          : 1.0;
+    const QRect part = QRect(qRound(m_capture->region.x * sx), qRound(m_capture->region.y * sy),
+                             qRound(m_capture->region.w * sx), qRound(m_capture->region.h * sy))
+                           .intersected(grabbed.rect());
+    if (part.isEmpty()) {
+        return;
+    }
+    const QImage image = part == grabbed.rect() ? grabbed : grabbed.copy(part);
     QByteArray png;
     {
         QBuffer buffer(&png);
@@ -728,6 +749,7 @@ void StageController::finishCapture(std::uint64_t sequence)
             return;
         }
     }
+    const qint64 encoded_at_ms = QDateTime::currentMSecsSinceEpoch();
     // Beside the control socket, in a directory only this account can enter. The pixels go
     // to one file for the connection that asked; that client verifies the digest it is
     // given and deletes the file.
@@ -748,6 +770,8 @@ void StageController::finishCapture(std::uint64_t sequence)
             {QStringLiteral("event"), QStringLiteral("snapshot")},
             {QStringLiteral("seq"), static_cast<qint64>(sequence)},
             {QStringLiteral("surface"), static_cast<qint64>(m_capture->surface)},
+            {QStringLiteral("x"), m_capture->region.x},
+            {QStringLiteral("y"), m_capture->region.y},
             {QStringLiteral("width"), image.width()},
             {QStringLiteral("height"), image.height()},
             {QStringLiteral("sha256"),
@@ -755,6 +779,13 @@ void StageController::finishCapture(std::uint64_t sequence)
             {QStringLiteral("path"), path},
         }));
     }
+    // What a capture costs, split where it can actually be changed: rendering the window
+    // is the compositor's, encoding and writing is what a smaller region saves.
+    qInfo("archie-stage: capture %llu %dx%d at %d,%d render %lld ms encode %lld ms write %lld ms %lld bytes",
+          static_cast<unsigned long long>(sequence), image.width(), image.height(),
+          m_capture->region.x, m_capture->region.y, grabbed_at_ms - m_capture->asked_at_ms,
+          encoded_at_ms - grabbed_at_ms, QDateTime::currentMSecsSinceEpoch() - encoded_at_ms,
+          static_cast<long long>(png.size()));
     tick();
 }
 

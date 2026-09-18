@@ -291,7 +291,7 @@ async fn start_camera(dir: std::path::PathBuf, camera: Camera) -> Client {
                 continue;
             };
             let mut reply = String::new();
-            if command.action == WireAction::Snapshot {
+            if matches!(command.action, WireAction::Snapshot { .. }) {
                 let path = match camera {
                     Camera::ElsewherePath => dir.join(format!("{}.png", command.seq)),
                     _ => dir.join("snapshots").join(format!("{}.png", command.seq)),
@@ -335,7 +335,7 @@ async fn a_capture_is_read_verified_and_removed() {
         .look(
             &mut client,
             &mut world,
-            &request("org.freecad.FreeCAD", StageAction::Snapshot),
+            &request("org.freecad.FreeCAD", StageAction::Snapshot { region: None }),
             &dir.join("snapshots"),
             Duration::from_secs(5),
         )
@@ -389,7 +389,7 @@ async fn a_capture_that_does_not_match_or_lives_elsewhere_is_not_believed() {
         .look(
             &mut client,
             &mut world,
-            &request("org.freecad.FreeCAD", StageAction::Snapshot),
+            &request("org.freecad.FreeCAD", StageAction::Snapshot { region: None }),
             &dir.join("snapshots"),
             Duration::from_secs(5),
         )
@@ -411,7 +411,7 @@ async fn a_capture_that_does_not_match_or_lives_elsewhere_is_not_believed() {
         .look(
             &mut client,
             &mut world,
-            &request("org.freecad.FreeCAD", StageAction::Snapshot),
+            &request("org.freecad.FreeCAD", StageAction::Snapshot { region: None }),
             &elsewhere.join("snapshots"),
             Duration::from_secs(5),
         )
@@ -447,7 +447,7 @@ async fn capturing_needs_its_own_grant() {
         .look(
             &mut client,
             &mut world,
-            &request("org.freecad.FreeCAD", StageAction::Snapshot),
+            &request("org.freecad.FreeCAD", StageAction::Snapshot { region: None }),
             &dir.join("snapshots"),
             Duration::from_secs(5),
         )

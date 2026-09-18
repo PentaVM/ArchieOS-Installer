@@ -63,7 +63,7 @@ use archie_policy::{
 };
 use archie_stage::{
     drain, wait_until, ActOutcome, ActRequest, DamageRect, LookOutcome, OperateError, Operator,
-    PointerButton, Repainted, Snapshot, StageAction, StageClient, StageWorld,
+    PointerButton, Region, Repainted, Snapshot, StageAction, StageClient, StageWorld,
 };
 use archie_types::{Locality, PrivacyGrade, Timestamp, TraceId};
 use archie_vault::{
@@ -102,6 +102,8 @@ pub enum SightError {
     Motor(#[from] MotorError),
     #[error("the capture says nothing about that box: {0}")]
     Appearance(#[from] AppearanceError),
+    #[error("the box is not inside the part of the window that was captured")]
+    OutsideCapture,
     #[error("an ask that was already under way did not finish")]
     Interrupted,
     #[error("policy did not grant a lease to act on this source")]
@@ -278,16 +280,19 @@ fn shared(a: Rect, b: Rect) -> f32 {
 /// A grounding model points near a control; the local model knows where the control
 /// actually is. When the two are about the same thing, the control wins. It is the same
 /// rule wherever an answer arrives, in the foreground or from a background ask.
-fn snapped_to(sees: Option<&Arc<dyn Sees>>, png: &[u8], bbox: Rect) -> Rect {
-    nearest_control(sees, png, bbox).unwrap_or(bbox)
+fn snapped_to(sees: Option<&Arc<dyn Sees>>, snapshot: &Snapshot, bbox: Rect) -> Rect {
+    nearest_control(sees, snapshot, bbox).unwrap_or(bbox)
 }
 
 /// The control the local model sees nearest to where something else pointed, when it is
 /// near enough to be about the same thing.
-fn nearest_control(sees: Option<&Arc<dyn Sees>>, png: &[u8], bbox: Rect) -> Option<Rect> {
+fn nearest_control(sees: Option<&Arc<dyn Sees>>, snapshot: &Snapshot, bbox: Rect) -> Option<Rect> {
     sees?
-        .controls_in(png)
+        .controls_in(&snapshot.png)
         .into_iter()
+        // The model saw a capture, which may be of one part of the window; the box it
+        // found is about the window.
+        .filter_map(|control| in_window(snapshot, control))
         .filter(|control| shared(*control, bbox) >= 0.3)
         .max_by(|a, b| {
             shared(*a, bbox)
@@ -401,6 +406,40 @@ pub fn scene_with(
     )?;
     Ok(scene)
 }
+
+/// Where a box of the window falls in a capture, which may be of one part of it. Nothing
+/// when the capture does not hold all of the box: a capture cannot say anything about what
+/// it does not contain.
+fn in_capture(snapshot: &Snapshot, bbox: Rect) -> Option<Rect> {
+    let x = bbox.x.checked_sub(snapshot.x)?;
+    let y = bbox.y.checked_sub(snapshot.y)?;
+    if x < 0 || y < 0 {
+        return None;
+    }
+    let right = u32::try_from(x).ok()?.checked_add(bbox.width)?;
+    let bottom = u32::try_from(y).ok()?.checked_add(bbox.height)?;
+    if right > snapshot.width || bottom > snapshot.height {
+        return None;
+    }
+    Rect::new(x, y, bbox.width, bbox.height).ok()
+}
+
+/// The reverse: a box the local model found in a capture, put back in the window.
+fn in_window(snapshot: &Snapshot, bbox: Rect) -> Option<Rect> {
+    Rect::new(
+        bbox.x.checked_add(snapshot.x)?,
+        bbox.y.checked_add(snapshot.y)?,
+        bbox.width,
+        bbox.height,
+    )
+    .ok()
+}
+
+/// How much context a confirming capture takes around the boxes it is about.
+const CONFIRM_MARGIN_PX: u32 = 8;
+/// A part of the window is asked for only when it is smaller than this fraction of it;
+/// two opposite corners are no saving over the window that holds them both.
+const CONFIRM_SHARE: u64 = 2;
 
 /// Where a control is expected to redraw itself when it reacts.
 fn watched(bbox: Rect) -> DamageRect {
@@ -560,12 +599,16 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
             known.bbox.x as f32 + known.bbox.width as f32 / 2.0,
             known.bbox.y as f32 + known.bbox.height as f32 / 2.0,
         );
-        for control in sees.controls_in(&snapshot.png) {
+        for seen in sees.controls_in(&snapshot.png) {
             let alike = |a: u32, b: u32| a as f32 >= b as f32 * 0.5 && a as f32 <= b as f32 * 1.8;
-            if !alike(control.width, known.bbox.width) || !alike(control.height, known.bbox.height) {
+            if !alike(seen.width, known.bbox.width) || !alike(seen.height, known.bbox.height) {
                 continue;
             }
-            let Ok(now) = appearance_of(&snapshot.png, control) else {
+            let Ok(now) = appearance_of(&snapshot.png, seen) else {
+                continue;
+            };
+            // Measured in the capture, compared in the window.
+            let Some(control) = in_window(snapshot, seen) else {
                 continue;
             };
             if !now.matches(&known.appearance) {
@@ -598,7 +641,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
 
     /// The same rule as `snapped_to`, for a session that has a capture in hand.
     fn snapped(&self, snapshot: &Snapshot, bbox: Rect) -> Rect {
-        snapped_to(self.sees.as_ref(), &snapshot.png, bbox)
+        snapped_to(self.sees.as_ref(), snapshot, bbox)
     }
 
     /// Reads applications' own accounts of their controls before looking at any pixels.
@@ -645,16 +688,21 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
         self.known.clear();
     }
 
-    /// Captures the application's window through the stage gate.
+    /// Captures the application's window through the stage gate, or one part of it.
+    ///
+    /// A capture is the slow step of this loop and the only one that discloses anything,
+    /// so asking for the box a control is in, rather than for the window, is worth doing
+    /// wherever the box is all that has to be seen.
     pub async fn look(
         &mut self,
         app_id: &str,
         surface: Option<u32>,
+        region: Option<Region>,
     ) -> Result<Snapshot, SightError> {
         let request = ActRequest {
             app_id: app_id.to_string(),
             surface,
-            action: StageAction::Snapshot,
+            action: StageAction::Snapshot { region },
             text_grade: PrivacyGrade::Public,
             principal: self.principal.clone(),
             task_id: None,
@@ -725,7 +773,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
                 None => {
                     let mark = self.world.damage_mark();
                     let snapshot =
-                        Arc::new(self.look(&target.app_id, Some(surface.surface)).await?);
+                        Arc::new(self.look(&target.app_id, Some(surface.surface), None).await?);
                     self.confirm_known(&snapshot, mark);
                     captured.insert(surface.surface, (snapshot.clone(), mark));
                     (snapshot, mark)
@@ -802,6 +850,30 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
         ground(target, snapshot, grounding, destination).await
     }
 
+    /// What a capture has to hold to confirm what this session knows in that window: the
+    /// box in question and every other box it knows there, with a little context around
+    /// them. Nothing when that already comes to most of the window, because then the
+    /// window is the simpler ask and no slower.
+    fn confirming_region(&self, surface: &archie_stage::StageSurface, bbox: Rect) -> Option<Region> {
+        let of = |bbox: &Rect| Region::new(bbox.x, bbox.y, bbox.width, bbox.height);
+        let mut region = of(&bbox);
+        for known in self.known.values() {
+            if known.surface == surface.surface
+                && known.geometry_revision == surface.geometry_revision
+            {
+                region = region.union(&of(&known.bbox));
+            }
+        }
+        let (width, height) = (
+            u32::try_from(surface.width).ok()?,
+            u32::try_from(surface.height).ok()?,
+        );
+        let region = region.grown(CONFIRM_MARGIN_PX).clamped(width, height)?;
+        let window = u64::from(width) * u64::from(height);
+        let asked = u64::from(region.width) * u64::from(region.height);
+        (asked * CONFIRM_SHARE < window).then_some(region)
+    }
+
     /// One capture says something about every control this session knows in that window.
     /// The ones still where they were stay usable without another look; the ones that are
     /// not are forgotten rather than clicked on faith.
@@ -813,7 +885,12 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
             {
                 continue;
             }
-            match appearance_of(&snapshot.png, known.bbox) {
+            // A capture of one box says nothing about a control outside it, so that
+            // control is neither confirmed nor forgotten.
+            let Some(seen) = in_capture(snapshot, known.bbox) else {
+                continue;
+            };
+            match appearance_of(&snapshot.png, seen) {
                 Ok(now) if now.matches(&known.appearance) => known.mark = mark,
                 _ => forget.push(key.clone()),
             }
@@ -831,7 +908,10 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
         bbox: Rect,
         mark: u64,
     ) -> Result<(), SightError> {
-        let appearance = appearance_of(&snapshot.png, bbox)?;
+        let appearance = match in_capture(snapshot, bbox) {
+            Some(seen) => appearance_of(&snapshot.png, seen)?,
+            None => return Err(SightError::OutsideCapture),
+        };
         self.uses += 1;
         if self.known.len() >= REMEMBERED_TARGETS && !self.known.contains_key(key) {
             if let Some(stale) = self
@@ -921,10 +1001,15 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
                     (known.bbox, Knowledge::Trusted, None)
                 }
                 Some(known) => {
-                    // Something was drawn where it was: look once before believing the old box.
+                    // Something was drawn where it was: look once before believing the old
+                    // box. Looking means the boxes this session knows in that window, not
+                    // the window, whenever those come to less of it.
                     let mark = self.world.damage_mark();
                     let at = Instant::now();
-                    let snapshot = self.look(&target.app_id, Some(known.surface)).await?;
+                    let part = self.confirming_region(&surface, known.bbox);
+                    let snapshot = self
+                        .look(&target.app_id, Some(known.surface), part)
+                        .await?;
                     timings.look_ms = at.elapsed().as_millis() as u64;
                     self.confirm_known(&snapshot, mark);
                     match self.known.get(&key).cloned() {
@@ -932,23 +1017,46 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
                             (fresh.bbox, Knowledge::Confirmed, Some(snapshot))
                         }
                         _ => {
-                            // Not where it was. Before asking a model again, the local one
-                            // is asked whether the same control is somewhere near.
-                            let at = Instant::now();
-                            let moved = self.refind(&known, &snapshot);
-                            timings.recognise_ms = at.elapsed().as_millis() as u64;
-                            if let Some(bbox) = moved {
-                                self.moved_to(&key, &known, bbox, mark);
-                                (bbox, Knowledge::Refound, Some(snapshot))
-                            } else {
+                            // Not where it was, and a capture of the box it was in cannot
+                            // say where it went: the window is looked at whole first.
+                            let (snapshot, settled) = if part.is_some() {
                                 let at = Instant::now();
-                                let bbox = self
-                                    .ground(target, &snapshot, grounding, grounding_locality)
-                                    .await?;
-                                timings.ground_ms = at.elapsed().as_millis() as u64;
-                                let bbox = self.snapped(&snapshot, bbox);
-                                self.remember(&key, target, &snapshot, bbox, mark)?;
-                                (bbox, Knowledge::Grounded, Some(snapshot))
+                                let whole =
+                                    self.look(&target.app_id, Some(known.surface), None).await?;
+                                timings.look_ms += at.elapsed().as_millis() as u64;
+                                self.confirm_known(&whole, mark);
+                                // It may only have been mid-redraw a moment ago, and the
+                                // window says so now.
+                                let settled = self
+                                    .known
+                                    .get(&key)
+                                    .cloned()
+                                    .filter(|fresh| fresh.mark == mark);
+                                (whole, settled)
+                            } else {
+                                (snapshot, None)
+                            };
+                            if let Some(fresh) = settled {
+                                (fresh.bbox, Knowledge::Confirmed, Some(snapshot))
+                            } else {
+                                // Before asking a model again, the local one is asked
+                                // whether the same control is somewhere near.
+                                let at = Instant::now();
+                                let moved = self.refind(&known, &snapshot);
+                                timings.recognise_ms = at.elapsed().as_millis() as u64;
+                                if let Some(bbox) = moved {
+                                    self.moved_to(&key, &known, bbox, mark);
+                                    (bbox, Knowledge::Refound, Some(snapshot))
+                                } else {
+                                    let at = Instant::now();
+                                    let bbox = self
+                                        .ground(target, &snapshot, grounding, grounding_locality)
+                                        .await?;
+                                    timings.ground_ms = at.elapsed().as_millis() as u64;
+                                    let bbox = self.snapped(&snapshot, bbox);
+                                    self.remember(&key, target, &snapshot, bbox, mark)?;
+                                    (bbox, Knowledge::Grounded, Some(snapshot))
+                                }
                             }
                         }
                     }
@@ -956,7 +1064,11 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
                 None => {
                     let mark = self.world.damage_mark();
                     let at = Instant::now();
-                    let snapshot = self.look(&target.app_id, Some(surface.surface)).await?;
+                    // Nothing is known about this target, so a model has to see the
+                    // window it is in, not a box of it.
+                    let snapshot = self
+                        .look(&target.app_id, Some(surface.surface), None)
+                        .await?;
                     timings.look_ms = at.elapsed().as_millis() as u64;
                     self.confirm_known(&snapshot, mark);
                     let at = Instant::now();
@@ -1088,10 +1200,11 @@ async fn find_in_background(
     sees: Option<Arc<dyn Sees>>,
 ) -> Result<Found, SightError> {
     let bbox = ground(&target, &snapshot, &grounding, destination).await?;
-    let bbox = snapped_to(sees.as_ref(), &snapshot.png, bbox);
+    let bbox = snapped_to(sees.as_ref(), &snapshot, bbox);
+    let seen = in_capture(&snapshot, bbox).ok_or(SightError::OutsideCapture)?;
     Ok(Found {
         bbox,
-        appearance: appearance_of(&snapshot.png, bbox)?,
+        appearance: appearance_of(&snapshot.png, seen)?,
         mark,
         surface: snapshot.surface,
         geometry_revision: snapshot.geometry_revision,

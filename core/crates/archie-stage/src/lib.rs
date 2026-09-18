@@ -61,7 +61,7 @@ pub mod protocol;
 pub mod seal;
 
 pub use action::{
-    ActionKind, Key, KeyChord, Modifier, NamedKey, PointerButton, StageAction, StageText,
+    ActionKind, Key, KeyChord, Modifier, NamedKey, PointerButton, Region, StageAction, StageText,
 };
 pub use gate::{
     stage_resource, AuthorizedStageCommand, StageAdmission, StageGate, StageProposal, StageReceipt,

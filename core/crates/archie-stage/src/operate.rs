@@ -220,7 +220,7 @@ impl Operator {
         R: AsyncRead + Unpin,
         W: AsyncWrite + Unpin,
     {
-        if request.action != StageAction::Snapshot {
+        if !matches!(request.action, StageAction::Snapshot { .. }) {
             return Err(OperateError::NotACapture);
         }
         let performed = self
@@ -241,6 +241,8 @@ impl Operator {
             surface: surface.surface,
             app_id: surface.app_id,
             geometry_revision: surface.geometry_revision,
+            x: capture.x,
+            y: capture.y,
             width: capture.width,
             height: capture.height,
             captured_at_ms: performed.sent_at_ms,
@@ -354,10 +356,24 @@ impl Operator {
                             sent_at_ms: now.as_millis(),
                         });
                     }
-                    Some(StageEvent::Snapshot { seq, surface: captured, width, height, sha256, path })
-                        if seq == sealed.sequence() && captured == surface.surface =>
-                    {
-                        capture = Some(CaptureEvent { width, height, sha256, path });
+                    Some(StageEvent::Snapshot {
+                        seq,
+                        surface: captured,
+                        x,
+                        y,
+                        width,
+                        height,
+                        sha256,
+                        path,
+                    }) if seq == sealed.sequence() && captured == surface.surface => {
+                        capture = Some(CaptureEvent {
+                            x,
+                            y,
+                            width,
+                            height,
+                            sha256,
+                            path,
+                        });
                     }
                     Some(event) => world.apply(&event),
                     None => return Err(OperateError::Closed),
@@ -375,6 +391,8 @@ struct Performed {
 }
 
 struct CaptureEvent {
+    x: i32,
+    y: i32,
     width: u32,
     height: u32,
     sha256: String,
@@ -392,6 +410,11 @@ pub struct Snapshot {
     pub app_id: String,
     /// The surface's geometry revision the capture was requested against.
     pub geometry_revision: u64,
+    /// Where in the surface this capture starts. Zero for a whole window; the corner of
+    /// the part asked for otherwise, which is what puts its pixels back in the window's
+    /// own coordinates.
+    pub x: i32,
+    pub y: i32,
     pub width: u32,
     pub height: u32,
     pub captured_at_ms: i64,
@@ -405,6 +428,8 @@ impl std::fmt::Debug for Snapshot {
         f.debug_struct("Snapshot")
             .field("surface", &self.surface)
             .field("app_id", &self.app_id)
+            .field("x", &self.x)
+            .field("y", &self.y)
             .field("width", &self.width)
             .field("height", &self.height)
             .field("bytes", &self.png.len())

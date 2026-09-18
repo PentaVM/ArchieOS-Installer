@@ -129,9 +129,28 @@ void a_verifying_payload_must_still_be_a_command() {
     CHECK(refused(R"({"kind":"scroll","x":1,"y":1,"steps_x":0,"steps_y":61})").error == QStringLiteral("command_malformed"));
     CHECK_BECAUSE(refused(R"({"kind":"snapshot","x":0,"y":0,"width":10,"height":10})").error ==
                       QStringLiteral("command_malformed"),
-                  "a capture takes the whole surface; a caller cannot aim it at part of another window");
+                  "the part of a surface to capture is one region, not four loose numbers");
+    CHECK_BECAUSE(refused(R"({"kind":"snapshot","region":{"x":1,"y":2,"width":0,"height":9}})").error ==
+                      QStringLiteral("command_malformed"),
+                  "a region with no pixels in it would read as the whole window");
+    CHECK(refused(R"({"kind":"snapshot","region":{"x":-1,"y":2,"width":4,"height":9}})").error ==
+          QStringLiteral("command_malformed"));
+    CHECK(refused(R"({"kind":"snapshot","region":{"x":1,"y":2,"width":4}})").error ==
+          QStringLiteral("command_malformed"));
+    CHECK(refused(R"({"kind":"snapshot","region":{"x":1,"y":2,"width":4,"height":9,"why":"no"}})").error ==
+          QStringLiteral("command_malformed"));
     const auto look = refused(R"({"kind":"snapshot"})");
     CHECK(look.command.has_value() && look.command->command.action == archie::visual::StageAction::Snapshot);
+    CHECK_BECAUSE(look.command && look.command->command.local_x == 0 && look.command->command.to_local_x == 0,
+                  "naming no region is asking for the whole surface");
+    // A part of the surface travels as two corners, which is what the stage re-checks.
+    const auto part = refused(R"({"kind":"snapshot","region":{"x":12,"y":40,"width":80,"height":27}})");
+    CHECK(part.command.has_value());
+    if (part.command) {
+        CHECK(part.command->command.action == archie::visual::StageAction::Snapshot);
+        CHECK(part.command->command.local_x == 12 && part.command->command.local_y == 40);
+        CHECK(part.command->command.to_local_x == 92 && part.command->command.to_local_y == 67);
+    }
 }
 
 void text_and_chords_arrive_as_units() {

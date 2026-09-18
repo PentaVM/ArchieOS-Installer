@@ -133,7 +133,7 @@ mod unix {
             else {
                 return Err(format!("no window of {app} is on the stage"));
             };
-            let snapshot = match sight.look(&app, Some(surface.0)).await {
+            let snapshot = match sight.look(&app, Some(surface.0), None).await {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
                     eprintln!("archie-teach: round {round} was not captured: {error}");

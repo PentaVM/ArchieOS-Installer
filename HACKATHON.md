@@ -243,6 +243,15 @@ from executed builds on identified hardware.
   thing about every cell at a loss that looked respectable. Rectifiers that leak and a step
   ten times smaller fixed it, and every epoch now prints how much the model still varies
   and how much of it still fires, so it cannot happen quietly again.
+- A capture no longer means a window. A snapshot command may name one box of its surface;
+  the box is sealed with the command, re-checked against the window as it is now, and the
+  compositor encodes only those pixels. A look that only confirms what the session knows
+  asks for those boxes — 355×88 instead of 1534×696 on the demo form — so it discloses less
+  and costs less: encoding fell from 43 ms to 1–4 ms and a whole look from 135–590 ms to
+  35–119 ms. The same twelve activations that ran at 1.56 a second when every look captured
+  the window now run at 4.07, and eight of one control at 6.05, every one verified by the
+  window redrawing. What is left of a capture is Qt rendering the item, 22–98 ms whatever
+  size is asked for; at agent tempo the pointer's own 166–176 ms is now the slow part.
 - Not done: menus and popups, more than one target per call, verification stronger than
   "the control redrew", and a run of LocateAnything-3B itself. Measured cloud vision latency
   was 1.32–1.69 s for Gemma or MiniCPM and 27.3–33.5 s for Kimi-K3, so the cloud adapter is

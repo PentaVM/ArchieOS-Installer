@@ -315,8 +315,30 @@ DecodeResult decode_command(const QByteArray& raw_line, const QByteArray& key, s
         if (!exact_keys(action, {"kind"})) return fail("command_malformed");
         c.action = StageAction::Focus;
     } else if (kind == QLatin1String("snapshot")) {
-        if (!exact_keys(action, {"kind"})) return fail("command_malformed");
         c.action = StageAction::Snapshot;
+        // No region is the whole surface. A region is one box of it, which is both faster
+        // to render and less of the window disclosed.
+        if (exact_keys(action, {"kind"})) {
+            // Nothing more to read.
+        } else if (exact_keys(action, {"kind", "region"})) {
+            if (!action.value(QLatin1String("region")).isObject()) return fail("command_malformed");
+            const QJsonObject region = action.value(QLatin1String("region")).toObject();
+            if (!exact_keys(region, {"x", "y", "width", "height"})) return fail("command_malformed");
+            const auto x = coordinate(region.value(QLatin1String("x")));
+            const auto y = coordinate(region.value(QLatin1String("y")));
+            const auto width = integer(region.value(QLatin1String("width")), 1, kMaxCoordinate);
+            const auto height = integer(region.value(QLatin1String("height")), 1, kMaxCoordinate);
+            if (!x || !y || !width || !height) return fail("command_malformed");
+            const std::int64_t right = static_cast<std::int64_t>(*x) + *width;
+            const std::int64_t bottom = static_cast<std::int64_t>(*y) + *height;
+            if (right > kMaxCoordinate || bottom > kMaxCoordinate) return fail("command_malformed");
+            c.local_x = *x;
+            c.local_y = *y;
+            c.to_local_x = static_cast<int>(right);
+            c.to_local_y = static_cast<int>(bottom);
+        } else {
+            return fail("command_malformed");
+        }
     } else {
         return fail("command_malformed");
     }

@@ -303,12 +303,21 @@ impl StageGate {
                     }
                 }
             }
+            StageAction::Snapshot {
+                region: Some(region),
+            } => {
+                // A part of a window with no pixels in it is not a smaller ask, it is a
+                // malformed one, and the compositor would read it as "the whole window".
+                if region.is_empty() {
+                    return refuse(StageRefusal::CoordinateOutOfRange);
+                }
+            }
             StageAction::Move { .. }
             | StageAction::Click { .. }
             | StageAction::DoubleClick { .. }
             | StageAction::Drag { .. }
             | StageAction::Focus
-            | StageAction::Snapshot => {}
+            | StageAction::Snapshot { .. } => {}
         }
         if app.requires_approval.contains(&kind) {
             approval = Some("policy requires approval for this action");

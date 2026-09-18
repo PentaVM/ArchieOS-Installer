@@ -546,6 +546,50 @@ void an_agent_tempo_is_the_same_playback_on_a_faster_clock() {
     CHECK_BECAUSE(capture.state() == PlaybackState::Finished,
                   "an agent at work does not wait 450 ms for anyone to see that it looked");
 }
+void a_capture_can_ask_for_one_box_instead_of_the_whole_window() {
+    CASE("a snapshot may name a part of the surface, and only a real part of it");
+
+    SurfaceTable table = table_with_terminal();  // 800x600 at 100,80
+    InputAuthority authority;
+
+    StageCommand whole = click_on(table, 7, 0, 0);
+    whole.action = StageAction::Snapshot;
+    CHECK_BECAUSE(!check_command(whole, table, authority, 0, T0).has_value(),
+                  "naming no part is asking for the whole surface, as before");
+    CHECK_EQ(snapshot_region(whole, *table.find(7)), (IRect{0, 0, 800, 600}));
+
+    StageCommand box = whole;
+    box.local_x = 120;
+    box.local_y = 40;
+    box.to_local_x = 200;
+    box.to_local_y = 67;
+    CHECK_BECAUSE(!check_command(box, table, authority, 0, T0).has_value(),
+                  "a box inside the window is a box the window has");
+    CHECK_EQ(snapshot_region(box, *table.find(7)), (IRect{120, 40, 80, 27}));
+
+    StageCommand past = box;
+    past.to_local_x = 801;
+    CHECK_BECAUSE(check_command(past, table, authority, 0, T0) == CommandRefusal::OutsideSurface,
+                  "a capture cannot ask for pixels the window does not have");
+    StageCommand behind = box;
+    behind.local_y = -1;
+    CHECK(check_command(behind, table, authority, 0, T0) == CommandRefusal::OutsideSurface);
+    StageCommand inside_out = box;
+    inside_out.to_local_x = box.local_x;
+    CHECK_BECAUSE(check_command(inside_out, table, authority, 0, T0) == CommandRefusal::OutsideSurface,
+                  "an empty box is not the whole window by accident");
+
+    // The command was checked against the surface as it was; by the time it is rendered
+    // the window may be smaller. What is left of the box is captured, not what is past it.
+    SurfaceTable shrunk = table_with_terminal();
+    shrunk.move(7, IRect{100, 80, 150, 600});
+    CHECK_EQ(snapshot_region(box, *shrunk.find(7)), (IRect{120, 40, 30, 27}));
+    StageCommand gone = box;
+    gone.local_x = 400;
+    gone.to_local_x = 480;
+    CHECK_BECAUSE(snapshot_region(gone, *shrunk.find(7)) == (IRect{0, 0, 150, 600}),
+                  "nothing left of the box is the whole surface, never a negative rectangle");
+}
 }  // namespace
 
 int main() {
@@ -561,5 +605,6 @@ int main() {
     typing_and_chords_are_counted_not_carried();
     a_capture_is_checked_like_a_touch_and_held_on_screen();
     an_agent_tempo_is_the_same_playback_on_a_faster_clock();
+    a_capture_can_ask_for_one_box_instead_of_the_whole_window();
     return archie::visual::test::report();
 }

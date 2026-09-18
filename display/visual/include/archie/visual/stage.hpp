@@ -231,10 +231,12 @@ struct StageCommand {
     SurfaceId surface = 0;
     std::string app_id;
     std::uint64_t geometry_revision = 0;
-    /// Target, in the surface's own logical pixels.
+    /// Target, in the surface's own logical pixels. For `Snapshot`, the top-left corner of
+    /// the part to capture.
     int local_x = 0;
     int local_y = 0;
-    /// Drag end, in the surface's own logical pixels.
+    /// Drag end, in the surface's own logical pixels. For `Snapshot`, the corner past the
+    /// bottom-right of the part to capture; an empty rectangle means the whole surface.
     int to_local_x = 0;
     int to_local_y = 0;
     PointerButton button = PointerButton::Left;
@@ -277,6 +279,13 @@ enum class CommandRefusal {
                                                           const InputAuthority& authority,
                                                           std::uint64_t last_sequence,
                                                           std::int64_t now_ms);
+
+/// The part of the surface a `Snapshot` command asks for, in the surface's own pixels,
+/// already clipped to it. A command that names no part asks for the whole surface.
+///
+/// Looking at the box a control is in, rather than at the whole window, is both faster
+/// and less seen: the compositor encodes fewer pixels and the agent is handed fewer.
+[[nodiscard]] IRect snapshot_region(const StageCommand& command, const Surface& surface) noexcept;
 
 /// Output coordinates of a surface-local point.
 [[nodiscard]] PointF to_output(const Surface& surface, int local_x, int local_y) noexcept;

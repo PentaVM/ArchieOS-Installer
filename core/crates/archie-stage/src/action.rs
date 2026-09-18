@@ -351,8 +351,97 @@ pub enum StageAction {
         chord: KeyChord,
     },
     Focus,
-    /// Capture what the whole surface shows.
-    Snapshot,
+    /// Capture what the surface shows: all of it, or one part of it.
+    Snapshot {
+        region: Option<Region>,
+    },
+}
+
+/// The part of a surface a capture is about, in the surface's own pixels.
+///
+/// Looking at the box a control is in, rather than at the whole window, is both faster and
+/// less seen: the compositor renders the window either way, but it encodes and hands over
+/// only what was asked for, and the agent is given no pixels it did not need.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Region {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl Region {
+    pub fn new(x: i32, y: i32, width: u32, height: u32) -> Self {
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    /// The corner past the bottom-right, which is how the compositor is told the size.
+    pub fn far(&self) -> (i32, i32) {
+        (
+            self.x.saturating_add_unsigned(self.width),
+            self.y.saturating_add_unsigned(self.height),
+        )
+    }
+
+    /// A region with no pixels in it asks for nothing, and is never sent.
+    pub fn is_empty(&self) -> bool {
+        self.width == 0 || self.height == 0
+    }
+
+    /// The same region kept inside a surface of that size, or nothing left of it.
+    pub fn clamped(&self, width: u32, height: u32) -> Option<Self> {
+        let x = self.x.max(0);
+        let y = self.y.max(0);
+        let (far_x, far_y) = self.far();
+        let right = far_x.min(i32::try_from(width).unwrap_or(i32::MAX));
+        let bottom = far_y.min(i32::try_from(height).unwrap_or(i32::MAX));
+        if right <= x || bottom <= y {
+            return None;
+        }
+        Some(Self {
+            x,
+            y,
+            width: (right - x) as u32,
+            height: (bottom - y) as u32,
+        })
+    }
+
+    /// The smallest region holding both.
+    pub fn union(&self, other: &Self) -> Self {
+        let x = self.x.min(other.x);
+        let y = self.y.min(other.y);
+        let (a, b) = self.far();
+        let (c, d) = other.far();
+        Self {
+            x,
+            y,
+            width: (a.max(c) - x).max(0) as u32,
+            height: (b.max(d) - y).max(0) as u32,
+        }
+    }
+
+    /// The same region with `margin` pixels of context on every side.
+    pub fn grown(&self, margin: u32) -> Self {
+        Self {
+            x: self.x.saturating_sub_unsigned(margin),
+            y: self.y.saturating_sub_unsigned(margin),
+            width: self.width.saturating_add(margin.saturating_mul(2)),
+            height: self.height.saturating_add(margin.saturating_mul(2)),
+        }
+    }
+
+    /// Whether this region holds all of that one.
+    pub fn holds(&self, other: &Self) -> bool {
+        let (a, b) = self.far();
+        let (c, d) = other.far();
+        other.x >= self.x && other.y >= self.y && c <= a && d <= b
+    }
 }
 
 impl StageAction {
@@ -366,7 +455,7 @@ impl StageAction {
             Self::Text { .. } => ActionKind::Text,
             Self::Key { .. } => ActionKind::Key,
             Self::Focus => ActionKind::Focus,
-            Self::Snapshot => ActionKind::Snapshot,
+            Self::Snapshot { .. } => ActionKind::Snapshot,
         }
     }
 
@@ -380,7 +469,14 @@ impl StageAction {
             Self::Drag {
                 x, y, to_x, to_y, ..
             } => vec![(*x, *y), (*to_x, *to_y)],
-            Self::Text { .. } | Self::Key { .. } | Self::Focus | Self::Snapshot => Vec::new(),
+            // A capture touches nothing, but a part of a surface is still two corners of
+            // it, and they are checked like any other coordinates.
+            Self::Snapshot {
+                region: Some(region),
+            } => vec![(region.x, region.y), region.far()],
+            Self::Text { .. } | Self::Key { .. } | Self::Focus | Self::Snapshot { .. } => {
+                Vec::new()
+            }
         }
     }
 }

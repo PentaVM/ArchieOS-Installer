@@ -50,6 +50,8 @@ fn scratch(name: &str) -> PathBuf {
 struct Stage {
     clicks: Vec<(i32, i32)>,
     captures: usize,
+    /// What each capture asked for: the whole window, or one part of it.
+    captured: Vec<Option<archie_stage::Region>>,
     /// How many marks the button is drawn with. Changing it redraws a different control.
     bars: usize,
     /// Whether a click makes the window redraw where it landed.
@@ -60,6 +62,7 @@ impl Default for Stage {
     fn default() -> Self {
         Self {
             clicks: Vec::new(),
+            captured: Vec::new(),
             captures: 0,
             bars: 3,
             reacts: true,
@@ -67,8 +70,9 @@ impl Default for Stage {
     }
 }
 
-/// A 640x480 window with a field and a button in it, in grey.
-fn window_png(bars: usize) -> Vec<u8> {
+/// A 640x480 window with a field and a button in it, in grey; or the part of it a capture
+/// asked for, cropped exactly as the compositor crops it.
+fn window_png(bars: usize, region: Option<archie_stage::Region>) -> (Vec<u8>, archie_stage::Region) {
     let (width, height) = (640_u32, 480_u32);
     let mut pixels = vec![0xf2_u8; (width * height) as usize];
     let mut draw = |(bx, by, bw, bh): (u32, u32, u32, u32), marks: usize| {
@@ -92,16 +96,25 @@ fn window_png(bars: usize) -> Vec<u8> {
     };
     draw(FIELD, 2);
     draw(BUTTON, bars);
+    let region = region
+        .and_then(|region| region.clamped(width, height))
+        .unwrap_or(archie_stage::Region::new(0, 0, width, height));
+    let part: Vec<u8> = (0..region.height)
+        .flat_map(|row| {
+            let from = ((region.y as u32 + row) * width + region.x as u32) as usize;
+            pixels[from..from + region.width as usize].to_vec()
+        })
+        .collect();
     let mut png = Vec::new();
-    let mut encoder = png::Encoder::new(&mut png, width, height);
+    let mut encoder = png::Encoder::new(&mut png, region.width, region.height);
     encoder.set_color(png::ColorType::Grayscale);
     encoder.set_depth(png::BitDepth::Eight);
     encoder
         .write_header()
         .unwrap()
-        .write_image_data(&pixels)
+        .write_image_data(&part)
         .unwrap();
-    png
+    (png, region)
 }
 
 type Pipe = StageClient<
@@ -154,19 +167,24 @@ async fn compositor(
             last = command.seq;
             let mut reply = String::new();
             match command.action {
-                WireAction::Snapshot => {
-                    let png = {
+                WireAction::Snapshot { region } => {
+                    let (png, part) = {
                         let mut stage = stage.lock().unwrap();
                         stage.captures += 1;
-                        window_png(stage.bars)
+                        stage.captured.push(region);
+                        window_png(stage.bars, region)
                     };
                     let path = dir.join("snapshots").join(format!("{}.png", command.seq));
                     std::fs::write(&path, &png).unwrap();
                     let digest =
                         hex::encode(ring::digest::digest(&ring::digest::SHA256, &png).as_ref());
                     reply.push_str(&format!(
-                        "{{\"event\":\"snapshot\",\"seq\":{},\"surface\":4,\"width\":640,\"height\":480,\"sha256\":\"{digest}\",\"path\":{}}}\n",
+                        "{{\"event\":\"snapshot\",\"seq\":{},\"surface\":4,\"x\":{},\"y\":{},\"width\":{},\"height\":{},\"sha256\":\"{digest}\",\"path\":{}}}\n",
                         command.seq,
+                        part.x,
+                        part.y,
+                        part.width,
+                        part.height,
                         serde_json::to_string(&path.to_string_lossy()).unwrap()
                     ));
                 }
@@ -874,4 +892,57 @@ async fn a_model_that_points_near_a_control_is_put_on_it() {
     );
     assert_eq!((sighting.point.x, sighting.point.y), (352, 264));
     assert_eq!(stage.lock().unwrap().clicks, vec![(352, 264)]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_look_that_only_confirms_asks_for_the_boxes_and_not_the_window() {
+    let dir = scratch("region");
+    let stage = Arc::new(Mutex::new(Stage::default()));
+    let (client, _inject) = compositor(dir.clone(), stage.clone()).await;
+    let (url, _requests) = grounding_server(
+        "nvidia/LocateAnything-3B",
+        &[
+            (SAVE, "<box> 500, 500, 600, 600 </box>"),
+            (NOTE, "<box> 100, 100, 300, 150 </box>"),
+        ],
+        Duration::ZERO,
+    )
+    .await;
+    let grounding = client_for(&url);
+    let mut sight = session(&dir, client).await;
+    let save = target("button:save", SAVE, PrivacyGrade::Internal);
+    let mut note = target("input:note", NOTE, PrivacyGrade::Internal);
+    note.kind = NodeKind::Input;
+
+    // Found once each, which needs the window, and then pressed again, which does not:
+    // its own click redrew it, so the box has to be looked at before it is believed.
+    for (operation, target) in [(300, &save), (301, &note), (302, &save), (303, &note)] {
+        let sighting = sight
+            .find_and_activate(target, &grounding, Locality::Local, operation)
+            .await
+            .unwrap();
+        assert_eq!(sighting.outcome.outcome_code, "clicked_and_repainted");
+    }
+
+    let captured = stage.lock().unwrap().captured.clone();
+    assert!(
+        captured[0].is_none() && captured[1].is_none(),
+        "nothing was known of either control, so a model had to see the window"
+    );
+    // Four activations, three captures: the third needed none at all, because nothing had
+    // been drawn over the button since the capture that found the field confirmed it.
+    assert_eq!(captured.len(), 3);
+    let window = 640 * 480;
+    for part in captured[2..].iter() {
+        let part = part.expect("a look that only confirms asks for a part of the window");
+        assert!(
+            part.holds(&archie_stage::Region::new(320, 240, 64, 48))
+                && part.holds(&archie_stage::Region::new(64, 48, 128, 24)),
+            "one capture still confirms every control this session knows there: {part:?}"
+        );
+        assert!(
+            u64::from(part.width) * u64::from(part.height) * 3 < window,
+            "and it is a small part of the window: {part:?}"
+        );
+    }
 }

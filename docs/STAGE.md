@@ -144,6 +144,7 @@ than on coordinates. It joins IRIS and the stage and adds no authority of its ow
 
 ```text
  look      Operator::look               snapshot grant, read lease, compositor checks → PNG
+                                        of the window, or of the one box that was asked for
  ground    LocateAnythingClient         the description in a one-entry Vault capsule for this
                                         task, the capture bound to its SHA-256 → one box
  activate  MotorController + Operator   a lease on the IRIS source, then an ordinary stage
@@ -161,7 +162,8 @@ not in the loop. Archie asks the cheapest thing that can answer, in this order:
 - **trusted**: nothing has been drawn over a box it found earlier, so it is used as it is —
   no capture, no model;
 - **confirmed**: something has, so Archie looks once, and the box still holds the same
-  control. One capture also re-confirms every other control it knows in that window;
+  control. That look asks the compositor for the boxes it knows in that window rather than
+  for the window, so one small capture also re-confirms every other control it knows there;
 - **refound**: the box no longer holds it, so the local model in `archie-reflex` says where
   the controls in that capture are, and the one of about the same size and the same shape,
   nearest to where it was, is that control moved. Nothing is asked over a network;
@@ -189,6 +191,22 @@ What confirms a box is its own shape: a 9×8 grid of average brightness over it,
 after bringing both to the same brightness. Hover, focus and a press move the whole box
 and leave the shape alone; different writing in the same place does not. It decides
 nothing — it only says whether to look again or to ask again.
+
+### Looking at a box, not at a window
+
+Pixels are a disclosure, so looking is authorised like touching — and asking for less of
+them is both faster and less seen. A snapshot command may name one box of its surface. The
+box travels sealed with the rest of the command and is re-checked against the window as it
+is now: a box that pokes outside the window is refused, and so is one with no pixels in it,
+which would otherwise read as "the whole window". The compositor encodes only those pixels
+and says which corner of the window they came from, so what it hands over cannot be more
+than what was asked for.
+
+A look that only confirms what this session already knows asks for the boxes it knows in
+that window, with eight pixels of context around them, whenever those come to less than
+half of it; one such capture still re-confirms every one of them. A look that has to find
+something asks for the window, because a model has to see the window to find anything in
+it, and so does a control that has moved out of the box it was in.
 
 ### The local model
 
@@ -442,9 +460,16 @@ only by its owner.
   declared. **refound** — a control found again after the window moved it, without asking
   anything — is covered by tests but has not been measured live: the demo that moves
   controls draws different ones each time, so there is nothing there to find again.
-- **A capture costs 135–590 ms** when one is needed: the compositor renders the whole
-  window, encodes a PNG and writes it, and Sight then reads, digests and decodes it.
-  Capturing the box alone is the obvious next saving.
+- **A capture is now the rendering, and little else.** A snapshot command may ask for one
+  box of a surface rather than the whole of it, and a look that only confirms asks for the
+  boxes this session knows in that window. Measured on the demo form, 355×88 pixels instead
+  of 1534×696: encoding fell from 43 ms to 1–4 ms and a whole look from 135–590 ms to
+  35–119 ms. What is left is Qt rendering the item to an offscreen image, 22–98 ms
+  whatever size is asked for, because it redraws the window either way. Reading back only
+  the damaged part, or the client's buffer directly, is what would cut that.
+- **The pointer is now the slow part.** At agent tempo a verified click is 166–176 ms of
+  trajectory, dwell and receipt, against a 35–119 ms look. Twelve activations of the demo
+  form ran at 4.07 a second, and eight of a single control at 6.05.
 - **Damage is often the whole window.** Qt Quick's software backend reported 1534×696 for
   16 of the 27 repaints in one run, so "the control redrew" frequently means no more than
   "the window redrew", and a control nothing has touched is rarely trusted without a look.

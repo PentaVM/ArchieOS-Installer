@@ -18,7 +18,7 @@
 //! exists so the format has a second, tested reader, and for test compositors.
 
 use crate::action::{
-    Key, KeyChord, Modifier, PointerButton, StageAction, StageText, MAX_COORDINATE,
+    Key, KeyChord, Modifier, PointerButton, Region, StageAction, StageText, MAX_COORDINATE,
     MAX_SCROLL_STEPS, MAX_TEXT_CHARS,
 };
 use crate::gate::AuthorizedStageCommand;
@@ -112,7 +112,12 @@ pub enum WireAction {
         key: Key,
     },
     Focus,
-    Snapshot,
+    Snapshot {
+        /// Absent asks for the whole surface, which is what the compositor understood
+        /// before there was a choice.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        region: Option<Region>,
+    },
 }
 
 impl From<&StageAction> for WireAction {
@@ -159,7 +164,9 @@ impl From<&StageAction> for WireAction {
                 key: chord.key,
             },
             StageAction::Focus => Self::Focus,
-            StageAction::Snapshot => Self::Snapshot,
+            StageAction::Snapshot { region } => Self::Snapshot {
+                region: region.filter(|region| !region.is_empty()),
+            },
         }
     }
 }
@@ -194,7 +201,16 @@ impl WireAction {
                 };
                 chord.modifiers.len() == modifiers.len() && !chord.is_reserved()
             }
-            Self::Focus | Self::Snapshot => true,
+            Self::Focus => true,
+            // A part of a window is two corners of it, and it has to be a real rectangle
+            // before it is sealed: the compositor checks it again against the live window.
+            Self::Snapshot { region: None } => true,
+            Self::Snapshot {
+                region: Some(region),
+            } => {
+                let (far_x, far_y) = region.far();
+                !region.is_empty() && point(&region.x, &region.y) && point(&far_x, &far_y)
+            }
         }
     }
 }

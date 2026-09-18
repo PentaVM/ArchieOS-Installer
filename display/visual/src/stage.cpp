@@ -284,11 +284,48 @@ std::optional<CommandRefusal> check_command(const StageCommand& command,
                 return CommandRefusal::ChordOutOfBounds;
             }
             break;
+        case StageAction::Snapshot: {
+            // No part named is the whole surface. A part named has to be a real rectangle
+            // inside it, so that a capture cannot be asked for pixels the window has not.
+            const IRect asked{command.local_x, command.local_y,
+                              command.to_local_x - command.local_x,
+                              command.to_local_y - command.local_y};
+            if (command.local_x == 0 && command.local_y == 0 && command.to_local_x == 0 &&
+                command.to_local_y == 0) {
+                break;
+            }
+            if (asked.empty() || command.local_x < 0 || command.local_y < 0 ||
+                command.to_local_x > surface->geometry.w ||
+                command.to_local_y > surface->geometry.h) {
+                return CommandRefusal::OutsideSurface;
+            }
+            break;
+        }
         case StageAction::Focus:
-        case StageAction::Snapshot:
             break;
     }
     return std::nullopt;
+}
+
+IRect snapshot_region(const StageCommand& command, const Surface& surface) noexcept {
+    const IRect whole{0, 0, surface.geometry.w, surface.geometry.h};
+    if (command.action != StageAction::Snapshot) {
+        return whole;
+    }
+    IRect asked{command.local_x, command.local_y, command.to_local_x - command.local_x,
+                command.to_local_y - command.local_y};
+    if (asked.empty()) {
+        return whole;
+    }
+    // Clipped rather than refused here: `check_command` is what refuses, and this is also
+    // called after a surface may have been resized under a command already accepted.
+    const int right = std::min(asked.x + asked.w, whole.w);
+    const int bottom = std::min(asked.y + asked.h, whole.h);
+    asked.x = std::max(asked.x, 0);
+    asked.y = std::max(asked.y, 0);
+    asked.w = right - asked.x;
+    asked.h = bottom - asked.y;
+    return asked.empty() ? whole : asked;
 }
 
 PointF to_output(const Surface& surface, int local_x, int local_y) noexcept {

@@ -122,6 +122,12 @@ pub enum StageEvent {
     Snapshot {
         seq: u64,
         surface: u32,
+        /// Where the capture starts in the surface, for a command that asked for one part
+        /// of it. A compositor that captures whole windows sends neither, and both are 0.
+        #[serde(default)]
+        x: i32,
+        #[serde(default)]
+        y: i32,
         width: u32,
         height: u32,
         sha256: String,
@@ -159,13 +165,17 @@ impl StageEvent {
             Self::Authority { reason, .. } => is_code(reason),
             Self::Receipt { outcome, .. } => is_code(outcome),
             Self::Snapshot {
+                x,
+                y,
                 width,
                 height,
                 sha256,
                 path,
                 ..
             } => {
-                (1..=MAX_SNAPSHOT_SIDE).contains(width)
+                *x >= 0
+                    && *y >= 0
+                    && (1..=MAX_SNAPSHOT_SIDE).contains(width)
                     && (1..=MAX_SNAPSHOT_SIDE).contains(height)
                     && sha256.len() == 64
                     && sha256

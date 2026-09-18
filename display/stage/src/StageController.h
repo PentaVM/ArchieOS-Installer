@@ -200,6 +200,12 @@ private:
         std::uint64_t sequence = 0;
         archie::visual::SurfaceId surface = 0;
         QPointer<QLocalSocket> socket;
+        /// The part of the surface asked for, in its own pixels, and the surface's size,
+        /// which is what the grabbed image is measured against.
+        archie::visual::IRect region{};
+        int surface_width = 0;
+        int surface_height = 0;
+        qint64 asked_at_ms = 0;
         bool done = false;
         bool ok = false;
     };

@@ -538,7 +538,7 @@ allow = ["click", "snapshot"]
     );
 
     assert!(matches!(
-        authorize(&read, StageAction::Snapshot),
+        authorize(&read, StageAction::Snapshot { region: None }),
         StageAdmission::Allowed(_)
     ));
     assert!(
@@ -550,14 +550,14 @@ allow = ["click", "snapshot"]
     );
     assert!(
         matches!(
-            authorize(&execute, StageAction::Snapshot),
+            authorize(&execute, StageAction::Snapshot { region: None }),
             StageAdmission::Refused(StageRefusal::Lease(LeaseRejection::ActionNotPermitted))
         ),
         "nor is a lease to click one to look"
     );
     assert!(
         matches!(
-            gate(FREECAD, StageAction::Snapshot),
+            gate(FREECAD, StageAction::Snapshot { region: None }),
             StageAdmission::Refused(StageRefusal::ActionNotAllowed {
                 kind: ActionKind::Snapshot,
                 ..
