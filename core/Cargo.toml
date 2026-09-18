@@ -39,6 +39,7 @@ members = [
     "crates/archie-sight",
     "crates/archie-a11y",
     "crates/archie-reflex",
+    "crates/archie-paint",
     "crates/archie-cerebra",
     "crates/archie-workstation",
     "crates/archie-iris",
@@ -82,6 +83,7 @@ archie-toolpack = { path = "crates/archie-toolpack" }
 archie-sight = { path = "crates/archie-sight" }
 archie-a11y = { path = "crates/archie-a11y" }
 archie-reflex = { path = "crates/archie-reflex" }
+archie-paint = { path = "crates/archie-paint" }
 archie-cerebra = { path = "crates/archie-cerebra" }
 archie-workstation = { path = "crates/archie-workstation" }
 archie-iris = { path = "crates/archie-iris" }
@@ -90,6 +92,7 @@ archie-iris = { path = "crates/archie-iris" }
 anyhow = "1"
 async-trait = "0.1"
 base64 = "0.22"
+jpeg-decoder = "0.3"
 png = "0.18"
 clap = { version = "4", features = ["derive"] }
 ed25519-dalek = { version = "2", features = ["rand_core", "pkcs8", "pem"] }

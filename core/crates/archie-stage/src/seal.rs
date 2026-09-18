@@ -18,8 +18,8 @@
 //! exists so the format has a second, tested reader, and for test compositors.
 
 use crate::action::{
-    Key, KeyChord, Modifier, PointerButton, Region, StageAction, StageText, MAX_COORDINATE,
-    MAX_SCROLL_STEPS, MAX_TEXT_CHARS,
+    Key, KeyChord, Modifier, PointerButton, Region, StageAction, StageText, StrokePoint,
+    MAX_COORDINATE, MAX_SCROLL_STEPS, MAX_STROKE_POINTS, MAX_TEXT_CHARS,
 };
 use crate::gate::AuthorizedStageCommand;
 use archie_types::Timestamp;
@@ -111,6 +111,10 @@ pub enum WireAction {
         modifiers: Vec<Modifier>,
         key: Key,
     },
+    Stroke {
+        points: Vec<StrokePoint>,
+        button: PointerButton,
+    },
     Focus,
     Snapshot {
         /// Absent asks for the whole surface, which is what the compositor understood
@@ -164,6 +168,10 @@ impl From<&StageAction> for WireAction {
                 key: chord.key,
             },
             StageAction::Focus => Self::Focus,
+            StageAction::Stroke { points, button } => Self::Stroke {
+                points: points.clone(),
+                button: *button,
+            },
             StageAction::Snapshot { region } => Self::Snapshot {
                 region: region.filter(|region| !region.is_empty()),
             },
@@ -200,6 +208,11 @@ impl WireAction {
                     key: *key,
                 };
                 chord.modifiers.len() == modifiers.len() && !chord.is_reserved()
+            }
+            Self::Stroke { points, .. } => {
+                (2..=MAX_STROKE_POINTS).contains(&points.len())
+                    && points.iter().all(|at| point(&at.x, &at.y))
+                    && points.iter().any(|at| at != &points[0])
             }
             Self::Focus => true,
             // A part of a window is two corners of it, and it has to be a real rectangle

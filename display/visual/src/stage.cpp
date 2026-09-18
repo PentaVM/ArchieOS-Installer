@@ -204,6 +204,8 @@ const char* refusal_code(CommandRefusal refusal) noexcept {
             return "text_out_of_bounds";
         case CommandRefusal::ChordOutOfBounds:
             return "chord_out_of_bounds";
+        case CommandRefusal::PathOutOfBounds:
+            return "path_out_of_bounds";
         case CommandRefusal::NotTypeable:
             return "not_typeable";
         case CommandRefusal::CaptureFailed:
@@ -301,6 +303,23 @@ std::optional<CommandRefusal> check_command(const StageCommand& command,
             }
             break;
         }
+        case StageAction::Stroke: {
+            if (command.path.size() < 2 || command.path.size() > kMaxStrokePoints) {
+                return CommandRefusal::PathOutOfBounds;
+            }
+            for (const IPoint& point : command.path) {
+                if (!inside(point.x, point.y)) {
+                    return CommandRefusal::OutsideSurface;
+                }
+            }
+            // A stroke that never leaves its first point is a click wearing a line's name.
+            const bool moves = std::any_of(command.path.begin() + 1, command.path.end(),
+                                           [&](const IPoint& point) { return !(point == command.path.front()); });
+            if (!moves) {
+                return CommandRefusal::PathOutOfBounds;
+            }
+            break;
+        }
         case StageAction::Focus:
             break;
     }
@@ -364,6 +383,9 @@ PlaybackPolicy PlaybackPolicy::agent_tempo() noexcept {
     policy.press_dwell_ms = 32;
     // The caption still says the agent looked. The receipt no longer waits for it.
     policy.capture_hold_ms = 0;
+    // Still long enough for an application to see the press before the line starts, and
+    // short enough that a picture is not a thousand pauses.
+    policy.drag_hold_ms = 24;
     return policy;
 }
 
@@ -398,6 +420,18 @@ PointerTrajectory PointerTrajectory::plan(PointF from, PointF to, std::int64_t s
     const float ny = dx / distance;
     trajectory.m_control =
         PointF{(from.x + to.x) / 2.0F + nx * offset, (from.y + to.y) / 2.0F + ny * offset};
+    return trajectory;
+}
+
+PointerTrajectory PointerTrajectory::straight(PointF from, PointF to, std::int64_t start_ms,
+                                              std::int64_t duration_ms) noexcept {
+    PointerTrajectory trajectory;
+    trajectory.m_from = from;
+    trajectory.m_to = to;
+    trajectory.m_start_ms = start_ms;
+    trajectory.m_duration_ms = std::max<std::int64_t>(duration_ms, 0);
+    // The control point of a straight line is its middle: the same easing, no bow.
+    trajectory.m_control = PointF{(from.x + to.x) / 2.0F, (from.y + to.y) / 2.0F};
     return trajectory;
 }
 
@@ -478,6 +512,35 @@ Playback Playback::start(const StageCommand& command, const Surface& surface, Po
             arrive(haul);
             end = haul.end_ms() + policy.press_dwell_ms;
             step(end, StepKind::Release, drop, command.button, 0);
+            break;
+        }
+        case StageAction::Stroke: {
+            // Reached like anything else, then drawn: pressed at the first point, carried
+            // through every one of them at a speed, and let go at the last. The line the
+            // application receives is the line the command named.
+            const PointF first = to_output(surface, command.path.front().x, command.path.front().y);
+            const auto reach = PointerTrajectory::plan(pointer_now, first, now_ms, policy.trajectory);
+            arrive(reach);
+            step(reach.end_ms(), StepKind::Press, first, command.button, 0);
+            std::int64_t at = reach.end_ms() + policy.drag_hold_ms;
+            PointF held = first;
+            const float pace = policy.trajectory.pace > 0.0F ? policy.trajectory.pace : 1.0F;
+            const float speed = std::max(policy.stroke_speed_px_per_s, 1.0F) / pace;
+            for (std::size_t i = 1; i < command.path.size(); ++i) {
+                const PointF to = to_output(surface, command.path[i].x, command.path[i].y);
+                const float dx = to.x - held.x;
+                const float dy = to.y - held.y;
+                const auto span = static_cast<std::int64_t>(
+                    std::lround(std::sqrt(dx * dx + dy * dy) / speed * 1000.0F));
+                const auto segment = PointerTrajectory::straight(
+                    held, to, at, std::max(span, policy.stroke_min_segment_ms));
+                arrive(segment);
+                at = segment.end_ms();
+                held = to;
+            }
+            at += policy.press_dwell_ms;
+            step(at, StepKind::Release, held, command.button, 0);
+            end = at;
             break;
         }
         case StageAction::Scroll: {

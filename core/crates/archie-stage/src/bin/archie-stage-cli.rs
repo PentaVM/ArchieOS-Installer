@@ -11,6 +11,7 @@
 //! archie-stage-cli act    --socket <path> --key-file <path> --app <app_id> <action...>
 //!     click <x> <y> | double-click <x> <y> | move <x> <y> | drag <x> <y> <to_x> <to_y>
 //!     scroll <x> <y> <steps_y> | type <text> | key [ctrl+][shift+][alt+]<key> | focus
+//!     stroke <x,y> <x,y> [<x,y>...]
 //! ```
 //!
 //! Coordinates are surface-local. `--surface` picks a surface when an application has more
@@ -35,7 +36,7 @@ mod unix {
     use archie_policy::{PolicyEngine, Principal};
     use archie_stage::{
         learn, ActOutcome, ActRequest, CommandKey, KeyChord, Operator, PointerButton, StageAction,
-        StageClient, StagePolicy, StageText, StageWorld,
+        StageClient, StagePolicy, StageText, StageWorld, StrokePoint,
     };
     use archie_types::PrivacyGrade;
     use std::io::Write;
@@ -191,6 +192,28 @@ mod unix {
                 let chord = KeyChord::parse(spec)
                     .ok_or("not a key this stage can press, like enter or ctrl+s")?;
                 StageAction::Key { chord }
+            }
+            // `stroke 10,10 80,10 80,60` — a line through those points, drawn in one
+            // continuous press.
+            "stroke" => {
+                let mut points = Vec::new();
+                for word in &words[1..] {
+                    let (x, y) = word
+                        .split_once(',')
+                        .ok_or_else(|| format!("{word:?} is not a point like 10,20"))?;
+                    points.push(StrokePoint {
+                        x: x.trim()
+                            .parse()
+                            .map_err(|_| format!("{word:?} is not a point like 10,20"))?,
+                        y: y.trim()
+                            .parse()
+                            .map_err(|_| format!("{word:?} is not a point like 10,20"))?,
+                    });
+                }
+                StageAction::Stroke {
+                    points,
+                    button: PointerButton::Left,
+                }
             }
             "focus" => StageAction::Focus,
             other => return Err(format!("{other:?} is not a stage action")),

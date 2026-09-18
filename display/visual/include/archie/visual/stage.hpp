@@ -208,6 +208,17 @@ enum class StageAction {
     /// Capture what the surface shows. It changes nothing in the application, and it is
     /// still a command: pixels are a disclosure, so looking is authorised like touching.
     Snapshot,
+    /// Press, follow a way through the surface, and let go: one continuous line, which is
+    /// what drawing is. A drag is the two-point case of it.
+    Stroke,
+};
+
+/// One point of a stroke, in a surface's own logical pixels.
+struct IPoint {
+    int x = 0;
+    int y = 0;
+
+    friend bool operator==(const IPoint&, const IPoint&) = default;
 };
 
 enum class PointerButton {
@@ -217,6 +228,9 @@ enum class PointerButton {
 };
 
 inline constexpr std::size_t kMaxTextChars = 2'000;
+/// The most points one stroke may carry. A longer line is more than one stroke, and a
+/// command that never ends is not one.
+inline constexpr std::size_t kMaxStrokePoints = 256;
 inline constexpr int kMaxScrollSteps = 60;
 inline constexpr int kMaxChordKeys = 4;
 
@@ -244,6 +258,10 @@ struct StageCommand {
     int scroll_steps_y = 0;
     std::size_t text_chars = 0;
     int key_count = 0;
+    /// The way a `Stroke` follows, in the surface's own logical pixels: where the button
+    /// goes down, every point it is dragged through, and where it comes up. Empty for
+    /// every other action.
+    std::vector<IPoint> path;
 };
 
 /// Why the compositor would not run a command. Stable codes: they end up in receipts.
@@ -261,6 +279,9 @@ enum class CommandRefusal {
     ScrollOutOfBounds,
     TextOutOfBounds,
     ChordOutOfBounds,
+    /// A stroke with fewer than two points, more than `kMaxStrokePoints`, or one that goes
+    /// nowhere at all.
+    PathOutOfBounds,
     /// The keyboard the stage presents cannot produce a character or key of the command,
     /// and the application offers no text-input path for it either. Only the compositor
     /// knows its keymap, so `check_command` never returns this; the compositor does, before
@@ -309,6 +330,10 @@ class PointerTrajectory final {
 public:
     [[nodiscard]] static PointerTrajectory plan(PointF from, PointF to, std::int64_t start_ms,
                                                 const TrajectoryPolicy& policy);
+    /// A straight segment of a given duration, for a line that has to be the line asked
+    /// for: no bow, no reaching, the same easing between the two points.
+    [[nodiscard]] static PointerTrajectory straight(PointF from, PointF to, std::int64_t start_ms,
+                                                    std::int64_t duration_ms) noexcept;
 
     /// Where the pointer is at `now_ms`. Before the start it is at `from`; after the end,
     /// exactly at `to`.
@@ -373,6 +398,13 @@ struct PlaybackPolicy {
     std::int64_t focus_settle_ms = 120;
     /// Hold before a drag starts moving, so the application registers the press.
     std::int64_t drag_hold_ms = 80;
+    /// How fast the pointer follows a stroke, in logical pixels a second. A stroke is a
+    /// line being drawn, not a reach for a target: it holds a speed, it does not bow, and
+    /// it arrives where it was told rather than where a target is.
+    float stroke_speed_px_per_s = 900.0F;
+    /// The shortest a stroke's segment may take, so that a hundred tiny steps are still a
+    /// hundred events an application can follow.
+    std::int64_t stroke_min_segment_ms = 8;
     /// How long a capture stays on screen as an action before its receipt: long enough for
     /// a person watching to see that the agent looked, and for the frame to be rendered.
     std::int64_t capture_hold_ms = 450;

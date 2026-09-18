@@ -1,0 +1,16 @@
+[package]
+name = "archie-paint"
+description = "Turns a picture into strokes and draws them on the Archie Stage, through the same gate as every other action."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+archie-policy.workspace = true
+archie-stage.workspace = true
+archie-types.workspace = true
+jpeg-decoder.workspace = true
+png.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "io-util"] }

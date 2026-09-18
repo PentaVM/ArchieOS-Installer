@@ -38,6 +38,8 @@ constexpr std::size_t kMaxRememberedPresses = 32;
             return CaptionVerb::Focusing;
         case StageAction::Snapshot:
             return CaptionVerb::Observing;
+        case StageAction::Stroke:
+            return CaptionVerb::Drawing;
     }
     return CaptionVerb::Moving;
 }

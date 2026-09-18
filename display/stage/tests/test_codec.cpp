@@ -139,6 +139,27 @@ void a_verifying_payload_must_still_be_a_command() {
           QStringLiteral("command_malformed"));
     CHECK(refused(R"({"kind":"snapshot","region":{"x":1,"y":2,"width":4,"height":9,"why":"no"}})").error ==
           QStringLiteral("command_malformed"));
+    CHECK_BECAUSE(refused(R"({"kind":"stroke","points":[{"x":1,"y":2}],"button":"left"})").error ==
+                      QStringLiteral("command_malformed"),
+                  "one point is not a line");
+    CHECK(refused(R"({"kind":"stroke","points":[{"x":1,"y":2},{"x":3,"y":4,"z":5}],"button":"left"})").error ==
+          QStringLiteral("command_malformed"));
+    CHECK(refused(R"({"kind":"stroke","points":[{"x":1,"y":2},{"x":3,"y":4}]})").error ==
+          QStringLiteral("command_malformed"));
+    CHECK(refused(R"({"kind":"stroke","points":[[1,2],[3,4]],"button":"left"})").error ==
+          QStringLiteral("command_malformed"));
+    const auto stroke = refused(R"({"kind":"stroke","points":[{"x":1,"y":2},{"x":3,"y":4},{"x":5,"y":9}],"button":"left"})");
+    CHECK(stroke.command.has_value());
+    if (stroke.command) {
+        const auto& drawn = stroke.command->command;
+        CHECK(drawn.action == archie::visual::StageAction::Stroke);
+        CHECK_EQ(drawn.path.size(), std::size_t{3});
+        CHECK((drawn.path.front() == archie::visual::IPoint{1, 2}));
+        CHECK((drawn.path.back() == archie::visual::IPoint{5, 9}));
+        CHECK_BECAUSE(drawn.local_x == 1 && drawn.local_y == 2 && drawn.to_local_x == 5 &&
+                          drawn.to_local_y == 9,
+                      "where the line starts and ends, for everything that reads one point");
+    }
     const auto look = refused(R"({"kind":"snapshot"})");
     CHECK(look.command.has_value() && look.command->command.action == archie::visual::StageAction::Snapshot);
     CHECK_BECAUSE(look.command && look.command->command.local_x == 0 && look.command->command.to_local_x == 0,

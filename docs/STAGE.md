@@ -104,6 +104,50 @@ The stage's keymap follows `XKB_DEFAULT_LAYOUT` and the other `XKB_DEFAULT_*` va
 a node it must match the physical keyboard, or a person typing after a takeover gets the
 wrong characters. A Spanish or Latin American layout puts ñ, ¿ and ¡ on keys.
 
+## Drawing
+
+A click is a press and a release in the same place. Everything else a hand does with a
+pointer down — a signature, a selection across a canvas, a line in a drawing — is a way
+through the window, and until now the stage could only say it as a drag between two points.
+
+A `stroke` carries up to 256 points. The compositor presses at the first, follows the way
+through every one of them, and lets go at the last, and it re-checks each point against the
+window as it is now: a stroke with fewer than two points, more than 256, or one that never
+leaves where it started is refused with `path_out_of_bounds`, and one that would leave the
+window with `point_outside_surface`. The line is drawn as the line it was given: straight
+between its points, at a speed rather than at a reach's pace, because a bowed line is a
+different drawing. At agent tempo the same way is covered four times as fast.
+
+```bash
+archie-stage-cli act --socket … --key-file … --app org.qt-project.qml stroke 40,40 200,40 200,160
+```
+
+### Painting a picture
+
+`archie-paint` turns a picture into strokes and draws them, one command each. The picture
+is hatched the way an engraver shades: parallel lines where it is dark, crossed at another
+angle where it is darker, with the tone levels taken from the picture's own histogram — so
+"cover the darkest fifth" rather than "cover everything under 100", which reads a dim
+painting and a bright photograph alike. The grain is softened first, because a photograph
+thresholded as it is breaks into speckle and a pen drawing speckle lifts every few pixels.
+
+```bash
+archie-paint --dry-run --image mona-lisa.jpg --canvas 0,0,1254,516 --preview plan.png
+archie-paint --socket … --key-file … --policy apps.toml --app org.qt-project.qml \
+    --image mona-lisa.jpg --inset 40
+```
+
+`--dry-run` plans without a stage and `--preview` draws the plan on paper, which is how the
+hatching was tuned without drawing a thousand lines each time. Nothing about a picture is
+special to the stage: the policy has to allow `stroke` for that application, every stroke
+takes a lease for one operation, each is sealed and re-checked, and a refusal stops that
+stroke and no other.
+
+Measured in WSLg on `display/stage/demo/paint.qml`, a sheet of paper with no controls on
+it: 1291 strokes of a 640-pixel Mona Lisa, at agent tempo, drawn at about 4.9 strokes a
+second with none refused. The canvas saves what it has every few seconds, so the picture
+outlives the run that made it.
+
 ## Cinematics
 
 Everything drawn comes from `StageDirector` (`display/visual/director.hpp`), a pure model

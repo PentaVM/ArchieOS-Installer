@@ -2,7 +2,8 @@
 #
 # Anything not listed here is refused, whatever a lease says. Each entry names the
 # application by the app_id it reports to the compositor, and grants action kinds —
-# move, click, double_click, drag, scroll, text, key, focus, snapshot — nothing implicitly.
+# move, click, double_click, drag, scroll, stroke, text, key, focus, snapshot — nothing
+# implicitly.
 #
 # snapshot lets Archie capture that window's pixels and send them to whichever grounding
 # model it chose. Nothing here grants it: add it only for an application whose windows may

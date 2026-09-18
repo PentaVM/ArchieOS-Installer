@@ -9,6 +9,8 @@ use zeroize::Zeroizing;
 pub const MAX_TEXT_CHARS: usize = 2_000;
 /// The largest scroll one action may make, in wheel steps per axis.
 pub const MAX_SCROLL_STEPS: i32 = 60;
+/// The most points one stroke may carry. A longer line is more than one stroke.
+pub const MAX_STROKE_POINTS: usize = 256;
 /// The largest surface-local coordinate accepted. No output is this large.
 pub const MAX_COORDINATE: i32 = 32_767;
 
@@ -33,6 +35,7 @@ pub enum ActionKind {
     Key,
     Focus,
     Snapshot,
+    Stroke,
 }
 
 impl ActionKind {
@@ -45,6 +48,7 @@ impl ActionKind {
             Self::Scroll => "scroll",
             Self::Text => "text",
             Self::Key => "key",
+            Self::Stroke => "stroke",
             Self::Focus => "focus",
             Self::Snapshot => "snapshot",
         }
@@ -350,11 +354,25 @@ pub enum StageAction {
     Key {
         chord: KeyChord,
     },
+    /// Press, follow a way through the surface, and let go: one continuous line, which is
+    /// what drawing is. A drag is the two-point case of it.
+    Stroke {
+        points: Vec<StrokePoint>,
+        button: PointerButton,
+    },
     Focus,
     /// Capture what the surface shows: all of it, or one part of it.
     Snapshot {
         region: Option<Region>,
     },
+}
+
+/// One point of a stroke, in the surface's own pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StrokePoint {
+    pub x: i32,
+    pub y: i32,
 }
 
 /// The part of a surface a capture is about, in the surface's own pixels.
@@ -454,6 +472,7 @@ impl StageAction {
             Self::Scroll { .. } => ActionKind::Scroll,
             Self::Text { .. } => ActionKind::Text,
             Self::Key { .. } => ActionKind::Key,
+            Self::Stroke { .. } => ActionKind::Stroke,
             Self::Focus => ActionKind::Focus,
             Self::Snapshot { .. } => ActionKind::Snapshot,
         }
@@ -469,6 +488,8 @@ impl StageAction {
             Self::Drag {
                 x, y, to_x, to_y, ..
             } => vec![(*x, *y), (*to_x, *to_y)],
+            // Every point of a line is a place the pointer is put.
+            Self::Stroke { points, .. } => points.iter().map(|at| (at.x, at.y)).collect(),
             // A capture touches nothing, but a part of a surface is still two corners of
             // it, and they are checked like any other coordinates.
             Self::Snapshot {

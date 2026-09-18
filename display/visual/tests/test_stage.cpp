@@ -590,6 +590,98 @@ void a_capture_can_ask_for_one_box_instead_of_the_whole_window() {
     CHECK_BECAUSE(snapshot_region(gone, *shrunk.find(7)) == (IRect{0, 0, 150, 600}),
                   "nothing left of the box is the whole surface, never a negative rectangle");
 }
+void a_stroke_is_pressed_followed_and_let_go() {
+    CASE("a stroke goes down at its first point, through every one of them, and up at the last");
+
+    SurfaceTable table = table_with_terminal();  // 800x600 at 100,80
+    InputAuthority authority;
+    const PlaybackPolicy policy;
+
+    StageCommand line = click_on(table, 7, 0, 0);
+    line.action = StageAction::Stroke;
+    line.path = {IPoint{100, 100}, IPoint{300, 100}, IPoint{300, 260}};
+    CHECK(!check_command(line, table, authority, 0, T0).has_value());
+
+    Playback drawing = Playback::start(line, *table.find(7), PointF{5.0F, 5.0F}, T0, policy);
+    const auto& steps = drawing.schedule();
+    std::size_t presses = 0;
+    std::size_t releases = 0;
+    for (const InputStep& step : steps) {
+        presses += step.kind == StepKind::Press ? 1 : 0;
+        releases += step.kind == StepKind::Release ? 1 : 0;
+    }
+    CHECK_BECAUSE(presses == 1 && releases == 1, "one line is one press and one release");
+    const InputStep* press = nullptr;
+    const InputStep* release = nullptr;
+    for (const InputStep& step : steps) {
+        if (step.kind == StepKind::Press) press = &step;
+        if (step.kind == StepKind::Release) release = &step;
+    }
+    // The surface sits at 100,80 and a point is its centre, so the window's 100,100 is the
+    // output's 200.5,180.5.
+    const auto at_point = [](PointF point, float x, float y) {
+        return std::abs(point.x - x) < 0.01F && std::abs(point.y - y) < 0.01F;
+    };
+    CHECK(press != nullptr && release != nullptr);
+    if (press && release) {
+        CHECK(at_point(press->point, 200.5F, 180.5F));
+        CHECK(at_point(release->point, 400.5F, 340.5F));
+        CHECK_BECAUSE(press->at_ms < release->at_ms, "the button is down for the whole line");
+    }
+
+    // Every point named is arrived at, in order, and nothing is drawn before the press.
+    std::vector<PointF> arrivals;
+    for (const InputStep& step : steps) {
+        if (step.kind == StepKind::Motion && press && step.at_ms > press->at_ms) {
+            arrivals.push_back(step.point);
+        }
+    }
+    CHECK_EQ(arrivals.size(), std::size_t{2});
+    if (arrivals.size() == 2) {
+        CHECK(at_point(arrivals[0], 400.5F, 180.5F));
+        CHECK(at_point(arrivals[1], 400.5F, 340.5F));
+    }
+    // And it is the line it was asked for: halfway along the first segment the pointer is
+    // on that segment, not bowed off it the way a reach for a target is.
+    const auto first = drawing.trajectory_at(press->at_ms + policy.drag_hold_ms + 1);
+    CHECK(first.has_value());
+    if (first) {
+        const PointF half = first->at((first->start_ms() + first->end_ms()) / 2);
+        CHECK_BECAUSE(std::abs(half.y - 180.5F) < 0.01F,
+                      "a line drawn across the window does not sag in the middle");
+    }
+
+    StageCommand alone = line;
+    alone.path = {IPoint{100, 100}};
+    CHECK(check_command(alone, table, authority, 0, T0) == CommandRefusal::PathOutOfBounds);
+    StageCommand still = line;
+    still.path = {IPoint{100, 100}, IPoint{100, 100}};
+    CHECK_BECAUSE(check_command(still, table, authority, 0, T0) == CommandRefusal::PathOutOfBounds,
+                  "a stroke that never leaves its first point is a click wearing a line's name");
+    StageCommand long_line = line;
+    long_line.path.assign(kMaxStrokePoints + 1, IPoint{100, 100});
+    long_line.path[1] = IPoint{101, 100};
+    CHECK(check_command(long_line, table, authority, 0, T0) == CommandRefusal::PathOutOfBounds);
+    StageCommand past = line;
+    past.path = {IPoint{100, 100}, IPoint{800, 100}};
+    CHECK_BECAUSE(check_command(past, table, authority, 0, T0) == CommandRefusal::OutsideSurface,
+                  "a line cannot be drawn past the edge of the window it is drawn in");
+
+    // At an agent's tempo the same line is drawn faster, and it is still the same line.
+    Playback quick = Playback::start(line, *table.find(7), PointF{5.0F, 5.0F}, T0,
+                                     PlaybackPolicy::agent_tempo());
+    CHECK_BECAUSE(quick.ends_ms() - T0 < drawing.ends_ms() - T0,
+                  "the pointer covers the same way in less time");
+    std::size_t quick_motions = 0;
+    for (const InputStep& step : quick.schedule()) {
+        quick_motions += step.kind == StepKind::Motion ? 1 : 0;
+    }
+    std::size_t motions = 0;
+    for (const InputStep& step : steps) {
+        motions += step.kind == StepKind::Motion ? 1 : 0;
+    }
+    CHECK_EQ(quick_motions, motions);
+}
 }  // namespace
 
 int main() {
@@ -606,5 +698,6 @@ int main() {
     a_capture_is_checked_like_a_touch_and_held_on_screen();
     an_agent_tempo_is_the_same_playback_on_a_faster_clock();
     a_capture_can_ask_for_one_box_instead_of_the_whole_window();
+    a_stroke_is_pressed_followed_and_let_go();
     return archie::visual::test::report();
 }

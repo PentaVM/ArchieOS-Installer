@@ -566,3 +566,101 @@ allow = ["click", "snapshot"]
         "the shipped policy grants no capture of anything"
     );
 }
+
+#[test]
+fn a_line_needs_two_points_that_go_somewhere_and_a_policy_that_allows_drawing() {
+    let policy = StagePolicy::parse(
+        r#"
+[[app]]
+app_id = "org.freecad.FreeCAD"
+display_name = "FreeCAD"
+allow = ["stroke"]
+"#,
+    )
+    .unwrap();
+    let principal = agent();
+    let stroke = |points: Vec<(i32, i32)>| StageAction::Stroke {
+        points: points
+            .into_iter()
+            .map(|(x, y)| archie_stage::StrokePoint { x, y })
+            .collect(),
+        button: PointerButton::Left,
+    };
+    let authorize = |action: StageAction| {
+        let lease = lease_for(
+            &principal,
+            stage_resource(FREECAD),
+            Action::Execute,
+            OPERATION,
+        );
+        StageGate::authorize(
+            &policy,
+            &lease,
+            &principal,
+            false,
+            &proposal(FREECAD, action),
+            Timestamp::now(),
+        )
+    };
+
+    assert!(matches!(
+        authorize(stroke(vec![(10, 10), (90, 40), (90, 120)])),
+        StageAdmission::Allowed(_)
+    ));
+    assert!(
+        matches!(
+            authorize(stroke(vec![(10, 10)])),
+            StageAdmission::Refused(StageRefusal::StrokeOutOfRange)
+        ),
+        "one point is not a line"
+    );
+    assert!(
+        matches!(
+            authorize(stroke(vec![(10, 10), (10, 10), (10, 10)])),
+            StageAdmission::Refused(StageRefusal::StrokeOutOfRange)
+        ),
+        "a line that never leaves its first point is a click wearing a line's name"
+    );
+    assert!(
+        matches!(
+            authorize(stroke(vec![(10, 10), (40_000, 10)])),
+            StageAdmission::Refused(StageRefusal::CoordinateOutOfRange)
+        ),
+        "every point of a line is a place the pointer is put, and is bounded like one"
+    );
+    let too_many: Vec<(i32, i32)> = (0..archie_stage::MAX_STROKE_POINTS as i32 + 1)
+        .map(|at| (at % 500, 10))
+        .collect();
+    assert!(matches!(
+        authorize(stroke(too_many)),
+        StageAdmission::Refused(StageRefusal::StrokeOutOfRange)
+    ));
+
+    // A picture is not something every application may be drawn on.
+    let looking = StagePolicy::parse(
+        r#"
+[[app]]
+app_id = "org.freecad.FreeCAD"
+display_name = "FreeCAD"
+allow = ["click"]
+"#,
+    )
+    .unwrap();
+    let lease = lease_for(
+        &principal,
+        stage_resource(FREECAD),
+        Action::Execute,
+        OPERATION,
+    );
+    assert!(matches!(
+        StageGate::authorize(
+            &looking,
+            &lease,
+            &principal,
+            false,
+            &proposal(FREECAD, stroke(vec![(10, 10), (90, 40)])),
+            Timestamp::now(),
+        ),
+        StageAdmission::Refused(StageRefusal::ActionNotAllowed { .. })
+    ));
+}

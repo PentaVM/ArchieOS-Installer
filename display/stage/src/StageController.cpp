@@ -90,6 +90,8 @@ QString verb_code(CaptionVerb verb)
         return QStringLiteral("pressing_keys");
     case CaptionVerb::Focusing:
         return QStringLiteral("focusing");
+    case CaptionVerb::Drawing:
+        return QStringLiteral("drawing");
     case CaptionVerb::Observing:
         return QStringLiteral("observing");
     case CaptionVerb::Interrupted:

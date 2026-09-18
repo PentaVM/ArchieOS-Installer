@@ -269,6 +269,22 @@ from executed builds on identified hardware.
   button was declared by the application in 3–23 ms with no capture and no model; the menu
   item needed one, and it was a capture of the 200×80 menu rather than of the 1334×596
   window behind it.
+- Added a `stroke`: a command that carries up to 256 points, pressed at the first, followed
+  through every one of them and let go at the last. A click was a press and a release in one
+  place and a drag was two points; a signature, a selection across a canvas or a line in a
+  drawing is a way through the window, and the stage can now say one. Every point is
+  re-checked against the window as it is, the line is drawn straight between its points at a
+  speed rather than bowed the way a reach for a target is, and the caption says "dibujando".
+- Added `archie-paint`: it turns a picture into strokes and draws them, one ordinary command
+  each. The hatching is an engraver's — parallel lines where the picture is dark, crossed at
+  another angle where it is darker — with the tone levels taken from the picture's own
+  histogram rather than from fixed numbers, and the grain softened first so that a pen
+  follows tone instead of speckle. `--dry-run --preview` plans and draws it on paper without
+  a stage, which is how it was tuned.
+- Measured in WSLg on a sheet of paper with no controls on it: the Mona Lisa, 1291 strokes,
+  drawn at about 4.9 strokes a second at agent tempo with none refused. Nothing about a
+  picture is special to the stage — the policy has to allow `stroke` for that application,
+  every stroke takes a lease for one operation, and each one is sealed and re-checked.
 - Not done: more than one target per call, verification stronger than
   "the control redrew", and a run of LocateAnything-3B itself. Measured cloud vision latency
   was 1.32–1.69 s for Gemma or MiniCPM and 27.3–33.5 s for Kimi-K3, so the cloud adapter is

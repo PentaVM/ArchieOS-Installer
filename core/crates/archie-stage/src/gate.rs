@@ -6,7 +6,8 @@
 //! proposed has a [`StageProposal`], which nothing seals.
 
 use crate::action::{
-    ActionKind, Key, StageAction, MAX_COORDINATE, MAX_SCROLL_STEPS, MAX_TEXT_CHARS,
+    ActionKind, Key, StageAction, MAX_COORDINATE, MAX_SCROLL_STEPS, MAX_STROKE_POINTS,
+    MAX_TEXT_CHARS,
 };
 use crate::policy::StagePolicy;
 use archie_policy::{Lease, LeaseRejection, Operation, Principal, Resource};
@@ -157,6 +158,8 @@ pub enum StageRefusal {
     CoordinateOutOfRange,
     #[error("scroll steps are out of range")]
     ScrollOutOfRange,
+    #[error("a stroke needs between two and {MAX_STROKE_POINTS} points, and has to go somewhere")]
+    StrokeOutOfRange,
     #[error("typed text may never be graded secret")]
     SecretText,
     #[error("text graded {grade} exceeds what {app_id} may receive")]
@@ -193,6 +196,7 @@ impl StageRefusal {
             },
             Self::CoordinateOutOfRange => "stage_coordinate_out_of_range",
             Self::ScrollOutOfRange => "stage_scroll_out_of_range",
+            Self::StrokeOutOfRange => "stage_stroke_out_of_range",
             Self::SecretText => "secret_in_text",
             Self::TextExceedsAppGrade { .. } => "text_exceeds_app_grade",
             Self::TextOutOfBounds { .. } => "text_out_of_bounds",
@@ -301,6 +305,15 @@ impl StageGate {
                     if app.approval_keys.contains(&named) {
                         approval = Some("policy requires approval for this key");
                     }
+                }
+            }
+            StageAction::Stroke { points, .. } => {
+                // A line of one point is not a line, and one that never leaves its first
+                // point is a click wearing a line's name.
+                if !(2..=MAX_STROKE_POINTS).contains(&points.len())
+                    || points.iter().all(|at| at == &points[0])
+                {
+                    return refuse(StageRefusal::StrokeOutOfRange);
                 }
             }
             StageAction::Snapshot {

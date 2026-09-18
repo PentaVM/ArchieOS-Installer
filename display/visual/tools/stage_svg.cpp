@@ -134,6 +134,9 @@ std::string caption_text(const Caption& caption) {
         case CaptionVerb::Dragging:
             std::snprintf(buffer, sizeof buffer, "arrastrando · %s", app);
             break;
+        case CaptionVerb::Drawing:
+            std::snprintf(buffer, sizeof buffer, "dibujando · %s", app);
+            break;
         case CaptionVerb::Scrolling:
             std::snprintf(buffer, sizeof buffer, "desplazando · %s", app);
             break;

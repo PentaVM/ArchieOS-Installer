@@ -311,6 +311,36 @@ DecodeResult decode_command(const QByteArray& raw_line, const QByteArray& key, s
         decoded.keys.append(*key_code);
         c.action = StageAction::Key;
         c.key_count = static_cast<int>(decoded.keys.size());
+    } else if (kind == QLatin1String("stroke")) {
+        // A line: where the button goes down, every point it is dragged through, and where
+        // it comes up. The stage re-checks every one of them against the window.
+        if (!exact_keys(action, {"kind", "points", "button"}) ||
+            !action.value(QLatin1String("points")).isArray()) {
+            return fail("command_malformed");
+        }
+        const QJsonArray points = action.value(QLatin1String("points")).toArray();
+        if (points.size() < 2 || points.size() > static_cast<qsizetype>(archie::visual::kMaxStrokePoints)) {
+            return fail("command_malformed");
+        }
+        for (const QJsonValue& value : points) {
+            if (!value.isObject()) return fail("command_malformed");
+            const QJsonObject point = value.toObject();
+            if (!exact_keys(point, {"x", "y"})) return fail("command_malformed");
+            const auto x = coordinate(point.value(QLatin1String("x")));
+            const auto y = coordinate(point.value(QLatin1String("y")));
+            if (!x || !y) return fail("command_malformed");
+            c.path.push_back(archie::visual::IPoint{*x, *y});
+        }
+        const auto pressed = button(action.value(QLatin1String("button")));
+        if (!pressed) return fail("command_malformed");
+        c.button = *pressed;
+        c.action = StageAction::Stroke;
+        // Where it starts and ends, for everything that reads one point of a command: the
+        // camera framing the work, and the checks every other action shares.
+        c.local_x = c.path.front().x;
+        c.local_y = c.path.front().y;
+        c.to_local_x = c.path.back().x;
+        c.to_local_y = c.path.back().y;
     } else if (kind == QLatin1String("focus")) {
         if (!exact_keys(action, {"kind"})) return fail("command_malformed");
         c.action = StageAction::Focus;
