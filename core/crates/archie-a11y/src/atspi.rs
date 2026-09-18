@@ -96,9 +96,6 @@ impl Accessibility {
             if names.get_connection_unix_process_id(name).await.ok() != Some(pid) {
                 continue;
             }
-            // With one window there is nothing to tell apart, and asking how big it is
-            // would be another round trip for an answer that cannot change anything.
-            let mut windows = 0;
             let mut pending = vec![(service.clone(), path, 0_usize)];
             while let Some((service, path, depth)) = pending.pop() {
                 read += 1;
@@ -107,9 +104,12 @@ impl Accessibility {
                 }
                 let accessible = self.accessible(&service, path.as_str()).await?;
                 let role = accessible.get_role_name().await.unwrap_or_default();
-                if role == "frame" && windows > 1 {
-                    // Another window of the same application measures differently, and
-                    // its coordinates would be a click in the wrong place.
+                // The windows of an application are the children of its root, whatever the
+                // toolkit calls them: a frame, a dialog, or the window a menu opens in.
+                // Every one of them is measured, even when there is only one, because an
+                // application that has just opened a menu has two before it says so, and
+                // coordinates from the wrong window are a click in the wrong place.
+                if depth == 1 {
                     match (window, self.bounds(&service, path.as_str()).await) {
                         (Some((width, height)), Some(bounds))
                             if bounds.width as i32 != width || bounds.height as i32 != height =>
@@ -136,9 +136,6 @@ impl Accessibility {
                     continue;
                 }
                 let children = accessible.get_children().await.unwrap_or_default();
-                if depth == 0 {
-                    windows = children.len();
-                }
                 for (child_service, child_path) in children {
                     pending.push((child_service, child_path, depth + 1));
                 }

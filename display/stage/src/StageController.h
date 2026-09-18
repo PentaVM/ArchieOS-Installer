@@ -16,6 +16,7 @@
 #include <QLocalSocket>
 #include <QObject>
 #include <QPointer>
+#include <QSet>
 #include <QQuickItemGrabResult>
 #include <QQuickWindow>
 #include <QSharedPointer>
@@ -122,10 +123,16 @@ public:
     bool listening() const { return m_server.isListening(); }
 
     /// A toplevel became visible. Called from QML once the item exists.
-    Q_INVOKABLE void registerSurface(QWaylandQuickItem *item, const QString &appId);
+    /// `parent` is the window a menu opened over, and zero for a window itself.
+    Q_INVOKABLE void registerSurface(QWaylandQuickItem *item, const QString &appId,
+                                     archie::visual::SurfaceId parent = 0);
     /// The item's desk geometry or application id may have changed.
     Q_INVOKABLE void updateSurface(QWaylandQuickItem *item, const QString &appId);
     Q_INVOKABLE void unregisterSurface(QWaylandQuickItem *item);
+    /// A menu, a combo box list or anything else an application opens over a window it
+    /// already has. It becomes an item under that window's item and a surface on the
+    /// table, so that a command can name it: a menu item is a thing to click.
+    Q_INVOKABLE void addPopup(QObject *xdgSurface);
     Q_INVOKABLE void setOutputSize(int width, int height);
 
 signals:
@@ -169,6 +176,12 @@ private:
     void schedule(std::optional<std::int64_t> at);
 
     QByteArray surfaceEvent(archie::visual::SurfaceId id) const;
+    /// Menus and other surfaces an application opens over a window it already has.
+    /// Qt makes them items under that window's item; the stage puts them on the table
+    /// so that a command can name one, because a menu item is a thing to click.
+    void adoptChildSurfaces(QWaylandQuickItem *item);
+    /// Keeps a surface's place on the table current as its item moves or resizes.
+    void followGeometry(QWaylandQuickItem *item, const QString &appId);
     QWaylandSeat *seat() const;
     QWaylandQuickItem *itemFor(archie::visual::SurfaceId id) const;
 
@@ -218,6 +231,11 @@ private:
     QHash<QWaylandQuickItem *, archie::visual::SurfaceId> m_ids;
     /// The process behind each surface, as the compositor was told when it connected.
     QHash<archie::visual::SurfaceId, qint64> m_pids;
+    /// The window a surface opened over, when it is not a window of its own.
+    QHash<archie::visual::SurfaceId, archie::visual::SurfaceId> m_parents;
+    /// Items that appeared under a window before the surface they will show: a menu is
+    /// an item first and a surface a moment later.
+    QSet<QObject *> m_awaiting;
     QPointer<QObject> m_focusedItem;
 
     QPointF m_lastPhysicalPointer;

@@ -109,6 +109,8 @@ async fn the_mirror_follows_what_the_compositor_reports() {
         height: 100,
         geometry_revision: 5,
         pid: 4321,
+        parent: 0,
+        popup: false,
     });
     world.apply(&StageEvent::Focus { surface: Some(1) });
     world.apply(&StageEvent::Authority {

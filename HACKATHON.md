@@ -252,7 +252,24 @@ from executed builds on identified hardware.
   the window now run at 4.07, and eight of one control at 6.05, every one verified by the
   window redrawing. What is left of a capture is Qt rendering the item, 22–98 ms whatever
   size is asked for; at agent tempo the pointer's own 166–176 ms is now the slow part.
-- Not done: menus and popups, more than one target per call, verification stronger than
+- A menu is now a surface Archie can name. It is not part of the window it belongs to: the
+  application opens it over one and closes it as soon as it is done, and the stage gives it
+  an item under that window and a place on the surface table, with the window's application
+  id and `parent` pointing at it. A command names it, the compositor re-checks it, a capture
+  is of the menu alone and its damage verifies the click.
+- What goes where follows from what it is: a menu item goes to the newest open menu, and
+  waits up to 600 ms for one because the click that opens a menu is answered before the
+  menu is drawn; everything else goes to the window, menu or no menu. An answer about one
+  surface is never used in another, and a menu item is never asked about before its menu
+  exists — coordinates from the wrong window are a click in the wrong place, and while
+  writing this one such click chose a menu entry nobody had asked for.
+- Measured in WSLg on a demo window whose menu is a real popup surface: six activations,
+  alternating the window's own button and an item in the menu it opens, at 4.44 a second,
+  all verified by a repaint, with the application's log recording its three choices. The
+  button was declared by the application in 3–23 ms with no capture and no model; the menu
+  item needed one, and it was a capture of the 200×80 menu rather than of the 1334×596
+  window behind it.
+- Not done: more than one target per call, verification stronger than
   "the control redrew", and a run of LocateAnything-3B itself. Measured cloud vision latency
   was 1.32–1.69 s for Gemma or MiniCPM and 27.3–33.5 s for Kimi-K3, so the cloud adapter is
   a Cortex fallback rather than the interactive loop.

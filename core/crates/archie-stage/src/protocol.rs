@@ -93,6 +93,13 @@ pub enum StageEvent {
         geometry_revision: u64,
         #[serde(default)]
         pid: u32,
+        /// The window this surface opened over, and zero when it is a window itself.
+        #[serde(default)]
+        parent: u32,
+        /// Whether it is a menu or another of the shell's popups, which closes as soon as
+        /// it is done with.
+        #[serde(default)]
+        popup: bool,
     },
     Unmapped {
         surface: u32,
@@ -200,6 +207,11 @@ pub struct StageSurface {
     pub geometry_revision: u64,
     /// The client process that owns it, or 0 when the compositor could not tell.
     pub pid: u32,
+    /// The window this surface opened over — a menu belongs to the window that opened it —
+    /// and zero when it is a window of its own.
+    pub parent: u32,
+    /// Whether it is a menu or another of the shell's popups.
+    pub popup: bool,
 }
 
 /// The control plane's mirror of the stage.
@@ -241,6 +253,8 @@ impl StageWorld {
                 height,
                 geometry_revision,
                 pid,
+                parent,
+                popup,
             } => {
                 self.surfaces.insert(
                     *surface,
@@ -253,6 +267,8 @@ impl StageWorld {
                         height: *height,
                         geometry_revision: *geometry_revision,
                         pid: *pid,
+                        parent: *parent,
+                        popup: *popup,
                     },
                 );
             }

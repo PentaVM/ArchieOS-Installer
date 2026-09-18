@@ -52,6 +52,11 @@ struct Stage {
     captures: usize,
     /// What each capture asked for: the whole window, or one part of it.
     captured: Vec<Option<archie_stage::Region>>,
+    /// Which surface each capture and each click named: the window, or a menu over it.
+    looked_at: Vec<u32>,
+    clicked: Vec<u32>,
+    /// The size of every surface this compositor has, by id.
+    sizes: Vec<(u32, u32, u32)>,
     /// How many marks the button is drawn with. Changing it redraws a different control.
     bars: usize,
     /// Whether a click makes the window redraw where it landed.
@@ -63,6 +68,9 @@ impl Default for Stage {
         Self {
             clicks: Vec::new(),
             captured: Vec::new(),
+            looked_at: Vec::new(),
+            clicked: Vec::new(),
+            sizes: vec![(4, 640, 480)],
             captures: 0,
             bars: 3,
             reacts: true,
@@ -72,7 +80,11 @@ impl Default for Stage {
 
 /// A 640x480 window with a field and a button in it, in grey; or the part of it a capture
 /// asked for, cropped exactly as the compositor crops it.
-fn window_png(bars: usize, region: Option<archie_stage::Region>) -> (Vec<u8>, archie_stage::Region) {
+fn window_png(
+    bars: usize,
+    region: Option<archie_stage::Region>,
+    surface: (u32, u32),
+) -> (Vec<u8>, archie_stage::Region) {
     let (width, height) = (640_u32, 480_u32);
     let mut pixels = vec![0xf2_u8; (width * height) as usize];
     let mut draw = |(bx, by, bw, bh): (u32, u32, u32, u32), marks: usize| {
@@ -96,9 +108,11 @@ fn window_png(bars: usize, region: Option<archie_stage::Region>) -> (Vec<u8>, ar
     };
     draw(FIELD, 2);
     draw(BUTTON, bars);
+    // A menu is a surface of its own, smaller than the window and drawn from its corner.
+    let (surface_width, surface_height) = (surface.0.min(width), surface.1.min(height));
     let region = region
-        .and_then(|region| region.clamped(width, height))
-        .unwrap_or(archie_stage::Region::new(0, 0, width, height));
+        .and_then(|region| region.clamped(surface_width, surface_height))
+        .unwrap_or(archie_stage::Region::new(0, 0, surface_width, surface_height));
     let part: Vec<u8> = (0..region.height)
         .flat_map(|row| {
             let from = ((region.y as u32 + row) * width + region.x as u32) as usize;
@@ -172,15 +186,23 @@ async fn compositor(
                         let mut stage = stage.lock().unwrap();
                         stage.captures += 1;
                         stage.captured.push(region);
-                        window_png(stage.bars, region)
+                        stage.looked_at.push(command.surface);
+                        let size = stage
+                            .sizes
+                            .iter()
+                            .find(|(id, _, _)| *id == command.surface)
+                            .map(|(_, width, height)| (*width, *height))
+                            .unwrap_or((640, 480));
+                        window_png(stage.bars, region, size)
                     };
                     let path = dir.join("snapshots").join(format!("{}.png", command.seq));
                     std::fs::write(&path, &png).unwrap();
                     let digest =
                         hex::encode(ring::digest::digest(&ring::digest::SHA256, &png).as_ref());
                     reply.push_str(&format!(
-                        "{{\"event\":\"snapshot\",\"seq\":{},\"surface\":4,\"x\":{},\"y\":{},\"width\":{},\"height\":{},\"sha256\":\"{digest}\",\"path\":{}}}\n",
+                        "{{\"event\":\"snapshot\",\"seq\":{},\"surface\":{},\"x\":{},\"y\":{},\"width\":{},\"height\":{},\"sha256\":\"{digest}\",\"path\":{}}}\n",
                         command.seq,
+                        command.surface,
                         part.x,
                         part.y,
                         part.width,
@@ -192,11 +214,13 @@ async fn compositor(
                     let reacts = {
                         let mut stage = stage.lock().unwrap();
                         stage.clicks.push((x, y));
+                        stage.clicked.push(command.surface);
                         stage.reacts
                     };
                     if reacts {
                         reply.push_str(&format!(
-                            "{{\"event\":\"damage\",\"surface\":4,\"rects\":[{{\"x\":{},\"y\":{},\"width\":20,\"height\":20}}]}}\n",
+                            "{{\"event\":\"damage\",\"surface\":{},\"rects\":[{{\"x\":{},\"y\":{},\"width\":20,\"height\":20}}]}}\n",
+                            command.surface,
                             x - 10,
                             y - 10
                         ));
@@ -945,4 +969,73 @@ async fn a_look_that_only_confirms_asks_for_the_boxes_and_not_the_window() {
             "and it is a small part of the window: {part:?}"
         );
     }
+}
+
+const SAVE_AS: &str = "the save as item";
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_menu_that_opens_is_where_the_next_click_goes() {
+    let dir = scratch("menu");
+    let stage = Arc::new(Mutex::new(Stage::default()));
+    let (client, inject) = compositor(dir.clone(), stage.clone()).await;
+    let (url, _requests) = grounding_server(
+        "nvidia/LocateAnything-3B",
+        &[
+            (SAVE, "<box> 500, 500, 600, 600 </box>"),
+            (SAVE_AS, "<box> 100, 500, 900, 700 </box>"),
+        ],
+        Duration::ZERO,
+    )
+    .await;
+    let grounding = client_for(&url);
+    let mut sight = session(&dir, client).await;
+
+    // The button in the window is found and clicked as any other.
+    let save = target("button:save", SAVE, PrivacyGrade::Internal);
+    let first = sight
+        .find_and_activate(&save, &grounding, Locality::Local, 400)
+        .await
+        .unwrap();
+    assert_eq!(first.outcome.outcome_code, "clicked_and_repainted");
+
+    // That click opened a menu: a surface of the same application, over the window, which
+    // is what the compositor now says.
+    stage.lock().unwrap().sizes.push((9, 200, 120));
+    inject
+        .send(
+            "{\"event\":\"surface\",\"surface\":9,\"app_id\":\"org.example.Form\",\"x\":340,\
+             \"y\":300,\"width\":200,\"height\":120,\"geometry_revision\":1,\"pid\":4321,\
+             \"parent\":4,\"popup\":true}\n"
+                .into(),
+        )
+        .unwrap();
+
+    let mut item = target("menu:save-as", SAVE_AS, PrivacyGrade::Internal);
+    item.kind = NodeKind::MenuItem;
+    let sighting = sight
+        .find_and_activate(&item, &grounding, Locality::Local, 401)
+        .await
+        .unwrap();
+    assert_eq!(sighting.knowledge, Knowledge::Grounded);
+    assert_eq!(sighting.outcome.outcome_code, "clicked_and_repainted");
+
+    let looked_at = stage.lock().unwrap().looked_at.clone();
+    let clicked = stage.lock().unwrap().clicked.clone();
+    assert_eq!(
+        (looked_at.last(), clicked.last()),
+        (Some(&9), Some(&9)),
+        "the menu is what was looked at and what was clicked, not the window behind it"
+    );
+    // 100..900 of 200 wide and 500..700 of 120 high: the menu's own coordinates, not the
+    // window's, because the capture was of the menu.
+    assert_eq!((sighting.point.x, sighting.point.y), (100, 72));
+
+    // The button in the window is still in the window, menu or no menu: coordinates read
+    // from one surface are a click in the wrong place in another.
+    let again = sight
+        .find_and_activate(&save, &grounding, Locality::Local, 402)
+        .await
+        .unwrap();
+    assert_eq!(again.outcome.outcome_code, "clicked_and_repainted");
+    assert_eq!(stage.lock().unwrap().clicked.last(), Some(&4));
 }

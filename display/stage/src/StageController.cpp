@@ -20,6 +20,8 @@
 #include <QWaylandSeat>
 #include <QWaylandSurface>
 #include <QWaylandView>
+#include <QWaylandQuickShellSurfaceItem>
+#include <QWaylandXdgShell>
 
 #include <algorithm>
 #include <cmath>
@@ -284,6 +286,17 @@ QWaylandQuickItem *StageController::itemFor(SurfaceId id) const
 
 namespace {
 
+/// Whether a surface is a menu, a combo box list or anything else the xdg shell calls a
+/// popup: something the application opened over a window, which closes when it is done.
+bool is_popup(QWaylandQuickItem *item)
+{
+    if (!item || !item->surface()) {
+        return false;
+    }
+    const QWaylandXdgSurface *xdg = QWaylandXdgSurface::findIn(item->surface());
+    return xdg != nullptr && xdg->popup() != nullptr;
+}
+
 IRect desk_geometry(QWaylandQuickItem *item, QObject *desk)
 {
     QPointF origin(item->x(), item->y());
@@ -296,7 +309,7 @@ IRect desk_geometry(QWaylandQuickItem *item, QObject *desk)
 
 } // namespace
 
-void StageController::registerSurface(QWaylandQuickItem *item, const QString &appId)
+void StageController::registerSurface(QWaylandQuickItem *item, const QString &appId, SurfaceId parent)
 {
     if (!item || m_ids.contains(item)) {
         return;
@@ -304,6 +317,9 @@ void StageController::registerSurface(QWaylandQuickItem *item, const QString &ap
     const SurfaceId id = m_nextSurface++;
     m_items.insert(id, item);
     m_ids.insert(item, id);
+    if (parent != 0) {
+        m_parents.insert(id, parent);
+    }
     connect(item, &QObject::destroyed, this, [this, item] {
         const auto found = m_ids.constFind(item);
         if (found == m_ids.constEnd()) {
@@ -313,6 +329,7 @@ void StageController::registerSurface(QWaylandQuickItem *item, const QString &ap
         m_ids.remove(item);
         m_items.remove(gone);
         m_pids.remove(gone);
+        m_parents.remove(gone);
         if (m_active && m_active->command.surface == gone) {
             cancelPlayback("surface_unmapped");
         }
@@ -363,6 +380,68 @@ void StageController::registerSurface(QWaylandQuickItem *item, const QString &ap
     }
     emit surfacesChanged();
     updateSurface(item, appId);
+    followGeometry(item, appId);
+    // A window may already have a menu open when the stage first hears of it, and it may
+    // open one at any time afterwards.
+    adoptChildSurfaces(item);
+    connect(item, &QQuickItem::childrenChanged, this, [this, item] { adoptChildSurfaces(item); });
+}
+
+void StageController::followGeometry(QWaylandQuickItem *item, const QString &appId)
+{
+    // The table's own answer first, so that a surface which renamed itself keeps the name
+    // it is known by; the one it was registered with when it is not on the table yet,
+    // which is how a menu that had no size when it appeared gets one.
+    const auto refresh = [this, item, appId] {
+        const auto found = m_ids.constFind(item);
+        if (found == m_ids.constEnd()) {
+            return;
+        }
+        const Surface *known = m_table.find(*found);
+        updateSurface(item, known ? QString::fromStdString(known->app_id) : appId);
+    };
+    connect(item, &QQuickItem::xChanged, this, refresh);
+    connect(item, &QQuickItem::yChanged, this, refresh);
+    connect(item, &QQuickItem::widthChanged, this, refresh);
+    connect(item, &QQuickItem::heightChanged, this, refresh);
+}
+
+void StageController::adoptChildSurfaces(QWaylandQuickItem *item)
+{
+    const auto found = m_ids.constFind(item);
+    if (found == m_ids.constEnd()) {
+        return;
+    }
+    const SurfaceId parent = *found;
+    const Surface *known = m_table.find(parent);
+    if (!known) {
+        return;
+    }
+    const QString appId = QString::fromStdString(known->app_id);
+    for (QQuickItem *child : item->childItems()) {
+        auto *surfaceItem = qobject_cast<QWaylandQuickItem *>(child);
+        if (!surfaceItem || m_ids.contains(surfaceItem)) {
+            continue;
+        }
+        if (!surfaceItem->surface()) {
+            // The item is made before the surface it will show. Nothing can be said about
+            // it yet, so this waits for the surface rather than dropping it.
+            if (!m_awaiting.contains(surfaceItem)) {
+                m_awaiting.insert(surfaceItem);
+                connect(surfaceItem, &QWaylandQuickItem::surfaceChanged, this,
+                        [this, item, surfaceItem] {
+                            m_awaiting.remove(surfaceItem);
+                            adoptChildSurfaces(item);
+                        });
+                connect(surfaceItem, &QObject::destroyed, this,
+                        [this, surfaceItem] { m_awaiting.remove(surfaceItem); });
+            }
+            continue;
+        }
+        // The application's own id: a menu of an application is that application, and the
+        // policy that governs the window governs what it opens.
+        registerSurface(surfaceItem, appId, parent);
+    }
 }
 
 void StageController::updateSurface(QWaylandQuickItem *item, const QString &appId)
@@ -378,6 +457,11 @@ void StageController::updateSurface(QWaylandQuickItem *item, const QString &appI
     const auto now = monotonic();
 
     if (geometry.empty()) {
+        return;
+    }
+    if (app.empty() && !known) {
+        // A surface with no application behind it is not something a command can name, and
+        // saying so on the wire would be saying nothing.
         return;
     }
     if (!known || known->app_id != app) {
@@ -403,6 +487,43 @@ void StageController::updateSurface(QWaylandQuickItem *item, const QString &appI
     tick();
 }
 
+void StageController::addPopup(QObject *xdgSurface)
+{
+    auto *xdg = qobject_cast<QWaylandXdgSurface *>(xdgSurface);
+    QWaylandXdgPopup *popup = xdg ? xdg->popup() : nullptr;
+    QWaylandXdgSurface *above = popup ? popup->parentXdgSurface() : nullptr;
+    QWaylandSurface *over = above ? above->surface() : nullptr;
+    if (!over) {
+        return;
+    }
+    // The window it opened over, and the item drawing it: a menu belongs to that window,
+    // is drawn inside it, and is that application whatever else it is.
+    SurfaceId parent = 0;
+    QWaylandQuickItem *parentItem = nullptr;
+    for (auto it = m_items.constBegin(); it != m_items.constEnd(); ++it) {
+        if (it.value() && it.value()->surface() == over) {
+            parent = it.key();
+            parentItem = it.value();
+            break;
+        }
+    }
+    const Surface *window = m_table.find(parent);
+    if (!parentItem || !window) {
+        return;
+    }
+    auto *item = new QWaylandQuickShellSurfaceItem(parentItem);
+    item->setShellSurface(xdg);
+    // A submenu opens over its menu the same way.
+    item->setAutoCreatePopupItems(true);
+    // Only a person in control reaches applications through the scene, exactly as for a
+    // window; the agent's input goes through the seat.
+    item->setInputEventsEnabled(physicalInput());
+    connect(this, &StageController::authorityChanged, item,
+            [this, item] { item->setInputEventsEnabled(physicalInput()); });
+    connect(item, &QWaylandQuickShellSurfaceItem::surfaceDestroyed, item, &QObject::deleteLater);
+    registerSurface(item, QString::fromStdString(window->app_id), parent);
+}
+
 void StageController::unregisterSurface(QWaylandQuickItem *item)
 {
     const auto found = m_ids.constFind(item);
@@ -416,6 +537,7 @@ void StageController::unregisterSurface(QWaylandQuickItem *item)
     m_ids.remove(item);
     m_items.remove(id);
     m_pids.remove(id);
+    m_parents.remove(id);
     if (m_table.unmap(id)) {
         broadcast(line_of(QJsonObject{{QStringLiteral("event"), QStringLiteral("unmapped")},
                                       {QStringLiteral("surface"), static_cast<qint64>(id)}}));
@@ -450,6 +572,10 @@ QByteArray StageController::surfaceEvent(SurfaceId id) const
         {QStringLiteral("width"), surface->geometry.w},
         {QStringLiteral("height"), surface->geometry.h},
         {QStringLiteral("geometry_revision"), static_cast<qint64>(surface->geometry_revision)},
+        // The window this one opened over, if it is a menu or another surface of that
+        // window rather than a window of its own. Zero when it is a window.
+        {QStringLiteral("parent"), static_cast<qint64>(m_parents.value(id, 0))},
+        {QStringLiteral("popup"), is_popup(m_items.value(id))},
         // Which process draws it: how something that reads an application's own account of
         // its controls, on another bus, finds the same window.
         {QStringLiteral("pid"), m_pids.value(id, 0)},

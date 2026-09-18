@@ -114,6 +114,9 @@ WaylandCompositor {
 
     XdgShell {
         onToplevelCreated: (toplevel, xdgSurface) => shellSurfaces.append({ shellSurface: xdgSurface })
+        // A menu is a surface of its own. The stage gives it an item under the window
+        // it belongs to and puts it on the table, so the agent can name it.
+        onPopupCreated: (popup, xdgSurface) => compositor.stage.addPopup(xdgSurface)
     }
     // Ask applications to leave window decoration to the stage, which draws one consistent
     // frame around every application. Clients that do not speak the protocol keep their own.

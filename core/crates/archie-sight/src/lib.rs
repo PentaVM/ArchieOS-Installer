@@ -63,7 +63,8 @@ use archie_policy::{
 };
 use archie_stage::{
     drain, wait_until, ActOutcome, ActRequest, DamageRect, LookOutcome, OperateError, Operator,
-    PointerButton, Region, Repainted, Snapshot, StageAction, StageClient, StageWorld,
+    PointerButton, Region, Repainted, Snapshot, StageAction, StageClient, StageSurface,
+    StageWorld,
 };
 use archie_types::{Locality, PrivacyGrade, Timestamp, TraceId};
 use archie_vault::{
@@ -435,6 +436,10 @@ fn in_window(snapshot: &Snapshot, bbox: Rect) -> Option<Rect> {
     .ok()
 }
 
+/// How long a menu item waits for its menu. The click that opens a menu is answered before
+/// the menu is drawn, so without this the next action would look at the window behind it.
+const MENU_TIMEOUT: Duration = Duration::from_millis(600);
+
 /// How much context a confirming capture takes around the boxes it is about.
 const CONFIRM_MARGIN_PX: u32 = 8;
 /// A part of the window is asked for only when it is smaller than this fraction of it;
@@ -655,7 +660,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
     async fn declared(
         &self,
         target: &Target,
-        surface: &archie_stage::StageSurface,
+        surface: &StageSurface,
     ) -> Option<Rect> {
         let declares = self.declares.as_ref()?;
         if surface.pid == 0 {
@@ -751,9 +756,14 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
             {
                 continue;
             }
-            let Some(surface) = self.world.surfaces_of(&target.app_id).next().cloned() else {
+            let Some(surface) = self.where_to_act(&target.app_id, target.kind) else {
                 continue;
             };
+            // A menu item cannot be found before its menu is open, and asking about one in
+            // the window behind it would teach this session a box in the wrong surface.
+            if matches!(target.kind, NodeKind::MenuItem | NodeKind::Menu) && !surface.popup {
+                continue;
+            }
             // A control the application itself names needs no model, now or later.
             if self.declared(target, &surface).await.is_some() {
                 continue;
@@ -850,11 +860,53 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
         ground(target, snapshot, grounding, destination).await
     }
 
+    /// Where an action on this application goes.
+    ///
+    /// A menu item belongs in the menu: the newest one, because a submenu opens over the
+    /// menu that opened it. Everything else belongs in the window, even while a menu is
+    /// open over it — a button is where it is, and coordinates read from one window are a
+    /// click in the wrong place in another.
+    fn where_to_act(&self, app_id: &str, kind: NodeKind) -> Option<StageSurface> {
+        let in_a_menu = matches!(kind, NodeKind::MenuItem | NodeKind::Menu);
+        let mut window: Option<&StageSurface> = None;
+        let mut menu: Option<&StageSurface> = None;
+        for surface in self.world.surfaces_of(app_id) {
+            if surface.popup {
+                if menu.is_none() || menu.is_some_and(|open| open.surface < surface.surface) {
+                    menu = Some(surface);
+                }
+            } else if window.is_none() {
+                window = Some(surface);
+            }
+        }
+        // A menu item with no menu open is a menu bar's own entry, in the window.
+        if in_a_menu { menu.or(window) } else { window.or(menu) }.cloned()
+    }
+
+    /// The same, for a target that names a menu item: it waits a moment for the menu, since
+    /// whatever opened it was answered before it was drawn.
+    async fn acting_on(&mut self, target: &Target) -> Result<StageSurface, SightError> {
+        if target.kind == NodeKind::MenuItem
+            && !self
+                .world
+                .surfaces_of(&target.app_id)
+                .any(|surface| surface.popup)
+        {
+            let app = target.app_id.clone();
+            wait_until(&mut self.client, &mut self.world, MENU_TIMEOUT, |world| {
+                world.surfaces_of(&app).any(|surface| surface.popup)
+            })
+            .await?;
+        }
+        self.where_to_act(&target.app_id, target.kind)
+            .ok_or(SightError::NotCaptured(ActOutcome::NoSurface))
+    }
+
     /// What a capture has to hold to confirm what this session knows in that window: the
     /// box in question and every other box it knows there, with a little context around
     /// them. Nothing when that already comes to most of the window, because then the
     /// window is the simpler ask and no slower.
-    fn confirming_region(&self, surface: &archie_stage::StageSurface, bbox: Rect) -> Option<Region> {
+    fn confirming_region(&self, surface: &StageSurface, bbox: Rect) -> Option<Region> {
         let of = |bbox: &Rect| Region::new(bbox.x, bbox.y, bbox.width, bbox.height);
         let mut region = of(&bbox);
         for known in self.known.values() {
@@ -953,12 +1005,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
         let mut timings = Timings::default();
         // What the compositor said while nobody was listening counts too.
         drain(&mut self.client, &mut self.world).await?;
-        let surface = self
-            .world
-            .surfaces_of(&target.app_id)
-            .next()
-            .cloned()
-            .ok_or(SightError::NotCaptured(ActOutcome::NoSurface))?;
+        let surface = self.acting_on(target).await?;
         let key = (target.app_id.clone(), target.node.as_str().to_string());
         let remembered = self.known.get(&key).cloned().filter(|known| {
             known.surface == surface.surface
@@ -979,15 +1026,26 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
             None
         };
 
+        // An answer about another window is an answer about another window: it is kept for
+        // the one it was about, and this one is found again from here.
+        let arrived = match waiting {
+            Some(handle) => {
+                let at = Instant::now();
+                let found = handle.await.map_err(|_| SightError::Interrupted)??;
+                timings.ground_ms = at.elapsed().as_millis() as u64;
+                let here = found.surface == surface.surface
+                    && found.geometry_revision == surface.geometry_revision;
+                let bbox = found.bbox;
+                self.keep(&key, found);
+                here.then_some(bbox)
+            }
+            None => None,
+        };
+
         let (bbox, knowledge, before) = if let Some(bbox) = declared {
             (bbox, Knowledge::Declared, None)
-        } else if let Some(handle) = waiting {
+        } else if let Some(bbox) = arrived {
             // Asked already, while Archie was doing something else.
-            let at = Instant::now();
-            let found = handle.await.map_err(|_| SightError::Interrupted)??;
-            timings.ground_ms = at.elapsed().as_millis() as u64;
-            let bbox = found.bbox;
-            self.keep(&key, found);
             (bbox, Knowledge::Grounded, None)
         } else {
             match remembered {

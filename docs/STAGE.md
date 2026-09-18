@@ -175,9 +175,34 @@ The declared answer is read again for every action, so it cannot go stale, and i
 used when it is unambiguous: a control whose name the task's words contain, of the kind the
 task asked for, and exactly one of them. Anything else — a window that names nothing, two
 controls with the same name, a toolkit with no bridge — falls through to looking. The
-window is matched by the process the compositor reported for that surface, and when an
-application has more than one window, by that window's size, because coordinates from the
-wrong window are a click in the wrong place.
+window is matched by the process the compositor reported for that surface and by that
+window's size — every time, not only when the application is known to have two, because an
+application that has just opened a menu has two before anything says so, and coordinates
+from the wrong window are a click in the wrong place.
+
+### Menus
+
+A menu is not part of the window it belongs to. It is a surface the application opens over
+one, and it closes as soon as it is done with; xdg-shell calls it a popup. The stage gives
+each one an item under the window that opened it and puts it on the surface table with that
+window's application id, its own geometry and `parent` pointing at the window. From there
+it is an ordinary surface: a command names it, the compositor re-checks it, a capture is
+of it alone, and its damage verifies a click in it.
+
+Where an action goes follows from what it is. A target of kind `menu_item` goes to the
+newest open menu — the newest because a submenu opens over the menu that opened it — and
+waits up to 600 ms for one, since the click that opens a menu is answered before the menu
+is drawn. Everything else goes to the window, menu or no menu: a button is where it is, and
+a menu that happens to be open is not a reason to click through it. For the same reason, a
+background ask about a target is used only in the surface it was asked about, and a menu
+item is never asked about before its menu exists.
+
+Measured in WSLg on `display/stage/demo/menu.qml`, a window whose menu is a real popup
+surface: six activations, alternating the window's own `Archivo` button and the
+`Guardar como` item in the menu it opens, at 4.44 a second, all six verified by a repaint,
+and the application's log recording its three choices. The button was declared by the
+application (3–23 ms, no capture and no model); the menu item needed a capture, and that
+capture was 200×80 — the menu — rather than the 1334×596 window behind it.
 
 A session can be told the whole list of targets before it starts. `start_finding` takes one
 capture, asks a grounding model about everything nothing else can answer for, and returns
@@ -430,14 +455,17 @@ only by its owner.
   that changes, or the stage moves to a compositor library that offers them.
 - **Alacritty dies at full size** with its own `wl_shm_pool` stride error when it draws
   client-side decorations. It ran at half width.
-- **Popups and menus are drawn but cannot be targeted.** Commands address toplevel
-  surfaces, and a click on an open menu goes to the window beneath it.
+- **A menu larger than its window is clipped.** Its item is drawn inside the window's, so
+  a menu that would hang over the edge is cut there. Qt's own popup placement decides where
+  it goes; the stage only gives it an item and a place on the table.
+- **Submenus have not been driven.** A menu of a menu is created the same way and would be
+  the newest open menu, but nothing has opened one on the stage yet.
 - **Clients that ignore xdg-decoration** keep their own title bars inside the stage's
   frame, weston-terminal among them.
 - **No XWayland**, so X11-only applications do not run.
 - **Nothing has run on DRM/KMS hardware.**
-- **Seeing is one window and one target per call.** A capture is the toplevel's own
-  buffer, so menus and popups are neither in the picture nor within reach of the click.
+- **Seeing is one surface and one target per call.** A capture is one surface's own buffer:
+  the window, one box of it, or a menu over it, but never two of them at once.
 - **"Changed" is not "right".** Verification shows that the window's pixels changed, not
   that the intended thing happened. A click that only takes focus away from a field
   passes.
