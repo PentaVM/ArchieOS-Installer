@@ -305,6 +305,27 @@ from executed builds on identified hardware.
   with modifiers needs an explicit grant, which the shipped policy still does not give
   anyone. Getting the picture back out of Photopea needs a click on its own Save button,
   which is the accessibility path's job and is not done yet.
+- Added `--flow`: lines that follow the form rather than shading across it. The picture's
+  gradient is turned a quarter and averaged, lines are let go into that field from the dark
+  places and followed until they leave the picture or reach ground with no form in it, and
+  each takes the palette colour nearest the picture under its seed. The demo canvas now has
+  a palette, so a colour change is what it is from outside: a click on a swatch.
+- Fixed a bug that had made every flowed drawing wrong: the planner read a point of the
+  canvas as a point of the picture without scaling, so a picture drawn into a canvas of a
+  different size was drawn from its own top-left crop. A test now says the corner of the
+  canvas is the corner of the picture.
+- Wrote down a ceiling that is not the stage's to fix: an application receives the pointer's
+  position at its own frame rate, not the path that was sent, so **a fifteen-second drawing
+  is about nine hundred positions** whatever the commands carry. `seen_by` resamples a line
+  the way the application will receive it, `--as-seen` makes the preview show that instead of
+  the plan, and `--stroke-speed` lets the stage be asked for a speed that fits. Video tempo
+  now draws at 1000 px/s rather than 2500.
+- Measured in WSLg on the demo canvas: the film's intro is 40 lines in 3 colours in 13.2 s
+  with none refused, and the full picture is 4438 lines in 5 colours with none refused.
+- The demo canvas itself had been dropping strokes — it held one line's points and painted
+  when Qt got round to it, so the next press replaced them, and 22 of 34 strokes reached the
+  application and never appeared on its paper while its log reported them as received. Worth
+  recording because only the picture showed it; every count in the logs had agreed.
 - Not done: more than one target per call, verification stronger than
   "the control redrew", and a run of LocateAnything-3B itself. Measured cloud vision latency
   was 1.32–1.69 s for Gemma or MiniCPM and 27.3–33.5 s for Kimi-K3, so the cloud adapter is
