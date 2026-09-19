@@ -292,26 +292,75 @@ The demo canvas is a sheet of paper with nothing on it, which is the easy case. 
 strokes work in a real drawing program: Firefox on the stage with `photopea.com`, an image
 editor that is a web page.
 
+Photopea takes a script in its URL, so the document is made without touching a menu.
+`--find-paper` is how Archie knows where to draw: it looks at the window once, through the
+same gate and read lease as any capture, and takes the largest light rectangle in it for
+paper. Nothing of that capture is kept but the rectangle.
+
+Then Archie draws, opens Photopea's own File menu, walks it to Export as ▸ PNG, and clicks
+Save in the dialog. The file lands in the browser's download directory: 760×1020, 62 KB,
+drawn with Photopea's own brush.
+
 ```bash
-firefox -P archie --new-window 'https://www.photopea.com/#{"script":"app.documents.add(760,1020,72,'Archie',NewDocumentMode.RGB,DocumentFill.WHITE)"}'
-archie-paint --socket … --key-file … --policy apps.toml --app firefox --image mona-lisa.jpg --find-paper
+firefox --profile /root/ff-profile --new-window 'https://www.photopea.com/#{"script":"app.documents.add(760,1020,72,'Archie',NewDocumentMode.RGB,DocumentFill.WHITE)"}'
+archie-stage-cli act … click 19 390                 # the brush, in the tool column
+archie-paint --socket … --app firefox --image mona-lisa.jpg --find-paper --flow --points 24
+archie-stage-cli act … click 19 102                 # File
+archie-stage-cli act … click 56 402                 # Export as
+archie-stage-cli act … click 214 403                # PNG
+archie-stage-cli act … click 683 524                # Save
 ```
 
-Photopea takes a script in its URL, so the document is made without touching a menu. After
-that everything is the stage's own vocabulary: `focus`, `key b` for the brush, `key [` to
-make it thinner, and strokes. `--find-paper` is how Archie knows where to draw — it looks at
-the window once, through the same gate and read lease as any capture, and takes the largest
-light rectangle in it for paper. Nothing of that capture is kept but the rectangle.
+A correction to what this document said before. It reported that "647 strokes of the Mona
+Lisa were drawn into Photopea at 4.5–4.7 a second with none refused". The stroke count and
+the rate were true of the stage; the drawing was not. Nothing was painted in that run, and
+nothing was painted in the four runs after it, because Photopea's brush was never selected —
+and the reason is the next paragraph. A count of strokes the compositor executed is not a
+count of marks an application made, and this document should not have read as though it
+were.
 
-Measured: the paper came back as 385×680 at 38,238 of a 980-wide window, and 647 strokes of
-the Mona Lisa were drawn into Photopea at 4.5–4.7 a second with none refused.
+### What Photopea taught the stage
 
-Two things this exposed, both of them the system working rather than failing. The stage
-could not press `[`, because its keyboard was letters, digits and named keys only — a
-keyboard has marks, and now so does it. And `ctrl+shift+s` to export was refused with
-`modified_keys_not_allowed`: a chord with modifiers needs an explicit grant in the policy,
-which the demo policy for Firefox now has. Getting the picture out of Photopea still needs a
-click on its own Save button, which is the accessibility path's job and is not done yet.
+**It declares nothing.** Photopea draws its whole interface — menu bar, tool column, panels,
+dialogs — inside one canvas element, so the accessibility bus has nothing to say about any of
+it. Everything Archie does here is done by looking or by position. This is the case the local
+model exists for, and it is worth stating plainly that the fastest and most exact path, the
+one where the application names its own controls, is simply not available in applications
+like this one.
+
+**Keys reach Firefox and stop there.** Sending `b` to select the brush does nothing, and so
+does `ctrl+s`. The Wayland trace shows why: Firefox binds `wl_seat` twice, and the compositor
+sends pointer events to both bindings — Firefox uses one and prints `discarded` for the other
+— but sends `wl_keyboard.enter` and every key on the binding Firefox discards. So the
+protocol log shows the key arriving (`wl_keyboard.key(11, …, 48, 1)`, which is `b`) while the
+page's own `keydown` handler never runs. A page that echoes what it receives confirms it:
+nothing. Clicking works, typing does not, and that is why the brush has to be clicked in the
+tool column and why the drawing is made with whatever brush size Photopea starts with.
+
+**Agent tempo is too quick for it.** At `--tempo agent` a press lasts 32 ms and Photopea's
+canvas does not register it: strokes are executed, none are refused, and the document stays
+white. At `--tempo person` the same strokes paint. An application that watches the pointer
+itself, rather than being told about a click, needs the press to last.
+
+**A click with the wrong tool poisons the next one.** One click on the canvas with the Move
+tool — sent only to give the page keyboard focus — left Photopea in a state where the brush,
+selected afterwards, painted nothing. Removing that click is the difference between a 465-byte
+white PNG and the picture. The brush click gives the page focus anyway.
+
+**Verification cannot see an in-page menu.** `archie-look` opens the File menu and then
+reports `world verification did not observe a newer scene revision`, because the menu is
+drawn inside the page rather than in a surface of its own. Retrying on that false negative
+clicks again and closes the menu, which is worse than not retrying. The activation succeeded;
+the check could not see it.
+
+**What the grounding models could do.** On this window, asked for the File menu:
+`openbmb/MiniCPM-V-4_5` answered `0 206 44 234` in 8.0 s and the click opened the menu;
+`google/gemma-3-27b-it` answered `<box> 266, 48, 309, 74 </box>` in 2.4 s, which is the
+browser's tab bar; `moonshotai/Kimi-K3` missed four times out of four. None of them placed
+the smaller targets — Export as, PNG, a 30-pixel tool icon — well enough to walk the menu, so
+those are clicked at positions known from the window's own fixed layout.
+
+
 
 ### Who does what, and what a model is for
 

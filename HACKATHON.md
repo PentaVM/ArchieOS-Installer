@@ -292,19 +292,42 @@ from executed builds on identified hardware.
   handed control to the person, as it should, and the painter spent 551 strokes arguing with
   it. A stroke refused with `operator_has_control` now waits for the person and is tried
   again.
-- The same strokes were then drawn in a real application: Firefox on the stage with
+- The same strokes were then taken to a real application: Firefox on the stage with
   photopea.com, an image editor that is a web page. Photopea takes a script in its URL, so
-  the document is made without a menu; after that it is the stage's own vocabulary — focus,
-  `b` for the brush, `[` to make it thinner, and strokes. Archie finds where to draw by
-  looking: one capture through the same gate and read lease as any other, and the largest
-  light rectangle in the window is the paper. 647 strokes of the Mona Lisa went into
-  Photopea at 4.5–4.7 a second with none refused.
-- That run exposed two things, both of them the system working. The stage could not press
-  `[`, because its keyboard was letters, digits and named keys — a keyboard has marks, and
-  now so does it. And `ctrl+shift+s` was refused with `modified_keys_not_allowed`: a chord
-  with modifiers needs an explicit grant, which the shipped policy still does not give
-  anyone. Getting the picture back out of Photopea needs a click on its own Save button,
-  which is the accessibility path's job and is not done yet.
+  the document is made without a menu, and Archie finds where to draw by looking: one capture
+  through the same gate and read lease as any other, and the largest light rectangle in the
+  window is the paper.
+- **Archie now gets the picture back out.** It draws with Photopea's own brush, opens
+  Photopea's File menu, walks it to Export as ▸ PNG and clicks Save; the file lands in the
+  browser's download directory, 760×1020 and 62 KB. This is the step that was open.
+- A correction to an earlier entry. It said "647 strokes of the Mona Lisa went into Photopea
+  at 4.5–4.7 a second with none refused". The strokes and the rate were true of the stage,
+  the drawing was not: nothing was painted, because the brush had never been selected. A
+  count of strokes the compositor executed is not a count of marks an application made.
+- Photopea declares nothing. Its whole interface — menus, tools, panels, dialogs — is drawn
+  inside one canvas, so the accessibility bus has nothing to say about any of it. In an
+  application like this the fastest and most exact path, where the application names its own
+  controls, is simply not available.
+- Keys reach Firefox and stop there. The Wayland trace shows Firefox binding the seat twice:
+  pointer events go to both bindings and Firefox prints `discarded` for one, while keyboard
+  focus and every key go to the binding it discards. The key arrives in the protocol log and
+  the page's own `keydown` never runs. Clicking works, typing does not — which is why the
+  brush is clicked in the tool column rather than pressed.
+- Agent tempo is too quick for a canvas that watches the pointer itself: at 32 ms of press
+  Photopea registers nothing, every stroke is executed and none refused, and the page stays
+  white. At a person's tempo the same strokes paint.
+- A single click with the Move tool, sent only to give the page keyboard focus, left Photopea
+  unable to paint afterwards. Removing it is the difference between a 465-byte white PNG and
+  the picture.
+- `archie-look` opens the File menu and then reports that verification saw no new scene
+  revision, because the menu is drawn inside the page and not in a surface of its own. The
+  activation worked; the check could not see it, and retrying on that closes the menu again.
+- Of the vision models the provider offers, on this window: MiniCPM-V-4_5 placed the File
+  menu well enough to open it (8.0 s), Gemma answered in the right format and pointed at the
+  browser's tab bar (2.4 s), and Kimi-K3 missed four times out of four. None placed the
+  smaller targets, so those are clicked from the window's own fixed layout. IRIS now accepts
+  four bare integers as an answer as well as `<box>…</box>`, which is what MiniCPM returns —
+  the same strict grammar, one more punctuation.
 - Added `--flow`: lines that follow the form rather than shading across it. The picture's
   gradient is turned a quarter and averaged, lines are let go into that field from the dark
   places and followed until they leave the picture or reach ground with no form in it, and
