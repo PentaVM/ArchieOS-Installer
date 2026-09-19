@@ -322,6 +322,15 @@ from executed builds on identified hardware.
   now draws at 1000 px/s rather than 2500.
 - Measured in WSLg on the demo canvas: the film's intro is 40 lines in 3 colours in 13.2 s
   with none refused, and the full picture is 4438 lines in 5 colours with none refused.
+- The plan now says how much of the paper the pen will cover before anything is drawn, and
+  the demo canvas takes its pen width as an argument and reports it, so a large drawing can
+  be made with a fine pen and the plan made for the pen that will draw it.
+- Four pictures in a row came out looking like a black ground with the drawing scratched into
+  it. It was not too much ink: the files were transparent where the paper should have been,
+  because Qt throws a canvas's picture away when the canvas is resized and the demo laid its
+  white sheet only once. Every stroke was in place and every log agreed; what found it was
+  reading the alpha of one pixel in the corner of the file. Verification that a window redrew
+  cannot see a drawing made on no paper.
 - The demo canvas itself had been dropping strokes — it held one line's points and painted
   when Qt got round to it, so the next press replaced them, and 22 of 34 strokes reached the
   application and never appeared on its paper while its log reported them as received. Worth

@@ -21,17 +21,30 @@ Window {
     /// The colours this canvas can be drawn with, and which one is in hand.
     property var swatches: ["#141210", "#4a352a", "#8a6a46", "#c39c6d", "#e6d3b3", "#5d6b63"]
     property string ink: "#141210"
+    /// How wide the pen is. A drawing of many lines wants a fine one, because lines closer
+    /// together than the pen is wide leave no paper between them.
+    property int nib: {
+        const args = Qt.application.arguments
+        const last = args.length > 1 ? parseInt(args[args.length - 1], 10) : NaN
+        return isNaN(last) ? 2 : Math.max(1, last)
+    }
     /// Where the picture is written. Set with `qml -- paint.qml --out <path>` is not a
-    /// thing, so it is the last argument the demo scripts pass.
-    property string out: Qt.application.arguments.length > 1
-                         ? Qt.application.arguments[Qt.application.arguments.length - 1]
-                         : "/tmp/painting.png"
+    /// thing, so it is the last argument the demo scripts pass, before the pen's width if
+    /// one is given.
+    property string out: {
+        const args = Qt.application.arguments
+        if (args.length < 2)
+            return "/tmp/painting.png"
+        const back = isNaN(parseInt(args[args.length - 1], 10)) ? 1 : 2
+        return args.length > back ? args[args.length - back] : "/tmp/painting.png"
+    }
 
     /// Where the paper is and where the palette is, in the window's own pixels. An agent
     /// that is told this does not have to guess which part of the window is paper, and does
     /// not draw a line through the palette and change colour by accident.
     function report() {
         console.log("paint: layout", root.width, root.height, "strokes", root.strokes,
+                    "pen", root.nib,
                     "paper", Math.round(paper.x), Math.round(paper.y),
                     Math.round(paper.width), Math.round(paper.height),
                     "palette", Math.round(tray.x + palette.x + 16), Math.round(tray.y + palette.y + 16), 40)
@@ -48,8 +61,13 @@ Window {
         anchors.bottom: tray.top
         renderStrategy: Canvas.Immediate
         renderTarget: Canvas.Image
-        onWidthChanged: root.report()
-        onHeightChanged: root.report()
+        // Qt throws the canvas's picture away when the canvas changes size, so the paper
+        // has to be laid again — otherwise the drawing is made on nothing, and every stroke
+        // of it is there while the paper behind it is not. A picture saved from that is
+        // transparent, which looks like paper in one viewer and like a black ground in the
+        // next, and neither of them is what was drawn.
+        onWidthChanged: { paper.papered = false; paper.requestPaint(); root.report() }
+        onHeightChanged: { paper.papered = false; paper.requestPaint(); root.report() }
 
         /// The pieces waiting to be inked: each one a colour and the points drawn with it.
         /// A paint runs when the scene gets to it, which may be several strokes after the
@@ -70,12 +88,12 @@ Window {
 
         onPaint: {
             const ctx = getContext("2d")
-            if (!paper.papered) {
+            if (!paper.papered && paper.width > 0 && paper.height > 0) {
                 ctx.fillStyle = "#ffffff"
                 ctx.fillRect(0, 0, paper.width, paper.height)
                 paper.papered = true
             }
-            ctx.lineWidth = 2
+            ctx.lineWidth = root.nib
             ctx.lineCap = "round"
             ctx.lineJoin = "round"
             for (var p = 0; p < paper.pending.length; ++p) {

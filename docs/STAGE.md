@@ -194,6 +194,47 @@ painting with a crisp frame — that threw the whole face away.
 short, so when there is only time for forty of them, the forty should be the ones that carry
 the most of the picture. They are still drawn in the order they were found, darkest first.
 
+### How much paper the pen leaves
+
+A drawing of many lines fills in. Lines closer together than the pen is wide leave no paper
+between them, and what was planned as shading arrives as a filled shape. The plan knows this
+beforehand — it is the ink the pen lays down against the paper there is — so the dry run says
+so before anything is drawn:
+
+```
+4438 lines in 5 colours, 928012 pixels of line, in a canvas of 834x920 at 0,0
+the pen covers 2.42 of the paper — more ink than paper: the dark will fill in
+```
+
+The number is a warning, not a measurement of the drawing that comes out: the preview inks
+exactly as many pixels as the pen is wide, while a real canvas draws an anti-aliased line
+with round caps and darkens about half as much again. Aim at a third of the paper.
+
+The other way to fit more lines in is a finer pen, which is what a large drawing wants
+anyway. `paint.qml` takes its pen width as an argument and reports it, and `archie-paint` is
+given the same number, so the plan is made for the pen that will actually draw it — 1408
+lines with a one-pixel pen rather than 762 with a two-pixel one, on the same paper, for the
+same ink.
+
+### Paper that is not there
+
+Four pictures in a row came out looking like a black ground with the drawing scratched into
+it, and the coverage number above was the obvious culprit: too much ink. It was not. Every
+one of those files was transparent where the paper should have been, and a transparent PNG
+is shown on white by one viewer and on black by the next.
+
+`paint.qml` laid its paper — a white rectangle over the whole canvas — on the first paint and
+then never again. Qt throws a `Canvas`'s picture away when the canvas changes size, so the
+paper went with it the first time the compositor sized the window, and every stroke after
+that was drawn on nothing. The strokes were all there; the sheet behind them was not, and
+nothing in any log said so, because from the application's side everything had worked.
+
+It is worth two sentences in a document about verification. The stage checks that a command
+was legal, that the window was where it said, and that something redrew. None of those
+notice that a picture is being drawn on a surface with no paper in it, because to the
+compositor and the application alike it is a drawing with every stroke in place. What caught
+it was reading the alpha of one pixel in the corner of the file.
+
 ### What a pointer can say in fifteen seconds
 
 An application does not receive a path. It receives the pointer's position, again and again,
