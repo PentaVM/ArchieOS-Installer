@@ -160,6 +160,60 @@ a second with none refused. The canvas saves what it has every few seconds, so t
 outlives the run that made it — and a copy is taken before anything is stopped, because
 `Canvas.save` can be halfway through writing when the application is killed.
 
+### In a real application: Firefox and Photopea
+
+The demo canvas is a sheet of paper with nothing on it, which is the easy case. The same
+strokes work in a real drawing program: Firefox on the stage with `photopea.com`, an image
+editor that is a web page.
+
+```bash
+firefox -P archie --new-window 'https://www.photopea.com/#{"script":"app.documents.add(760,1020,72,'Archie',NewDocumentMode.RGB,DocumentFill.WHITE)"}'
+archie-paint --socket … --key-file … --policy apps.toml --app firefox --image mona-lisa.jpg --find-paper
+```
+
+Photopea takes a script in its URL, so the document is made without touching a menu. After
+that everything is the stage's own vocabulary: `focus`, `key b` for the brush, `key [` to
+make it thinner, and strokes. `--find-paper` is how Archie knows where to draw — it looks at
+the window once, through the same gate and read lease as any capture, and takes the largest
+light rectangle in it for paper. Nothing of that capture is kept but the rectangle.
+
+Measured: the paper came back as 385×680 at 38,238 of a 980-wide window, and 647 strokes of
+the Mona Lisa were drawn into Photopea at 4.5–4.7 a second with none refused.
+
+Two things this exposed, both of them the system working rather than failing. The stage
+could not press `[`, because its keyboard was letters, digits and named keys only — a
+keyboard has marks, and now so does it. And `ctrl+shift+s` to export was refused with
+`modified_keys_not_allowed`: a chord with modifiers needs an explicit grant in the policy,
+which the demo policy for Firefox now has. Getting the picture out of Photopea still needs a
+click on its own Save button, which is the accessibility path's job and is not done yet.
+
+### Who does what, and what a model is for
+
+It is worth being exact about which parts of this are a model, because the answer is
+smaller than it looks.
+
+| The work | Who does it today | What it costs |
+| --- | --- | --- |
+| Turning a picture into strokes | nobody — arithmetic in `archie-paint` | about 30 ms for a thousand strokes |
+| Finding a control the application names | the accessibility bus | 3–23 ms |
+| Finding a control in a window that names nothing | the local model in `archie-reflex` | about 9 ms |
+| Naming what is in a window at all | a grounding model, over the network | 1.3–33 s |
+| Deciding what the task is, and in what order | a frontier model — today the one writing this | seconds, and cost |
+
+The hatching is not a model and never was: it is a histogram, four angles and a threshold.
+What a model is for here is the part where something has to be *recognised* — and that part
+has a ladder under it, so the expensive rung is used as rarely as possible. A control the
+application declares costs no model. A control it does not declare costs the local model,
+which is 5 KB and runs on one core. Only a window that declares nothing, has never been
+seen, and holds something nobody has named yet reaches a grounding model over a network,
+and that answer is then remembered, snapped onto a real control and confirmed by shape
+rather than asked again.
+
+That is the margin worth watching: everything above the last row is already local, already
+measured, and already cheap; the last row is the one a local IRIS model replaces as it gets
+better, and the seam it plugs into is the same `Sees` and `Declares` one the rest of this
+uses.
+
 ## Cinematics
 
 Everything drawn comes from `StageDirector` (`display/visual/director.hpp`), a pure model

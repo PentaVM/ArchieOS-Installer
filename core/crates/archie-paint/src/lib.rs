@@ -11,8 +11,10 @@
 //! tone comes out of how much of the paper is left white.
 
 mod image;
+mod paper;
 
 pub use image::{Picture, PictureError};
+pub use paper::{paper_in, PAPER};
 
 use archie_stage::StrokePoint;
 
@@ -438,7 +440,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod paper {
+mod ink_on_paper {
     use super::*;
 
     #[test]

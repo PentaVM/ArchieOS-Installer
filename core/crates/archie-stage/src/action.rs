@@ -232,6 +232,17 @@ pub enum Key {
     Char(char),
 }
 
+/// The marks a keyboard has without a shift, beside its letters and digits: bracket left
+/// and right, minus, equal, semicolon, apostrophe, comma, period, slash, backslash and
+/// grave. They are written by code point because two of them have to be escaped in a
+/// literal, and an escape is a thing to get wrong quietly.
+fn is_mark(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x5B | 0x5D | 0x2D | 0x3D | 0x3B | 0x27 | 0x2C | 0x2E | 0x2F | 0x5C | 0x60
+    )
+}
+
 impl Key {
     pub fn parse(text: &str) -> Option<Self> {
         if let Some(named) = NamedKey::parse(text) {
@@ -239,7 +250,10 @@ impl Key {
         }
         let mut chars = text.chars();
         match (chars.next(), chars.next()) {
-            (Some(c), None) if c.is_ascii_lowercase() || c.is_ascii_digit() => Some(Self::Char(c)),
+            // A letter, a digit, or one of the marks a keyboard has without a shift.
+            (Some(c), None) if c.is_ascii_lowercase() || c.is_ascii_digit() || is_mark(c) => {
+                Some(Self::Char(c))
+            }
             _ => None,
         }
     }
@@ -532,6 +546,8 @@ mod tests {
         assert_eq!(Key::parse("f12"), Some(Key::Named(NamedKey::F12)));
         assert_eq!(Key::parse("s"), Some(Key::Char('s')));
         assert_eq!(Key::parse("7"), Some(Key::Char('7')));
+        assert_eq!(Key::parse("["), Some(Key::Char('[')));
+        assert_eq!(Key::parse("."), Some(Key::Char('.')));
         for bad in ["S", "ss", "", "ñ", "ctrl", "super", "\n"] {
             assert_eq!(Key::parse(bad), None, "{bad:?}");
         }

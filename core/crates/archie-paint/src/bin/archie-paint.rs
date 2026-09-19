@@ -4,7 +4,7 @@
 //! archie-paint --socket <path> --key-file <path> --policy <apps.toml> --app <app_id>
 //!              --image <file.png> [--surface N] [--inset 40] [--spacing 5]
 //!              [--canvas x,y,w,h] [--limit N] [--levels 70:14,110:11,...]
-//!              [--pen 2] [--dry-run [--preview <file.png>]]
+//!              [--pen 2] [--find-paper] [--dry-run [--preview <file.png>]]
 //! ```
 //!
 //! Every stroke goes the same way as every other action: the stage policy has to allow
@@ -227,6 +227,17 @@ fn take(args: &mut Vec<String>, name: &str) -> Option<String> {
     Some(args.remove(at))
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
+fn flag(args: &mut Vec<String>, name: &str) -> bool {
+    match args.iter().position(|arg| arg == name) {
+        Some(at) => {
+            args.remove(at);
+            true
+        }
+        None => false,
+    }
+}
+
 fn number<T: std::str::FromStr>(args: &mut Vec<String>, name: &str) -> Result<Option<T>, String> {
     match take(args, name) {
         Some(value) => Ok(Some(
@@ -271,9 +282,10 @@ fn canvas_of(asked: Option<&str>, surface: Option<(i32, i32)>, inset: u32) -> Re
 mod unix {
 
     use archie_policy::{PolicyEngine, Principal};
+    use archie_paint::{Canvas, Picture};
     use archie_stage::{
-        learn, ActOutcome, ActRequest, CommandKey, Operator, PointerButton, StageAction,
-        StageClient, StagePolicy, StageWorld,
+        learn, ActOutcome, ActRequest, CommandKey, LookOutcome, Operator, PointerButton,
+        StageAction, StageClient, StagePolicy, StageWorld,
     };
     use archie_types::PrivacyGrade;
 
@@ -294,7 +306,7 @@ mod unix {
         }
     }
 
-    use super::{canvas_of, levels_of, number, plan_with, prepared, shares_of, take};
+    use super::{canvas_of, flag, levels_of, number, plan_with, prepared, shares_of, take};
 
     async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         let socket = take(&mut args, "--socket");
@@ -308,6 +320,9 @@ mod unix {
         let min_run: u32 = number(&mut args, "--min-run")?.unwrap_or(4);
         let limit: Option<usize> = number(&mut args, "--limit")?;
         let canvas_arg = take(&mut args, "--canvas");
+        // Where to draw can be looked for rather than given: an application that can be
+        // drawn in has paper in it, and paper is the large light rectangle in its window.
+        let find_paper = flag(&mut args, "--find-paper");
         let levels = levels_of(&mut args)?;
         let shares = shares_of(&mut args)?;
         let pen: u32 = number(&mut args, "--pen")?.unwrap_or(2);
@@ -336,15 +351,31 @@ mod unix {
             None => world.surfaces_of(&app).next().cloned(),
         };
         let found = found.ok_or_else(|| format!("{app} has no surface on this stage"))?;
-        let canvas = canvas_of(
-            canvas_arg.as_deref(),
-            Some((found.width, found.height)),
-            inset,
-        )?;
+        let mut operator = Operator::new(key, policy, PolicyEngine::default());
+        let canvas = if find_paper {
+            let paper = look_for_paper(
+                &mut operator,
+                &mut client,
+                &mut world,
+                &app,
+                found.surface,
+                &socket,
+            )
+            .await?;
+            println!(
+                "the paper is {}x{} at {},{} of that window",
+                paper.width, paper.height, paper.x, paper.y
+            );
+            paper.inset(inset)
+        } else {
+            canvas_of(
+                canvas_arg.as_deref(),
+                Some((found.width, found.height)),
+                inset,
+            )?
+        };
         let plan = plan_with(&picture, canvas, spacing, min_run, levels, &shares, pen);
         super::planning::report(&plan, canvas);
-
-        let mut operator = Operator::new(key, policy, PolicyEngine::default());
         let started = Instant::now();
         let (mut drawn, mut refused) = (0_usize, 0_usize);
         let mut paused_ms = 0_u64;
@@ -430,6 +461,61 @@ mod unix {
     }
 
 
+
+    /// Looks at the window once and takes the largest light rectangle in it for paper.
+    ///
+    /// The capture goes the way every capture goes: a read lease, the compositor's checks,
+    /// a digest, and the file removed as it is read. Nothing of it is kept but a rectangle.
+    async fn look_for_paper(
+        operator: &mut Operator,
+        client: &mut StageClient<
+            tokio::net::unix::OwnedReadHalf,
+            tokio::net::unix::OwnedWriteHalf,
+        >,
+        world: &mut StageWorld,
+        app: &str,
+        surface: u32,
+        socket: &str,
+    ) -> Result<Canvas, String> {
+        let snapshots = Path::new(socket)
+            .parent()
+            .ok_or("--socket has no directory")?
+            .join("snapshots");
+        let request = ActRequest {
+            app_id: app.to_string(),
+            surface: Some(surface),
+            action: StageAction::Snapshot { region: None },
+            text_grade: PrivacyGrade::Public,
+            principal: Principal::Human {
+                id: "archie-paint".into(),
+                authenticated: true,
+            },
+            task_id: None,
+            user_present: true,
+            approved: false,
+            justification: "look for the paper to draw on".into(),
+        };
+        let outcome = operator
+            .look(client, world, &request, &snapshots, Duration::from_secs(30))
+            .await
+            .map_err(|e| e.to_string())?;
+        let snapshot = match outcome {
+            LookOutcome::Captured(snapshot) => snapshot,
+            LookOutcome::NotCaptured(outcome) => {
+                return Err(format!("the window was not captured: {outcome:?}"))
+            }
+        };
+        let picture = Picture::from_png(&snapshot.png).map_err(|e| e.to_string())?;
+        let paper = archie_paint::paper_in(&picture, archie_paint::PAPER)
+            .ok_or("there is no paper in that window to draw on")?;
+        // The capture may be of one part of the window; the paper is in the window.
+        Ok(Canvas::new(
+            paper.x + snapshot.x,
+            paper.y + snapshot.y,
+            paper.width,
+            paper.height,
+        ))
+    }
 
     fn load_key(path: &str) -> Result<CommandKey, String> {
         let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;

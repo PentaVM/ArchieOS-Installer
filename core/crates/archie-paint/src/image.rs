@@ -258,3 +258,43 @@ impl Picture {
         }
     }
 }
+
+impl Picture {
+    /// Reads a picture from PNG bytes, for a capture that never touches a file.
+    pub fn from_png(bytes: &[u8]) -> Result<Self, PictureError> {
+        let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+        let mut reader = decoder
+            .read_info()
+            .map_err(|e| PictureError::Png(e.to_string()))?;
+        let size = reader
+            .output_buffer_size()
+            .ok_or_else(|| PictureError::Png("a picture larger than this can hold".into()))?;
+        let mut buffer = vec![0; size];
+        let frame = reader
+            .next_frame(&mut buffer)
+            .map_err(|e| PictureError::Png(e.to_string()))?;
+        let info = reader.info();
+        let channels = match info.color_type {
+            png::ColorType::Grayscale => 1,
+            png::ColorType::GrayscaleAlpha => 2,
+            png::ColorType::Rgb => 3,
+            png::ColorType::Rgba => 4,
+            other => return Err(PictureError::Png(format!("{other:?} is not read here"))),
+        };
+        let grey = buffer[..frame.buffer_size()]
+            .chunks_exact(channels)
+            .map(|pixel| {
+                if channels <= 2 {
+                    pixel[0]
+                } else {
+                    (0.2126 * f32::from(pixel[0])
+                        + 0.7152 * f32::from(pixel[1])
+                        + 0.0722 * f32::from(pixel[2]))
+                    .round()
+                    .clamp(0.0, 255.0) as u8
+                }
+            })
+            .collect();
+        Self::from_grey(grey, frame.width, frame.height)
+    }
+}

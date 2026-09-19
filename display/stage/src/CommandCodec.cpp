@@ -119,6 +119,21 @@ std::optional<int> named_key(const QString& name) {
         if (c >= QLatin1Char('0') && c <= QLatin1Char('9')) {
             return Qt::Key_0 + (c.unicode() - '0');
         }
+        // The rest of what is on a keyboard without a shift: applications use these as
+        // shortcuts too, and a stage that cannot press them cannot work those applications.
+        // By code point, because two of them have to be escaped in a literal.
+        static const QHash<char16_t, int> marks = {
+            {0x5B, Qt::Key_BracketLeft}, {0x5D, Qt::Key_BracketRight},
+            {0x2D, Qt::Key_Minus},       {0x3D, Qt::Key_Equal},
+            {0x3B, Qt::Key_Semicolon},   {0x27, Qt::Key_Apostrophe},
+            {0x2C, Qt::Key_Comma},       {0x2E, Qt::Key_Period},
+            {0x2F, Qt::Key_Slash},       {0x5C, Qt::Key_Backslash},
+            {0x60, Qt::Key_QuoteLeft},
+        };
+        const auto mark = marks.constFind(c.unicode());
+        if (mark != marks.constEnd()) {
+            return *mark;
+        }
     }
     return std::nullopt;
 }

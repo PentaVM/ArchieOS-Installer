@@ -292,6 +292,19 @@ from executed builds on identified hardware.
   handed control to the person, as it should, and the painter spent 551 strokes arguing with
   it. A stroke refused with `operator_has_control` now waits for the person and is tried
   again.
+- The same strokes were then drawn in a real application: Firefox on the stage with
+  photopea.com, an image editor that is a web page. Photopea takes a script in its URL, so
+  the document is made without a menu; after that it is the stage's own vocabulary — focus,
+  `b` for the brush, `[` to make it thinner, and strokes. Archie finds where to draw by
+  looking: one capture through the same gate and read lease as any other, and the largest
+  light rectangle in the window is the paper. 647 strokes of the Mona Lisa went into
+  Photopea at 4.5–4.7 a second with none refused.
+- That run exposed two things, both of them the system working. The stage could not press
+  `[`, because its keyboard was letters, digits and named keys — a keyboard has marks, and
+  now so does it. And `ctrl+shift+s` was refused with `modified_keys_not_allowed`: a chord
+  with modifiers needs an explicit grant, which the shipped policy still does not give
+  anyone. Getting the picture back out of Photopea needs a click on its own Save button,
+  which is the accessibility path's job and is not done yet.
 - Not done: more than one target per call, verification stronger than
   "the control redrew", and a run of LocateAnything-3B itself. Measured cloud vision latency
   was 1.32–1.69 s for Gemma or MiniCPM and 27.3–33.5 s for Kimi-K3, so the cloud adapter is
