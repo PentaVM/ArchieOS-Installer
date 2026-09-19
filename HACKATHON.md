@@ -308,11 +308,16 @@ from executed builds on identified hardware.
   inside one canvas, so the accessibility bus has nothing to say about any of it. In an
   application like this the fastest and most exact path, where the application names its own
   controls, is simply not available.
-- Keys reach Firefox and stop there. The Wayland trace shows Firefox binding the seat twice:
-  pointer events go to both bindings and Firefox prints `discarded` for one, while keyboard
-  focus and every key go to the binding it discards. The key arrives in the protocol log and
-  the page's own `keydown` never runs. Clicking works, typing does not — which is why the
-  brush is clicked in the tool column rather than pressed.
+- **Fixed: the keyboard now reaches web content.** Keys used to reach Firefox and stop there.
+  The Wayland trace showed Firefox asking the seat for a keyboard twice; Qt's compositor sends
+  pointer events to every one of a client's bindings and keyboard events to exactly one, and
+  Firefox listens on the other. The key arrived in the protocol log and the page's own
+  `keydown` never ran. The stage now says the same thing — focus, key, modifiers — to the
+  bindings Qt left out, found the way Qt finds the one it speaks to so nothing is sent twice,
+  and a client with a single binding is untouched. A page that echoes what it receives reads
+  `b/KeyB  z/KeyZ  Control/ControlRight+ctrl  s/KeyS+ctrl`. In Photopea, which reads keys only
+  once its own page holds focus, `[` now thins the brush: the drawing it exports is 110 lines
+  at 119 KB instead of 70 thick ones at 62.
 - Agent tempo is too quick for a canvas that watches the pointer itself: at 32 ms of press
   Photopea registers nothing, every stroke is executed and none refused, and the page stays
   white. At a person's tempo the same strokes paint.
