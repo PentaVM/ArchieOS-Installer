@@ -22,6 +22,7 @@
 
 #include <QHash>
 #include <QList>
+#include <array>
 #include <QPointer>
 #include <QWaylandSeat>
 
@@ -77,10 +78,15 @@ private:
     const Stroke *strokeFor(char32_t unit);
     bool textInputEnabled(QWaylandSurface *surface) const;
     void press(std::uint32_t keycode, bool pressed);
+    void alsoTellTheClientsOtherKeyboards(std::uint32_t keycode, bool pressed);
 
     QPointer<QWaylandSeat> m_seat;
     xkb_keymap *m_keymap = nullptr;
     std::uint32_t m_layout = 0;
     QHash<char32_t, Stroke> m_strokes;
     QList<std::uint32_t> m_held;
+    /// The surface the client's other keyboards have been told holds focus, and the modifier
+    /// state they were last told, so that neither is repeated.
+    QPointer<QWaylandSurface> m_mirrored;
+    std::optional<std::array<std::uint32_t, 4>> m_mirroredMods;
 };

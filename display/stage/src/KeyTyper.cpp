@@ -2,6 +2,7 @@
 
 #include <QMap>
 #include <QWaylandClient>
+#include <QWaylandCompositor>
 #include <QWaylandInputMethodControl>
 #include <QWaylandKeyboard>
 #include <QWaylandSurface>
@@ -280,4 +281,86 @@ void KeyTyper::press(std::uint32_t keycode, bool pressed)
     keyboard->sendKeyEvent(keycode, state);
     keyboard->maybeUpdateKeymap();
     keyboard->updateModifierState(keycode, state);
+    alsoTellTheClientsOtherKeyboards(keycode, pressed);
+}
+
+// A client may ask the seat for a keyboard more than once. Qt's compositor sends pointer
+// events to every one of a client's bindings and keyboard events to exactly one of them,
+// whichever its resource map happens to hand back — and a client that is listening on
+// another binding then hears nothing. Firefox is such a client: the protocol log shows the
+// key arriving on a binding it has already discarded, while the page's own handler never
+// runs. Clicking works and typing does not, which is a strange enough failure to be worth a
+// comment this long.
+//
+// So the stage says the same thing to the client's other keyboards: the focus it holds, the
+// key, and the modifier state, each sent only to the bindings Qt left out. A client with one
+// binding is left exactly as it was, and a client that really listens on two would hear the
+// key once from Qt and once from here — which is the trade, and it is the right way round,
+// because the alternative is a keyboard that does not work at all.
+void KeyTyper::alsoTellTheClientsOtherKeyboards(std::uint32_t keycode, bool pressed)
+{
+    QWaylandKeyboardPrivate *keyboard = keyboard_of(m_seat);
+    QWaylandCompositor *compositor = m_seat ? m_seat->compositor() : nullptr;
+    QWaylandSurface *focus = m_seat ? m_seat->keyboardFocus() : nullptr;
+    if (!keyboard || !compositor || !focus) {
+        return;
+    }
+    const QMultiMap<struct ::wl_client *, QWaylandKeyboardPrivate::Resource *> bound =
+        keyboard->resourceMap();
+    struct ::wl_client *client = focus->waylandClient();
+    const QList<QWaylandKeyboardPrivate::Resource *> keyboards = bound.values(client);
+    if (keyboards.size() < 2) {
+        return;
+    }
+    // The one Qt speaks to, found the way Qt finds it.
+    QWaylandKeyboardPrivate::Resource *spoken_to = bound.value(client);
+
+    if (m_mirrored != focus) {
+        if (m_mirrored) {
+            struct ::wl_client *before = m_mirrored->waylandClient();
+            QWaylandKeyboardPrivate::Resource *told = bound.value(before);
+            for (QWaylandKeyboardPrivate::Resource *resource : bound.values(before)) {
+                if (resource != told) {
+                    keyboard->send_leave(resource->handle, compositor->nextSerial(),
+                                         m_mirrored->resource());
+                }
+            }
+        }
+        for (QWaylandKeyboardPrivate::Resource *resource : keyboards) {
+            if (resource != spoken_to) {
+                keyboard->sendEnter(focus, resource);
+            }
+        }
+        m_mirrored = focus;
+        m_mirroredMods.reset();
+    }
+
+    const std::uint32_t time = compositor->currentTimeMsecs();
+    const uint32_t state = pressed ? QtWaylandServer::wl_keyboard::key_state_pressed
+                                   : QtWaylandServer::wl_keyboard::key_state_released;
+    for (QWaylandKeyboardPrivate::Resource *resource : keyboards) {
+        if (resource != spoken_to) {
+            // The protocol carries the keycode the kernel uses; Qt's is that plus eight.
+            keyboard->send_key(resource->handle, compositor->nextSerial(), time, keycode - 8,
+                               state);
+        }
+    }
+
+    std::array<std::uint32_t, 4> mods{};
+    if (xkb_state *xkb = keyboard->xkbState()) {
+        mods = {xkb_state_serialize_mods(xkb, XKB_STATE_MODS_DEPRESSED),
+                xkb_state_serialize_mods(xkb, XKB_STATE_MODS_LATCHED),
+                xkb_state_serialize_mods(xkb, XKB_STATE_MODS_LOCKED),
+                xkb_state_serialize_layout(xkb, XKB_STATE_LAYOUT_EFFECTIVE)};
+    }
+    if (m_mirroredMods == mods) {
+        return;
+    }
+    for (QWaylandKeyboardPrivate::Resource *resource : keyboards) {
+        if (resource != spoken_to) {
+            keyboard->send_modifiers(resource->handle, compositor->nextSerial(), mods[0], mods[1],
+                                     mods[2], mods[3]);
+        }
+    }
+    m_mirroredMods = mods;
 }

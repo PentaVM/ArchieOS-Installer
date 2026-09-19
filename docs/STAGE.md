@@ -328,14 +328,24 @@ model exists for, and it is worth stating plainly that the fastest and most exac
 one where the application names its own controls, is simply not available in applications
 like this one.
 
-**Keys reach Firefox and stop there.** Sending `b` to select the brush does nothing, and so
-does `ctrl+s`. The Wayland trace shows why: Firefox binds `wl_seat` twice, and the compositor
-sends pointer events to both bindings — Firefox uses one and prints `discarded` for the other
-— but sends `wl_keyboard.enter` and every key on the binding Firefox discards. So the
-protocol log shows the key arriving (`wl_keyboard.key(11, …, 48, 1)`, which is `b`) while the
-page's own `keydown` handler never runs. A page that echoes what it receives confirms it:
-nothing. Clicking works, typing does not, and that is why the brush has to be clicked in the
-tool column and why the drawing is made with whatever brush size Photopea starts with.
+**Keys used to reach Firefox and stop there, and now they do not.** Sending `b` to select the
+brush did nothing, and neither did `ctrl+s`. The Wayland trace said why: Firefox asks the seat
+for a keyboard twice, Qt's compositor sends pointer events to every one of a client's bindings
+and keyboard events to exactly one of them — whichever its resource map hands back — and
+Firefox listens on the other. The protocol log showed the key arriving
+(`wl_keyboard.key(11, …, 48, 1)`, which is `b`) on a binding Firefox had already discarded,
+while the page's own `keydown` never ran. Clicking worked and typing did not, which is a
+strange enough failure to be worth stating twice.
+
+The stage now says the same thing to the client's other keyboards: the focus it holds, the
+key, and the modifier state, each sent only to the bindings Qt left out — found the way Qt
+finds the one it speaks to, so nothing is sent twice. A client with a single binding is left
+exactly as it was. A page that echoes what it receives now reads
+`b/KeyB  z/KeyZ  Control/ControlRight+ctrl  s/KeyS+ctrl`: every key once, with its modifiers.
+
+One thing this does not change: Photopea reads keys only once the page itself holds focus, so
+the brush is still chosen by clicking its tool — and that click is what gives the page focus.
+After it, `[` thins the brush from the keyboard like anyone else's.
 
 **Agent tempo is too quick for it.** At `--tempo agent` a press lasts 32 ms and Photopea's
 canvas does not register it: strokes are executed, none are refused, and the document stays
