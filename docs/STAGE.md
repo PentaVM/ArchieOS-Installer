@@ -143,10 +143,22 @@ special to the stage: the policy has to allow `stroke` for that application, eve
 takes a lease for one operation, each is sealed and re-checked, and a refusal stops that
 stroke and no other.
 
+The pen has a width, and lines closer together than about three times it leave no paper
+between them: what was planned as a dark grey comes out solid black. `--pen` is how wide
+the canvas's pen is, and both the plan and the preview are made for it, which is what makes
+the planned picture and the drawn one look like each other.
+
+A person reaching for the mouse takes the stage, and a picture is not a reason to argue
+with that: a stroke the compositor answers with `operator_has_control` waits for them and
+is tried again, rather than being spent against a stage that is refusing it. That happened
+by accident in a run here — a real mouse crossed the window at stroke 328 — and 551 strokes
+of the plan were thrown away before this was fixed.
+
 Measured in WSLg on `display/stage/demo/paint.qml`, a sheet of paper with no controls on
-it: 1291 strokes of a 640-pixel Mona Lisa, at agent tempo, drawn at about 4.9 strokes a
-second with none refused. The canvas saves what it has every few seconds, so the picture
-outlives the run that made it.
+it: 977 strokes of a 640-pixel Mona Lisa on a portrait window, at agent tempo, drawn at 4.8
+a second with none refused. The canvas saves what it has every few seconds, so the picture
+outlives the run that made it — and a copy is taken before anything is stopped, because
+`Canvas.save` can be halfway through writing when the application is killed.
 
 ## Cinematics
 

@@ -4,7 +4,7 @@
 //! archie-paint --socket <path> --key-file <path> --policy <apps.toml> --app <app_id>
 //!              --image <file.png> [--surface N] [--inset 40] [--spacing 5]
 //!              [--canvas x,y,w,h] [--limit N] [--levels 70:14,110:11,...]
-//!              [--dry-run [--preview <file.png>] [--ink 2]]
+//!              [--pen 2] [--dry-run [--preview <file.png>]]
 //! ```
 //!
 //! Every stroke goes the same way as every other action: the stage policy has to allow
@@ -54,18 +54,20 @@ mod planning {
         let preview = super::take(&mut args, "--preview");
         let levels = super::levels_of(&mut args)?;
         let shares = super::shares_of(&mut args)?;
-        let ink: u32 = super::number(&mut args, "--ink")?.unwrap_or(2);
+        // The canvas draws with a pen this wide, so the plan is made for one and the
+        // preview is drawn with one.
+        let pen: u32 = super::number(&mut args, "--pen")?.unwrap_or(2);
         let canvas = super::canvas_of(super::take(&mut args, "--canvas").as_deref(), None, inset)?;
         let soften: Option<u32> = super::number(&mut args, "--soften")?;
         let picture = super::prepared(Path::new(&image), soften)?;
-        let plan = super::plan_with(&picture, canvas, spacing, min_run, levels, &shares);
+        let plan = super::plan_with(&picture, canvas, spacing, min_run, levels, &shares, pen);
         report(&plan, canvas);
         println!(
             "tone levels from the picture itself: {:?}",
-            levels_of(&picture, &shares)
+            levels_of(&picture, &shares, pen)
         );
         if let Some(out) = preview {
-            let paper = archie_paint::preview(&plan, canvas, ink);
+            let paper = archie_paint::preview(&plan, canvas, pen);
             write_grey(Path::new(&out), &paper, canvas.width, canvas.height)?;
             println!("drew the plan on paper: {out}");
         }
@@ -104,7 +106,12 @@ mod planning {
     pub const SPACING: u32 = 17;
 
     /// The tone levels this picture's own darkness puts them at.
-    pub fn levels_of(picture: &Picture, shares: &[f32]) -> Vec<(u8, u32)> {
+    ///
+    /// The pen has a width, and lines closer together than about three times it leave no
+    /// paper between them: what was meant as a dark grey comes out solid black. That floor
+    /// is why the planned picture and the drawn one now look like each other.
+    pub fn levels_of(picture: &Picture, shares: &[f32], pen: u32) -> Vec<(u8, u32)> {
+        let closest = (pen.max(1) * 3).max(3);
         picture
             .darkness_at(shares)
             .into_iter()
@@ -112,7 +119,7 @@ mod planning {
             .map(|(darkness, share)| {
                 (
                     darkness,
-                    ((SPACING as f32 * share.clamp(0.0, 1.0)).round() as u32).max(4),
+                    ((SPACING as f32 * share.clamp(0.0, 1.0)).round() as u32).max(closest),
                 )
             })
             .collect()
@@ -123,10 +130,11 @@ mod planning {
         spacing: u32,
         min_run: u32,
         shares: &[f32],
+        pen: u32,
     ) -> Hatching {
         Hatching {
             min_run,
-            ..Hatching::from_levels(&levels_of(picture, shares))
+            ..Hatching::from_levels(&levels_of(picture, shares, pen))
         }
         .spread(spacing)
     }
@@ -149,13 +157,14 @@ fn plan_with(
     min_run: u32,
     levels: Option<Vec<(u8, u32)>>,
     shares: &[f32],
+    pen: u32,
 ) -> Plan {
     let hatching = match levels {
         Some(levels) => archie_paint::Hatching {
             min_run,
             ..archie_paint::Hatching::from_levels(&levels)
         },
-        None => planning::hatching(picture, spacing, min_run, shares),
+        None => planning::hatching(picture, spacing, min_run, shares, pen),
     };
     archie_paint::plan(picture, canvas, &hatching)
 }
@@ -267,6 +276,9 @@ mod unix {
         StageClient, StagePolicy, StageWorld,
     };
     use archie_types::PrivacyGrade;
+
+    /// How long a stroke waits for a person who has taken the stage before giving up on it.
+    const PATIENCE_MS: u64 = 120_000;
     use std::path::Path;
     use std::process::ExitCode;
     use std::time::{Duration, Instant};
@@ -298,6 +310,7 @@ mod unix {
         let canvas_arg = take(&mut args, "--canvas");
         let levels = levels_of(&mut args)?;
         let shares = shares_of(&mut args)?;
+        let pen: u32 = number(&mut args, "--pen")?.unwrap_or(2);
         if !args.is_empty() {
             return Err(format!("unexpected arguments: {args:?}"));
         }
@@ -328,12 +341,13 @@ mod unix {
             Some((found.width, found.height)),
             inset,
         )?;
-        let plan = plan_with(&picture, canvas, spacing, min_run, levels, &shares);
+        let plan = plan_with(&picture, canvas, spacing, min_run, levels, &shares, pen);
         super::planning::report(&plan, canvas);
 
         let mut operator = Operator::new(key, policy, PolicyEngine::default());
         let started = Instant::now();
         let (mut drawn, mut refused) = (0_usize, 0_usize);
+        let mut paused_ms = 0_u64;
         let total = plan.strokes.len().min(limit.unwrap_or(usize::MAX));
         for (index, stroke) in plan.strokes.iter().take(total).enumerate() {
             let request = ActRequest {
@@ -353,12 +367,38 @@ mod unix {
                 approved: false,
                 justification: "draw one stroke of a picture".into(),
             };
-            let outcome = operator
-                .act(&mut client, &mut world, &request, Duration::from_secs(30))
-                .await
-                .map_err(|e| e.to_string())?;
+            // A person reaching for the mouse takes the stage, and a picture is not a
+            // reason to argue with that: the stroke waits until they are done rather than
+            // being spent against a stage that is refusing it. The compositor gives the
+            // agent the stage back after its own quiet period.
+            let mut waited_ms = 0_u64;
+            let outcome = loop {
+                let outcome = operator
+                    .act(&mut client, &mut world, &request, Duration::from_secs(30))
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let held = matches!(
+                    &outcome,
+                    ActOutcome::Receipt { outcome, .. }
+                        if outcome == "operator_has_control" || outcome == "preempted_by_operator"
+                );
+                if !held || waited_ms >= PATIENCE_MS {
+                    break outcome;
+                }
+                if waited_ms == 0 {
+                    println!("a person has the stage; waiting for them");
+                }
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                waited_ms += 500;
+                paused_ms += 500;
+            };
             match &outcome {
-                ActOutcome::Receipt { outcome, .. } if outcome == "executed" => drawn += 1,
+                ActOutcome::Receipt { outcome, .. } if outcome == "executed" => {
+                    drawn += 1;
+                    if waited_ms > 0 {
+                        println!("back to it after {:.1}s", waited_ms as f32 / 1000.0);
+                    }
+                }
                 other => {
                     refused += 1;
                     if refused <= 3 {
@@ -375,9 +415,12 @@ mod unix {
             }
         }
         let seconds = started.elapsed().as_secs_f32();
+        let drawing = seconds - paused_ms as f32 / 1000.0;
         println!(
-            "drew {drawn} strokes and had {refused} refused in {seconds:.1}s ({:.1} a second)",
-            drawn as f32 / seconds.max(0.001)
+            "drew {drawn} strokes and had {refused} refused in {seconds:.1}s, of which \
+             {:.1}s was waiting for a person ({:.1} strokes a second while drawing)",
+            paused_ms as f32 / 1000.0,
+            drawn as f32 / drawing.max(0.001)
         );
         Ok(if refused == 0 {
             ExitCode::SUCCESS

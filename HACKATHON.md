@@ -281,10 +281,17 @@ from executed builds on identified hardware.
   histogram rather than from fixed numbers, and the grain softened first so that a pen
   follows tone instead of speckle. `--dry-run --preview` plans and draws it on paper without
   a stage, which is how it was tuned.
-- Measured in WSLg on a sheet of paper with no controls on it: the Mona Lisa, 1291 strokes,
-  drawn at about 4.9 strokes a second at agent tempo with none refused. Nothing about a
-  picture is special to the stage — the policy has to allow `stroke` for that application,
-  every stroke takes a lease for one operation, and each one is sealed and re-checked.
+- Measured in WSLg on a sheet of paper with no controls on it: the Mona Lisa, 977 strokes on
+  a portrait window, drawn at 4.8 strokes a second at agent tempo with none refused. Nothing
+  about a picture is special to the stage — the policy has to allow `stroke` for that
+  application, every stroke takes a lease for one operation, and each one is sealed and
+  re-checked.
+- Two things that run found. The pen has a width, and hatching closer than about three times
+  it comes out solid black however careful the plan was, so the plan is made for the pen the
+  canvas draws with. And a real mouse crossed the stage window mid-picture: the compositor
+  handed control to the person, as it should, and the painter spent 551 strokes arguing with
+  it. A stroke refused with `operator_has_control` now waits for the person and is tried
+  again.
 - Not done: more than one target per call, verification stronger than
   "the control redrew", and a run of LocateAnything-3B itself. Measured cloud vision latency
   was 1.32–1.69 s for Gemma or MiniCPM and 27.3–33.5 s for Kimi-K3, so the cloud adapter is

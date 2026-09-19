@@ -304,9 +304,13 @@ pub fn preview(plan: &Plan, canvas: Canvas, width_px: u32) -> Vec<u8> {
     let (w, h) = (canvas.width.max(1) as i64, canvas.height.max(1) as i64);
     let mut paper = vec![255_u8; (w * h) as usize];
     let mut ink = |x: i64, y: i64| {
-        let half = width_px.max(1) as i64 / 2;
-        for dy in -half..=half {
-            for dx in -half..=half {
+        // As many pixels across as the pen is wide, centred on the line: a pen of two
+        // covers two, not three. The preview is only worth looking at if it inks what the
+        // canvas inks.
+        let width = width_px.max(1) as i64;
+        let from = -(width / 2);
+        for dy in from..from + width {
+            for dx in from..from + width {
                 let (px, py) = (x + dx, y + dy);
                 if px >= 0 && py >= 0 && px < w && py < h {
                     paper[(py * w + px) as usize] = 22;
