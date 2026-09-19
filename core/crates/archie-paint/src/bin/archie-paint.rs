@@ -61,8 +61,15 @@ mod planning {
         let canvas = super::canvas_of(super::take(&mut args, "--canvas").as_deref(), None, inset)?;
         let soften: Option<u32> = super::number(&mut args, "--soften")?;
         let picture = super::prepared(Path::new(&image), soften)?;
-        let plan =
-            super::plan_with(&picture, canvas, spacing, min_run, levels, &shares, pen, max_points);
+        let asked = super::AsAsked {
+            spacing,
+            min_run,
+            levels,
+            shares: shares.clone(),
+            pen,
+            max_points,
+        };
+        let plan = super::plan_with(&picture, canvas, &asked);
         report(&plan, canvas);
         println!(
             "tone levels from the picture itself: {:?}",
@@ -154,23 +161,31 @@ fn prepared(path: &std::path::Path, soften: Option<u32>) -> Result<Picture, Stri
     Ok(picture.softened(radius).stretched())
 }
 
-fn plan_with(
-    picture: &Picture,
-    canvas: Canvas,
+/// How a picture is to be hatched, as the command line says it.
+struct AsAsked {
     spacing: u32,
     min_run: u32,
     levels: Option<Vec<(u8, u32)>>,
-    shares: &[f32],
+    shares: Vec<f32>,
     pen: u32,
     max_points: usize,
-) -> Plan {
-    let hatching = match levels {
+}
+
+fn plan_with(picture: &Picture, canvas: Canvas, asked: &AsAsked) -> Plan {
+    let hatching = match &asked.levels {
         Some(levels) => archie_paint::Hatching {
-            min_run,
-            max_points,
-            ..archie_paint::Hatching::from_levels(&levels)
+            min_run: asked.min_run,
+            max_points: asked.max_points,
+            ..archie_paint::Hatching::from_levels(levels)
         },
-        None => planning::hatching(picture, spacing, min_run, shares, pen, max_points),
+        None => planning::hatching(
+            picture,
+            asked.spacing,
+            asked.min_run,
+            &asked.shares,
+            asked.pen,
+            asked.max_points,
+        ),
     };
     archie_paint::plan(picture, canvas, &hatching)
 }
@@ -312,7 +327,7 @@ mod unix {
         }
     }
 
-    use super::{canvas_of, flag, levels_of, number, plan_with, prepared, shares_of, take};
+    use super::{canvas_of, flag, levels_of, number, plan_with, prepared, shares_of, take, AsAsked};
 
     async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         let socket = take(&mut args, "--socket");
@@ -384,7 +399,18 @@ mod unix {
                 inset,
             )?
         };
-        let plan = plan_with(&picture, canvas, spacing, min_run, levels, &shares, pen, max_points);
+        let plan = plan_with(
+            &picture,
+            canvas,
+            &AsAsked {
+                spacing,
+                min_run,
+                levels,
+                shares,
+                pen,
+                max_points,
+            },
+        );
         super::planning::report(&plan, canvas);
         let started = Instant::now();
         let (mut drawn, mut refused) = (0_usize, 0_usize);
