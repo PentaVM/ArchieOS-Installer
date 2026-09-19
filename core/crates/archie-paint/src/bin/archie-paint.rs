@@ -105,6 +105,7 @@ mod planning {
                 canvas.x,
                 canvas.y
             );
+            super::say_how_covered(length, pen, canvas);
             if let Some(out) = preview {
                 let paper = archie_paint::preview_in_colour(&groups, canvas, &swatches, pen);
                 write_colour(Path::new(&out), &paper, canvas.width, canvas.height)?;
@@ -277,7 +278,30 @@ fn palette_at(args: &mut Vec<String>) -> Result<Option<(i32, i32, i32)>, String>
     Ok(Some((numbers[0], numbers[1], numbers[2])))
 }
 
+/// How much of the paper the pen will actually cover, and a word about it.
+///
+/// Lines closer together than the pen is wide leave no paper between them, and what was
+/// planned as shading comes out as a filled shape. The plan knows this before anything is
+/// drawn — it is the ink the pen lays down against the paper there is — and twenty minutes
+/// of drawing is a long way to go to find it out.
+fn say_how_covered(length: f32, pen: u32, canvas: archie_paint::Canvas) {
+    let paper = (canvas.width as f32) * (canvas.height as f32);
+    if paper <= 0.0 {
+        return;
+    }
+    let covered = length * pen.max(1) as f32 / paper;
+    let note = if covered < 0.35 {
+        "paper between the lines"
+    } else if covered < 0.8 {
+        "close, but still a drawing"
+    } else {
+        "more ink than paper: the dark will fill in"
+    };
+    println!("the pen covers {covered:.2} of the paper — {note}");
+}
+
 /// How the lines that follow the form are to be drawn, as the command line says it.
+
 fn flow_of(args: &mut Vec<String>) -> Result<archie_paint::Flow, String> {
     let mut flow = archie_paint::Flow::default();
     if let Some(seeding) = number(args, "--seeding")? {
@@ -572,6 +596,7 @@ mod unix {
                 canvas.x,
                 canvas.y
             );
+            say_how_covered(length, pen, canvas);
             for (colour, plan) in groups {
                 if let Some((x, y)) = palette.swatch(colour) {
                     deeds.push(Deed::Swatch(x, y));

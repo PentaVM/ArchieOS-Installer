@@ -518,7 +518,26 @@ void a_capture_is_checked_like_a_touch_and_held_on_screen() {
 }
 
 
+void a_filming_tempo_still_draws_slower_than_an_application_can_look() {
+    CASE("video tempo leaves an application enough pointer reports to see a line by");
+
+    // An application learns where the pointer went by being told where it is, once a frame.
+    // At sixty frames a second, a line drawn faster than about a thousand pixels a second
+    // reaches it as a polygon of the few positions that fitted in, whatever the command
+    // carried. That is not something the stage can fix by sending more points, so the tempo
+    // meant for filming has to stay slow enough to be worth watching.
+    const PlaybackPolicy filming = PlaybackPolicy::video_tempo();
+    const float between_reports = filming.stroke_speed_px_per_s / 60.0F;
+    CHECK_BECAUSE(between_reports <= 20.0F,
+                  "no more than twenty pixels between one report and the next");
+    // It is barely faster than a person's hand, and cannot be much faster: the limit is
+    // the application looking, not the stage drawing.
+    CHECK_BECAUSE(filming.stroke_speed_px_per_s >= PlaybackPolicy{}.stroke_speed_px_per_s,
+                  "and no slower than a person's hand");
+}
+
 void an_agent_tempo_is_the_same_playback_on_a_faster_clock() {
+
     CASE("at agent tempo the same steps happen sooner, and looking holds nothing");
 
     SurfaceTable table = table_with_terminal();
@@ -697,6 +716,7 @@ int main() {
     typing_and_chords_are_counted_not_carried();
     a_capture_is_checked_like_a_touch_and_held_on_screen();
     an_agent_tempo_is_the_same_playback_on_a_faster_clock();
+    a_filming_tempo_still_draws_slower_than_an_application_can_look();
     a_capture_can_ask_for_one_box_instead_of_the_whole_window();
     a_stroke_is_pressed_followed_and_let_go();
     return archie::visual::test::report();
