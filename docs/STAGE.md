@@ -160,6 +160,88 @@ a second with none refused. The canvas saves what it has every few seconds, so t
 outlives the run that made it — and a copy is taken before anything is stopped, because
 `Canvas.save` can be halfway through writing when the application is killed.
 
+### Lines that follow the form, in colour
+
+Hatching shades: it says how dark a place is. It does not say what shape is there, and a
+picture made only of it reads as a screen of parallel marks rather than as a drawing. A line
+that runs *along* the form does say it — the way a hand draws a cheek by following it.
+
+`--flow` plans those lines. The picture is read once for how it changes at every point: the
+gradient, turned a quarter, averaged over a neighbourhood so that neighbouring points agree
+which way the form runs. Lines are then let go into that field from the dark places, darkest
+first, and followed forwards and back until they leave the picture, run out of length, or
+reach ground with no form in it. Each line is given the palette colour nearest the picture
+under its seed, and the lines are drawn colour by colour, so the palette is visited once per
+colour rather than once per line.
+
+```bash
+archie-paint --dry-run --image mona-lisa.jpg --canvas 0,0,834,920 --soften 3 --flow \
+    --seeding 9 --steps 90 --darker-than 100 --coherence 7 --least-form 0.25 \
+    --as-seen 700 --preview plan.png
+```
+
+Two of those settings are worth their own sentence.
+
+`--least-form` is where a line stops. Ground the picture does not change across has no form
+to follow, and a line that carries on through it is a line ruled at random — which is what
+the first version drew across the sky, because a field with nothing in it still has to point
+somewhere. It is a rank rather than a measurement: `0.25` means "keep going while this place
+is in the more shaped three quarters of *this* picture". A measurement would have been read
+by whatever single hard edge the picture happens to contain, and in the Mona Lisa — a soft
+painting with a crisp frame — that threw the whole face away.
+
+`--most` keeps only the longest lines. A line costs the same to send whether it is long or
+short, so when there is only time for forty of them, the forty should be the ones that carry
+the most of the picture. They are still drawn in the order they were found, darkest first.
+
+### What a pointer can say in fifteen seconds
+
+An application does not receive a path. It receives the pointer's position, again and again,
+at its own frame rate, and between two frames it learns nothing. So a line drawn quickly
+arrives as a polygon of the few positions that fitted in — however many points the command
+carried, and whatever the compositor drew on its own screen.
+
+That sets a ceiling on any live drawing, and it is worth writing down plainly: at sixty
+frames a second, **a fifteen-second drawing is about nine hundred positions**, minus the time
+spent between commands. Spend them on many lines and each is angular; spend them on few and
+each is smooth. No amount of points per command changes the total.
+
+`--as-seen <px/s>` makes the plan honest about this: it resamples every line the way the
+application will receive it at that speed, and the preview then shows the drawing that will
+land rather than the one that was planned. Every picture below was chosen from a preview
+made that way.
+
+`--stroke-speed` on the stage is the other half. Video tempo used to draw at 2500 pixels a
+second, which is forty pixels between one position and the next — the polygon again. It now
+draws at a thousand by default, and the intro run below asks for 942, which is the speed that
+fits its own plan into fifteen seconds exactly.
+
+Measured in WSLg, both on `paint.qml`:
+
+| | lines | commands | colours | time | refused |
+|---|---|---|---|---|---|
+| the intro | 40 | 43 | 3 | 13.2 s | 0 |
+| the picture | 4438 | 4443 | 5 | ~17 min | 0 |
+
+The intro is the one for the film: a contour drawing of the Mona Lisa, in three colours,
+finished in thirteen seconds while somebody explains what is happening. The picture is the
+same planner with the seeding nine pixels apart instead of thirty, drawn at seven hundred
+pixels a second so that every line is smooth.
+
+One bug found by drawing rather than by testing, and it was in neither the stage nor the
+planner: `paint.qml` threw away points. It kept one line's worth of them and painted when
+Qt got round to it, and a press starting the next stroke replaced the lot — so at three
+strokes a second, twenty-two of thirty-four strokes reached the application and never
+appeared on its canvas. The demo now keeps every piece with the colour it was drawn in until
+it has actually been inked. Worth saying because the application's log had said `saved 34
+strokes` throughout: the count was of strokes received, and only the picture showed that
+most of them had been dropped.
+
+The palette also used to sit on the paper. A line near the bottom of the picture could land
+on a swatch and change the colour halfway through the drawing, so the palette now has its own
+strip below the paper, and the application reports where the paper is as well as where the
+palette is.
+
 ### In a real application: Firefox and Photopea
 
 The demo canvas is a sheet of paper with nothing on it, which is the easy case. The same

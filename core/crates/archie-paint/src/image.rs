@@ -7,6 +7,9 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Picture {
     grey: Vec<u8>,
+    /// What colour each pixel is, when the picture had any. A pen that only knows light
+    /// and dark never asks for this; one choosing between an application's swatches does.
+    colour: Option<Vec<[u8; 3]>>,
     width: u32,
     height: u32,
 }
@@ -30,9 +33,29 @@ impl Picture {
         }
         Ok(Self {
             grey,
+            colour: None,
             width,
             height,
         })
+    }
+
+    /// The same picture, remembering what colour it was.
+    pub fn with_colour(mut self, colour: Vec<[u8; 3]>) -> Self {
+        if colour.len() == self.grey.len() {
+            self.colour = Some(colour);
+        }
+        self
+    }
+
+    /// What colour the picture is at that pixel, when it had any.
+    pub fn colour(&self, x: u32, y: u32) -> Option<[u8; 3]> {
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+        self.colour
+            .as_ref()?
+            .get((y as usize) * (self.width as usize) + x as usize)
+            .copied()
     }
 
     /// Reads a picture and keeps its greys. Colour becomes light the way an eye weighs it,
@@ -84,7 +107,20 @@ impl Picture {
                 }
             })
             .collect();
-        Self::from_grey(grey, u32::from(info.width), u32::from(info.height))
+        let colour: Vec<[u8; 3]> = pixels
+            .chunks_exact(channels)
+            .map(|pixel| {
+                if channels == 1 {
+                    [pixel[0], pixel[0], pixel[0]]
+                } else {
+                    [pixel[0], pixel[1], pixel[2]]
+                }
+            })
+            .collect();
+        Ok(
+            Self::from_grey(grey, u32::from(info.width), u32::from(info.height))?
+                .with_colour(colour),
+        )
     }
 
     fn read_png(path: &std::path::Path) -> Result<Self, PictureError> {
@@ -137,7 +173,14 @@ impl Picture {
                 over.round().clamp(0.0, 255.0) as u8
             })
             .collect();
-        Self::from_grey(grey, frame.width, frame.height)
+        let colour: Vec<[u8; 3]> = pixels
+            .chunks_exact(channels)
+            .map(|pixel| match channels {
+                1 | 2 => [pixel[0], pixel[0], pixel[0]],
+                _ => [pixel[0], pixel[1], pixel[2]],
+            })
+            .collect();
+        Ok(Self::from_grey(grey, frame.width, frame.height)?.with_colour(colour))
     }
 
     pub fn width(&self) -> u32 {
@@ -203,6 +246,7 @@ impl Picture {
         }
         Self {
             grey: down,
+            colour: self.colour.clone(),
             width: self.width,
             height: self.height,
         }
@@ -253,6 +297,7 @@ impl Picture {
                 .iter()
                 .map(|light| (((f32::from(*light) - low) / (high - low)) * 255.0).round() as u8)
                 .collect(),
+            colour: self.colour.clone(),
             width: self.width,
             height: self.height,
         }

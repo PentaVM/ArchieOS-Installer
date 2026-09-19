@@ -1,8 +1,9 @@
 // A sheet of paper for the agent to draw on.
 //
-// It has no controls and nothing to find: the pointer going down, along and up is the whole
-// of what it understands, which is what a stroke is. It saves what has been drawn every few
-// seconds, so the picture survives the run that made it.
+// The paper understands the pointer going down, along and up, which is what a stroke is.
+// Below it is a palette: clicking a swatch picks that colour up, which is the whole of what
+// a colour change is from outside. It saves what has been drawn every few seconds, so the
+// picture survives the run that made it.
 //
 //     QT_QUICK_BACKEND=software qml paint.qml
 import QtQuick
@@ -17,14 +18,23 @@ Window {
     title: "Lienzo"
 
     property int strokes: 0
+    /// The colours this canvas can be drawn with, and which one is in hand.
+    property var swatches: ["#141210", "#4a352a", "#8a6a46", "#c39c6d", "#e6d3b3", "#5d6b63"]
+    property string ink: "#141210"
     /// Where the picture is written. Set with `qml -- paint.qml --out <path>` is not a
-    /// thing, so it is an environment variable the demo scripts set.
+    /// thing, so it is the last argument the demo scripts pass.
     property string out: Qt.application.arguments.length > 1
                          ? Qt.application.arguments[Qt.application.arguments.length - 1]
                          : "/tmp/painting.png"
 
+    /// Where the paper is and where the palette is, in the window's own pixels. An agent
+    /// that is told this does not have to guess which part of the window is paper, and does
+    /// not draw a line through the palette and change colour by accident.
     function report() {
-        console.log("paint: layout", root.width, root.height, "strokes", root.strokes)
+        console.log("paint: layout", root.width, root.height, "strokes", root.strokes,
+                    "paper", Math.round(paper.x), Math.round(paper.y),
+                    Math.round(paper.width), Math.round(paper.height),
+                    "palette", Math.round(tray.x + palette.x + 16), Math.round(tray.y + palette.y + 16), 40)
     }
     Component.onCompleted: report()
     onWidthChanged: report()
@@ -32,11 +42,31 @@ Window {
 
     Canvas {
         id: paper
-        anchors.fill: parent
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.bottom: tray.top
         renderStrategy: Canvas.Immediate
         renderTarget: Canvas.Image
-        property var line: []
+        onWidthChanged: root.report()
+        onHeightChanged: root.report()
+
+        /// The pieces waiting to be inked: each one a colour and the points drawn with it.
+        /// A paint runs when the scene gets to it, which may be several strokes after the
+        /// pointer moved, so nothing is thrown away until it has actually been drawn.
+        property var pending: []
         property bool papered: false
+
+        function begin(point) {
+            paper.pending = paper.pending.concat([{ colour: root.ink, points: [point] }])
+        }
+        function extend(point) {
+            if (paper.pending.length === 0) {
+                paper.begin(point)
+                return
+            }
+            paper.pending[paper.pending.length - 1].points.push(point)
+        }
 
         onPaint: {
             const ctx = getContext("2d")
@@ -45,40 +75,91 @@ Window {
                 ctx.fillRect(0, 0, paper.width, paper.height)
                 paper.papered = true
             }
-            if (paper.line.length < 2)
-                return
-            ctx.strokeStyle = "#161616"
             ctx.lineWidth = 2
             ctx.lineCap = "round"
             ctx.lineJoin = "round"
-            ctx.beginPath()
-            ctx.moveTo(paper.line[0].x, paper.line[0].y)
-            for (var i = 1; i < paper.line.length; ++i)
-                ctx.lineTo(paper.line[i].x, paper.line[i].y)
-            ctx.stroke()
-            // The last point stays, so the next piece of the same line joins this one.
-            paper.line = [paper.line[paper.line.length - 1]]
+            for (var p = 0; p < paper.pending.length; ++p) {
+                const piece = paper.pending[p]
+                if (piece.points.length < 2)
+                    continue
+                ctx.strokeStyle = piece.colour
+                ctx.beginPath()
+                ctx.moveTo(piece.points[0].x, piece.points[0].y)
+                for (var i = 1; i < piece.points.length; ++i)
+                    ctx.lineTo(piece.points[i].x, piece.points[i].y)
+                ctx.stroke()
+            }
+            // The last point of the last piece stays, so the next move joins the line it
+            // ends rather than starting a new one a frame further on.
+            const last = paper.pending.length > 0 ? paper.pending[paper.pending.length - 1] : null
+            paper.pending = (last && last.points.length > 0)
+                ? [{ colour: last.colour, points: [last.points[last.points.length - 1]] }]
+                : []
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            onPressed: (mouse) => {
+                paper.begin(Qt.point(mouse.x, mouse.y))
+                paper.requestPaint()
+            }
+            onPositionChanged: (mouse) => {
+                if (!pressed)
+                    return
+                paper.extend(Qt.point(mouse.x, mouse.y))
+                paper.requestPaint()
+            }
+            onReleased: (mouse) => {
+                paper.extend(Qt.point(mouse.x, mouse.y))
+                paper.requestPaint()
+                root.strokes += 1
+                if (root.strokes % 25 === 0)
+                    console.log("paint: strokes", root.strokes)
+            }
         }
     }
 
-    MouseArea {
-        anchors.fill: parent
-        onPressed: (mouse) => {
-            paper.line = [Qt.point(mouse.x, mouse.y)]
-            paper.requestPaint()
-        }
-        onPositionChanged: (mouse) => {
-            if (!pressed)
-                return
-            paper.line.push(Qt.point(mouse.x, mouse.y))
-            paper.requestPaint()
-        }
-        onReleased: (mouse) => {
-            paper.line.push(Qt.point(mouse.x, mouse.y))
-            paper.requestPaint()
-            root.strokes += 1
-            if (root.strokes % 25 === 0)
-                console.log("paint: strokes", root.strokes)
+    // The palette, on its own strip below the paper: six squares, each a colour to pick up.
+    // It is not on the paper, so a line drawn near the bottom of the picture cannot change
+    // the colour it is being drawn in.
+    Rectangle {
+        id: tray
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: 56
+        color: "#f2f0ec"
+        border.width: 1
+        border.color: "#d8d4cc"
+        onYChanged: root.report()
+
+        Row {
+            id: palette
+            x: 12
+            y: 12
+            spacing: 8
+            Repeater {
+                model: root.swatches
+                Rectangle {
+                    required property string modelData
+                    required property int index
+                    width: 32
+                    height: 32
+                    radius: 4
+                    color: modelData
+                    border.width: root.ink === modelData ? 3 : 1
+                    border.color: root.ink === modelData ? "#1f6feb" : "#8a8a8a"
+                    Accessible.role: Accessible.Button
+                    Accessible.name: "color " + (index + 1)
+                    MouseArea {
+                        anchors.fill: parent
+                        onPressed: {
+                            root.ink = parent.modelData
+                            console.log("paint: ink", root.ink)
+                        }
+                    }
+                }
+            }
         }
     }
 

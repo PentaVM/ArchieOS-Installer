@@ -43,6 +43,12 @@ int main(int argc, char *argv[])
     const QCommandLineOption tempo(QStringLiteral("tempo"),
                                    QStringLiteral("person, to be watched, or agent, four actions a second."),
                                    QStringLiteral("tempo"), QStringLiteral("person"));
+    const QCommandLineOption strokeSpeed(
+        QStringLiteral("stroke-speed"),
+        QStringLiteral("How fast a line is drawn, in pixels a second. An application sees the pointer at its "
+                       "own frame rate, so a line drawn faster than about ten pixels a frame reaches it as "
+                       "a polygon of its corners."),
+        QStringLiteral("px/s"));
     const QCommandLineOption windowed(QStringLiteral("windowed"), QStringLiteral("Do not go full screen."));
     const QCommandLineOption width(QStringLiteral("width"), QStringLiteral("Window width."), QStringLiteral("px"),
                                    QStringLiteral("1600"));
@@ -57,7 +63,7 @@ int main(int argc, char *argv[])
                                        QStringLiteral("ms"));
     const QCommandLineOption quitAfter(QStringLiteral("quit-after-ms"), QStringLiteral("Exit after this long."),
                                        QStringLiteral("ms"));
-    parser.addOptions({socketName, control, keyFile, reducedMotion, tier, tempo, windowed, width, height, grab, grabAfter,
+    parser.addOptions({socketName, control, keyFile, reducedMotion, tier, tempo, strokeSpeed, windowed, width, height, grab, grabAfter,
                        grabEvery, quitAfter});
     parser.process(app);
 
@@ -88,6 +94,15 @@ int main(int argc, char *argv[])
         options.playback = archie::visual::PlaybackPolicy::video_tempo();
     } else if (parser.value(tempo) != QLatin1String("person")) {
         qWarning("archie-stage: --tempo is person, agent or video");
+    }
+    if (parser.isSet(strokeSpeed)) {
+        bool read = false;
+        const float speed = parser.value(strokeSpeed).toFloat(&read);
+        if (read && speed > 0.0F) {
+            options.playback.stroke_speed_px_per_s = speed;
+        } else {
+            qWarning("archie-stage: --stroke-speed wants pixels a second, above nothing");
+        }
     }
     if (parser.value(tier) == QLatin1String("conserve")) {
         options.tier = archie::visual::RenderTier::Conserve;

@@ -4,7 +4,10 @@
 //! archie-paint --socket <path> --key-file <path> --policy <apps.toml> --app <app_id>
 //!              --image <file.png> [--surface N] [--inset 40] [--spacing 5]
 //!              [--canvas x,y,w,h] [--limit N] [--levels 70:14,110:11,...]
-//!              [--pen 2] [--points 2] [--find-paper] [--dry-run [--preview <file.png>]]
+//!              [--pen 2] [--points 2] [--find-paper]
+//!              [--flow [--seeding 7] [--step 4] [--steps 120] [--darker-than 96] [--least-form 0.4] [--most N]
+//!                      [--swatches "#141210,…"] [--palette x,y,step]]
+//!              [--dry-run [--preview <file.png>] [--as-seen <px/s>] [--frames 60]]
 //! ```
 //!
 //! Every stroke goes the same way as every other action: the stage policy has to allow
@@ -52,6 +55,13 @@ mod planning {
         let spacing: u32 = super::number(&mut args, "--spacing")?.unwrap_or(10);
         let min_run: u32 = super::number(&mut args, "--min-run")?.unwrap_or(4);
         let preview = super::take(&mut args, "--preview");
+        // The speed the stage will draw at, so the preview can show what will land rather
+        // than what was asked for.
+        let seen_at: Option<f32> = super::number(&mut args, "--as-seen")?;
+        let frames: f32 = super::number(&mut args, "--frames")?.unwrap_or(60.0);
+        let flowing = super::flag(&mut args, "--flow");
+        let flow = super::flow_of(&mut args)?;
+        let swatches = super::swatches_of(&mut args)?;
         let levels = super::levels_of(&mut args)?;
         let shares = super::shares_of(&mut args)?;
         // The canvas draws with a pen this wide, so the plan is made for one and the
@@ -69,6 +79,39 @@ mod planning {
             pen,
             max_points,
         };
+        if flowing {
+            let mut groups = archie_paint::flow_plan(&picture, canvas, &flow, &swatches, max_points);
+            // What the application will see of it, not what was planned: the pointer is a
+            // place reported at a frame rate, and the drawing is made of those reports.
+            if let Some(speed) = seen_at {
+                let mut kept = 0_usize;
+                for (_, plan) in &mut groups {
+                    for stroke in &mut plan.strokes {
+                        *stroke = archie_paint::seen_by(stroke, speed, frames);
+                        kept += stroke.len();
+                    }
+                }
+                println!(
+                    "at {speed:.0} pixels a second the application sees {kept} positions of it, \n                     {frames:.0} a second"
+                );
+            }
+            let strokes: usize = groups.iter().map(|(_, plan)| plan.strokes.len()).sum();
+            let length: f32 = groups.iter().map(|(_, plan)| plan.drawn_length()).sum();
+            println!(
+                "{strokes} lines in {} colours, {length:.0} pixels of line, in a canvas of {}x{} at {},{}",
+                groups.len(),
+                canvas.width,
+                canvas.height,
+                canvas.x,
+                canvas.y
+            );
+            if let Some(out) = preview {
+                let paper = archie_paint::preview_in_colour(&groups, canvas, &swatches, pen);
+                write_colour(Path::new(&out), &paper, canvas.width, canvas.height)?;
+                println!("drew the plan on paper: {out}");
+            }
+            return Ok(ExitCode::SUCCESS);
+        }
         let plan = super::plan_with(&picture, canvas, &asked);
         report(&plan, canvas);
         println!(
@@ -81,6 +124,18 @@ mod planning {
             println!("drew the plan on paper: {out}");
         }
         Ok(ExitCode::SUCCESS)
+    }
+
+    /// The preview of a picture drawn in several colours.
+    fn write_colour(path: &Path, rgb: &[u8], width: u32, height: u32) -> Result<(), String> {
+        let file = std::fs::File::create(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), width, height);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .write_header()
+            .and_then(|mut writer| writer.write_image_data(rgb))
+            .map_err(|e| e.to_string())
     }
 
     /// The preview, as a plain grey PNG.
@@ -159,6 +214,94 @@ fn prepared(path: &std::path::Path, soften: Option<u32>) -> Result<Picture, Stri
     let picture = Picture::read(path).map_err(|e| e.to_string())?;
     let radius = soften.unwrap_or_else(|| (picture.width() / 200).max(1));
     Ok(picture.softened(radius).stretched())
+}
+
+/// The swatches a drawing application is asked to draw with, and where to click for each.
+/// Finding them by looking is the accessibility path's job; here they are given.
+#[cfg_attr(not(unix), allow(dead_code))]
+struct Palette {
+    colours: Vec<[u8; 3]>,
+    at: Option<(i32, i32, i32)>,
+}
+
+#[cfg_attr(not(unix), allow(dead_code))]
+impl Palette {
+    /// Where to click for swatch `at`, when the application's palette was described.
+    fn swatch(&self, at: usize) -> Option<(i32, i32)> {
+        let (x, y, step) = self.at?;
+        Some((x + step * at as i32, y))
+    }
+}
+
+/// `--swatches "#1b1a17,#6b4a2f,…"`, and the default the demo canvas has.
+fn swatches_of(args: &mut Vec<String>) -> Result<Vec<[u8; 3]>, String> {
+    let text = take(args, "--swatches").unwrap_or_else(|| {
+        "#141210,#4a352a,#8a6a46,#c39c6d,#e6d3b3,#5d6b63".to_string()
+    });
+    let mut colours = Vec::new();
+    for part in text.split(',') {
+        let hex = part.trim().trim_start_matches('#');
+        if hex.len() != 6 {
+            return Err("--swatches is colours like #1b1a17,#6b4a2f".into());
+        }
+        let mut colour = [0_u8; 3];
+        for (at, pair) in hex.as_bytes().chunks(2).enumerate() {
+            let pair = std::str::from_utf8(pair).map_err(|_| "a colour is hex")?;
+            colour[at] = u8::from_str_radix(pair, 16).map_err(|_| "a colour is hex")?;
+        }
+        colours.push(colour);
+    }
+    if colours.is_empty() {
+        return Err("--swatches needs at least one colour".into());
+    }
+    Ok(colours)
+}
+
+/// `--palette 40,1130,44`: the first swatch's middle, and how far apart they are.
+#[cfg_attr(not(unix), allow(dead_code))]
+fn palette_at(args: &mut Vec<String>) -> Result<Option<(i32, i32, i32)>, String> {
+    let Some(text) = take(args, "--palette") else {
+        return Ok(None);
+    };
+    let parts: Vec<&str> = text.split(',').collect();
+    if parts.len() != 3 {
+        return Err("--palette is x,y,step".into());
+    }
+    let mut numbers = [0_i32; 3];
+    for (at, part) in parts.iter().enumerate() {
+        numbers[at] = part
+            .trim()
+            .parse()
+            .map_err(|_| "--palette is three numbers".to_string())?;
+    }
+    Ok(Some((numbers[0], numbers[1], numbers[2])))
+}
+
+/// How the lines that follow the form are to be drawn, as the command line says it.
+fn flow_of(args: &mut Vec<String>) -> Result<archie_paint::Flow, String> {
+    let mut flow = archie_paint::Flow::default();
+    if let Some(seeding) = number(args, "--seeding")? {
+        flow.seeding = seeding;
+    }
+    if let Some(step) = number::<f32>(args, "--step")? {
+        flow.step = step;
+    }
+    if let Some(steps) = number(args, "--steps")? {
+        flow.steps = steps;
+    }
+    if let Some(darker) = number(args, "--darker-than")? {
+        flow.darker_than = darker;
+    }
+    if let Some(coherence) = number(args, "--coherence")? {
+        flow.coherence = coherence;
+    }
+    if let Some(least) = number::<f32>(args, "--least-form")? {
+        flow.least_form = least;
+    }
+    if let Some(most) = number(args, "--most")? {
+        flow.most = most;
+    }
+    Ok(flow)
 }
 
 /// How a picture is to be hatched, as the command line says it.
@@ -327,7 +470,17 @@ mod unix {
         }
     }
 
-    use super::{canvas_of, flag, levels_of, number, plan_with, prepared, shares_of, take, AsAsked};
+    use super::{
+        canvas_of, flag, flow_of, levels_of, number, palette_at, plan_with, prepared, shares_of,
+        swatches_of, take, AsAsked, Palette,
+    };
+
+    /// One thing to do on the way to a picture.
+    enum Deed {
+        /// Pick up a colour, by clicking the swatch the application offers for it.
+        Swatch(i32, i32),
+        Line(Vec<archie_stage::StrokePoint>),
+    }
 
     async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         let socket = take(&mut args, "--socket");
@@ -344,6 +497,12 @@ mod unix {
         // Where to draw can be looked for rather than given: an application that can be
         // drawn in has paper in it, and paper is the large light rectangle in its window.
         let find_paper = flag(&mut args, "--find-paper");
+        let flowing = flag(&mut args, "--flow");
+        let flow = flow_of(&mut args)?;
+        let palette = Palette {
+            colours: swatches_of(&mut args)?,
+            at: palette_at(&mut args)?,
+        };
         let levels = levels_of(&mut args)?;
         let shares = shares_of(&mut args)?;
         let pen: u32 = number(&mut args, "--pen")?.unwrap_or(2);
@@ -351,11 +510,11 @@ mod unix {
         // a command is what costs; this is the whole difference between a slow picture and
         // a fast one.
         let max_points: usize = number(&mut args, "--points")?.unwrap_or(2);
+        let soften: Option<u32> = number(&mut args, "--soften")?;
         if !args.is_empty() {
             return Err(format!("unexpected arguments: {args:?}"));
         }
 
-        let soften: Option<u32> = number(&mut args, "--soften")?;
         let picture = prepared(Path::new(&image), soften)?;
         let socket = socket.ok_or("--socket is required")?;
         let app = app.ok_or("--app is required")?;
@@ -399,31 +558,62 @@ mod unix {
                 inset,
             )?
         };
-        let plan = plan_with(
-            &picture,
-            canvas,
-            &AsAsked {
-                spacing,
-                min_run,
-                levels,
-                shares,
-                pen,
-                max_points,
-            },
-        );
-        super::planning::report(&plan, canvas);
+        // What to do, in order: a colour to pick up, or a line to draw with it.
+        let mut deeds: Vec<Deed> = Vec::new();
+        if flowing {
+            let groups = archie_paint::flow_plan(&picture, canvas, &flow, &palette.colours, max_points);
+            let lines: usize = groups.iter().map(|(_, plan)| plan.strokes.len()).sum();
+            let length: f32 = groups.iter().map(|(_, plan)| plan.drawn_length()).sum();
+            println!(
+                "{lines} lines in {} colours, {length:.0} pixels of line, in a canvas of {}x{} at {},{}",
+                groups.len(),
+                canvas.width,
+                canvas.height,
+                canvas.x,
+                canvas.y
+            );
+            for (colour, plan) in groups {
+                if let Some((x, y)) = palette.swatch(colour) {
+                    deeds.push(Deed::Swatch(x, y));
+                }
+                deeds.extend(plan.strokes.into_iter().map(Deed::Line));
+            }
+        } else {
+            let plan = plan_with(
+                &picture,
+                canvas,
+                &AsAsked {
+                    spacing,
+                    min_run,
+                    levels,
+                    shares,
+                    pen,
+                    max_points,
+                },
+            );
+            super::planning::report(&plan, canvas);
+            deeds.extend(plan.strokes.into_iter().map(Deed::Line));
+        }
         let started = Instant::now();
         let (mut drawn, mut refused) = (0_usize, 0_usize);
         let mut paused_ms = 0_u64;
-        let total = plan.strokes.len().min(limit.unwrap_or(usize::MAX));
-        for (index, stroke) in plan.strokes.iter().take(total).enumerate() {
+        let total = deeds.len().min(limit.unwrap_or(usize::MAX));
+        for (index, deed) in deeds.iter().take(total).enumerate() {
+            let action = match deed {
+                Deed::Swatch(x, y) => StageAction::Click {
+                    x: *x,
+                    y: *y,
+                    button: PointerButton::Left,
+                },
+                Deed::Line(points) => StageAction::Stroke {
+                    points: points.clone(),
+                    button: PointerButton::Left,
+                },
+            };
             let request = ActRequest {
                 app_id: app.clone(),
                 surface: Some(found.surface),
-                action: StageAction::Stroke {
-                    points: stroke.clone(),
-                    button: PointerButton::Left,
-                },
+                action,
                 text_grade: PrivacyGrade::Public,
                 principal: Principal::Human {
                     id: "archie-paint".into(),
@@ -432,7 +622,10 @@ mod unix {
                 task_id: None,
                 user_present: true,
                 approved: false,
-                justification: "draw one stroke of a picture".into(),
+                justification: match deed {
+                    Deed::Swatch(..) => "pick up a colour the application offers".into(),
+                    Deed::Line(_) => "draw one stroke of a picture".to_string(),
+                },
             };
             // A person reaching for the mouse takes the stage, and a picture is not a
             // reason to argue with that: the stroke waits until they are done rather than
