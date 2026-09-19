@@ -423,6 +423,18 @@ PointerTrajectory PointerTrajectory::plan(PointF from, PointF to, std::int64_t s
     return trajectory;
 }
 
+PlaybackPolicy PlaybackPolicy::video_tempo() noexcept {
+    PlaybackPolicy policy = agent_tempo();
+    // A twelfth of a person's time over a path, one frame of press, and a line drawn at
+    // nine thousand pixels a second with the shortest segment worth scheduling.
+    policy.trajectory.pace = 0.08F;
+    policy.press_dwell_ms = 8;
+    policy.drag_hold_ms = 4;
+    policy.stroke_speed_px_per_s = 9'000.0F;
+    policy.stroke_min_segment_ms = 2;
+    return policy;
+}
+
 PointerTrajectory PointerTrajectory::straight(PointF from, PointF to, std::int64_t start_ms,
                                               std::int64_t duration_ms) noexcept {
     PointerTrajectory trajectory;

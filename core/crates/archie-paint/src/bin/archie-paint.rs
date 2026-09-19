@@ -4,7 +4,7 @@
 //! archie-paint --socket <path> --key-file <path> --policy <apps.toml> --app <app_id>
 //!              --image <file.png> [--surface N] [--inset 40] [--spacing 5]
 //!              [--canvas x,y,w,h] [--limit N] [--levels 70:14,110:11,...]
-//!              [--pen 2] [--find-paper] [--dry-run [--preview <file.png>]]
+//!              [--pen 2] [--points 2] [--find-paper] [--dry-run [--preview <file.png>]]
 //! ```
 //!
 //! Every stroke goes the same way as every other action: the stage policy has to allow
@@ -57,10 +57,12 @@ mod planning {
         // The canvas draws with a pen this wide, so the plan is made for one and the
         // preview is drawn with one.
         let pen: u32 = super::number(&mut args, "--pen")?.unwrap_or(2);
+        let max_points: usize = super::number(&mut args, "--points")?.unwrap_or(2);
         let canvas = super::canvas_of(super::take(&mut args, "--canvas").as_deref(), None, inset)?;
         let soften: Option<u32> = super::number(&mut args, "--soften")?;
         let picture = super::prepared(Path::new(&image), soften)?;
-        let plan = super::plan_with(&picture, canvas, spacing, min_run, levels, &shares, pen);
+        let plan =
+            super::plan_with(&picture, canvas, spacing, min_run, levels, &shares, pen, max_points);
         report(&plan, canvas);
         println!(
             "tone levels from the picture itself: {:?}",
@@ -131,9 +133,11 @@ mod planning {
         min_run: u32,
         shares: &[f32],
         pen: u32,
+        max_points: usize,
     ) -> Hatching {
         Hatching {
             min_run,
+            max_points,
             ..Hatching::from_levels(&levels_of(picture, shares, pen))
         }
         .spread(spacing)
@@ -158,13 +162,15 @@ fn plan_with(
     levels: Option<Vec<(u8, u32)>>,
     shares: &[f32],
     pen: u32,
+    max_points: usize,
 ) -> Plan {
     let hatching = match levels {
         Some(levels) => archie_paint::Hatching {
             min_run,
+            max_points,
             ..archie_paint::Hatching::from_levels(&levels)
         },
-        None => planning::hatching(picture, spacing, min_run, shares, pen),
+        None => planning::hatching(picture, spacing, min_run, shares, pen, max_points),
     };
     archie_paint::plan(picture, canvas, &hatching)
 }
@@ -326,6 +332,10 @@ mod unix {
         let levels = levels_of(&mut args)?;
         let shares = shares_of(&mut args)?;
         let pen: u32 = number(&mut args, "--pen")?.unwrap_or(2);
+        // How many points one command may carry. A line of many points is one command, and
+        // a command is what costs; this is the whole difference between a slow picture and
+        // a fast one.
+        let max_points: usize = number(&mut args, "--points")?.unwrap_or(2);
         if !args.is_empty() {
             return Err(format!("unexpected arguments: {args:?}"));
         }
@@ -374,7 +384,7 @@ mod unix {
                 inset,
             )?
         };
-        let plan = plan_with(&picture, canvas, spacing, min_run, levels, &shares, pen);
+        let plan = plan_with(&picture, canvas, spacing, min_run, levels, &shares, pen, max_points);
         super::planning::report(&plan, canvas);
         let started = Instant::now();
         let (mut drawn, mut refused) = (0_usize, 0_usize);

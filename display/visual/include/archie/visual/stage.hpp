@@ -414,6 +414,12 @@ struct PlaybackPolicy {
     /// does not hold the stage at all. Every movement is still drawn, and nothing about
     /// what is checked, sealed or refused changes with it.
     [[nodiscard]] static PlaybackPolicy agent_tempo() noexcept;
+
+    /// The tempo of an agent being filmed: the same actions, as fast as the hand can be
+    /// asked to move and still be followed. Everything that is checked, sealed or refused
+    /// is the same; only the clock changes, and a person watching sees a blur rather than
+    /// a demonstration.
+    [[nodiscard]] static PlaybackPolicy video_tempo() noexcept;
 };
 
 enum class PlaybackState {

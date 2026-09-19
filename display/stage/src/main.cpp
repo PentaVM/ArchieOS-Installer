@@ -84,8 +84,10 @@ int main(int argc, char *argv[])
         // What IRIS needs to work an application: the same checks, the same cinematics,
         // on a clock that fits four actions in a second.
         options.playback = archie::visual::PlaybackPolicy::agent_tempo();
+    } else if (parser.value(tempo) == QLatin1String("video")) {
+        options.playback = archie::visual::PlaybackPolicy::video_tempo();
     } else if (parser.value(tempo) != QLatin1String("person")) {
-        qWarning("archie-stage: --tempo is person or agent");
+        qWarning("archie-stage: --tempo is person, agent or video");
     }
     if (parser.value(tier) == QLatin1String("conserve")) {
         options.tier = archie::visual::RenderTier::Conserve;
