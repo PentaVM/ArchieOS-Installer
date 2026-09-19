@@ -259,15 +259,18 @@ fits its own plan into fifteen seconds exactly.
 
 Measured in WSLg, both on `paint.qml`:
 
-| | lines | commands | colours | time | refused |
-|---|---|---|---|---|---|
-| the intro | 40 | 43 | 3 | 13.2 s | 0 |
-| the picture | 4438 | 4443 | 5 | ~17 min | 0 |
+| | lines | commands | colours | pen | time | refused |
+|---|---|---|---|---|---|---|
+| the intro | 40 | 43 | 3 | 2 px | 13.2 s | 0 |
+| the picture | 1428 | 1433 | 5 | 2 px | 7 min 09 s | 0 |
+| the picture, finer | 1408 | 1414 | 6 | 1 px | 6 min 32 s | 0 |
+| the densest tried | 4438 | 4443 | 5 | 2 px | 21 min 28 s | 0 |
 
 The intro is the one for the film: a contour drawing of the Mona Lisa, in three colours,
 finished in thirteen seconds while somebody explains what is happening. The picture is the
-same planner with the seeding nine pixels apart instead of thirty, drawn at seven hundred
-pixels a second so that every line is smooth.
+same planner with the seeding sixteen pixels apart instead of thirty, drawn at seven hundred
+pixels a second so that every line is smooth. The densest one is there for the shape of the
+curve: three times the lines for three times the time, and none of them refused.
 
 One bug found by drawing rather than by testing, and it was in neither the stage nor the
 planner: `paint.qml` threw away points. It kept one line's worth of them and painted when

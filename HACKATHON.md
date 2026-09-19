@@ -320,8 +320,10 @@ from executed builds on identified hardware.
   the way the application will receive it, `--as-seen` makes the preview show that instead of
   the plan, and `--stroke-speed` lets the stage be asked for a speed that fits. Video tempo
   now draws at 1000 px/s rather than 2500.
-- Measured in WSLg on the demo canvas: the film's intro is 40 lines in 3 colours in 13.2 s
-  with none refused, and the full picture is 4438 lines in 5 colours with none refused.
+- Measured in WSLg on the demo canvas, all with none refused: the film's intro is 40 lines
+  in 3 colours in 13.2 s, the picture is 1428 lines in 5 colours in 7m09s, the same drawn
+  with a one-pixel pen is 1408 lines in 6 colours in 6m32s, and the densest tried is 4438
+  lines in 5 colours in 21m28s.
 - The plan now says how much of the paper the pen will cover before anything is drawn, and
   the demo canvas takes its pen width as an argument and reports it, so a large drawing can
   be made with a fine pen and the plan made for the pen that will draw it.
