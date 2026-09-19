@@ -235,6 +235,76 @@ notice that a picture is being drawn on a surface with no paper in it, because t
 compositor and the application alike it is a drawing with every stroke in place. What caught
 it was reading the alpha of one pixel in the corner of the file.
 
+### Pointer craft
+
+Everything in this section came out of trying to draw a picture in fifteen seconds, and none
+of it is about pictures. A drawing is only the most demanding thing a pointer can be asked to
+do: it needs the pointer to be in the right place, at the right speed, for a great many
+places in a row, and it shows every mistake. What it taught applies to any application — to a
+sweep through a menu, a drag across a list, a careful resize.
+
+**Time is the budget, not commands.** An application looks at the pointer at its own rate and
+joins what it saw with straight runs, so there is a speed past which a line arrives as a
+polygon; that fixes how much pointer work a second can carry. Asking for "forty lines" says
+nothing about whether they fit. `--seconds` says what there is, and the planner spends it:
+
+```
+49 lines in 1 colours, 8658 pixels of line, in a canvas of 834x920 at 0,0
+at 950 pixels a second: 9.1s drawing, 4.0s travelling, 0.2s waiting on 2 commands
+  — 13.4s, 648 pixels of line a second
+```
+
+Everything in that line was measured on this stage rather than assumed, because the first
+version of it was assumed and was wrong in both directions.
+
+**Pixels of line a second, not commands a second.** The old measure said how fast Archie was
+*asking*. This one says how much work was *done*, which is the thing that decides whether a
+task finishes. The same drawing at 511 and at 671 pixels a second is the same number of
+commands and a third more picture.
+
+**Several lines under one authorisation.** `strokes` carries up to 64 paths and 1024 points in
+one command: one lease, one receipt, every point re-checked against the window as it is now,
+each line refusable on its own, and the operator still able to take the stage between them.
+Nothing that made a single line safe was given up; what went was the waiting. Measured on the
+same 56-line drawing, sent both ways:
+
+| | commands | time | pixels of line a second |
+|---|---|---|---|
+| one line at a time | 62 | 17.6 s | 511 |
+| in batches | 12 | 13.4 s | 671 |
+
+That is 84 milliseconds a command, which is the number the planner now charges. `--batch 1`
+sends them one at a time, so the difference can be measured again rather than believed.
+
+**The speed means the speed.** A tempo hurries the pointer *to* things, because nothing is
+being said on the way. It used to hurry the drawing as well — the stroke speed was divided by
+the tempo's pace, so `--stroke-speed 942` at video tempo drew at eleven thousand pixels a
+second and every line arrived as a polygon. Reaching and drawing are now separate: the tempo
+still flies between lines, and the line is drawn at the speed it was given.
+
+**Go to the nearest thing next.** The pointer has to travel from the end of one line to the
+start of the next, and on the first plans that travel cost as much as the drawing did — 8.5
+seconds against 8.4. Choosing what to do next by what it says *and what it costs to get
+there* cut it to 4.0. This is the same arithmetic as deciding which control to visit next in
+a window, and the answer is the same: the good one nearby beats the better one across the
+screen.
+
+**Changing colour is expensive, so do it rarely.** Putting one colour down and picking another
+up is a command and a trip to wherever the application keeps its colours: about three tenths
+of a second, which is a quarter of a second of line. A hand does not change brush every other
+stroke, and neither should this. `--per-colour` is the knob; lowering it buys colour at the
+price of line.
+
+**Weight, without pressure.** A pointer cannot press harder. It can go over a line again, a
+hair to one side, and back the way it came so that returning to the start costs nothing. The
+darkest lines get two or three passes and the light ones get one, which is what stops a
+drawing looking ruled. It costs ink and no commands, so the budget pays for it out of the
+same purse as any other line.
+
+Measured end to end on the demo canvas, a fifteen-second drawing: 49 lines in 4 commands,
+15.1 s, none refused, 575 pixels of line a second, and the lines that arrived were the lines
+that were planned.
+
 ### What a pointer can say in fifteen seconds
 
 An application does not receive a path. It receives the pointer's position, again and again,

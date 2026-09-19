@@ -231,6 +231,10 @@ inline constexpr std::size_t kMaxTextChars = 2'000;
 /// The most points one stroke may carry. A longer line is more than one stroke, and a
 /// command that never ends is not one.
 inline constexpr std::size_t kMaxStrokePoints = 256;
+/// How many separate lines one drawing command may carry, and how many points across all of
+/// them. The round trip is most of what a line costs, so a drawing sends its lines together.
+inline constexpr std::size_t kMaxStrokePaths = 64;
+inline constexpr std::size_t kMaxStrokePointsInAll = 1024;
 inline constexpr int kMaxScrollSteps = 60;
 inline constexpr int kMaxChordKeys = 4;
 
@@ -262,6 +266,9 @@ struct StageCommand {
     /// goes down, every point it is dragged through, and where it comes up. Empty for
     /// every other action.
     std::vector<IPoint> path;
+    /// Where the pen lifts: an index into `path` at which one line ends and the next begins.
+    /// A drawing of several lines travels between them with the button up.
+    std::vector<std::size_t> lifts;
 };
 
 /// Why the compositor would not run a command. Stable codes: they end up in receipts.

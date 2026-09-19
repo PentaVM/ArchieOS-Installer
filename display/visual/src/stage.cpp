@@ -304,18 +304,40 @@ std::optional<CommandRefusal> check_command(const StageCommand& command,
             break;
         }
         case StageAction::Stroke: {
-            if (command.path.size() < 2 || command.path.size() > kMaxStrokePoints) {
+            const std::size_t most =
+                command.lifts.empty() ? kMaxStrokePoints : kMaxStrokePointsInAll;
+            if (command.path.size() < 2 || command.path.size() > most ||
+                command.lifts.size() >= kMaxStrokePaths) {
                 return CommandRefusal::PathOutOfBounds;
+            }
+            // A lift has to fall between two lines, and the lines have to be in order.
+            std::size_t before = 0;
+            for (const std::size_t lift : command.lifts) {
+                if (lift < before + 2 || lift > command.path.size() - 2) {
+                    return CommandRefusal::PathOutOfBounds;
+                }
+                before = lift;
             }
             for (const IPoint& point : command.path) {
                 if (!inside(point.x, point.y)) {
                     return CommandRefusal::OutsideSurface;
                 }
             }
-            // A stroke that never leaves its first point is a click wearing a line's name.
-            const bool moves = std::any_of(command.path.begin() + 1, command.path.end(),
-                                           [&](const IPoint& point) { return !(point == command.path.front()); });
-            if (!moves) {
+            // A stroke that never leaves its first point is a click wearing a line's name,
+            // and that is true of every line in a drawing, not only of the first.
+            std::size_t from = 0;
+            auto still = [&](std::size_t start, std::size_t end) {
+                return std::all_of(command.path.begin() + static_cast<std::ptrdiff_t>(start) + 1,
+                                   command.path.begin() + static_cast<std::ptrdiff_t>(end),
+                                   [&](const IPoint& point) { return point == command.path[start]; });
+            };
+            for (const std::size_t lift : command.lifts) {
+                if (still(from, lift)) {
+                    return CommandRefusal::PathOutOfBounds;
+                }
+                from = lift;
+            }
+            if (still(from, command.path.size())) {
                 return CommandRefusal::PathOutOfBounds;
             }
             break;
@@ -541,10 +563,30 @@ Playback Playback::start(const StageCommand& command, const Surface& surface, Po
             step(reach.end_ms(), StepKind::Press, first, command.button, 0);
             std::int64_t at = reach.end_ms() + policy.drag_hold_ms;
             PointF held = first;
-            const float pace = policy.trajectory.pace > 0.0F ? policy.trajectory.pace : 1.0F;
-            const float speed = std::max(policy.stroke_speed_px_per_s, 1.0F) / pace;
+            // How fast the line is drawn is not how fast the pointer is carried to things.
+            // A tempo hurries the reaching, because nothing is being said on the way; it must
+            // not hurry the drawing, because the application samples the pointer at its own
+            // rate and a line drawn faster than it looks arrives as a polygon. So the stroke
+            // speed is the speed, and `--stroke-speed 950` means nine hundred and fifty.
+            const float speed = std::max(policy.stroke_speed_px_per_s, 1.0F);
+            std::size_t next_lift = 0;
             for (std::size_t i = 1; i < command.path.size(); ++i) {
                 const PointF to = to_output(surface, command.path[i].x, command.path[i].y);
+                // Where one line ends and the next begins: let go, go there with the button
+                // up, and press again. Nothing is drawn on the way, which is why the plan
+                // tries to make the way short.
+                if (next_lift < command.lifts.size() && command.lifts[next_lift] == i) {
+                    ++next_lift;
+                    at += policy.press_dwell_ms;
+                    step(at, StepKind::Release, held, command.button, 0);
+                    const auto between = PointerTrajectory::plan(held, to, at, policy.trajectory);
+                    arrive(between);
+                    at = between.end_ms();
+                    step(at, StepKind::Press, to, command.button, 0);
+                    at += policy.drag_hold_ms;
+                    held = to;
+                    continue;
+                }
                 const float dx = to.x - held.x;
                 const float dy = to.y - held.y;
                 const auto span = static_cast<std::int64_t>(

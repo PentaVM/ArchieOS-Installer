@@ -1,7 +1,7 @@
 //! Lines that follow the form.
 //!
 //! Hatching is fast to plan and honest about tone, and it looks like hatching: a grid laid
-//! over a face. A hand does something else — it draws *along* what it sees, so the line
+//! over a face. A hand does something else â it draws *along* what it sees, so the line
 //! itself says where the cheek turns. This plans that: the direction at each point where
 //! the picture changes least, a line let go into that field, and tone from how many lines
 //! are let go rather than from how close a grid is.
@@ -37,6 +37,41 @@ pub struct Flow {
     /// costs the same to send whether it is long or short, so when there is only time for a
     /// few, the few should be the ones that carry the most of the picture.
     pub most: usize,
+    /// How long the drawing may take, in seconds, or none for no limit.
+    ///
+    /// This is the only budget a drawing really has, and stating it in seconds rather than
+    /// in lines is what makes the plan honest. An application looks at the pointer at its
+    /// own rate and joins what it saw with straight runs, so there is a speed past which a
+    /// line arrives as a polygon; that fixes how much line a second can carry. Everything
+    /// else â how many commands, how far the pointer travels between them â only decides
+    /// how much of each second goes into line rather than into getting there.
+    ///
+    /// Given a time, the lines are chosen the way a hand chooses them: at each turn, the one
+    /// that says the most about the picture for the time it costs to go and draw it.
+    pub seconds: f32,
+    /// How fast the pointer will be drawing, in pixels a second.
+    pub speed: f32,
+    /// What one command costs before any of it is drawing: the round trip, and whatever the
+    /// stage draws of its own. Measured on this stage at video tempo, with the same drawing
+    /// sent one line at a time and then in batches: eighty-four milliseconds.
+    pub per_command: f32,
+    /// What one line costs beyond drawing it: the pen going down and coming up, and the
+    /// travel to it taken at the tempo's pace rather than at the drawing speed. Measured on
+    /// this stage at video tempo by planning a drawing and timing it: forty-three
+    /// milliseconds a line.
+    pub per_line: f32,
+    /// What putting one colour down and picking another up costs: the command, and the
+    /// pointer going to wherever the application keeps its colours and coming back. Measured
+    /// at about three tenths of a second, and it is the reason a hand does not change brush
+    /// every other stroke.
+    pub per_colour: f32,
+    /// How many times the pen may go over the darkest lines.
+    ///
+    /// Every line the same weight is what makes a drawing look ruled rather than drawn. A
+    /// hand presses harder where the picture is dark, and a pointer that cannot press can do
+    /// the same thing by going over a line again, a hair to one side. It costs ink and no
+    /// commands, so the budget pays for it out of the same purse as any other line.
+    pub weight: u32,
 }
 
 impl Default for Flow {
@@ -49,6 +84,12 @@ impl Default for Flow {
             coherence: 6,
             least_form: 0.4,
             most: 0,
+            seconds: 0.0,
+            speed: 950.0,
+            per_command: 0.084,
+            per_line: 0.043,
+            per_colour: 0.30,
+            weight: 1,
         }
     }
 }
@@ -184,7 +225,7 @@ fn field_of(picture: &Picture, coherence: u32) -> Field {
 /// The lines to draw, in the order to draw them: darkest first, so that a picture being
 /// watched becomes recognisable early.
 ///
-/// `palette` is what the application can be told to draw with — its swatches. Each line
+/// `palette` is what the application can be told to draw with â its swatches. Each line
 /// takes the nearest one to the picture under it, and the plan comes back grouped by
 /// colour, because changing colour costs a command and drawing does not.
 pub fn plan(
@@ -223,7 +264,9 @@ pub fn plan(
         let at = nearest(palette, fitted.colour_at(picture, sx as f32, sy as f32));
         drawn.push((at, stroke));
     }
-    if flow.most > 0 && drawn.len() > flow.most {
+    if flow.seconds > 0.0 {
+        drawn = what_fits_in_the_time(&drawn, picture, &fitted, flow);
+    } else if flow.most > 0 && drawn.len() > flow.most {
         // Kept by length, but drawn in the order they were found, so the picture still
         // arrives darkest first rather than longest first.
         let mut order: Vec<usize> = (0..drawn.len()).collect();
@@ -241,9 +284,33 @@ pub fn plan(
         });
     }
 
+    if flow.seconds > 0.0 {
+        // The order is the choosing: the lines come out in the order a hand would make them,
+        // and a run of them in one colour is one visit to the palette.
+        let mut runs: Vec<(usize, Plan)> = Vec::new();
+        for (at, stroke) in drawn {
+            match runs.last_mut() {
+                Some((colour, plan)) if *colour == at => plan.strokes.push(stroke),
+                _ => runs.push((
+                    at,
+                    Plan {
+                        strokes: vec![stroke],
+                    },
+                )),
+            }
+        }
+        return runs;
+    }
+
     let mut by_colour: Vec<Plan> = vec![Plan::default(); palette.len().max(1)];
     for (at, stroke) in drawn {
         by_colour[at].strokes.push(stroke);
+    }
+    // The pointer has to travel from the end of one line to the start of the next, and that
+    // travel is time in which nothing is drawn. Ordering the lines so that each is near the
+    // one before turns some of it back into drawing.
+    for plan in &mut by_colour {
+        shortest_way_round(&mut plan.strokes);
     }
     by_colour
         .into_iter()
@@ -252,8 +319,211 @@ pub fn plan(
         .collect()
 }
 
+/// The lines that fit in the time there is, in the order a hand would make them.
+///
+/// Greedy, and the greed is the whole idea: at each turn it takes the line that darkens the
+/// most picture nobody has darkened yet, per second it costs to go and draw it â and the
+/// cost is the honest one, the travel to reach it, the drawing of it, the command it takes,
+/// and one more command when it means putting down one colour and picking up another. A long
+/// line across ground already covered is worth less than a short one through a face nobody
+/// has drawn; a good line on the far side of the picture may be worth less than a fair one
+/// under the pointer. That is the trade a hand makes without thinking about it.
+///
+/// The picture is tracked coarsely â a tile for every few pixels â because the question is
+/// "has this part been said yet", not "is this pixel right".
+fn what_fits_in_the_time(
+    lines: &[(usize, Vec<StrokePoint>)],
+    picture: &Picture,
+    fitted: &crate::Fitted,
+    flow: &Flow,
+) -> Vec<(usize, Vec<StrokePoint>)> {
+    const TILE: i32 = 6;
+    let speed = if flow.speed > 0.0 { flow.speed } else { 950.0 };
+    let across = (fitted.width as i32 / TILE + 2).max(1) as usize;
+    let down = (fitted.height as i32 / TILE + 2).max(1) as usize;
+    let tile_of = |point: &StrokePoint| -> Option<usize> {
+        let (x, y) = (point.x - fitted.x, point.y - fitted.y);
+        if x < 0 || y < 0 {
+            return None;
+        }
+        let (tx, ty) = ((x / TILE) as usize, (y / TILE) as usize);
+        (tx < across && ty < down).then_some(ty * across + tx)
+    };
+    // What each line would say, as the tiles it touches and how dark the picture is there.
+    let says: Vec<Vec<(usize, f32)>> = lines
+        .iter()
+        .map(|(_, stroke)| {
+            let mut tiles: Vec<(usize, f32)> = stroke
+                .iter()
+                .filter_map(|point| {
+                    let tile = tile_of(point)?;
+                    let dark = fitted
+                        .darkness_at_canvas(picture, point.x as f32, point.y as f32)
+                        .unwrap_or(0);
+                    Some((tile, f32::from(dark) / 255.0))
+                })
+                .collect();
+            tiles.sort_by_key(|(tile, _)| *tile);
+            tiles.dedup_by_key(|(tile, _)| *tile);
+            tiles
+        })
+        .collect();
+    let lengths: Vec<f32> = lines
+        .iter()
+        .map(|(_, stroke)| length_of(stroke))
+        .collect();
+    // How heavy each line should be: the darkest go over twice or three times, which is
+    // what a hand does by pressing, and what a pointer that cannot press has instead.
+    let weights: Vec<u32> = says
+        .iter()
+        .map(|tiles| {
+            if tiles.is_empty() || flow.weight <= 1 {
+                return 1;
+            }
+            let mean: f32 = tiles.iter().map(|(_, dark)| *dark).sum::<f32>() / tiles.len() as f32;
+            // Nothing below halfway is worth a second pass; the darkest get them all.
+            let over = ((mean - 0.5) / 0.5).clamp(0.0, 1.0);
+            1 + (over * (flow.weight - 1) as f32).round() as u32
+        })
+        .collect();
+
+    let mut said = vec![false; across * down];
+    let mut taken = vec![false; lines.len()];
+    let mut order: Vec<usize> = Vec::new();
+    let mut spent = 0.0_f32;
+    let mut pen: Option<StrokePoint> = None;
+    let mut in_hand: Option<usize> = None;
+    loop {
+        let mut best: Option<(usize, f32, f32)> = None;
+        for at in 0..lines.len() {
+            if taken[at] {
+                continue;
+            }
+            let adds: f32 = says[at]
+                .iter()
+                .map(|(tile, dark)| if said[*tile] { 0.0 } else { *dark })
+                .sum();
+            if adds <= 0.0 {
+                continue;
+            }
+            let start = lines[at].1[0];
+            let travel = match pen {
+                Some(from) => {
+                    let (dx, dy) = ((start.x - from.x) as f32, (start.y - from.y) as f32);
+                    (dx * dx + dy * dy).sqrt()
+                }
+                None => 0.0,
+            };
+            // Lines travel together: a command carries as many as it may, so a line costs
+            // its share of one. Changing colour costs a whole command, because putting the
+            // colour down and picking another up is a click of its own.
+            let share = flow.per_command / crate::MAX_STROKE_PATHS as f32;
+            let palette = if in_hand == Some(lines[at].0) {
+                0.0
+            } else {
+                flow.per_colour
+            };
+            let costs = (travel + lengths[at] * weights[at] as f32) / speed
+                + weights[at] as f32 * flow.per_line
+                + share
+                + palette;
+            if spent + costs > flow.seconds {
+                continue;
+            }
+            let worth = adds / costs.max(1e-6);
+            if best.is_none_or(|(_, so_far, _)| worth > so_far) {
+                best = Some((at, worth, costs));
+            }
+        }
+        let Some((at, _, costs)) = best else {
+            break;
+        };
+        taken[at] = true;
+        spent += costs;
+        pen = lines[at].1.last().copied();
+        in_hand = Some(lines[at].0);
+        for (tile, _) in &says[at] {
+            said[*tile] = true;
+        }
+        order.push(at);
+    }
+    order
+        .into_iter()
+        .flat_map(|at| {
+            let (colour, line) = lines[at].clone();
+            let mut passes = vec![(colour, line.clone())];
+            // Each further pass a hair to one side of the last, so the mark widens instead
+            // of landing on the same pixels twice — and drawn back the way it came, because
+            // going round to the start again is travel that draws nothing.
+            for pass in 1..weights[at] {
+                let mut over = beside(&line, pass as i32);
+                if pass % 2 == 1 {
+                    over.reverse();
+                }
+                passes.push((colour, over));
+            }
+            passes
+        })
+        .collect()
+}
+
+/// The same line, moved a little to one side of itself.
+fn beside(line: &[StrokePoint], by: i32) -> Vec<StrokePoint> {
+    line.iter()
+        .enumerate()
+        .map(|(at, point)| {
+            let next = line[(at + 1).min(line.len() - 1)];
+            let previous = line[at.saturating_sub(1)];
+            let (dx, dy) = ((next.x - previous.x) as f32, (next.y - previous.y) as f32);
+            let length = (dx * dx + dy * dy).sqrt();
+            if length < 1e-3 {
+                return *point;
+            }
+            // Across the line, not along it.
+            StrokePoint {
+                x: point.x + (-dy / length * by as f32).round() as i32,
+                y: point.y + (dx / length * by as f32).round() as i32,
+            }
+        })
+        .collect()
+}
+
+/// The lines put in an order that walks between them rather than across the picture and
+/// back. Nearest first, starting from the longest, which is also how a hand goes about it:
+/// the large shape, then what is next to it.
+fn shortest_way_round(lines: &mut Vec<Vec<StrokePoint>>) {
+    if lines.len() < 3 {
+        return;
+    }
+    let start = (0..lines.len())
+        .max_by(|a, b| {
+            length_of(&lines[*a])
+                .partial_cmp(&length_of(&lines[*b]))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .unwrap_or(0);
+    let mut left: Vec<Vec<StrokePoint>> = std::mem::take(lines);
+    let mut order: Vec<Vec<StrokePoint>> = Vec::with_capacity(left.len());
+    order.push(left.swap_remove(start));
+    while !left.is_empty() {
+        let from = *order
+            .last()
+            .and_then(|line| line.last())
+            .unwrap_or(&StrokePoint { x: 0, y: 0 });
+        let near = (0..left.len())
+            .min_by_key(|at| {
+                let to = left[*at][0];
+                let (dx, dy) = (to.x - from.x, to.y - from.y);
+                dx * dx + dy * dy
+            })
+            .unwrap_or(0);
+        order.push(left.swap_remove(near));
+    }
+    *lines = order;
+}
+
 /// How far the pointer travels along a line.
-fn length_of(stroke: &[StrokePoint]) -> f32 {
+pub fn length_of(stroke: &[StrokePoint]) -> f32 {
     stroke
         .windows(2)
         .map(|pair| {
@@ -440,6 +710,140 @@ mod tests {
             64,
         );
         assert_eq!(groups.len(), 2, "one group for each swatch that was used");
+    }
+
+    /// A picture with two dark bands far apart: given ink for roughly one band's worth of
+    /// line, the lines taken should speak about both rather than pile onto one.
+    fn two_bands(size: u32) -> Picture {
+        let grey = (0..size * size)
+            .map(|at| {
+                let y = at / size;
+                let near = y > size / 8 && y < size / 4;
+                let far = y > size * 3 / 4 && y < size * 7 / 8;
+                if near || far {
+                    20
+                } else {
+                    250
+                }
+            })
+            .collect();
+        Picture::from_grey(grey, size, size).unwrap()
+    }
+
+    #[test]
+    fn a_budget_in_seconds_buys_the_lines_that_say_the_most() {
+        let picture = two_bands(160);
+        let canvas = Canvas::new(0, 0, 160, 160);
+        let hurried = Flow {
+            seconds: 2.0,
+            speed: 950.0,
+            per_command: 0.11,
+            ..Flow::default()
+        };
+        let groups = plan(&picture, canvas, &hurried, &[[0, 0, 0]], 64);
+        let lines: Vec<_> = groups.iter().flat_map(|(_, plan)| &plan.strokes).collect();
+        assert!(!lines.is_empty(), "some line is worth drawing");
+
+        // Two seconds buys the drawing, the travel between the lines and a command each.
+        let drawn: f32 = lines.iter().map(|line| length_of(line)).sum();
+        let commands = lines.len() as f32 * 0.11;
+        assert!(
+            drawn / 950.0 + commands <= 2.0,
+            "it spends the time it was given, not more: {drawn} pixels and {commands}s of commands"
+        );
+
+        // Both bands are spoken about: no line falls between them, so every line sits in one
+        // or the other, and neither is left out.
+        let (mut near, mut far) = (0, 0);
+        for line in &lines {
+            let middle = line[line.len() / 2].y;
+            if middle < 80 {
+                near += 1;
+            } else {
+                far += 1;
+            }
+        }
+        assert!(
+            near > 0 && far > 0,
+            "the ink is spread over what has not been said: {near} near, {far} far"
+        );
+    }
+
+    #[test]
+    fn the_dark_is_gone_over_again_and_the_light_is_not() {
+        let picture = two_bands(160);
+        let canvas = Canvas::new(0, 0, 160, 160);
+        let flat = Flow {
+            seconds: 6.0,
+            ..Flow::default()
+        };
+        let heavy = Flow {
+            weight: 3,
+            ..flat.clone()
+        };
+        let count = |flow: &Flow| -> usize {
+            plan(&picture, canvas, flow, &[[0, 0, 0]], 64)
+                .iter()
+                .map(|(_, plan)| plan.strokes.len())
+                .sum()
+        };
+        assert!(
+            count(&heavy) > count(&flat),
+            "going over the dark lines again makes more lines to draw: {} against {}",
+            count(&heavy),
+            count(&flat)
+        );
+
+        // A second pass is beside the first, not on top of it.
+        let line = vec![
+            StrokePoint { x: 10, y: 10 },
+            StrokePoint { x: 10, y: 40 },
+            StrokePoint { x: 10, y: 70 },
+        ];
+        let over = beside(&line, 1);
+        assert_eq!(over.len(), line.len(), "the same line, moved");
+        assert!(
+            over.iter().zip(&line).all(|(a, b)| a != b),
+            "every point of it has moved"
+        );
+        assert!(
+            over.iter().zip(&line).all(|(a, b)| (a.y - b.y).abs() <= 1),
+            "across the line, not along it"
+        );
+    }
+
+    #[test]
+    fn the_lines_are_put_in_an_order_that_walks_between_them() {
+        let picture = two_bands(160);
+        let canvas = Canvas::new(0, 0, 160, 160);
+        let groups = plan(&picture, canvas, &Flow::default(), &[[0, 0, 0]], 64);
+        let lines: Vec<_> = groups
+            .iter()
+            .flat_map(|(_, plan)| plan.strokes.clone())
+            .collect();
+        assert!(lines.len() > 4, "enough lines to have an order: {}", lines.len());
+
+        let walked = |order: &[Vec<StrokePoint>]| -> f32 {
+            order
+                .windows(2)
+                .map(|pair| {
+                    let from = pair[0][pair[0].len() - 1];
+                    let to = pair[1][0];
+                    let (dx, dy) = ((to.x - from.x) as f32, (to.y - from.y) as f32);
+                    (dx * dx + dy * dy).sqrt()
+                })
+                .sum()
+        };
+        let mut scattered = lines.clone();
+        scattered.sort_by_key(|line| line[0].x);
+        let mut walk = lines.clone();
+        shortest_way_round(&mut walk);
+        assert!(
+            walked(&walk) <= walked(&scattered),
+            "walking between them is no further than any other order: {} against {}",
+            walked(&walk),
+            walked(&scattered)
+        );
     }
 
     #[test]

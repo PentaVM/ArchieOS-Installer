@@ -5,7 +5,7 @@
 //!              --image <file.png> [--surface N] [--inset 40] [--spacing 5]
 //!              [--canvas x,y,w,h] [--limit N] [--levels 70:14,110:11,...]
 //!              [--pen 2] [--points 2] [--find-paper]
-//!              [--flow [--seeding 7] [--step 4] [--steps 120] [--darker-than 96] [--least-form 0.4] [--most N]
+//!              [--flow [--seeding 7] [--step 4] [--steps 120] [--darker-than 96] [--least-form 0.4] [--most N] [--seconds S --speed 950 --per-command 0.11] [--batch 64] [--weight 1]
 //!                      [--swatches "#141210,…"] [--palette x,y,step]]
 //!              [--dry-run [--preview <file.png>] [--as-seen <px/s>] [--frames 60]]
 //! ```
@@ -106,6 +106,8 @@ mod planning {
                 canvas.y
             );
             super::say_how_covered(length, pen, canvas);
+            let travelled = super::travel_of(&groups);
+            super::say_what_it_costs(length, travelled, seen_at.unwrap_or(0.0), super::commands_for(&groups));
             if let Some(out) = preview {
                 let paper = archie_paint::preview_in_colour(&groups, canvas, &swatches, pen);
                 write_colour(Path::new(&out), &paper, canvas.width, canvas.height)?;
@@ -278,6 +280,51 @@ fn palette_at(args: &mut Vec<String>) -> Result<Option<(i32, i32, i32)>, String>
     Ok(Some((numbers[0], numbers[1], numbers[2])))
 }
 
+/// How many commands a plan actually takes: the lines batched as far as one command may
+/// carry them, and one more for each visit to the palette.
+fn commands_for(groups: &[(usize, archie_paint::Plan)]) -> usize {
+    groups
+        .iter()
+        .map(|(_, plan)| plan.strokes.len().div_ceil(archie_paint::MAX_STROKE_PATHS) + 1)
+        .sum()
+}
+
+/// How far the pointer travels between the lines, which is time in which nothing is drawn.
+fn travel_of(groups: &[(usize, archie_paint::Plan)]) -> f32 {
+    let mut travelled = 0.0;
+    let mut at: Option<archie_stage::StrokePoint> = None;
+    for (_, plan) in groups {
+        for stroke in &plan.strokes {
+            if let (Some(from), Some(to)) = (at, stroke.first()) {
+                let (dx, dy) = ((to.x - from.x) as f32, (to.y - from.y) as f32);
+                travelled += (dx * dx + dy * dy).sqrt();
+            }
+            at = stroke.last().copied();
+        }
+    }
+    travelled
+}
+
+/// What the plan will cost in time, which is the only budget a drawing really has.
+///
+/// An application looks at the pointer at its own rate and joins what it saw with straight
+/// runs, so a line drawn faster than about fifteen pixels between looks arrives as a polygon.
+/// That fixes how much line a second can carry — near a thousand pixels — and everything
+/// else the stage does only decides how much of each second goes into line rather than into
+/// travelling, waiting for a receipt, or drawing the stage's own cinematics.
+fn say_what_it_costs(drawn: f32, travelled: f32, speed: f32, commands: usize) {
+    let speed = if speed > 0.0 { speed } else { 950.0 };
+    let drawing = drawn / speed;
+    let travelling = travelled / speed;
+    // Measured on this stage: about a tenth of a second for each command's round trip.
+    let waiting = commands as f32 * 0.11;
+    let total = drawing + travelling + waiting;
+    println!(
+        "at {speed:.0} pixels a second: {drawing:.1}s drawing, {travelling:.1}s travelling, \n         {waiting:.1}s waiting on {commands} commands -- {total:.1}s, {:.0} pixels of line \n         a second",
+        if total > 0.0 { drawn / total } else { 0.0 }
+    );
+}
+
 /// How much of the paper the pen will actually cover, and a word about it.
 ///
 /// Lines closer together than the pen is wide leave no paper between them, and what was
@@ -301,7 +348,6 @@ fn say_how_covered(length: f32, pen: u32, canvas: archie_paint::Canvas) {
 }
 
 /// How the lines that follow the form are to be drawn, as the command line says it.
-
 fn flow_of(args: &mut Vec<String>) -> Result<archie_paint::Flow, String> {
     let mut flow = archie_paint::Flow::default();
     if let Some(seeding) = number(args, "--seeding")? {
@@ -324,6 +370,27 @@ fn flow_of(args: &mut Vec<String>) -> Result<archie_paint::Flow, String> {
     }
     if let Some(most) = number(args, "--most")? {
         flow.most = most;
+    }
+    // The budget a drawing really has. `--speed` is what the stage will be told to draw at
+    // and `--per-command` what one command costs before any of it is drawing, so that the
+    // plan is made against the clock it will actually run on.
+    if let Some(seconds) = number::<f32>(args, "--seconds")? {
+        flow.seconds = seconds;
+    }
+    if let Some(speed) = number::<f32>(args, "--speed")? {
+        flow.speed = speed;
+    }
+    if let Some(each) = number::<f32>(args, "--per-command")? {
+        flow.per_command = each;
+    }
+    if let Some(weight) = number(args, "--weight")? {
+        flow.weight = weight;
+    }
+    if let Some(each) = number::<f32>(args, "--per-line")? {
+        flow.per_line = each;
+    }
+    if let Some(each) = number::<f32>(args, "--per-colour")? {
+        flow.per_colour = each;
     }
     Ok(flow)
 }
@@ -503,7 +570,31 @@ mod unix {
     enum Deed {
         /// Pick up a colour, by clicking the swatch the application offers for it.
         Swatch(i32, i32),
-        Line(Vec<archie_stage::StrokePoint>),
+        /// Lines drawn one after another under a single authorisation. The round trip is
+        /// most of what a line costs, so they travel together.
+        Lines(Vec<Vec<archie_stage::StrokePoint>>),
+    }
+
+    /// The lines grouped into as few commands as one may carry.
+    fn in_batches(lines: Vec<Vec<archie_stage::StrokePoint>>, most: usize) -> Vec<Deed> {
+        let most = most.clamp(1, archie_stage::MAX_STROKE_PATHS);
+        let mut deeds = Vec::new();
+        let mut batch: Vec<Vec<archie_stage::StrokePoint>> = Vec::new();
+        let mut points = 0;
+        for line in lines {
+            let full = batch.len() >= most
+                || points + line.len() > archie_stage::MAX_STROKE_POINTS_IN_ALL;
+            if full && !batch.is_empty() {
+                deeds.push(Deed::Lines(std::mem::take(&mut batch)));
+                points = 0;
+            }
+            points += line.len();
+            batch.push(line);
+        }
+        if !batch.is_empty() {
+            deeds.push(Deed::Lines(batch));
+        }
+        deeds
     }
 
     async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
@@ -534,6 +625,10 @@ mod unix {
         // a command is what costs; this is the whole difference between a slow picture and
         // a fast one.
         let max_points: usize = number(&mut args, "--points")?.unwrap_or(2);
+        // How many lines one command may carry. One at a time is how it worked before there
+        // was a drawing command, and is kept so the difference can be measured rather than
+        // asserted.
+        let batch: usize = number(&mut args, "--batch")?.unwrap_or(archie_stage::MAX_STROKE_PATHS);
         let soften: Option<u32> = number(&mut args, "--soften")?;
         if !args.is_empty() {
             return Err(format!("unexpected arguments: {args:?}"));
@@ -596,12 +691,14 @@ mod unix {
                 canvas.x,
                 canvas.y
             );
-            say_how_covered(length, pen, canvas);
+            super::say_how_covered(length, pen, canvas);
+            let travelled = super::travel_of(&groups);
+            super::say_what_it_costs(length, travelled, 0.0, super::commands_for(&groups));
             for (colour, plan) in groups {
                 if let Some((x, y)) = palette.swatch(colour) {
                     deeds.push(Deed::Swatch(x, y));
                 }
-                deeds.extend(plan.strokes.into_iter().map(Deed::Line));
+                deeds.extend(in_batches(plan.strokes, batch));
             }
         } else {
             let plan = plan_with(
@@ -617,7 +714,7 @@ mod unix {
                 },
             );
             super::planning::report(&plan, canvas);
-            deeds.extend(plan.strokes.into_iter().map(Deed::Line));
+            deeds.extend(in_batches(plan.strokes, batch));
         }
         let started = Instant::now();
         let (mut drawn, mut refused) = (0_usize, 0_usize);
@@ -630,8 +727,8 @@ mod unix {
                     y: *y,
                     button: PointerButton::Left,
                 },
-                Deed::Line(points) => StageAction::Stroke {
-                    points: points.clone(),
+                Deed::Lines(paths) => StageAction::Strokes {
+                    paths: paths.clone(),
                     button: PointerButton::Left,
                 },
             };
@@ -649,7 +746,7 @@ mod unix {
                 approved: false,
                 justification: match deed {
                     Deed::Swatch(..) => "pick up a colour the application offers".into(),
-                    Deed::Line(_) => "draw one stroke of a picture".to_string(),
+                    Deed::Lines(paths) => format!("draw {} strokes of a picture", paths.len()),
                 },
             };
             // A person reaching for the mouse takes the stage, and a picture is not a
@@ -693,7 +790,7 @@ mod unix {
             }
             if index % 25 == 24 {
                 println!(
-                    "{} of {total} strokes, {:.1}s",
+                    "{} of {total} commands, {:.1}s",
                     index + 1,
                     started.elapsed().as_secs_f32()
                 );
@@ -701,11 +798,24 @@ mod unix {
         }
         let seconds = started.elapsed().as_secs_f32();
         let drawing = seconds - paused_ms as f32 / 1000.0;
+        let done = |pick: &dyn Fn(&Vec<Vec<archie_stage::StrokePoint>>) -> f32| -> f32 {
+            deeds
+                .iter()
+                .take(total)
+                .map(|deed| match deed {
+                    Deed::Lines(paths) => pick(paths),
+                    Deed::Swatch(..) => 0.0,
+                })
+                .sum()
+        };
+        let lines = done(&|paths| paths.len() as f32);
+        let inked = done(&|paths| paths.iter().map(|p| archie_paint::length_of(p)).sum());
+        // Pixels of line a second is the number that decides whether a picture finishes.
+        // Commands a second only says how fast it was asking.
         println!(
-            "drew {drawn} strokes and had {refused} refused in {seconds:.1}s, of which \
-             {:.1}s was waiting for a person ({:.1} strokes a second while drawing)",
+            "drew {lines:.0} lines in {drawn} commands and had {refused} refused in {seconds:.1}s, of which {:.1}s was waiting for a person -- {:.0} pixels of line a second",
             paused_ms as f32 / 1000.0,
-            drawn as f32 / drawing.max(0.001)
+            inked / drawing.max(0.001)
         );
         Ok(if refused == 0 {
             ExitCode::SUCCESS

@@ -11,6 +11,22 @@ pub const MAX_TEXT_CHARS: usize = 2_000;
 pub const MAX_SCROLL_STEPS: i32 = 60;
 /// The most points one stroke may carry. A longer line is more than one stroke.
 pub const MAX_STROKE_POINTS: usize = 256;
+
+/// How many separate lines one drawing command may carry.
+///
+/// A line costs the same to send whether it is long or short, and the round trip is most of
+/// what it costs: a drawing of forty lines spent a third of its time waiting for receipts.
+/// Several lines under one authorisation is the same work with the waiting taken out. It is
+/// still one operation — one lease, one receipt — and every point of every line is still
+/// checked against the window as it is now, which is what made a single line safe.
+pub const MAX_STROKE_PATHS: usize = 64;
+
+/// How many points one drawing command may carry across all of its lines.
+///
+/// A sealed command may not be longer than thirty-two thousand bytes, and a point costs
+/// about twenty of them written out, so this is what fits with room to spare. A drawing
+/// longer than that is simply sent as two commands, which costs one round trip.
+pub const MAX_STROKE_POINTS_IN_ALL: usize = 1024;
 /// The largest surface-local coordinate accepted. No output is this large.
 pub const MAX_COORDINATE: i32 = 32_767;
 
@@ -374,6 +390,13 @@ pub enum StageAction {
         points: Vec<StrokePoint>,
         button: PointerButton,
     },
+    /// Several lines, drawn one after another without letting go of the authorisation: the
+    /// pointer presses, draws, lifts, travels to the next line and presses again. One
+    /// operation, one receipt, every point checked.
+    Strokes {
+        paths: Vec<Vec<StrokePoint>>,
+        button: PointerButton,
+    },
     Focus,
     /// Capture what the surface shows: all of it, or one part of it.
     Snapshot {
@@ -486,7 +509,8 @@ impl StageAction {
             Self::Scroll { .. } => ActionKind::Scroll,
             Self::Text { .. } => ActionKind::Text,
             Self::Key { .. } => ActionKind::Key,
-            Self::Stroke { .. } => ActionKind::Stroke,
+            // The same authority as one line: a drawing is not a new kind of touch.
+            Self::Stroke { .. } | Self::Strokes { .. } => ActionKind::Stroke,
             Self::Focus => ActionKind::Focus,
             Self::Snapshot { .. } => ActionKind::Snapshot,
         }
@@ -504,6 +528,11 @@ impl StageAction {
             } => vec![(*x, *y), (*to_x, *to_y)],
             // Every point of a line is a place the pointer is put.
             Self::Stroke { points, .. } => points.iter().map(|at| (at.x, at.y)).collect(),
+            Self::Strokes { paths, .. } => paths
+                .iter()
+                .flatten()
+                .map(|at| (at.x, at.y))
+                .collect(),
             // A capture touches nothing, but a part of a surface is still two corners of
             // it, and they are checked like any other coordinates.
             Self::Snapshot {

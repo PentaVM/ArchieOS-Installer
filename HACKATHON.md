@@ -333,6 +333,29 @@ from executed builds on identified hardware.
   smaller targets, so those are clicked from the window's own fixed layout. IRIS now accepts
   four bare integers as an answer as well as `<box>…</box>`, which is what MiniCPM returns —
   the same strict grammar, one more punctuation.
+- **Pointer craft.** Drawing a picture in fifteen seconds is the most demanding thing a
+  pointer can be asked to do, so it was used to find what the stage was missing. None of what
+  came out is about pictures; all of it is about operating an application by hand.
+  - Added `strokes`: up to 64 lines and 1024 points under one authorisation. One lease, one
+    receipt, every point still re-checked against the live window, each line still refusable,
+    the operator still able to take the stage between them. Measured on the same 56-line
+    drawing sent both ways: 62 commands in 17.6 s against 12 commands in 13.4 s, which is 84
+    milliseconds a command. `--batch 1` sends them one at a time so the difference stays
+    measurable.
+  - Fixed: the stroke speed was divided by the tempo's pace, so `--stroke-speed 942` at video
+    tempo drew at eleven thousand pixels a second and every line arrived as a polygon.
+    Reaching and drawing are now separate — the tempo flies between lines, the line is drawn
+    at the speed it was given.
+  - The budget is stated in seconds, not in lines, and the planner spends it: at each turn it
+    takes the work that says the most for the time it costs to go and do it, travel included.
+    Travel used to cost as much as the drawing (8.5 s against 8.4); it is now 4.0.
+  - Weight without pressure: a pointer cannot press harder, so the darkest lines are gone over
+    two or three times, a hair to one side and back the way they came. It costs ink and no
+    commands.
+  - The measure changed from commands a second to **pixels of line a second**, which is what
+    decides whether a task finishes rather than how fast it was asking.
+  - Measured end to end: a fifteen-second drawing is 49 lines in 4 commands, 15.1 s, none
+    refused, 575 pixels of line a second, and what arrived is what was planned.
 - Added `--flow`: lines that follow the form rather than shading across it. The picture's
   gradient is turned a quarter and averaged, lines are let go into that field from the dark
   places and followed until they leave the picture or reach ground with no form in it, and

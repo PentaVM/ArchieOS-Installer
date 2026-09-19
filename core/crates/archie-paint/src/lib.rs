@@ -15,10 +15,11 @@ mod flow;
 mod paper;
 
 pub use image::{Picture, PictureError};
-pub use flow::{plan as flow_plan, Flow};
+pub use flow::{length_of, plan as flow_plan, Flow};
 pub use paper::{paper_in, PAPER};
 
 use archie_stage::StrokePoint;
+pub use archie_stage::MAX_STROKE_PATHS;
 
 /// Where on a surface to draw, in that surface's own pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
