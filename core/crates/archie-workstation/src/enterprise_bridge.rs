@@ -5,18 +5,23 @@
 use archie_types::model::PrivacyGrade;
 use archie_types::task::{KanbanCard, Task};
 use archie_types::error::{Result, TypeError};
+use archie_vault::reference::VaultRef;
+use archie_vault::store::Vault;
+use archie_types::time::Timestamp;
 
 /// Represents an external corporate API endpoint or board.
 #[derive(Debug, Clone)]
 pub struct EnterpriseAdapter {
     pub name: String,
+    pub api_key_ref: VaultRef,
     pub allowed_grades: Vec<PrivacyGrade>,
 }
 
 impl EnterpriseAdapter {
-    pub fn new(name: impl Into<String>) -> Self {
+    pub fn new(name: impl Into<String>, api_key_ref: VaultRef) -> Self {
         Self {
             name: name.into(),
+            api_key_ref,
             // By default, only public and internal data can be sent to external corporate boards.
             allowed_grades: vec![PrivacyGrade::Public, PrivacyGrade::Internal],
         }
@@ -48,11 +53,20 @@ impl EnterpriseAdapter {
     }
 
     /// Synchronizes a batch of tasks to the external system.
-    pub async fn sync_to_remote(&self, _cards: &[KanbanCard]) -> Result<()> {
-        // In a real implementation, this would make an asynchronous HTTP request using reqwest
-        // to a corporate API (e.g., Trello, Jira, custom board).
-        // Since we cannot leak secrets, the HTTP client must use vault-injected credentials
-        // that are never passed down in plain text here.
+    pub async fn sync_to_remote(&self, _cards: &[KanbanCard], vault: &mut Vault) -> Result<()> {
+        let now_ms = Timestamp::now().as_millis();
+        
+        // Zero-Secret Leak: Fetch the credential ephemerally.
+        // It returns a SealedCredential which we expose to memory and immediately discard.
+        let sealed_cred = vault.broker_credential("enterprise_bridge", &self.api_key_ref, now_ms)
+            .map_err(|e| TypeError::InvalidTask(format!("Vault access failed: {:?}", e).into()))?;
+        
+        // The exposed secret is a Zeroizing<String>. It will be cleared from memory as soon as it goes out of scope.
+        let _secret = sealed_cred.expose();
+        
+        // In a real implementation, we would configure the reqwest::Client here using `_secret`
+        // as a Bearer token or API key header. As soon as this function returns, the Zeroizing
+        // struct wipes the credential from memory.
         Ok(())
     }
 }
