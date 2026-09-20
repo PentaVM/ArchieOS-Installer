@@ -497,6 +497,62 @@ impl TaskGraph {
             }
         }
         None
+}
+
+/// Simplified column views for Kanban boards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KanbanColumn {
+    Backlog,
+    InProgress,
+    Review,
+    Done,
+    Archived,
+}
+
+impl From<TaskStatus> for KanbanColumn {
+    fn from(status: TaskStatus) -> Self {
+        match status {
+            TaskStatus::Created
+            | TaskStatus::Blocked
+            | TaskStatus::Ready
+            | TaskStatus::WaitingRetry => KanbanColumn::Backlog,
+            TaskStatus::Active | TaskStatus::Running => KanbanColumn::InProgress,
+            TaskStatus::WaitingApproval => KanbanColumn::Review,
+            TaskStatus::Succeeded => KanbanColumn::Done,
+            TaskStatus::Paused | TaskStatus::Failed | TaskStatus::Cancelled => KanbanColumn::Archived,
+        }
+    }
+}
+
+/// A safe, sanitized view of a Task for external APIs and UIs.
+///
+/// Strips inputs, checkpoints, outputs, and errors that could contain
+/// sensitive information inappropriate for an external Kanban dashboard.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KanbanCard {
+    pub task_id: TaskId,
+    pub title: String,
+    pub status: TaskStatus,
+    pub column: KanbanColumn,
+    pub queue_class: QueueClass,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+    pub labels: BTreeMap<String, String>,
+}
+
+impl From<&Task> for KanbanCard {
+    fn from(task: &Task) -> Self {
+        Self {
+            task_id: task.task_id,
+            title: task.title.clone(),
+            status: task.status,
+            column: KanbanColumn::from(task.status),
+            queue_class: task.queue_class,
+            created_at: task.created_at,
+            updated_at: task.updated_at,
+            labels: task.labels.clone(),
+        }
     }
 }
 
