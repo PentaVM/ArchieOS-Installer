@@ -11,12 +11,15 @@
 //! tone comes out of how much of the paper is left white.
 
 mod image;
+mod flow;
 mod paper;
 
 pub use image::{Picture, PictureError};
+pub use flow::{length_of, plan as flow_plan, Flow};
 pub use paper::{paper_in, PAPER};
 
 use archie_stage::StrokePoint;
+pub use archie_stage::MAX_STROKE_PATHS;
 
 /// Where on a surface to draw, in that surface's own pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -259,16 +262,62 @@ fn finish(plan: &mut Plan, run: &mut Vec<StrokePoint>, hatching: &Hatching, forw
     plan.strokes.push(stroke);
 }
 
+/// The line as the application will actually receive it.
+///
+/// A stroke is sent as a path, but the pointer is not a path: it is a place, reported again
+/// and again. An application learns where the pointer went by being told where it is, at its
+/// own frame rate, and between two frames it learns nothing. So a line drawn quickly reaches
+/// it as a handful of positions joined by straight runs, however many points were sent.
+///
+/// This is the drawing the application will make of it: the stroke walked at `speed` pixels
+/// a second and sampled `frames` times a second. Planning against anything else is planning
+/// against a picture nobody will see.
+pub fn seen_by(stroke: &[StrokePoint], speed: f32, frames: f32) -> Vec<StrokePoint> {
+    if stroke.len() < 2 || speed <= 0.0 || frames <= 0.0 {
+        return stroke.to_vec();
+    }
+    let every = speed / frames;
+    let mut seen = vec![stroke[0]];
+    let mut carried = 0.0_f32;
+    for pair in stroke.windows(2) {
+        let (from, to) = (pair[0], pair[1]);
+        let (dx, dy) = ((to.x - from.x) as f32, (to.y - from.y) as f32);
+        let run = (dx * dx + dy * dy).sqrt();
+        if run <= 0.0 {
+            continue;
+        }
+        let mut along = every - carried;
+        while along <= run {
+            let share = along / run;
+            seen.push(StrokePoint {
+                x: from.x + (dx * share).round() as i32,
+                y: from.y + (dy * share).round() as i32,
+            });
+            along += every;
+        }
+        carried = (carried + run) % every;
+    }
+    let last = stroke[stroke.len() - 1];
+    if seen.last() != Some(&last) {
+        seen.push(last);
+    }
+    seen
+}
+
 /// Where the picture sits inside the canvas once it is fitted into it, and how to read it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Fitted {
-    x: i32,
-    y: i32,
-    width: u32,
-    height: u32,
+pub struct Fitted {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
 }
 
 /// The largest the picture can be drawn inside the canvas without stretching it, centred.
+pub fn fit_into(picture: &Picture, canvas: Canvas) -> Fitted {
+    fit(picture, canvas)
+}
+
 fn fit(picture: &Picture, canvas: Canvas) -> Fitted {
     let by_width = canvas.width as f32 / picture.width() as f32;
     let by_height = canvas.height as f32 / picture.height() as f32;
@@ -284,6 +333,37 @@ fn fit(picture: &Picture, canvas: Canvas) -> Fitted {
 }
 
 impl Fitted {
+    /// Where a point of the canvas falls in the picture, in the picture's own pixels. The
+    /// canvas is not the picture: a small picture drawn large, or a large one drawn small,
+    /// and the distance from the corner has to be read at the picture's own scale.
+    pub fn in_picture(&self, picture: &Picture, x: f32, y: f32) -> Option<(f32, f32)> {
+        let (dx, dy) = (x - self.x as f32, y - self.y as f32);
+        if dx < 0.0 || dy < 0.0 || dx >= self.width as f32 || dy >= self.height as f32 {
+            return None;
+        }
+        Some((
+            dx * picture.width() as f32 / self.width.max(1) as f32,
+            dy * picture.height() as f32 / self.height.max(1) as f32,
+        ))
+    }
+
+    /// How dark the picture is under a point of the canvas.
+    pub fn darkness_at_canvas(&self, picture: &Picture, x: f32, y: f32) -> Option<u8> {
+        self.darkness_at(
+            picture,
+            StrokePoint {
+                x: x.round() as i32,
+                y: y.round() as i32,
+            },
+        )
+    }
+
+    /// What colour the picture is under a point of the canvas.
+    pub fn colour_at(&self, picture: &Picture, x: f32, y: f32) -> Option<[u8; 3]> {
+        let (px, py) = self.in_picture(picture, x, y)?;
+        picture.colour(px as u32, py as u32)
+    }
+
     /// How dark the picture is under that point of the canvas, or nothing when the point is
     /// off the picture.
     fn darkness_at(&self, picture: &Picture, point: StrokePoint) -> Option<u8> {
@@ -437,7 +517,53 @@ mod tests {
             "the drawing sits in the middle of the canvas, {left}..{right}"
         );
     }
+
+    #[test]
+    fn a_point_of_the_canvas_is_read_at_the_pictures_own_scale() {
+        // A small picture drawn large: the far corner of the drawing is the far corner of
+        // the picture, not the point that many pixels along it.
+        let small = disc(40, 18.0);
+        let fitted = fit_into(&small, Canvas::new(0, 0, 400, 400));
+        let (x, y) = fitted
+            .in_picture(&small, 399.0, 399.0)
+            .expect("the last point of the canvas is on the picture");
+        assert!(
+            x > 38.0 && x < 40.0 && y > 38.0 && y < 40.0,
+            "the corner of the canvas is the corner of the picture, not ({x},{y})"
+        );
+        let (mx, my) = fitted
+            .in_picture(&small, 200.0, 200.0)
+            .expect("the middle of the canvas is on the picture");
+        assert!(
+            (mx - 20.0).abs() < 1.5 && (my - 20.0).abs() < 1.5,
+            "the middle is the middle, not ({mx},{my})"
+        );
+    }
+
+    #[test]
+    fn a_line_reaches_the_application_as_the_positions_it_had_time_to_see() {
+        // Six hundred pixels at six hundred a second is one second, and an application that
+        // looks sixty times a second sees sixty of them, however many were sent.
+        let sent: Vec<StrokePoint> = (0..=600)
+            .map(|at| StrokePoint { x: at, y: 0 })
+            .collect();
+        let seen = seen_by(&sent, 600.0, 60.0);
+        assert!(
+            (59..=62).contains(&seen.len()),
+            "about sixty positions, not {}",
+            seen.len()
+        );
+        assert_eq!(seen[0], sent[0], "it starts where the line starts");
+        assert_eq!(
+            seen[seen.len() - 1],
+            sent[sent.len() - 1],
+            "and ends where the line ends"
+        );
+        // Drawn slower, it sees more of the same line.
+        assert!(seen_by(&sent, 200.0, 60.0).len() > seen.len() * 2);
+    }
 }
+
 
 #[cfg(test)]
 mod ink_on_paper {
@@ -457,4 +583,29 @@ mod ink_on_paper {
         assert_eq!(paper[10 * 40 + 20], 22, "the line is on the paper");
         assert_eq!(paper[2 * 40 + 20], 255, "and nothing else is");
     }
+}
+
+/// The same as `preview`, for a plan that is drawn in several colours: each group in the
+/// colour it will be drawn with, on white paper. What comes out is what the canvas should
+/// end up with, without the canvas.
+pub fn preview_in_colour(
+    groups: &[(usize, Plan)],
+    canvas: Canvas,
+    palette: &[[u8; 3]],
+    width_px: u32,
+) -> Vec<u8> {
+    let (w, h) = (canvas.width.max(1) as usize, canvas.height.max(1) as usize);
+    let mut paper = vec![255_u8; w * h * 3];
+    for (at, plan) in groups {
+        let ink = palette.get(*at).copied().unwrap_or([20, 20, 20]);
+        let marks = preview(plan, canvas, width_px);
+        for (pixel, mark) in marks.iter().enumerate() {
+            if *mark < 128 {
+                paper[pixel * 3] = ink[0];
+                paper[pixel * 3 + 1] = ink[1];
+                paper[pixel * 3 + 2] = ink[2];
+            }
+        }
+    }
+    paper
 }

@@ -19,7 +19,8 @@
 
 use crate::action::{
     Key, KeyChord, Modifier, PointerButton, Region, StageAction, StageText, StrokePoint,
-    MAX_COORDINATE, MAX_SCROLL_STEPS, MAX_STROKE_POINTS, MAX_TEXT_CHARS,
+    MAX_COORDINATE, MAX_SCROLL_STEPS, MAX_STROKE_PATHS, MAX_STROKE_POINTS,
+    MAX_STROKE_POINTS_IN_ALL, MAX_TEXT_CHARS,
 };
 use crate::gate::AuthorizedStageCommand;
 use archie_types::Timestamp;
@@ -115,6 +116,10 @@ pub enum WireAction {
         points: Vec<StrokePoint>,
         button: PointerButton,
     },
+    Strokes {
+        paths: Vec<Vec<StrokePoint>>,
+        button: PointerButton,
+    },
     Focus,
     Snapshot {
         /// Absent asks for the whole surface, which is what the compositor understood
@@ -172,6 +177,10 @@ impl From<&StageAction> for WireAction {
                 points: points.clone(),
                 button: *button,
             },
+            StageAction::Strokes { paths, button } => Self::Strokes {
+                paths: paths.clone(),
+                button: *button,
+            },
             StageAction::Snapshot { region } => Self::Snapshot {
                 region: region.filter(|region| !region.is_empty()),
             },
@@ -213,6 +222,15 @@ impl WireAction {
                 (2..=MAX_STROKE_POINTS).contains(&points.len())
                     && points.iter().all(|at| point(&at.x, &at.y))
                     && points.iter().any(|at| at != &points[0])
+            }
+            Self::Strokes { paths, .. } => {
+                (1..=MAX_STROKE_PATHS).contains(&paths.len())
+                    && paths.iter().map(Vec::len).sum::<usize>() <= MAX_STROKE_POINTS_IN_ALL
+                    && paths.iter().all(|path| {
+                        (2..=MAX_STROKE_POINTS).contains(&path.len())
+                            && path.iter().all(|at| point(&at.x, &at.y))
+                            && path.iter().any(|at| at != &path[0])
+                    })
             }
             Self::Focus => true,
             // A part of a window is two corners of it, and it has to be a real rectangle

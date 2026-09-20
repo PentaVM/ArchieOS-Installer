@@ -4,7 +4,10 @@
 //! archie-paint --socket <path> --key-file <path> --policy <apps.toml> --app <app_id>
 //!              --image <file.png> [--surface N] [--inset 40] [--spacing 5]
 //!              [--canvas x,y,w,h] [--limit N] [--levels 70:14,110:11,...]
-//!              [--pen 2] [--points 2] [--find-paper] [--dry-run [--preview <file.png>]]
+//!              [--pen 2] [--points 2] [--find-paper]
+//!              [--flow [--seeding 7] [--step 4] [--steps 120] [--darker-than 96] [--least-form 0.4] [--most N] [--seconds S --speed 950 --per-command 0.11] [--batch 64] [--weight 1]
+//!                      [--swatches "#141210,…"] [--palette x,y,step]]
+//!              [--dry-run [--preview <file.png>] [--as-seen <px/s>] [--frames 60]]
 //! ```
 //!
 //! Every stroke goes the same way as every other action: the stage policy has to allow
@@ -52,6 +55,13 @@ mod planning {
         let spacing: u32 = super::number(&mut args, "--spacing")?.unwrap_or(10);
         let min_run: u32 = super::number(&mut args, "--min-run")?.unwrap_or(4);
         let preview = super::take(&mut args, "--preview");
+        // The speed the stage will draw at, so the preview can show what will land rather
+        // than what was asked for.
+        let seen_at: Option<f32> = super::number(&mut args, "--as-seen")?;
+        let frames: f32 = super::number(&mut args, "--frames")?.unwrap_or(60.0);
+        let flowing = super::flag(&mut args, "--flow");
+        let flow = super::flow_of(&mut args)?;
+        let swatches = super::swatches_of(&mut args)?;
         let levels = super::levels_of(&mut args)?;
         let shares = super::shares_of(&mut args)?;
         // The canvas draws with a pen this wide, so the plan is made for one and the
@@ -69,6 +79,42 @@ mod planning {
             pen,
             max_points,
         };
+        if flowing {
+            let mut groups = archie_paint::flow_plan(&picture, canvas, &flow, &swatches, max_points);
+            // What the application will see of it, not what was planned: the pointer is a
+            // place reported at a frame rate, and the drawing is made of those reports.
+            if let Some(speed) = seen_at {
+                let mut kept = 0_usize;
+                for (_, plan) in &mut groups {
+                    for stroke in &mut plan.strokes {
+                        *stroke = archie_paint::seen_by(stroke, speed, frames);
+                        kept += stroke.len();
+                    }
+                }
+                println!(
+                    "at {speed:.0} pixels a second the application sees {kept} positions of it, \n                     {frames:.0} a second"
+                );
+            }
+            let strokes: usize = groups.iter().map(|(_, plan)| plan.strokes.len()).sum();
+            let length: f32 = groups.iter().map(|(_, plan)| plan.drawn_length()).sum();
+            println!(
+                "{strokes} lines in {} colours, {length:.0} pixels of line, in a canvas of {}x{} at {},{}",
+                groups.len(),
+                canvas.width,
+                canvas.height,
+                canvas.x,
+                canvas.y
+            );
+            super::say_how_covered(length, pen, canvas);
+            let travelled = super::travel_of(&groups);
+            super::say_what_it_costs(length, travelled, seen_at.unwrap_or(0.0), super::commands_for(&groups));
+            if let Some(out) = preview {
+                let paper = archie_paint::preview_in_colour(&groups, canvas, &swatches, pen);
+                write_colour(Path::new(&out), &paper, canvas.width, canvas.height)?;
+                println!("drew the plan on paper: {out}");
+            }
+            return Ok(ExitCode::SUCCESS);
+        }
         let plan = super::plan_with(&picture, canvas, &asked);
         report(&plan, canvas);
         println!(
@@ -81,6 +127,18 @@ mod planning {
             println!("drew the plan on paper: {out}");
         }
         Ok(ExitCode::SUCCESS)
+    }
+
+    /// The preview of a picture drawn in several colours.
+    fn write_colour(path: &Path, rgb: &[u8], width: u32, height: u32) -> Result<(), String> {
+        let file = std::fs::File::create(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), width, height);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .write_header()
+            .and_then(|mut writer| writer.write_image_data(rgb))
+            .map_err(|e| e.to_string())
     }
 
     /// The preview, as a plain grey PNG.
@@ -159,6 +217,182 @@ fn prepared(path: &std::path::Path, soften: Option<u32>) -> Result<Picture, Stri
     let picture = Picture::read(path).map_err(|e| e.to_string())?;
     let radius = soften.unwrap_or_else(|| (picture.width() / 200).max(1));
     Ok(picture.softened(radius).stretched())
+}
+
+/// The swatches a drawing application is asked to draw with, and where to click for each.
+/// Finding them by looking is the accessibility path's job; here they are given.
+#[cfg_attr(not(unix), allow(dead_code))]
+struct Palette {
+    colours: Vec<[u8; 3]>,
+    at: Option<(i32, i32, i32)>,
+}
+
+#[cfg_attr(not(unix), allow(dead_code))]
+impl Palette {
+    /// Where to click for swatch `at`, when the application's palette was described.
+    fn swatch(&self, at: usize) -> Option<(i32, i32)> {
+        let (x, y, step) = self.at?;
+        Some((x + step * at as i32, y))
+    }
+}
+
+/// `--swatches "#1b1a17,#6b4a2f,…"`, and the default the demo canvas has.
+fn swatches_of(args: &mut Vec<String>) -> Result<Vec<[u8; 3]>, String> {
+    let text = take(args, "--swatches").unwrap_or_else(|| {
+        "#141210,#4a352a,#8a6a46,#c39c6d,#e6d3b3,#5d6b63".to_string()
+    });
+    let mut colours = Vec::new();
+    for part in text.split(',') {
+        let hex = part.trim().trim_start_matches('#');
+        if hex.len() != 6 {
+            return Err("--swatches is colours like #1b1a17,#6b4a2f".into());
+        }
+        let mut colour = [0_u8; 3];
+        for (at, pair) in hex.as_bytes().chunks(2).enumerate() {
+            let pair = std::str::from_utf8(pair).map_err(|_| "a colour is hex")?;
+            colour[at] = u8::from_str_radix(pair, 16).map_err(|_| "a colour is hex")?;
+        }
+        colours.push(colour);
+    }
+    if colours.is_empty() {
+        return Err("--swatches needs at least one colour".into());
+    }
+    Ok(colours)
+}
+
+/// `--palette 40,1130,44`: the first swatch's middle, and how far apart they are.
+#[cfg_attr(not(unix), allow(dead_code))]
+fn palette_at(args: &mut Vec<String>) -> Result<Option<(i32, i32, i32)>, String> {
+    let Some(text) = take(args, "--palette") else {
+        return Ok(None);
+    };
+    let parts: Vec<&str> = text.split(',').collect();
+    if parts.len() != 3 {
+        return Err("--palette is x,y,step".into());
+    }
+    let mut numbers = [0_i32; 3];
+    for (at, part) in parts.iter().enumerate() {
+        numbers[at] = part
+            .trim()
+            .parse()
+            .map_err(|_| "--palette is three numbers".to_string())?;
+    }
+    Ok(Some((numbers[0], numbers[1], numbers[2])))
+}
+
+/// How many commands a plan actually takes: the lines batched as far as one command may
+/// carry them, and one more for each visit to the palette.
+fn commands_for(groups: &[(usize, archie_paint::Plan)]) -> usize {
+    groups
+        .iter()
+        .map(|(_, plan)| plan.strokes.len().div_ceil(archie_paint::MAX_STROKE_PATHS) + 1)
+        .sum()
+}
+
+/// How far the pointer travels between the lines, which is time in which nothing is drawn.
+fn travel_of(groups: &[(usize, archie_paint::Plan)]) -> f32 {
+    let mut travelled = 0.0;
+    let mut at: Option<archie_stage::StrokePoint> = None;
+    for (_, plan) in groups {
+        for stroke in &plan.strokes {
+            if let (Some(from), Some(to)) = (at, stroke.first()) {
+                let (dx, dy) = ((to.x - from.x) as f32, (to.y - from.y) as f32);
+                travelled += (dx * dx + dy * dy).sqrt();
+            }
+            at = stroke.last().copied();
+        }
+    }
+    travelled
+}
+
+/// What the plan will cost in time, which is the only budget a drawing really has.
+///
+/// An application looks at the pointer at its own rate and joins what it saw with straight
+/// runs, so a line drawn faster than about fifteen pixels between looks arrives as a polygon.
+/// That fixes how much line a second can carry — near a thousand pixels — and everything
+/// else the stage does only decides how much of each second goes into line rather than into
+/// travelling, waiting for a receipt, or drawing the stage's own cinematics.
+fn say_what_it_costs(drawn: f32, travelled: f32, speed: f32, commands: usize) {
+    let speed = if speed > 0.0 { speed } else { 950.0 };
+    let drawing = drawn / speed;
+    let travelling = travelled / speed;
+    // Measured on this stage: about a tenth of a second for each command's round trip.
+    let waiting = commands as f32 * 0.11;
+    let total = drawing + travelling + waiting;
+    println!(
+        "at {speed:.0} pixels a second: {drawing:.1}s drawing, {travelling:.1}s travelling, \n         {waiting:.1}s waiting on {commands} commands -- {total:.1}s, {:.0} pixels of line \n         a second",
+        if total > 0.0 { drawn / total } else { 0.0 }
+    );
+}
+
+/// How much of the paper the pen will actually cover, and a word about it.
+///
+/// Lines closer together than the pen is wide leave no paper between them, and what was
+/// planned as shading comes out as a filled shape. The plan knows this before anything is
+/// drawn — it is the ink the pen lays down against the paper there is — and twenty minutes
+/// of drawing is a long way to go to find it out.
+fn say_how_covered(length: f32, pen: u32, canvas: archie_paint::Canvas) {
+    let paper = (canvas.width as f32) * (canvas.height as f32);
+    if paper <= 0.0 {
+        return;
+    }
+    let covered = length * pen.max(1) as f32 / paper;
+    let note = if covered < 0.35 {
+        "paper between the lines"
+    } else if covered < 0.8 {
+        "close, but still a drawing"
+    } else {
+        "more ink than paper: the dark will fill in"
+    };
+    println!("the pen covers {covered:.2} of the paper — {note}");
+}
+
+/// How the lines that follow the form are to be drawn, as the command line says it.
+fn flow_of(args: &mut Vec<String>) -> Result<archie_paint::Flow, String> {
+    let mut flow = archie_paint::Flow::default();
+    if let Some(seeding) = number(args, "--seeding")? {
+        flow.seeding = seeding;
+    }
+    if let Some(step) = number::<f32>(args, "--step")? {
+        flow.step = step;
+    }
+    if let Some(steps) = number(args, "--steps")? {
+        flow.steps = steps;
+    }
+    if let Some(darker) = number(args, "--darker-than")? {
+        flow.darker_than = darker;
+    }
+    if let Some(coherence) = number(args, "--coherence")? {
+        flow.coherence = coherence;
+    }
+    if let Some(least) = number::<f32>(args, "--least-form")? {
+        flow.least_form = least;
+    }
+    if let Some(most) = number(args, "--most")? {
+        flow.most = most;
+    }
+    // The budget a drawing really has. `--speed` is what the stage will be told to draw at
+    // and `--per-command` what one command costs before any of it is drawing, so that the
+    // plan is made against the clock it will actually run on.
+    if let Some(seconds) = number::<f32>(args, "--seconds")? {
+        flow.seconds = seconds;
+    }
+    if let Some(speed) = number::<f32>(args, "--speed")? {
+        flow.speed = speed;
+    }
+    if let Some(each) = number::<f32>(args, "--per-command")? {
+        flow.per_command = each;
+    }
+    if let Some(weight) = number(args, "--weight")? {
+        flow.weight = weight;
+    }
+    if let Some(each) = number::<f32>(args, "--per-line")? {
+        flow.per_line = each;
+    }
+    if let Some(each) = number::<f32>(args, "--per-colour")? {
+        flow.per_colour = each;
+    }
+    Ok(flow)
 }
 
 /// How a picture is to be hatched, as the command line says it.
@@ -327,7 +561,41 @@ mod unix {
         }
     }
 
-    use super::{canvas_of, flag, levels_of, number, plan_with, prepared, shares_of, take, AsAsked};
+    use super::{
+        canvas_of, flag, flow_of, levels_of, number, palette_at, plan_with, prepared, shares_of,
+        swatches_of, take, AsAsked, Palette,
+    };
+
+    /// One thing to do on the way to a picture.
+    enum Deed {
+        /// Pick up a colour, by clicking the swatch the application offers for it.
+        Swatch(i32, i32),
+        /// Lines drawn one after another under a single authorisation. The round trip is
+        /// most of what a line costs, so they travel together.
+        Lines(Vec<Vec<archie_stage::StrokePoint>>),
+    }
+
+    /// The lines grouped into as few commands as one may carry.
+    fn in_batches(lines: Vec<Vec<archie_stage::StrokePoint>>, most: usize) -> Vec<Deed> {
+        let most = most.clamp(1, archie_stage::MAX_STROKE_PATHS);
+        let mut deeds = Vec::new();
+        let mut batch: Vec<Vec<archie_stage::StrokePoint>> = Vec::new();
+        let mut points = 0;
+        for line in lines {
+            let full = batch.len() >= most
+                || points + line.len() > archie_stage::MAX_STROKE_POINTS_IN_ALL;
+            if full && !batch.is_empty() {
+                deeds.push(Deed::Lines(std::mem::take(&mut batch)));
+                points = 0;
+            }
+            points += line.len();
+            batch.push(line);
+        }
+        if !batch.is_empty() {
+            deeds.push(Deed::Lines(batch));
+        }
+        deeds
+    }
 
     async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         let socket = take(&mut args, "--socket");
@@ -344,6 +612,12 @@ mod unix {
         // Where to draw can be looked for rather than given: an application that can be
         // drawn in has paper in it, and paper is the large light rectangle in its window.
         let find_paper = flag(&mut args, "--find-paper");
+        let flowing = flag(&mut args, "--flow");
+        let flow = flow_of(&mut args)?;
+        let palette = Palette {
+            colours: swatches_of(&mut args)?,
+            at: palette_at(&mut args)?,
+        };
         let levels = levels_of(&mut args)?;
         let shares = shares_of(&mut args)?;
         let pen: u32 = number(&mut args, "--pen")?.unwrap_or(2);
@@ -351,11 +625,15 @@ mod unix {
         // a command is what costs; this is the whole difference between a slow picture and
         // a fast one.
         let max_points: usize = number(&mut args, "--points")?.unwrap_or(2);
+        // How many lines one command may carry. One at a time is how it worked before there
+        // was a drawing command, and is kept so the difference can be measured rather than
+        // asserted.
+        let batch: usize = number(&mut args, "--batch")?.unwrap_or(archie_stage::MAX_STROKE_PATHS);
+        let soften: Option<u32> = number(&mut args, "--soften")?;
         if !args.is_empty() {
             return Err(format!("unexpected arguments: {args:?}"));
         }
 
-        let soften: Option<u32> = number(&mut args, "--soften")?;
         let picture = prepared(Path::new(&image), soften)?;
         let socket = socket.ok_or("--socket is required")?;
         let app = app.ok_or("--app is required")?;
@@ -399,31 +677,65 @@ mod unix {
                 inset,
             )?
         };
-        let plan = plan_with(
-            &picture,
-            canvas,
-            &AsAsked {
-                spacing,
-                min_run,
-                levels,
-                shares,
-                pen,
-                max_points,
-            },
-        );
-        super::planning::report(&plan, canvas);
+        // What to do, in order: a colour to pick up, or a line to draw with it.
+        let mut deeds: Vec<Deed> = Vec::new();
+        if flowing {
+            let groups = archie_paint::flow_plan(&picture, canvas, &flow, &palette.colours, max_points);
+            let lines: usize = groups.iter().map(|(_, plan)| plan.strokes.len()).sum();
+            let length: f32 = groups.iter().map(|(_, plan)| plan.drawn_length()).sum();
+            println!(
+                "{lines} lines in {} colours, {length:.0} pixels of line, in a canvas of {}x{} at {},{}",
+                groups.len(),
+                canvas.width,
+                canvas.height,
+                canvas.x,
+                canvas.y
+            );
+            super::say_how_covered(length, pen, canvas);
+            let travelled = super::travel_of(&groups);
+            super::say_what_it_costs(length, travelled, 0.0, super::commands_for(&groups));
+            for (colour, plan) in groups {
+                if let Some((x, y)) = palette.swatch(colour) {
+                    deeds.push(Deed::Swatch(x, y));
+                }
+                deeds.extend(in_batches(plan.strokes, batch));
+            }
+        } else {
+            let plan = plan_with(
+                &picture,
+                canvas,
+                &AsAsked {
+                    spacing,
+                    min_run,
+                    levels,
+                    shares,
+                    pen,
+                    max_points,
+                },
+            );
+            super::planning::report(&plan, canvas);
+            deeds.extend(in_batches(plan.strokes, batch));
+        }
         let started = Instant::now();
         let (mut drawn, mut refused) = (0_usize, 0_usize);
         let mut paused_ms = 0_u64;
-        let total = plan.strokes.len().min(limit.unwrap_or(usize::MAX));
-        for (index, stroke) in plan.strokes.iter().take(total).enumerate() {
+        let total = deeds.len().min(limit.unwrap_or(usize::MAX));
+        for (index, deed) in deeds.iter().take(total).enumerate() {
+            let action = match deed {
+                Deed::Swatch(x, y) => StageAction::Click {
+                    x: *x,
+                    y: *y,
+                    button: PointerButton::Left,
+                },
+                Deed::Lines(paths) => StageAction::Strokes {
+                    paths: paths.clone(),
+                    button: PointerButton::Left,
+                },
+            };
             let request = ActRequest {
                 app_id: app.clone(),
                 surface: Some(found.surface),
-                action: StageAction::Stroke {
-                    points: stroke.clone(),
-                    button: PointerButton::Left,
-                },
+                action,
                 text_grade: PrivacyGrade::Public,
                 principal: Principal::Human {
                     id: "archie-paint".into(),
@@ -432,7 +744,10 @@ mod unix {
                 task_id: None,
                 user_present: true,
                 approved: false,
-                justification: "draw one stroke of a picture".into(),
+                justification: match deed {
+                    Deed::Swatch(..) => "pick up a colour the application offers".into(),
+                    Deed::Lines(paths) => format!("draw {} strokes of a picture", paths.len()),
+                },
             };
             // A person reaching for the mouse takes the stage, and a picture is not a
             // reason to argue with that: the stroke waits until they are done rather than
@@ -475,7 +790,7 @@ mod unix {
             }
             if index % 25 == 24 {
                 println!(
-                    "{} of {total} strokes, {:.1}s",
+                    "{} of {total} commands, {:.1}s",
                     index + 1,
                     started.elapsed().as_secs_f32()
                 );
@@ -483,11 +798,24 @@ mod unix {
         }
         let seconds = started.elapsed().as_secs_f32();
         let drawing = seconds - paused_ms as f32 / 1000.0;
+        let done = |pick: &dyn Fn(&Vec<Vec<archie_stage::StrokePoint>>) -> f32| -> f32 {
+            deeds
+                .iter()
+                .take(total)
+                .map(|deed| match deed {
+                    Deed::Lines(paths) => pick(paths),
+                    Deed::Swatch(..) => 0.0,
+                })
+                .sum()
+        };
+        let lines = done(&|paths| paths.len() as f32);
+        let inked = done(&|paths| paths.iter().map(|p| archie_paint::length_of(p)).sum());
+        // Pixels of line a second is the number that decides whether a picture finishes.
+        // Commands a second only says how fast it was asking.
         println!(
-            "drew {drawn} strokes and had {refused} refused in {seconds:.1}s, of which \
-             {:.1}s was waiting for a person ({:.1} strokes a second while drawing)",
+            "drew {lines:.0} lines in {drawn} commands and had {refused} refused in {seconds:.1}s, of which {:.1}s was waiting for a person -- {:.0} pixels of line a second",
             paused_ms as f32 / 1000.0,
-            drawn as f32 / drawing.max(0.001)
+            inked / drawing.max(0.001)
         );
         Ok(if refused == 0 {
             ExitCode::SUCCESS

@@ -518,7 +518,26 @@ void a_capture_is_checked_like_a_touch_and_held_on_screen() {
 }
 
 
+void a_filming_tempo_still_draws_slower_than_an_application_can_look() {
+    CASE("video tempo leaves an application enough pointer reports to see a line by");
+
+    // An application learns where the pointer went by being told where it is, once a frame.
+    // At sixty frames a second, a line drawn faster than about a thousand pixels a second
+    // reaches it as a polygon of the few positions that fitted in, whatever the command
+    // carried. That is not something the stage can fix by sending more points, so the tempo
+    // meant for filming has to stay slow enough to be worth watching.
+    const PlaybackPolicy filming = PlaybackPolicy::video_tempo();
+    const float between_reports = filming.stroke_speed_px_per_s / 60.0F;
+    CHECK_BECAUSE(between_reports <= 20.0F,
+                  "no more than twenty pixels between one report and the next");
+    // It is barely faster than a person's hand, and cannot be much faster: the limit is
+    // the application looking, not the stage drawing.
+    CHECK_BECAUSE(filming.stroke_speed_px_per_s >= PlaybackPolicy{}.stroke_speed_px_per_s,
+                  "and no slower than a person's hand");
+}
+
 void an_agent_tempo_is_the_same_playback_on_a_faster_clock() {
+
     CASE("at agent tempo the same steps happen sooner, and looking holds nothing");
 
     SurfaceTable table = table_with_terminal();
@@ -590,7 +609,47 @@ void a_capture_can_ask_for_one_box_instead_of_the_whole_window() {
     CHECK_BECAUSE(snapshot_region(gone, *shrunk.find(7)) == (IRect{0, 0, 150, 600}),
                   "nothing left of the box is the whole surface, never a negative rectangle");
 }
+void a_drawing_of_several_lines_lifts_between_them() {
+    CASE("several lines in one command press, draw, let go, travel and press again");
+
+    SurfaceTable table = table_with_terminal();
+    StageCommand drawing = click_on(table, 7, 0, 0);
+    drawing.action = StageAction::Stroke;
+    // Two lines far apart, joined in one command by a lift at the third point.
+    drawing.path = {IPoint{100, 100}, IPoint{160, 120}, IPoint{400, 300}, IPoint{460, 330}};
+    drawing.lifts = {2};
+    CHECK_BECAUSE(!check_command(drawing, table, InputAuthority{}, 0, T0).has_value(),
+                  "a drawing of two real lines is allowed");
+
+    Playback run = Playback::start(drawing, *table.find(7), PointF{}, T0, PlaybackPolicy{});
+    const auto steps = run.schedule();
+    int presses = 0;
+    int releases = 0;
+    for (const InputStep& one : steps) {
+        if (one.kind == StepKind::Press) ++presses;
+        if (one.kind == StepKind::Release) ++releases;
+    }
+    CHECK_BECAUSE(presses == 2, "one press for each line");
+    CHECK_BECAUSE(releases == 2, "and one release for each");
+    CHECK_BECAUSE(steps.back().kind == StepKind::Release, "it ends by letting go");
+
+    // A lift that would leave a line of one point is not a drawing.
+    StageCommand bad = drawing;
+    bad.lifts = {1};
+    CHECK_BECAUSE(check_command(bad, table, InputAuthority{}, 0, T0) == CommandRefusal::PathOutOfBounds,
+                  "a line has to have two points on both sides of a lift");
+    bad.lifts = {2, 2};
+    CHECK_BECAUSE(check_command(bad, table, InputAuthority{}, 0, T0) == CommandRefusal::PathOutOfBounds,
+                  "and the lifts have to be in order");
+    // A second line that never leaves its first point is a click wearing a line's name.
+    StageCommand still = drawing;
+    still.path = {IPoint{100, 100}, IPoint{160, 120}, IPoint{400, 300}, IPoint{400, 300}};
+    CHECK_BECAUSE(check_command(still, table, InputAuthority{}, 0, T0) == CommandRefusal::PathOutOfBounds,
+                  "every line of a drawing has to go somewhere, not only the first");
+}
+
 void a_stroke_is_pressed_followed_and_let_go() {
+
     CASE("a stroke goes down at its first point, through every one of them, and up at the last");
 
     SurfaceTable table = table_with_terminal();  // 800x600 at 100,80
@@ -697,7 +756,9 @@ int main() {
     typing_and_chords_are_counted_not_carried();
     a_capture_is_checked_like_a_touch_and_held_on_screen();
     an_agent_tempo_is_the_same_playback_on_a_faster_clock();
+    a_filming_tempo_still_draws_slower_than_an_application_can_look();
     a_capture_can_ask_for_one_box_instead_of_the_whole_window();
     a_stroke_is_pressed_followed_and_let_go();
+    a_drawing_of_several_lines_lifts_between_them();
     return archie::visual::test::report();
 }

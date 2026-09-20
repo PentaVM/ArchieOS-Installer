@@ -6,7 +6,8 @@
 //! proposed has a [`StageProposal`], which nothing seals.
 
 use crate::action::{
-    ActionKind, Key, StageAction, MAX_COORDINATE, MAX_SCROLL_STEPS, MAX_STROKE_POINTS,
+    ActionKind, Key, StageAction, MAX_COORDINATE, MAX_SCROLL_STEPS, MAX_STROKE_PATHS,
+    MAX_STROKE_POINTS, MAX_STROKE_POINTS_IN_ALL,
     MAX_TEXT_CHARS,
 };
 use crate::policy::StagePolicy;
@@ -305,6 +306,20 @@ impl StageGate {
                     if app.approval_keys.contains(&named) {
                         approval = Some("policy requires approval for this key");
                     }
+                }
+            }
+            StageAction::Strokes { paths, .. } => {
+                // Each line has to be a line, and the whole drawing has to fit in what one
+                // command may carry.
+                let points: usize = paths.iter().map(Vec::len).sum();
+                if !(1..=MAX_STROKE_PATHS).contains(&paths.len())
+                    || points > MAX_STROKE_POINTS_IN_ALL
+                    || paths.iter().any(|path| {
+                        !(2..=MAX_STROKE_POINTS).contains(&path.len())
+                            || path.iter().all(|at| at == &path[0])
+                    })
+                {
+                    return refuse(StageRefusal::StrokeOutOfRange);
                 }
             }
             StageAction::Stroke { points, .. } => {

@@ -356,6 +356,49 @@ DecodeResult decode_command(const QByteArray& raw_line, const QByteArray& key, s
         c.local_y = c.path.front().y;
         c.to_local_x = c.path.back().x;
         c.to_local_y = c.path.back().y;
+    } else if (kind == QLatin1String("strokes")) {
+        // Several lines under one authorisation. They arrive as a list of lists and are kept
+        // as one path with the places the pen lifts, so that every point is checked against
+        // the window by exactly the same loop that checks one line.
+        if (!exact_keys(action, {"kind", "paths", "button"}) ||
+            !action.value(QLatin1String("paths")).isArray()) {
+            return fail("command_malformed");
+        }
+        const QJsonArray paths = action.value(QLatin1String("paths")).toArray();
+        if (paths.isEmpty() || paths.size() > static_cast<qsizetype>(archie::visual::kMaxStrokePaths)) {
+            return fail("command_malformed");
+        }
+        for (const QJsonValue& one : paths) {
+            if (!one.isArray()) return fail("command_malformed");
+            const QJsonArray points = one.toArray();
+            if (points.size() < 2 ||
+                points.size() > static_cast<qsizetype>(archie::visual::kMaxStrokePoints)) {
+                return fail("command_malformed");
+            }
+            if (!c.path.empty()) {
+                c.lifts.push_back(c.path.size());
+            }
+            for (const QJsonValue& value : points) {
+                if (!value.isObject()) return fail("command_malformed");
+                const QJsonObject point = value.toObject();
+                if (!exact_keys(point, {"x", "y"})) return fail("command_malformed");
+                const auto x = coordinate(point.value(QLatin1String("x")));
+                const auto y = coordinate(point.value(QLatin1String("y")));
+                if (!x || !y) return fail("command_malformed");
+                c.path.push_back(archie::visual::IPoint{*x, *y});
+            }
+        }
+        if (c.path.size() > archie::visual::kMaxStrokePointsInAll) {
+            return fail("command_malformed");
+        }
+        const auto pressed = button(action.value(QLatin1String("button")));
+        if (!pressed) return fail("command_malformed");
+        c.button = *pressed;
+        c.action = StageAction::Stroke;
+        c.local_x = c.path.front().x;
+        c.local_y = c.path.front().y;
+        c.to_local_x = c.path.back().x;
+        c.to_local_y = c.path.back().y;
     } else if (kind == QLatin1String("focus")) {
         if (!exact_keys(action, {"kind"})) return fail("command_malformed");
         c.action = StageAction::Focus;

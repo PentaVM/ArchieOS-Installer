@@ -160,32 +160,287 @@ a second with none refused. The canvas saves what it has every few seconds, so t
 outlives the run that made it — and a copy is taken before anything is stopped, because
 `Canvas.save` can be halfway through writing when the application is killed.
 
+### Lines that follow the form, in colour
+
+Hatching shades: it says how dark a place is. It does not say what shape is there, and a
+picture made only of it reads as a screen of parallel marks rather than as a drawing. A line
+that runs *along* the form does say it — the way a hand draws a cheek by following it.
+
+`--flow` plans those lines. The picture is read once for how it changes at every point: the
+gradient, turned a quarter, averaged over a neighbourhood so that neighbouring points agree
+which way the form runs. Lines are then let go into that field from the dark places, darkest
+first, and followed forwards and back until they leave the picture, run out of length, or
+reach ground with no form in it. Each line is given the palette colour nearest the picture
+under its seed, and the lines are drawn colour by colour, so the palette is visited once per
+colour rather than once per line.
+
+```bash
+archie-paint --dry-run --image mona-lisa.jpg --canvas 0,0,834,920 --soften 3 --flow \
+    --seeding 9 --steps 90 --darker-than 100 --coherence 7 --least-form 0.25 \
+    --as-seen 700 --preview plan.png
+```
+
+Two of those settings are worth their own sentence.
+
+`--least-form` is where a line stops. Ground the picture does not change across has no form
+to follow, and a line that carries on through it is a line ruled at random — which is what
+the first version drew across the sky, because a field with nothing in it still has to point
+somewhere. It is a rank rather than a measurement: `0.25` means "keep going while this place
+is in the more shaped three quarters of *this* picture". A measurement would have been read
+by whatever single hard edge the picture happens to contain, and in the Mona Lisa — a soft
+painting with a crisp frame — that threw the whole face away.
+
+`--most` keeps only the longest lines. A line costs the same to send whether it is long or
+short, so when there is only time for forty of them, the forty should be the ones that carry
+the most of the picture. They are still drawn in the order they were found, darkest first.
+
+### How much paper the pen leaves
+
+A drawing of many lines fills in. Lines closer together than the pen is wide leave no paper
+between them, and what was planned as shading arrives as a filled shape. The plan knows this
+beforehand — it is the ink the pen lays down against the paper there is — so the dry run says
+so before anything is drawn:
+
+```
+4438 lines in 5 colours, 928012 pixels of line, in a canvas of 834x920 at 0,0
+the pen covers 2.42 of the paper — more ink than paper: the dark will fill in
+```
+
+The number is a warning, not a measurement of the drawing that comes out: the preview inks
+exactly as many pixels as the pen is wide, while a real canvas draws an anti-aliased line
+with round caps and darkens about half as much again. Aim at a third of the paper.
+
+The other way to fit more lines in is a finer pen, which is what a large drawing wants
+anyway. `paint.qml` takes its pen width as an argument and reports it, and `archie-paint` is
+given the same number, so the plan is made for the pen that will actually draw it — 1408
+lines with a one-pixel pen rather than 762 with a two-pixel one, on the same paper, for the
+same ink.
+
+### Paper that is not there
+
+Four pictures in a row came out looking like a black ground with the drawing scratched into
+it, and the coverage number above was the obvious culprit: too much ink. It was not. Every
+one of those files was transparent where the paper should have been, and a transparent PNG
+is shown on white by one viewer and on black by the next.
+
+`paint.qml` laid its paper — a white rectangle over the whole canvas — on the first paint and
+then never again. Qt throws a `Canvas`'s picture away when the canvas changes size, so the
+paper went with it the first time the compositor sized the window, and every stroke after
+that was drawn on nothing. The strokes were all there; the sheet behind them was not, and
+nothing in any log said so, because from the application's side everything had worked.
+
+It is worth two sentences in a document about verification. The stage checks that a command
+was legal, that the window was where it said, and that something redrew. None of those
+notice that a picture is being drawn on a surface with no paper in it, because to the
+compositor and the application alike it is a drawing with every stroke in place. What caught
+it was reading the alpha of one pixel in the corner of the file.
+
+### Pointer craft
+
+Everything in this section came out of trying to draw a picture in fifteen seconds, and none
+of it is about pictures. A drawing is only the most demanding thing a pointer can be asked to
+do: it needs the pointer to be in the right place, at the right speed, for a great many
+places in a row, and it shows every mistake. What it taught applies to any application — to a
+sweep through a menu, a drag across a list, a careful resize.
+
+**Time is the budget, not commands.** An application looks at the pointer at its own rate and
+joins what it saw with straight runs, so there is a speed past which a line arrives as a
+polygon; that fixes how much pointer work a second can carry. Asking for "forty lines" says
+nothing about whether they fit. `--seconds` says what there is, and the planner spends it:
+
+```
+49 lines in 1 colours, 8658 pixels of line, in a canvas of 834x920 at 0,0
+at 950 pixels a second: 9.1s drawing, 4.0s travelling, 0.2s waiting on 2 commands
+  — 13.4s, 648 pixels of line a second
+```
+
+Everything in that line was measured on this stage rather than assumed, because the first
+version of it was assumed and was wrong in both directions.
+
+**Pixels of line a second, not commands a second.** The old measure said how fast Archie was
+*asking*. This one says how much work was *done*, which is the thing that decides whether a
+task finishes. The same drawing at 511 and at 671 pixels a second is the same number of
+commands and a third more picture.
+
+**Several lines under one authorisation.** `strokes` carries up to 64 paths and 1024 points in
+one command: one lease, one receipt, every point re-checked against the window as it is now,
+each line refusable on its own, and the operator still able to take the stage between them.
+Nothing that made a single line safe was given up; what went was the waiting. Measured on the
+same 56-line drawing, sent both ways:
+
+| | commands | time | pixels of line a second |
+|---|---|---|---|
+| one line at a time | 62 | 17.6 s | 511 |
+| in batches | 12 | 13.4 s | 671 |
+
+That is 84 milliseconds a command, which is the number the planner now charges. `--batch 1`
+sends them one at a time, so the difference can be measured again rather than believed.
+
+**The speed means the speed.** A tempo hurries the pointer *to* things, because nothing is
+being said on the way. It used to hurry the drawing as well — the stroke speed was divided by
+the tempo's pace, so `--stroke-speed 942` at video tempo drew at eleven thousand pixels a
+second and every line arrived as a polygon. Reaching and drawing are now separate: the tempo
+still flies between lines, and the line is drawn at the speed it was given.
+
+**Go to the nearest thing next.** The pointer has to travel from the end of one line to the
+start of the next, and on the first plans that travel cost as much as the drawing did — 8.5
+seconds against 8.4. Choosing what to do next by what it says *and what it costs to get
+there* cut it to 4.0. This is the same arithmetic as deciding which control to visit next in
+a window, and the answer is the same: the good one nearby beats the better one across the
+screen.
+
+**Changing colour is expensive, so do it rarely.** Putting one colour down and picking another
+up is a command and a trip to wherever the application keeps its colours: about three tenths
+of a second, which is a quarter of a second of line. A hand does not change brush every other
+stroke, and neither should this. `--per-colour` is the knob; lowering it buys colour at the
+price of line.
+
+**Weight, without pressure.** A pointer cannot press harder. It can go over a line again, a
+hair to one side, and back the way it came so that returning to the start costs nothing. The
+darkest lines get two or three passes and the light ones get one, which is what stops a
+drawing looking ruled. It costs ink and no commands, so the budget pays for it out of the
+same purse as any other line.
+
+Measured end to end on the demo canvas, a fifteen-second drawing: 49 lines in 4 commands,
+15.1 s, none refused, 575 pixels of line a second, and the lines that arrived were the lines
+that were planned.
+
+### What a pointer can say in fifteen seconds
+
+An application does not receive a path. It receives the pointer's position, again and again,
+at its own frame rate, and between two frames it learns nothing. So a line drawn quickly
+arrives as a polygon of the few positions that fitted in — however many points the command
+carried, and whatever the compositor drew on its own screen.
+
+That sets a ceiling on any live drawing, and it is worth writing down plainly: at sixty
+frames a second, **a fifteen-second drawing is about nine hundred positions**, minus the time
+spent between commands. Spend them on many lines and each is angular; spend them on few and
+each is smooth. No amount of points per command changes the total.
+
+`--as-seen <px/s>` makes the plan honest about this: it resamples every line the way the
+application will receive it at that speed, and the preview then shows the drawing that will
+land rather than the one that was planned. Every picture below was chosen from a preview
+made that way.
+
+`--stroke-speed` on the stage is the other half. Video tempo used to draw at 2500 pixels a
+second, which is forty pixels between one position and the next — the polygon again. It now
+draws at a thousand by default, and the intro run below asks for 942, which is the speed that
+fits its own plan into fifteen seconds exactly.
+
+Measured in WSLg, both on `paint.qml`:
+
+| | lines | commands | colours | pen | time | refused |
+|---|---|---|---|---|---|---|
+| the intro | 40 | 43 | 3 | 2 px | 13.2 s | 0 |
+| the picture | 1428 | 1433 | 5 | 2 px | 7 min 09 s | 0 |
+| the picture, finer | 1408 | 1414 | 6 | 1 px | 6 min 32 s | 0 |
+| the densest tried | 4438 | 4443 | 5 | 2 px | 21 min 28 s | 0 |
+
+The intro is the one for the film: a contour drawing of the Mona Lisa, in three colours,
+finished in thirteen seconds while somebody explains what is happening. The picture is the
+same planner with the seeding sixteen pixels apart instead of thirty, drawn at seven hundred
+pixels a second so that every line is smooth. The densest one is there for the shape of the
+curve: three times the lines for three times the time, and none of them refused.
+
+One bug found by drawing rather than by testing, and it was in neither the stage nor the
+planner: `paint.qml` threw away points. It kept one line's worth of them and painted when
+Qt got round to it, and a press starting the next stroke replaced the lot — so at three
+strokes a second, twenty-two of thirty-four strokes reached the application and never
+appeared on its canvas. The demo now keeps every piece with the colour it was drawn in until
+it has actually been inked. Worth saying because the application's log had said `saved 34
+strokes` throughout: the count was of strokes received, and only the picture showed that
+most of them had been dropped.
+
+The palette also used to sit on the paper. A line near the bottom of the picture could land
+on a swatch and change the colour halfway through the drawing, so the palette now has its own
+strip below the paper, and the application reports where the paper is as well as where the
+palette is.
+
 ### In a real application: Firefox and Photopea
 
 The demo canvas is a sheet of paper with nothing on it, which is the easy case. The same
 strokes work in a real drawing program: Firefox on the stage with `photopea.com`, an image
 editor that is a web page.
 
+Photopea takes a script in its URL, so the document is made without touching a menu.
+`--find-paper` is how Archie knows where to draw: it looks at the window once, through the
+same gate and read lease as any capture, and takes the largest light rectangle in it for
+paper. Nothing of that capture is kept but the rectangle.
+
+Then Archie draws, opens Photopea's own File menu, walks it to Export as ▸ PNG, and clicks
+Save in the dialog. The file lands in the browser's download directory: 760×1020, 62 KB,
+drawn with Photopea's own brush.
+
 ```bash
-firefox -P archie --new-window 'https://www.photopea.com/#{"script":"app.documents.add(760,1020,72,'Archie',NewDocumentMode.RGB,DocumentFill.WHITE)"}'
-archie-paint --socket … --key-file … --policy apps.toml --app firefox --image mona-lisa.jpg --find-paper
+firefox --profile /root/ff-profile --new-window 'https://www.photopea.com/#{"script":"app.documents.add(760,1020,72,'Archie',NewDocumentMode.RGB,DocumentFill.WHITE)"}'
+archie-stage-cli act … click 19 390                 # the brush, in the tool column
+archie-paint --socket … --app firefox --image mona-lisa.jpg --find-paper --flow --points 24
+archie-stage-cli act … click 19 102                 # File
+archie-stage-cli act … click 56 402                 # Export as
+archie-stage-cli act … click 214 403                # PNG
+archie-stage-cli act … click 683 524                # Save
 ```
 
-Photopea takes a script in its URL, so the document is made without touching a menu. After
-that everything is the stage's own vocabulary: `focus`, `key b` for the brush, `key [` to
-make it thinner, and strokes. `--find-paper` is how Archie knows where to draw — it looks at
-the window once, through the same gate and read lease as any capture, and takes the largest
-light rectangle in it for paper. Nothing of that capture is kept but the rectangle.
+A correction to what this document said before. It reported that "647 strokes of the Mona
+Lisa were drawn into Photopea at 4.5–4.7 a second with none refused". The stroke count and
+the rate were true of the stage; the drawing was not. Nothing was painted in that run, and
+nothing was painted in the four runs after it, because Photopea's brush was never selected —
+and the reason is the next paragraph. A count of strokes the compositor executed is not a
+count of marks an application made, and this document should not have read as though it
+were.
 
-Measured: the paper came back as 385×680 at 38,238 of a 980-wide window, and 647 strokes of
-the Mona Lisa were drawn into Photopea at 4.5–4.7 a second with none refused.
+### What Photopea taught the stage
 
-Two things this exposed, both of them the system working rather than failing. The stage
-could not press `[`, because its keyboard was letters, digits and named keys only — a
-keyboard has marks, and now so does it. And `ctrl+shift+s` to export was refused with
-`modified_keys_not_allowed`: a chord with modifiers needs an explicit grant in the policy,
-which the demo policy for Firefox now has. Getting the picture out of Photopea still needs a
-click on its own Save button, which is the accessibility path's job and is not done yet.
+**It declares nothing.** Photopea draws its whole interface — menu bar, tool column, panels,
+dialogs — inside one canvas element, so the accessibility bus has nothing to say about any of
+it. Everything Archie does here is done by looking or by position. This is the case the local
+model exists for, and it is worth stating plainly that the fastest and most exact path, the
+one where the application names its own controls, is simply not available in applications
+like this one.
+
+**Keys used to reach Firefox and stop there, and now they do not.** Sending `b` to select the
+brush did nothing, and neither did `ctrl+s`. The Wayland trace said why: Firefox asks the seat
+for a keyboard twice, Qt's compositor sends pointer events to every one of a client's bindings
+and keyboard events to exactly one of them — whichever its resource map hands back — and
+Firefox listens on the other. The protocol log showed the key arriving
+(`wl_keyboard.key(11, …, 48, 1)`, which is `b`) on a binding Firefox had already discarded,
+while the page's own `keydown` never ran. Clicking worked and typing did not, which is a
+strange enough failure to be worth stating twice.
+
+The stage now says the same thing to the client's other keyboards: the focus it holds, the
+key, and the modifier state, each sent only to the bindings Qt left out — found the way Qt
+finds the one it speaks to, so nothing is sent twice. A client with a single binding is left
+exactly as it was. A page that echoes what it receives now reads
+`b/KeyB  z/KeyZ  Control/ControlRight+ctrl  s/KeyS+ctrl`: every key once, with its modifiers.
+
+One thing this does not change: Photopea reads keys only once the page itself holds focus, so
+the brush is still chosen by clicking its tool — and that click is what gives the page focus.
+After it, `[` thins the brush from the keyboard like anyone else's.
+
+**Agent tempo is too quick for it.** At `--tempo agent` a press lasts 32 ms and Photopea's
+canvas does not register it: strokes are executed, none are refused, and the document stays
+white. At `--tempo person` the same strokes paint. An application that watches the pointer
+itself, rather than being told about a click, needs the press to last.
+
+**A click with the wrong tool poisons the next one.** One click on the canvas with the Move
+tool — sent only to give the page keyboard focus — left Photopea in a state where the brush,
+selected afterwards, painted nothing. Removing that click is the difference between a 465-byte
+white PNG and the picture. The brush click gives the page focus anyway.
+
+**Verification cannot see an in-page menu.** `archie-look` opens the File menu and then
+reports `world verification did not observe a newer scene revision`, because the menu is
+drawn inside the page rather than in a surface of its own. Retrying on that false negative
+clicks again and closes the menu, which is worse than not retrying. The activation succeeded;
+the check could not see it.
+
+**What the grounding models could do.** On this window, asked for the File menu:
+`openbmb/MiniCPM-V-4_5` answered `0 206 44 234` in 8.0 s and the click opened the menu;
+`google/gemma-3-27b-it` answered `<box> 266, 48, 309, 74 </box>` in 2.4 s, which is the
+browser's tab bar; `moonshotai/Kimi-K3` missed four times out of four. None of them placed
+the smaller targets — Export as, PNG, a 30-pixel tool icon — well enough to walk the menu, so
+those are clicked at positions known from the window's own fixed layout.
+
+
 
 ### Who does what, and what a model is for
 
