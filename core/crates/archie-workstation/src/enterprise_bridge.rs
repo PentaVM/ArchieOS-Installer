@@ -38,12 +38,34 @@ impl EnterpriseAdapter {
 
     /// Prepares a task for export to the external API by converting it to a KanbanCard.
     /// Returns an error if the task contains data that is not allowed to be exported.
-    pub fn prepare_for_export(&self, task: &Task, grade: PrivacyGrade) -> Result<KanbanCard> {
+    pub fn prepare_for_export(&self, task: &Task) -> Result<KanbanCard> {
+        let is_quarantined = task.labels.get("archie.quarantine").map(|s| s.as_str()) == Some("true");
+        if is_quarantined {
+            return Err(TypeError::InvalidTask(
+                format!("Task {} cannot be exported: currently in quarantine", task.task_id).into()
+            ));
+        }
+
+        // Determine grade from labels
+        let grade_str = task.labels.get("archie.privacy_grade")
+            .or_else(|| task.labels.get("privacy_grade"))
+            .map(|s| s.as_str())
+            .unwrap_or("restricted"); // default to restricted if not specified
+        
+        let grade = match grade_str {
+            "public" => PrivacyGrade::Public,
+            "internal" => PrivacyGrade::Internal,
+            "sensitive" => PrivacyGrade::Sensitive,
+            "restricted" => PrivacyGrade::Restricted,
+            "secret" => PrivacyGrade::Secret,
+            _ => PrivacyGrade::Restricted,
+        };
+
         if !self.permits_egress(grade) {
             return Err(TypeError::InvalidTask(
                 format!(
-                    "Task {} cannot be exported due to strict privacy limits: grade {} not permitted",
-                    task.task_id, grade.as_str()
+                    "Task {} cannot be exported due to strict privacy limits: grade {:?} not permitted",
+                    task.task_id, grade
                 ).into()
             ));
         }
