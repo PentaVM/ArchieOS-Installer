@@ -17,7 +17,6 @@ use axum::{
     routing::{get, post, put},
     Json, Router,
 };
-use ring::constant_time::verify_slices;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -58,20 +57,17 @@ pub enum AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
+        // The message is owned: a `BadRequest` carries its own text, which ends with this
+        // match, so a borrow of it could not outlive the arm.
         let (status, msg) = match self {
             AppError::Internal(_err) => {
                 // In a real app: tracing::error!("Internal Board Error: {}", _err);
-                (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error")
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error".to_string())
             }
-            AppError::BadRequest(err) => (StatusCode::BAD_REQUEST, err.as_str()),
-            AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized"),
+            AppError::BadRequest(err) => (StatusCode::BAD_REQUEST, err),
+            AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()),
         };
-        (
-            status,
-            Json(ErrorResponse {
-                error: msg.into(),
-            }),
-        )
+        (status, Json(ErrorResponse { error: msg }))
             .into_response()
     }
 }
@@ -103,11 +99,29 @@ async fn auth_guard(
     let hash = ring::digest::digest(&ring::digest::SHA256, token.as_bytes());
 
     // Constant-time verification to prevent timing side-channels
-    if verify_slices(hash.as_ref(), &state.auth_token_hash).is_err() {
+    if !same_secret(hash.as_ref(), &state.auth_token_hash) {
         return Err(AppError::Unauthorized);
     }
 
     Ok(next.run(req).await)
+}
+
+/// Whether two secrets are equal, compared without revealing through timing where they
+/// first differ.
+///
+/// ring's `constant_time` module is deprecated and makes no promise about side channels,
+/// so this uses what ring does promise: HMAC verification. Both values are authenticated
+/// under a fresh random key and one tag is verified against the other; they match only
+/// when the values do, and the comparison that decides it is ring's own constant-time one.
+fn same_secret(a: &[u8], b: &[u8]) -> bool {
+    use ring::hmac;
+    use ring::rand::SystemRandom;
+    let Ok(key) = hmac::Key::generate(hmac::HMAC_SHA256, &SystemRandom::new()) else {
+        // Without randomness nothing can be compared safely; refuse rather than guess.
+        return false;
+    };
+    let tag = hmac::sign(&key, a);
+    hmac::verify(&key, b, tag.as_ref()).is_ok()
 }
 
 async fn list_tasks(State(state): State<BoardState>) -> Result<impl IntoResponse, AppError> {
@@ -210,9 +224,6 @@ async fn sync_board(State(state): State<BoardState>) -> Result<impl IntoResponse
 #[cfg(test)]
 mod tests {
     use super::*;
-    use archie_types::model::PrivacyGrade;
-    use archie_types::task::{Task, QueueClass};
-    use archie_types::ids::TraceId;
 
     // A small helper to check the logic outside of Axum if needed,
     // though the prompt asks for unit tests covering the privacy logic.
@@ -226,5 +237,24 @@ mod tests {
         };
         // Verify payload serialization/deserialization logic is aligned
         assert_eq!(payload.requested_privacy, None);
+    }
+
+    #[test]
+    fn a_token_is_let_in_only_when_its_hash_is_the_stored_one() {
+        let stored = ring::digest::digest(&ring::digest::SHA256, b"correct-token");
+        let right = ring::digest::digest(&ring::digest::SHA256, b"correct-token");
+        let wrong = ring::digest::digest(&ring::digest::SHA256, b"correct-tokem");
+        assert!(same_secret(right.as_ref(), stored.as_ref()));
+        assert!(!same_secret(wrong.as_ref(), stored.as_ref()));
+        assert!(!same_secret(&[], stored.as_ref()), "an empty value is not the secret");
+        assert!(!same_secret(&stored.as_ref()[..16], stored.as_ref()), "nor is half of it");
+    }
+
+    #[test]
+    fn a_bad_request_says_what_was_wrong() {
+        let response = AppError::BadRequest("title is empty".into()).into_response();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let internal = AppError::Internal("database path /secret".into()).into_response();
+        assert_eq!(internal.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }
