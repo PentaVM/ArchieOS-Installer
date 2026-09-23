@@ -1,0 +1,20 @@
+[package]
+name = "archie-voice"
+description = "Archie's voice: the backends behind the speech plane — the model it asks, and the tools it may propose."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+archie-types.workspace = true
+archie-speech.workspace = true
+archie-model-runtime.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+# The clock the model is given, read before any thread starts so the local offset is known.
+time = { workspace = true, features = ["local-offset"] }
+
+[[bin]]
+name = "archie-voice"
+path = "src/bin/archie-voice.rs"

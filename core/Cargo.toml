@@ -28,6 +28,7 @@ members = [
     "crates/archie-cli",
     "crates/archie-installer",
     "crates/archie-speech",
+    "crates/archie-voice",
     "crates/archie-geofabric",
     "crates/archie-model-runtime",
     "crates/archie-vault",
@@ -70,6 +71,7 @@ archie-memory = { path = "crates/archie-memory" }
 archie-core = { path = "crates/archie-core" }
 archie-installer = { path = "crates/archie-installer" }
 archie-speech = { path = "crates/archie-speech" }
+archie-voice = { path = "crates/archie-voice" }
 archie-geofabric = { path = "crates/archie-geofabric" }
 archie-displayd = { path = "crates/archie-displayd" }
 archie-worldd = { path = "crates/archie-worldd", default-features = false }
