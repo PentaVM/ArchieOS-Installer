@@ -29,8 +29,10 @@ pub fn os_control() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "click".into(),
-            description: "Hace clic en algo que se ve en la pantalla, descrito con palabras: \
-                          un botón, un enlace, un campo, un menú."
+            description: "Hace clic en algo que se ve en la pantalla, nombrado como aparece: \
+                          un botón por su texto (por ejemplo Guardar), un campo por su \
+                          etiqueta, un enlace, un menú. Úsalo para seleccionar un campo antes \
+                          de escribir en él y para pulsar botones."
                 .into(),
             parameters: json!({
                 "type": "object",
@@ -43,7 +45,9 @@ pub fn os_control() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "type_text".into(),
-            description: "Escribe texto en lo que tenga el foco, como si fuera el teclado.".into(),
+            description: "Escribe texto con el teclado en el campo que tenga el foco. Si el \
+                          campo no está seleccionado, primero haz clic en él con click."
+                .into(),
             parameters: json!({
                 "type": "object",
                 "properties": {"text": {"type": "string"}},

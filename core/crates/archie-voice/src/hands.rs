@@ -54,6 +54,8 @@ impl Performed {
 pub struct Launch {
     /// The stage's Wayland display, given to the application as `WAYLAND_DISPLAY`.
     pub wayland_display: Option<String>,
+    /// Where what the application prints goes. Nowhere, unless a file is named.
+    pub log: Option<std::path::PathBuf>,
 }
 
 /// A grounding model that finds, in a picture of a window, what the person named.
@@ -117,7 +119,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Hands<R, W> {
                 let action = StageAction::Text {
                     text: StageText::new(text.clone()),
                 };
-                self.act(app_id, action, "Escrito.").await
+                self.act(app_id, action, "Tecleado en la ventana al frente.").await
             }
             Plan::Keys { app_id, chord } => {
                 let done = format!("Pulsé {}.", chord_name(chord));
@@ -159,11 +161,14 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Hands<R, W> {
             return Performed::not_done("no sé cómo se abre.");
         };
         let mut command = Command::new(program);
-        command
-            .args(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+        command.args(args).stdin(Stdio::null());
+        let log = self.launch.log.as_ref().and_then(|path| {
+            std::fs::OpenOptions::new().create(true).append(true).open(path).ok()
+        });
+        match log.as_ref().and_then(|file| Some((file.try_clone().ok()?, file.try_clone().ok()?))) {
+            Some((out, err)) => command.stdout(out).stderr(err),
+            None => command.stdout(Stdio::null()).stderr(Stdio::null()),
+        };
         if let Some(display) = &self.launch.wayland_display {
             command
                 .env("WAYLAND_DISPLAY", display)
@@ -347,20 +352,24 @@ mod tests {
         let executed = ActOutcome::Receipt {
             sequence: 4,
             outcome: "executed".into(),
+                finished: 0,
         };
         assert!(reported(&executed, "firefox", "Escrito.").done);
         for outcome in [
             ActOutcome::Receipt {
                 sequence: 5,
                 outcome: "operator_has_control".into(),
+                finished: 0,
             },
             ActOutcome::Receipt {
                 sequence: 0,
                 outcome: "command_unverified".into(),
+                finished: 0,
             },
             ActOutcome::Receipt {
                 sequence: 6,
                 outcome: "cancelled".into(),
+                finished: 0,
             },
             ActOutcome::NeedsApproval {
                 reason: "enter".into(),
@@ -378,7 +387,8 @@ mod tests {
         assert!(reported(
             &ActOutcome::Receipt {
                 sequence: 5,
-                outcome: "operator_has_control".into()
+                outcome: "operator_has_control".into(),
+                finished: 0,
             },
             "firefox",
             ""

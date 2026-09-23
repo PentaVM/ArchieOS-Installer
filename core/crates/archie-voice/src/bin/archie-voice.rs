@@ -7,7 +7,7 @@
 //!
 //! archie-voice do  "<what the person said>" --grade public
 //!              --socket <stage control socket> --key-file <stage key> --policy <apps.toml>
-//!              [--stage-display <wayland display>] [--steps 4]
+//!              [--stage-display <wayland display>] [--app-log <file>] [--steps 6]
 //!              [--ground-model <vision model> [--ground-endpoint <local NIM url>]]
 //!              [--model …] [--budget …] [--language …]
 //! ```
@@ -232,11 +232,12 @@ struct StageFlags {
     steps: usize,
     ground_model: Option<String>,
     ground_endpoint: Option<String>,
+    app_log: Option<String>,
 }
 
 fn stage_flags(args: &mut Vec<String>) -> Result<StageFlags, String> {
     let steps = match take(args, "--steps") {
-        None => 4,
+        None => 6,
         Some(steps) => steps
             .parse::<usize>()
             .ok()
@@ -251,6 +252,7 @@ fn stage_flags(args: &mut Vec<String>) -> Result<StageFlags, String> {
         steps,
         ground_model: take(args, "--ground-model"),
         ground_endpoint: take(args, "--ground-endpoint"),
+        app_log: take(args, "--app-log"),
     })
 }
 
@@ -293,13 +295,20 @@ fn act(mut asking: Asking, flags: StageFlags) -> Result<ExitCode, String> {
         agent: AgentId::new(),
     };
     let operator = Operator::new(key, policy.clone(), PolicyEngine::default());
-    let sight = Sight::new(operator, client, world, snapshot_dir, principal.clone());
+    let mut sight = Sight::new(operator, client, world, snapshot_dir, principal.clone());
+    // What applications declare about their controls is the first way to find one: exact,
+    // live, and it needs neither a capture nor a model.
+    match asking.runtime.block_on(archie_a11y::Accessibility::connect()) {
+        Ok(bus) => sight = sight.asking(Box::new(bus)),
+        Err(error) => eprintln!("archie-voice: nothing to ask about controls ({error})"),
+    }
     let mut hands = Hands::new(
         sight,
         principal,
         asking.grade,
         Launch {
             wayland_display: flags.display.clone(),
+            log: flags.app_log.clone().map(Into::into),
         },
     );
     if let Some(model) = &flags.ground_model {
