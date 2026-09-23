@@ -45,7 +45,12 @@ pub struct ActRequest {
 pub enum ActOutcome {
     /// The compositor answered: `executed`, `cancelled`, or one of its refusal codes.
     /// Sequence 0 means it could not verify the command at all.
-    Receipt { sequence: u64, outcome: String },
+    Receipt {
+        sequence: u64,
+        outcome: String,
+        /// How many lines of a drawing were finished before it stopped.
+        finished: usize,
+    },
     /// The stage policy holds this action for a person's approval, and nobody gave it.
     NeedsApproval { reason: String },
     /// Refused before anything was sent: by policy, lease or gate.
@@ -344,13 +349,22 @@ impl Operator {
             tokio::select! {
                 _ = &mut deadline => return Err(OperateError::NoReceipt(receipt_timeout)),
                 event = client.next_event() => match event? {
-                    Some(StageEvent::Receipt { seq, outcome, .. })
+                    Some(StageEvent::Receipt {
+                        seq,
+                        outcome,
+                        finished,
+                        ..
+                    })
                         if seq == sealed.sequence() || seq == 0 =>
                     {
                         // Sequence 0 answers a line the compositor could not verify, and
                         // it only ever goes back to the connection that sent the line.
                         return Ok(Performed {
-                            outcome: ActOutcome::Receipt { sequence: seq, outcome },
+                            outcome: ActOutcome::Receipt {
+                                sequence: seq,
+                                outcome,
+                                finished,
+                            },
                             capture,
                             surface: Some(surface),
                             sent_at_ms: now.as_millis(),

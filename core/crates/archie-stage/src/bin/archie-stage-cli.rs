@@ -276,6 +276,7 @@ mod unix {
             ActOutcome::Receipt {
                 sequence: 0,
                 outcome,
+                ..
             } => {
                 println!("receipt: {outcome} (the compositor could not verify the command)");
                 ExitCode::from(4)

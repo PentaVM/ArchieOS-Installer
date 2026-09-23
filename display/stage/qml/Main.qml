@@ -16,6 +16,8 @@ WaylandCompositor {
     required property var stage
     required property string stageSocketName
     required property bool fullscreen
+    /// Which of the machine's screens the stage stands on.
+    required property int screenIndex
     required property int initialWidth
     required property int initialHeight
 
@@ -134,8 +136,14 @@ WaylandCompositor {
         sizeFollowsWindow: true
         window: Window {
             id: win
+            // The screen is chosen before the window is shown, so it opens where it belongs
+            // rather than opening on the first screen and moving.
+            screen: Qt.application.screens[compositor.screenIndex]
+                    ?? Qt.application.screens[0]
             width: compositor.initialWidth
             height: compositor.initialHeight
+            x: win.screen ? win.screen.virtualX : 0
+            y: win.screen ? win.screen.virtualY : 0
             visible: true
             visibility: compositor.fullscreen ? Window.FullScreen : Window.Windowed
             title: "Archie Stage"
