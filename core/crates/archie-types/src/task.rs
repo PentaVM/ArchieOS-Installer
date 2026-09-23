@@ -497,6 +497,7 @@ impl TaskGraph {
             }
         }
         None
+    }
 }
 
 /// Simplified column views for Kanban boards.
