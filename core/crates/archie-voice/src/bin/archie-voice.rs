@@ -10,7 +10,20 @@
 //!              [--stage-display <wayland display>] [--app-log <file>] [--steps 6]
 //!              [--ground-model <vision model> [--ground-endpoint <local NIM url>]]
 //!              [--model …] [--budget …] [--language …]
+//!
+//! archie-voice converse --grade public
+//!              --asr-model <nemotron-3.5-asr .gguf> --tts-model <magpie .gguf>
+//!              --codec-model <nanocodec .gguf> --tts-tokenizer <dir> [--voice <name>]
+//!              [--listen-language es-US] [--tts-language es-US] [--always] [--headphones]
+//!              [--wav-in <file>] [--wav-out <file>] [the stage flags of do]
 //! ```
+//!
+//! `converse` is the whole thing, spoken: the microphone through Nemotron 3.5 ASR, the
+//! floor deciding whether to answer, Nemotron on Nebius answering and proposing, the hands
+//! acting when a stage is given, and Magpie saying the answer. Built with
+//! `--features speech`, where NeMo-Speech.cpp and PulseAudio are installed. `--wav-in` and
+//! `--wav-out` put recordings where the microphone and the speaker were, which is how the
+//! loop is tested without a room.
 //!
 //! `ask` is the cognitive half on its own: what was heard goes in, and out come the pieces
 //! a voice would say and the tools the model proposes, each stamped with how long after the
@@ -74,25 +87,41 @@ struct Asking {
 }
 
 fn run(mut args: Vec<String>, offset: Option<time::UtcOffset>) -> Result<ExitCode, String> {
-    const USAGE: &str = "usage: archie-voice ask|do \"<what was said>\" --grade public";
+    const USAGE: &str =
+        "usage: archie-voice ask|do \"<what was said>\" --grade public | converse --grade public …";
     let command = match args.first().map(String::as_str) {
-        Some("ask") | Some("do") => args.remove(0),
+        Some("ask") | Some("do") | Some("converse") => args.remove(0),
         _ => return Err(USAGE.into()),
     };
+    if command == "converse" {
+        // Its own flags first; the stage is optional, since a conversation need not act.
+        let speech = speech_flags(&mut args)?;
+        let stage = if args.iter().any(|arg| arg == "--socket") {
+            Some(stage_flags(&mut args)?)
+        } else {
+            None
+        };
+        let asking = asking(args, offset, false)?;
+        return converse(asking, speech, stage);
+    }
     // `do` takes its stage flags out before the shared ones are read.
     let stage = if command == "do" {
         Some(stage_flags(&mut args)?)
     } else {
         None
     };
-    let asking = asking(args, offset)?;
+    let asking = asking(args, offset, true)?;
     match stage {
         None => ask(asking),
         Some(flags) => act(asking, flags),
     }
 }
 
-fn asking(mut args: Vec<String>, offset: Option<time::UtcOffset>) -> Result<Asking, String> {
+fn asking(
+    mut args: Vec<String>,
+    offset: Option<time::UtcOffset>,
+    words: bool,
+) -> Result<Asking, String> {
     let model = take(&mut args, "--model").unwrap_or_else(|| "nvidia/Nemotron-3_5-Lightning".into());
     let language = take(&mut args, "--language").unwrap_or_else(|| "es-CL".into());
     let budget = match take(&mut args, "--budget").as_deref() {
@@ -110,10 +139,17 @@ fn asking(mut args: Vec<String>, offset: Option<time::UtcOffset>) -> Result<Aski
                 .into())
         }
     };
-    if args.len() != 1 {
-        return Err(format!("say one thing, in quotes; got {args:?}"));
-    }
-    let heard = args.remove(0);
+    let heard = if words {
+        if args.len() != 1 {
+            return Err(format!("say one thing, in quotes; got {args:?}"));
+        }
+        args.remove(0)
+    } else {
+        if !args.is_empty() {
+            return Err(format!("unexpected arguments: {args:?}"));
+        }
+        String::new()
+    };
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -262,13 +298,21 @@ fn act(_asking: Asking, _flags: StageFlags) -> Result<ExitCode, String> {
 }
 
 #[cfg(unix)]
-fn act(mut asking: Asking, flags: StageFlags) -> Result<ExitCode, String> {
+type StageHands =
+    archie_voice::Hands<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>;
+
+/// Hands on the stage the flags name, and the policy they act under.
+#[cfg(unix)]
+fn connect(
+    asking: &Asking,
+    flags: &StageFlags,
+) -> Result<(StageHands, archie_stage::StagePolicy), String> {
     use archie_iris::LocateAnythingClient;
     use archie_policy::{PolicyEngine, Principal};
     use archie_sight::Sight;
     use archie_stage::{learn, Operator, StageClient, StagePolicy, StageWorld};
     use archie_types::AgentId;
-    use archie_voice::{decide, Grounding, Hands, Launch};
+    use archie_voice::{Grounding, Hands, Launch};
     use std::path::Path;
     use std::sync::Arc;
     use tokio::net::UnixStream;
@@ -326,23 +370,39 @@ fn act(mut asking: Asking, flags: StageFlags) -> Result<ExitCode, String> {
             locality,
         });
     }
+    Ok((hands, policy))
+}
 
-    let openable: Vec<String> = policy
+/// What the model is told about this moment: the clock, what is in front, what it may open.
+fn context_for(clock: &str, front: Option<String>, openable: &[String]) -> String {
+    let mut context = clock.to_string();
+    context.push_str(&match front {
+        Some(app) => format!("\nAplicación al frente: {app}."),
+        None => "\nNo hay ninguna aplicación al frente.".to_string(),
+    });
+    if !openable.is_empty() {
+        context.push_str(&format!("\nAplicaciones que puedes abrir: {}.", openable.join(", ")));
+    }
+    context
+}
+
+#[cfg(unix)]
+fn openable(policy: &archie_stage::StagePolicy) -> Vec<String> {
+    policy
         .apps()
         .filter(|app| !app.launch.is_empty())
         .map(|app| app.display_name.clone())
-        .collect();
-    let context = |front: Option<String>| {
-        let mut context = asking.clock.clone();
-        context.push_str(&match front {
-            Some(app) => format!("\nAplicación al frente: {app}."),
-            None => "\nNo hay ninguna aplicación al frente.".to_string(),
-        });
-        if !openable.is_empty() {
-            context.push_str(&format!("\nAplicaciones que puedes abrir: {}.", openable.join(", ")));
-        }
-        context
-    };
+        .collect()
+}
+
+#[cfg(unix)]
+fn act(mut asking: Asking, flags: StageFlags) -> Result<ExitCode, String> {
+    use archie_voice::decide;
+
+    let (mut hands, policy) = connect(&asking, &flags)?;
+    let openable = openable(&policy);
+    let clock = asking.clock.clone();
+    let context = |front: Option<String>| context_for(&clock, front, &openable);
 
     println!("heard: {}", asking.heard);
     let started = Instant::now();
@@ -411,7 +471,7 @@ fn act(mut asking: Asking, flags: StageFlags) -> Result<ExitCode, String> {
         asking.cognitive.set_context(context(hands.front()));
         asking
             .cognitive
-            .follow_up(format!("turn-1.{number}"), &results, asking.budget)
+            .follow_up("turn-1", &results, asking.budget)
             .map_err(|error| error.to_string())?;
     }
     println!(
@@ -419,6 +479,248 @@ fn act(mut asking: Asking, flags: StageFlags) -> Result<ExitCode, String> {
         flags.steps
     );
     Ok(ExitCode::from(5))
+}
+
+fn flag(args: &mut Vec<String>, name: &str) -> bool {
+    match args.iter().position(|arg| arg == name) {
+        Some(at) => {
+            args.remove(at);
+            true
+        }
+        None => false,
+    }
+}
+
+/// Where the ears and the voice come from, and how the room is set up.
+#[allow(dead_code)]
+struct SpeechFlags {
+    asr_model: String,
+    tts_model: String,
+    codec_model: String,
+    tts_tokenizer: String,
+    voice: Option<String>,
+    tts_language: String,
+    listen_language: String,
+    always: bool,
+    headphones: bool,
+    wav_in: Option<String>,
+    wav_out: Option<String>,
+    threads: i32,
+    end_after_ms: u64,
+    lookahead: i32,
+    name_boost: f32,
+}
+
+fn speech_flags(args: &mut Vec<String>) -> Result<SpeechFlags, String> {
+    Ok(SpeechFlags {
+        asr_model: take(args, "--asr-model").ok_or("converse needs --asr-model")?,
+        tts_model: take(args, "--tts-model").ok_or("converse needs --tts-model")?,
+        codec_model: take(args, "--codec-model").ok_or("converse needs --codec-model")?,
+        tts_tokenizer: take(args, "--tts-tokenizer").ok_or("converse needs --tts-tokenizer")?,
+        voice: take(args, "--voice"),
+        tts_language: take(args, "--tts-language").unwrap_or_else(|| "es-US".into()),
+        listen_language: take(args, "--listen-language").unwrap_or_else(|| "es-US".into()),
+        always: flag(args, "--always"),
+        headphones: flag(args, "--headphones"),
+        wav_in: take(args, "--wav-in"),
+        wav_out: take(args, "--wav-out"),
+        threads: take(args, "--threads")
+            .map(|n| n.parse::<i32>().map_err(|_| "--threads is a number"))
+            .transpose()?
+            .unwrap_or(0),
+        end_after_ms: take(args, "--end-after-ms")
+            .map(|n| n.parse::<u64>().map_err(|_| "--end-after-ms is a number"))
+            .transpose()?
+            .unwrap_or(800),
+        // Thirteen 80 ms frames: the least lookahead that kept up with speech on a
+        // Ryzen 5 4500U. A faster machine can answer sooner with less.
+        lookahead: take(args, "--asr-lookahead")
+            .map(|n| n.parse::<i32>().map_err(|_| "--asr-lookahead is a number of frames"))
+            .transpose()?
+            .unwrap_or(13),
+        name_boost: take(args, "--name-boost")
+            .map(|n| n.parse::<f32>().map_err(|_| "--name-boost is a number"))
+            .transpose()?
+            .unwrap_or(5.0),
+    })
+}
+
+#[cfg(not(all(unix, feature = "speech")))]
+fn converse(
+    _asking: Asking,
+    _speech: SpeechFlags,
+    _stage: Option<StageFlags>,
+) -> Result<ExitCode, String> {
+    Err("this build has no ears or voice: build archie-voice with --features speech, \
+         where NeMo-Speech.cpp and PulseAudio are installed"
+        .into())
+}
+
+/// Listens, answers out loud, and acts — until a recording runs out or the process is
+/// stopped.
+#[cfg(all(unix, feature = "speech"))]
+fn converse(
+    asking: Asking,
+    speech: SpeechFlags,
+    stage: Option<StageFlags>,
+) -> Result<ExitCode, String> {
+    use archie_speech::{
+        FloorPolicy, SessionPlan, SpeechCapabilities, SpeechSession, SpeechToolIntentCandidate,
+    };
+    use archie_voice::audio::{Microphone, Speaker};
+    use archie_voice::conversation::{self, Hearing, Moment, Saying, Setup};
+    use archie_voice::native::{Ears, Voice, VoiceFiles};
+    use std::cell::RefCell;
+    use std::path::Path;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+
+    let steps = stage.as_ref().map_or(6, |flags| flags.steps);
+    let stage = match &stage {
+        Some(flags) => Some(connect(&asking, flags)?),
+        None => None,
+    };
+    let openable = stage.as_ref().map(|(_, policy)| openable(policy)).unwrap_or_default();
+
+    let at = Instant::now();
+    let ears =
+        Ears::load(Path::new(&speech.asr_model), Some(speech.lookahead)).map_err(|e| e.to_string())?;
+    println!(
+        "ears ready in {} ms (NeMo-Speech.cpp {})",
+        at.elapsed().as_millis(),
+        archie_voice::native::runtime_version()
+    );
+    let at = Instant::now();
+    let voice = Voice::load(
+        &VoiceFiles {
+            magpie: Path::new(&speech.tts_model),
+            codec: Path::new(&speech.codec_model),
+            tokenizer_dir: Path::new(&speech.tts_tokenizer),
+        },
+        &speech.tts_language,
+        speech.voice.as_deref(),
+        speech.threads,
+    )
+    .map_err(|e| e.to_string())?;
+    let rate = voice.sample_rate();
+    println!(
+        "voice ready in {} ms, {rate} Hz; voices: {}",
+        at.elapsed().as_millis(),
+        voice.voices().join(", ")
+    );
+
+    let hearing = match &speech.wav_in {
+        Some(path) => Hearing::recording(Path::new(path), Duration::from_secs(30))?,
+        None => Hearing::Microphone(Microphone::open("Archie").map_err(|e| e.to_string())?),
+    };
+    let saying = match &speech.wav_out {
+        Some(path) => Saying::Recording {
+            path: path.into(),
+            samples: Vec::new(),
+            rate,
+        },
+        None => Saying::Speaker(Speaker::open("Archie", rate).map_err(|e| e.to_string())?),
+    };
+
+    let languages = vec!["es".to_string(), "en".to_string()];
+    let plan = SessionPlan {
+        language: asking.language.clone(),
+        listener: SpeechCapabilities {
+            partial_transcript: true,
+            languages: languages.clone(),
+            input_sample_rates: vec![archie_voice::audio::CAPTURE_RATE],
+            ..SpeechCapabilities::default()
+        },
+        voice: SpeechCapabilities {
+            accepts_external_response_text: true,
+            renders_external_response_verbatim: true,
+            languages,
+            output_sample_rates: vec![rate],
+            ..SpeechCapabilities::default()
+        },
+    };
+    let Asking {
+        runtime,
+        cognitive,
+        clock,
+        ..
+    } = asking;
+    let mut session =
+        SpeechSession::new(plan, FloorPolicy::default(), cognitive).map_err(|e| e.to_string())?;
+
+    let stage = RefCell::new(stage);
+    let mut act = |intent: &SpeechToolIntentCandidate| -> String {
+        let mut stage = stage.borrow_mut();
+        let Some((hands, policy)) = stage.as_mut() else {
+            return "No se hizo: en esta conversación no tengo el escritorio conectado.".into();
+        };
+        match archie_voice::decide(intent, policy, hands.front().as_deref()) {
+            Ok(plan) => runtime.block_on(hands.perform(&plan)).report,
+            Err(refusal) => format!("No se hizo: {}", refusal.spoken),
+        }
+    };
+    let mut context = || {
+        let front = stage
+            .borrow()
+            .as_ref()
+            .and_then(|(hands, _)| hands.front());
+        context_for(&clock, front, &openable)
+    };
+    let started = Instant::now();
+    let mut report = |moment: Moment| {
+        let at = started.elapsed().as_millis();
+        match moment {
+            Moment::Heard { text, .. } => println!("{at:>7} ms  oí       {text}"),
+            Moment::Floor {
+                action,
+                reason,
+                evidence,
+            } => println!("{at:>7} ms  piso     {action}: {reason}  [{}]", evidence.join("; ")),
+            Moment::Said {
+                text,
+                first_audio_ms,
+                audio_s,
+                stopped,
+            } => println!(
+                "{at:>7} ms  dije     {text}  (primer audio {first_audio_ms:.0} ms, {audio_s:.1} s{})",
+                if stopped { ", interrumpido" } else { "" }
+            ),
+            Moment::Proposed { tool, arguments } => {
+                println!("{at:>7} ms  propone  {tool}({arguments})")
+            }
+            Moment::Did { report } => println!("{at:>7} ms  resultado {report}"),
+            Moment::Interrupted => println!("{at:>7} ms  me interrumpieron: me callo"),
+            Moment::Alert(message) => println!("{at:>7} ms  alerta   {message}"),
+        }
+    };
+    let setup = Setup {
+        listen_language: speech.listen_language.clone(),
+        always: speech.always,
+        headphones: speech.headphones,
+        end_after: Duration::from_millis(speech.end_after_ms),
+        steps,
+        phrases: vec!["Archie".into()],
+        phrase_boost: speech.name_boost,
+    };
+    println!(
+        "escuchando ({}{}){}",
+        speech.listen_language,
+        if speech.always { ", respondo a todo" } else { ", di «Archie» para hablarme" },
+        if speech.headphones { ", con audífonos: puedes interrumpirme" } else { "" }
+    );
+    conversation::converse(
+        &setup,
+        &ears,
+        voice,
+        hearing,
+        saying,
+        &mut session,
+        &mut act,
+        &mut context,
+        Arc::new(AtomicBool::new(false)),
+        &mut report,
+    )?;
+    Ok(ExitCode::SUCCESS)
 }
 
 #[cfg(unix)]

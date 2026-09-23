@@ -109,7 +109,9 @@ impl TurnSource for NebiusSource {
 /// How the model is asked to speak, before any particular turn.
 pub const PERSONA_ES: &str = "Eres Archie, el asistente de voz de ArchieOS. Hablas español \
 de Chile, natural y cercano, tuteando: nunca uses voseo como querés o tenés. Todo lo que escribes se dice en voz alta: frases cortas, sin \
-markdown, sin listas, sin emojis, sin símbolos que no se pronuncian. No inventes datos que no \
+markdown, sin listas, sin emojis, sin símbolos que no se pronuncian. Escribe los números, las \
+horas y las fechas con palabras, como se dicen: son las tres y veinticinco, el veintitrés de \
+septiembre, dos mil veintiséis. No inventes datos que no \
 tienes, como la hora, la fecha o lo que hay en la pantalla: si no están en el contexto, dilo. \
 Cuando la persona pide hacer algo en el computador, usa las herramientas en vez de explicar \
 cómo se haría.";
@@ -149,6 +151,8 @@ pub struct NemotronCognitive<S: TurnSource> {
     chain: Vec<ToolChatMessage>,
     /// Tools the last finished step asked for, waiting for their results.
     awaiting: Vec<(String, ToolCall)>,
+    /// The last step to finish: its turn, and where its numbering stopped.
+    ended: Option<(String, u32, u32)>,
 }
 
 impl<S: TurnSource> NemotronCognitive<S> {
@@ -172,6 +176,7 @@ impl<S: TurnSource> NemotronCognitive<S> {
             last_request: None,
             chain: Vec::new(),
             awaiting: Vec::new(),
+            ended: None,
         }
     }
 
@@ -217,7 +222,16 @@ impl<S: TurnSource> NemotronCognitive<S> {
             .map_err(|reason| CognitiveError::Backend(reason.to_string()))?;
         let stream = self.source.start(outgoing.clone());
         self.last_request = Some(outgoing);
-        self.turn = Some(Turn::new(turn_id, stream, budget));
+        let mut turn = Turn::new(turn_id, stream, budget);
+        // The same turn carried further keeps counting where it stopped, so what it says
+        // next continues the record of that turn instead of restarting it.
+        if let Some((id, next_sequence, tool_calls)) = &self.ended {
+            if *id == turn.id {
+                turn.next_sequence = *next_sequence;
+                turn.tool_calls = *tool_calls;
+            }
+        }
+        self.turn = Some(turn);
         Ok(())
     }
 
@@ -379,6 +393,7 @@ impl<S: TurnSource> CognitiveModelAdapter for NemotronCognitive<S> {
                         tool_calls: done.calls.iter().map(|(_, call)| call.clone()).collect(),
                     });
                 }
+                self.ended = Some((done.id.clone(), done.next_sequence, done.tool_calls));
                 self.awaiting = done.calls;
             }
         }
@@ -648,6 +663,36 @@ mod tests {
         assert!(matches!(&sent.messages[3], ToolChatMessage::User(text) if text == "qué hora es"));
         assert_eq!(sent.tools.len(), crate::tools::os_control().len());
         assert_eq!(sent.max_tokens, 96, "one sentence does not need four hundred tokens");
+    }
+
+    #[test]
+    fn a_turn_carried_further_keeps_counting_where_it_stopped() {
+        let mut cognitive = adapter(TOOL);
+        cognitive
+            .begin(ask("t11", "abre firefox", SpeechBudget::Full))
+            .unwrap();
+        drain(&mut cognitive);
+        cognitive
+            .follow_up("t11", &[("t11#0".into(), "No se hizo.".into())], SpeechBudget::Full)
+            .unwrap();
+        let second: Vec<String> = drain(&mut cognitive)
+            .into_iter()
+            .filter_map(|event| match event {
+                CognitiveEvent::ToolIntent(intent) => Some(intent.correlation_id),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(second, vec!["t11#1".to_string()], "not a second t11#0");
+
+        cognitive.source.bytes = TEXT;
+        cognitive
+            .follow_up("t11", &[], SpeechBudget::Full)
+            .unwrap();
+        let first_said = drain(&mut cognitive).into_iter().find_map(|event| match event {
+            CognitiveEvent::Segment(segment) => Some(segment.sequence),
+            _ => None,
+        });
+        assert_eq!(first_said, Some(0), "nothing had been said, so speech starts at 0");
     }
 
     #[test]
