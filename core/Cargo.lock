@@ -547,9 +547,15 @@ dependencies = [
 name = "archie-voice"
 version = "0.1.0"
 dependencies = [
+ "archie-a11y",
+ "archie-iris",
  "archie-model-runtime",
+ "archie-policy",
+ "archie-sight",
  "archie-speech",
+ "archie-stage",
  "archie-types",
+ "hex",
  "serde_json",
  "time",
  "tokio",
