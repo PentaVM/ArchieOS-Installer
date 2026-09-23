@@ -93,6 +93,7 @@ ApplicationWindow {
     property var providers: world.providers || []
     property var provider: providers.length ? providers[0] : ({ condition: "unavailable", authority: "no provider" })
     property var kernel: archieBridge.kernel || ({})
+    property var orb: archieBridge.orb || ({})
     property var pressure: kernel.pressure || null
     property var zones: kernel.zones || []
     // "unavailable" and "idle" must never render the same. One says the machine is quiet,
@@ -692,6 +693,61 @@ ApplicationWindow {
                             }
                         }
                     }
+
+                    Node {
+                        id: orbRoot
+                        visible: root.scene === "orb"
+                        scale: Qt.vector3d(8, 8, 8)
+                        Model {
+                            geometry: MeshGeometry {
+                                vertices: archieBridge.orbField.packedVertices || ""
+                                triangleIndices: archieBridge.orbField.packedIndices || ""
+                            }
+                            materials: PrincipledMaterial {
+                                baseColor: "#164354"
+                                emissiveFactor: Qt.vector3d(0.025, 0.09, 0.12)
+                                opacity: 0.34
+                                cullMode: Material.NoCulling
+                                lighting: PrincipledMaterial.NoLighting
+                            }
+                        }
+                        Repeater3D {
+                            model: archieBridge.orbEdges
+                            delegate: Model {
+                                required property var modelData
+                                source: "#Cylinder"
+                                position: modelData.position
+                                rotation: modelData.rotation
+                                scale: Qt.vector3d(0.004, modelData.length / 200.0, 0.004)
+                                materials: PrincipledMaterial {
+                                    baseColor: modelData.color
+                                    opacity: modelData.opacity
+                                    lighting: PrincipledMaterial.NoLighting
+                                }
+                            }
+                        }
+                        Repeater3D {
+                            model: archieBridge.orbNodes
+                            delegate: Model {
+                                required property var modelData
+                                property string nodeId: modelData.id
+                                property var payload: modelData
+                                source: "#Sphere"
+                                pickable: true
+                                position: modelData.position
+                                readonly property real pulse: modelData.radius
+                                    + modelData.focus * 0.035
+                                    + modelData.voice * Number(root.orb.state ? root.orb.state.audio_envelope : 0) * 0.045
+                                scale: Qt.vector3d(pulse, pulse, pulse)
+                                materials: PrincipledMaterial {
+                                    baseColor: root.selection && root.selection.id === modelData.id ? "#ffffff" : modelData.color
+                                    emissiveFactor: Qt.vector3d(0.32 + modelData.focus * 0.5,
+                                                                0.42 + modelData.voice * 0.5, 0.56)
+                                    roughness: 0.24
+                                }
+                            }
+                        }
+                    }
                 }
 
                 SequentialAnimation {
@@ -782,6 +838,11 @@ ApplicationWindow {
                             selected: root.scene === "core"
                             onClicked: { root.scene = "core"; root.selection = null; archieBridge.requestMode("cerebra") }
                         }
+                        SceneButton {
+                            label: "ORB"
+                            selected: root.scene === "orb"
+                            onClicked: { root.scene = "orb"; root.selection = null; archieBridge.requestMode("cerebra") }
+                        }
                     }
                 }
 
@@ -798,6 +859,11 @@ ApplicationWindow {
                             }
                             // The model's count, not the drawn one. They differ when the
                             // tier aggregates, and the line beneath says by how much.
+                            if (root.scene === "orb") {
+                                var state = root.orb.state || ({})
+                                var activity = state.listen > 0.05 ? "LISTEN" : state.think > 0.05 ? "THINK" : state.speak > 0.05 ? "SPEAK" : "IDLE"
+                                return "TFOG ORB · " + (root.orb.entity_count || 0) + " ENTITIES · " + (root.orb.profile || "waiting") + " · " + activity
+                            }
                             var n = archieBridge.frame.totalNodes
                             return "ARCHIE CORE · DECLARED DEPENDENCIES · " + n
                                    + (n === 1 ? " REAL NODE" : " REAL NODES")
@@ -807,7 +873,9 @@ ApplicationWindow {
                     Text {
                         text: root.scene === "world"
                               ? "marker size = reported magnitude · source = " + (root.provider.authority || "none")
-                              : "position = dependency depth · colour = severity · opacity = freshness"
+                              : root.scene === "orb"
+                                ? "semantic field · focus, speech, selection and Stage signals · read only"
+                                : "position = dependency depth · colour = severity · opacity = freshness"
                         color: root.dim; font.family: "monospace"; font.pixelSize: 9
                     }
                     // What the frame says about itself. A scene that is showing less than

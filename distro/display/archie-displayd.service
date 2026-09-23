@@ -10,10 +10,12 @@ After=archied.service archie-worldd.service
 [Service]
 Type=simple
 User=archie-display
-Group=archie-display
+Group=archie
 # The only membership that matters: it lets this process open archied's control socket,
 # which is group-gated to `archie`. The renderer account has no such membership.
 SupplementaryGroups=archie
+RuntimeDirectory=archie-display:archie
+RuntimeDirectoryMode=0770
 ExecStart=/usr/bin/archie-displayd --bind 127.0.0.1:7666
 Restart=on-failure
 RestartSec=2s

@@ -26,10 +26,11 @@ use crate::audio::{loudness, AudioError, Microphone, Speaker, VoiceActivity};
 use crate::listen::{after_utterance, over_archie, Utterance};
 use crate::native::{Ears, Voice};
 use crate::nemotron::{NemotronCognitive, TurnSource};
+use archie_orb::{publish, semantic_features, signal, SignalKind};
 use archie_speech::{
-    FloorAction, SessionEvent, SpeechBudget, SpeechSession,
-    SpeechToolIntentCandidate,
+    FloorAction, SessionEvent, SpeechBudget, SpeechSession, SpeechToolIntentCandidate,
 };
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
@@ -68,9 +69,10 @@ impl Hearing {
     /// The next 20 ms of sound and its rate, or `None` when a recording has run out.
     fn frame(&mut self) -> Result<Option<(Vec<f32>, u32)>, AudioError> {
         match self {
-            Self::Microphone(microphone) => {
-                Ok(Some((microphone.frame()?.to_vec(), crate::audio::CAPTURE_RATE)))
-            }
+            Self::Microphone(microphone) => Ok(Some((
+                microphone.frame()?.to_vec(),
+                crate::audio::CAPTURE_RATE,
+            ))),
             Self::Recording {
                 samples,
                 rate,
@@ -102,7 +104,11 @@ impl Hearing {
 /// Where the voice goes.
 pub enum Saying {
     Speaker(Speaker),
-    Recording { path: PathBuf, samples: Vec<i16>, rate: u32 },
+    Recording {
+        path: PathBuf,
+        samples: Vec<i16>,
+        rate: u32,
+    },
 }
 
 impl Saying {
@@ -121,7 +127,11 @@ impl Saying {
             Self::Speaker(speaker) => {
                 let _ = speaker.drain();
             }
-            Self::Recording { path, samples, rate } => {
+            Self::Recording {
+                path,
+                samples,
+                rate,
+            } => {
                 let _ = write_wav(path, samples, *rate);
             }
         }
@@ -169,18 +179,40 @@ impl Default for Setup {
 /// What the loop reports as it goes: printed by the command line, kept by a test.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Moment {
-    Heard { text: String, at_ms: u128 },
-    Floor { action: String, reason: String, evidence: Vec<String> },
-    Said { text: String, first_audio_ms: f64, audio_s: f64, stopped: bool },
-    Proposed { tool: String, arguments: String },
-    Did { report: String },
+    Heard {
+        text: String,
+        at_ms: u128,
+    },
+    Floor {
+        action: String,
+        reason: String,
+        evidence: Vec<String>,
+    },
+    Said {
+        text: String,
+        first_audio_ms: f64,
+        audio_s: f64,
+        stopped: bool,
+    },
+    Proposed {
+        tool: String,
+        arguments: String,
+    },
+    Did {
+        report: String,
+    },
     Interrupted,
     Alert(String),
 }
 
 enum ToVoice {
     /// Said only while `generation` is still current.
-    Say { generation: u64, sequence: u32, text: String },
+    Say {
+        generation: u64,
+        sequence: u32,
+        text: String,
+        semantic_features: Vec<f32>,
+    },
     /// Everything queued so far is dropped.
     Hush,
     Finish,
@@ -232,6 +264,10 @@ pub fn converse<S: TurnSource>(
     let mut listening = ears
         .listen(&setup.listen_language, &phrases, setup.phrase_boost)
         .map_err(|e| e.to_string())?;
+    publish(&signal(SignalKind::Listen {
+        active: true,
+        audio_envelope: 0.0,
+    }));
     let mut activity = VoiceActivity::default();
     let mut partial = String::new();
     let mut audio_ms: u64 = 0;
@@ -255,7 +291,17 @@ pub fn converse<S: TurnSource>(
                 }
                 std::thread::sleep(Duration::from_millis(20));
                 pump_voice(&from_voice, session, &mut speaking, &mut last_spoke, report)?;
-                advance(session, &mut turn, setup, act, context, &to_voice, &generation, &mut speaking, report)?;
+                advance(
+                    session,
+                    &mut turn,
+                    setup,
+                    act,
+                    context,
+                    &to_voice,
+                    &generation,
+                    &mut speaking,
+                    report,
+                )?;
                 continue;
             };
             audio_ms += (frame.len() as u64 * 1000) / rate.max(1) as u64;
@@ -268,6 +314,11 @@ pub fn converse<S: TurnSource>(
                     generation.fetch_add(1, Ordering::SeqCst);
                     let _ = to_voice.send(ToVoice::Hush);
                     report(Moment::Interrupted);
+                    publish(&signal(SignalKind::Think {
+                        active: false,
+                        trace_id: format!("voz-{turn_number}"),
+                        working_set: BTreeMap::new(),
+                    }));
                     turn = None;
                 }
             }
@@ -327,13 +378,20 @@ pub fn converse<S: TurnSource>(
                     session.cognitive_mut().set_context(context());
                     turn_number += 1;
                     let id = format!("voz-{turn_number}");
-                    let decision = session.heard(&id, &said, &state).map_err(|e| e.to_string())?;
+                    let decision = session
+                        .heard(&id, &said, &state)
+                        .map_err(|e| e.to_string())?;
                     report(Moment::Floor {
                         action: format!("{:?}", decision.action),
                         reason: decision.reason.clone(),
                         evidence: state.evidence.clone(),
                     });
                     if matches!(decision.budget, SpeechBudget::Sentence | SpeechBudget::Full) {
+                        publish(&signal(SignalKind::Think {
+                            active: true,
+                            trace_id: id.clone(),
+                            working_set: BTreeMap::new(),
+                        }));
                         turn = Some(Answering {
                             id,
                             heard: said,
@@ -355,7 +413,17 @@ pub fn converse<S: TurnSource>(
             }
 
             pump_voice(&from_voice, session, &mut speaking, &mut last_spoke, report)?;
-            advance(session, &mut turn, setup, act, context, &to_voice, &generation, &mut speaking, report)?;
+            advance(
+                session,
+                &mut turn,
+                setup,
+                act,
+                context,
+                &to_voice,
+                &generation,
+                &mut speaking,
+                report,
+            )?;
 
             if !hearing.is_live() {
                 // A recording is read faster than real time; the voice thread still gets
@@ -368,6 +436,15 @@ pub fn converse<S: TurnSource>(
 
     let _ = to_voice.send(ToVoice::Finish);
     let _ = voice_thread.join();
+    publish(&signal(SignalKind::Listen {
+        active: false,
+        audio_envelope: 0.0,
+    }));
+    publish(&signal(SignalKind::Think {
+        active: false,
+        trace_id: format!("voz-{turn_number}"),
+        working_set: BTreeMap::new(),
+    }));
     result
 }
 
@@ -401,10 +478,12 @@ fn advance<S: TurnSource>(
         match event {
             SessionEvent::Speak(segment) => {
                 *speaking += 1;
+                let features = semantic_features(&segment.text);
                 let _ = to_voice.send(ToVoice::Say {
                     generation: generation.load(Ordering::SeqCst),
                     sequence: segment.sequence,
                     text: segment.text,
+                    semantic_features: features,
                 });
             }
             SessionEvent::ToolProposal(intent) => {
@@ -416,7 +495,9 @@ fn advance<S: TurnSource>(
                 report(Moment::Did {
                     report: outcome.clone(),
                 });
-                answering.results.push((intent.correlation_id.clone(), outcome));
+                answering
+                    .results
+                    .push((intent.correlation_id.clone(), outcome));
             }
             SessionEvent::Withheld { .. } => {}
             SessionEvent::Alert(message) => report(Moment::Alert(message)),
@@ -438,6 +519,11 @@ fn advance<S: TurnSource>(
                     let heard_from_archie = session.written_text();
                     let heard = answering.heard.clone();
                     session.cognitive_mut().remember(&heard, &heard_from_archie);
+                    archie_orb::publish(&archie_orb::signal(SignalKind::Think {
+                        active: false,
+                        trace_id: answering.id.clone(),
+                        working_set: BTreeMap::new(),
+                    }));
                     *turn = None;
                     return Ok(());
                 }
@@ -503,6 +589,7 @@ fn speak(
                 generation,
                 sequence,
                 text,
+                semantic_features,
             } => {
                 if current.load(Ordering::SeqCst) != generation {
                     let _ = outbox.send(FromVoice::Spoke {
@@ -515,6 +602,9 @@ fn speak(
                     continue;
                 }
                 let mut failed = None;
+                let turn_id = format!("voz-{generation}-{sequence}");
+                let mut last_signal = Instant::now() - Duration::from_secs(1);
+                let mut published_active = false;
                 let result = voice.say(&text, |pcm| {
                     if current.load(Ordering::SeqCst) != generation {
                         return false;
@@ -523,8 +613,39 @@ fn speak(
                         failed = Some(error.to_string());
                         return false;
                     }
+                    if !published_active || last_signal.elapsed() >= Duration::from_millis(100) {
+                        let envelope = if pcm.is_empty() {
+                            0.0
+                        } else {
+                            (pcm.iter()
+                                .map(|sample| {
+                                    let value = *sample as f32 / i16::MAX as f32;
+                                    value * value
+                                })
+                                .sum::<f32>()
+                                / pcm.len() as f32)
+                                .sqrt()
+                                .clamp(0.0, 1.0)
+                        };
+                        publish(&signal(SignalKind::Speak {
+                            active: true,
+                            turn_id: turn_id.clone(),
+                            semantic_features: semantic_features.clone(),
+                            audio_envelope: envelope,
+                        }));
+                        last_signal = Instant::now();
+                        published_active = true;
+                    }
                     true
                 });
+                if published_active {
+                    publish(&signal(SignalKind::Speak {
+                        active: false,
+                        turn_id,
+                        semantic_features: Vec::new(),
+                        audio_envelope: 0.0,
+                    }));
+                }
                 match (result, failed) {
                     (_, Some(error)) => {
                         let _ = outbox.send(FromVoice::Failed(error));
@@ -582,7 +703,8 @@ pub fn read_wav(path: &std::path::Path) -> Result<(Vec<f32>, u32), String> {
     let mut at = 12;
     while at + 8 <= bytes.len() {
         let id = &bytes[at..at + 4];
-        let size = u32::from_le_bytes([bytes[at + 4], bytes[at + 5], bytes[at + 6], bytes[at + 7]]) as usize;
+        let size = u32::from_le_bytes([bytes[at + 4], bytes[at + 5], bytes[at + 6], bytes[at + 7]])
+            as usize;
         let body = &bytes[at + 8..(at + 8 + size).min(bytes.len())];
         if id == b"fmt " && body.len() >= 16 {
             channels = u16::from_le_bytes([body[2], body[3]]);
@@ -637,7 +759,10 @@ mod tests {
 
     #[test]
     fn a_run_of_punctuation_through_silence_becomes_one_mark() {
-        assert_eq!(tidy("Oye Archi, ¿qué hora es?.............."), "Oye Archi, ¿qué hora es?");
+        assert_eq!(
+            tidy("Oye Archi, ¿qué hora es?.............."),
+            "Oye Archi, ¿qué hora es?"
+        );
         assert_eq!(tidy("  hola.  "), "hola.");
     }
 

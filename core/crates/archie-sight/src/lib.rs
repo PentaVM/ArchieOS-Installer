@@ -58,13 +58,13 @@ use archie_iris::{
     SourceId,
 };
 use archie_model_runtime::{VisionImage, VisionMime};
+use archie_orb::{SignalKind, StageStatus};
 use archie_policy::{
     Action, CapabilityRequest, Constraints, PolicyEngine, Principal, Resource, Scope,
 };
 use archie_stage::{
     drain, wait_until, ActOutcome, ActRequest, DamageRect, LookOutcome, OperateError, Operator,
-    PointerButton, Region, Repainted, Snapshot, StageAction, StageClient, StageSurface,
-    StageWorld,
+    PointerButton, Region, Repainted, Snapshot, StageAction, StageClient, StageSurface, StageWorld,
 };
 use archie_types::{Locality, PrivacyGrade, Timestamp, TraceId};
 use archie_vault::{
@@ -232,7 +232,6 @@ impl Declares for archie_a11y::Accessibility {
     }
 }
 
-
 /// Something that can find controls in a picture of a window, such as the local model in
 /// `archie-reflex`.
 ///
@@ -253,8 +252,9 @@ impl Sees for archie_reflex::Deployed {
         self.detect(&tile, RECOGNISED_CONFIDENCE)
             .into_iter()
             .filter_map(|found| {
-                let (x, y, width, height) =
-                    found.control.in_window(tile.source_width, tile.source_height);
+                let (x, y, width, height) = found
+                    .control
+                    .in_window(tile.source_width, tile.source_height);
                 Rect::new(x.max(0), y.max(0), width, height).ok()
             })
             .collect()
@@ -446,6 +446,16 @@ const CONFIRM_MARGIN_PX: u32 = 8;
 /// two opposite corners are no saving over the window that holds them both.
 const CONFIRM_SHARE: u64 = 2;
 
+fn publish_followup(app_id: &str, surface: u32, pid: Option<u32>, status: StageStatus) {
+    archie_orb::publish(&archie_orb::signal(SignalKind::Stage {
+        operation_id: format!("followup:{surface}"),
+        app_id: app_id.to_string(),
+        surface,
+        pid: pid.filter(|pid| *pid != 0),
+        status,
+    }));
+}
+
 /// Where a control is expected to redraw itself when it reacts.
 fn watched(bbox: Rect) -> DamageRect {
     DamageRect {
@@ -510,20 +520,40 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> MotorExecutor for StageMotorEx
                 }
                 let at = Instant::now();
                 let (surface, watch) = (self.surface, self.watch);
-                let repainted =
-                    wait_until(self.client, self.world, self.repaint_timeout, |world| {
-                        world.repainted_since(mark, surface, &watch) == Repainted::Yes
-                    })
-                    .await?;
-                Ok((clicked, repainted, act_ms, at.elapsed().as_millis() as u64))
+                let repaint = wait_until(self.client, self.world, self.repaint_timeout, |world| {
+                    world.repainted_since(mark, surface, &watch) == Repainted::Yes
+                })
+                .await;
+                match repaint {
+                    Ok(repainted) => {
+                        Ok((clicked, repainted, act_ms, at.elapsed().as_millis() as u64))
+                    }
+                    Err(error) => Err(error),
+                }
             })
         })
         .map_err(|_| MotorError::Executor)?;
         self.act_ms = act_ms;
         self.verify_ms = verify_ms;
         if !clicked.executed() {
+            publish_followup(
+                &self.app_id,
+                self.surface,
+                self.world.surface(self.surface).map(|surface| surface.pid),
+                StageStatus::Error,
+            );
             return Err(MotorError::Executor);
         }
+        publish_followup(
+            &self.app_id,
+            self.surface,
+            self.world.surface(self.surface).map(|surface| surface.pid),
+            if repainted {
+                StageStatus::Verified
+            } else {
+                StageStatus::Error
+            },
+        );
         Ok(MotorOutcome {
             observed_scene_revision: if repainted {
                 action.scene_revision + 1
@@ -586,14 +616,12 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
         }
     }
 
-
     /// Uses a local model to see what there is to click in a window, which puts a
     /// grounding model's answer on a real control and finds a control that has moved.
     pub fn recognising(mut self, sees: Arc<dyn Sees>) -> Self {
         self.sees = Some(sees);
         self
     }
-
 
     /// The same control somewhere else: what the local model sees that is about the size
     /// of the box that was there, and still looks like what was there.
@@ -643,7 +671,6 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
         );
     }
 
-
     /// The same rule as `snapped_to`, for a session that has a capture in hand.
     fn snapped(&self, snapshot: &Snapshot, bbox: Rect) -> Rect {
         snapped_to(self.sees.as_ref(), snapshot, bbox)
@@ -657,11 +684,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
 
     /// Where the application says the target is, if it says anything unambiguous about it.
     /// Nothing is remembered from this: it is read again each time, so it cannot go stale.
-    async fn declared(
-        &self,
-        target: &Target,
-        surface: &StageSurface,
-    ) -> Option<Rect> {
+    async fn declared(&self, target: &Target, surface: &StageSurface) -> Option<Rect> {
         let declares = self.declares.as_ref()?;
         if surface.pid == 0 {
             return None;
@@ -671,6 +694,19 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
             .await
             .ok()?;
         let control = control_named(&controls, &target.description, target.kind)?;
+        let opaque = ring::digest::digest(&ring::digest::SHA256, control.path.as_bytes());
+        let control_id = opaque
+            .as_ref()
+            .iter()
+            .take(16)
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        archie_orb::publish(&archie_orb::signal(SignalKind::AccessibilitySelection {
+            app_id: surface.app_id.clone(),
+            surface: surface.surface,
+            pid: (surface.pid != 0).then_some(surface.pid),
+            control_id,
+        }));
         Some(control.bounds)
     }
 
@@ -692,7 +728,12 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
         drain(&mut self.client, &mut self.world).await?;
         Ok(self
             .operator
-            .act(&mut self.client, &mut self.world, request, self.receipt_timeout)
+            .act(
+                &mut self.client,
+                &mut self.world,
+                request,
+                self.receipt_timeout,
+            )
             .await?)
     }
 
@@ -803,8 +844,10 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
                 Some(taken) => taken.clone(),
                 None => {
                     let mark = self.world.damage_mark();
-                    let snapshot =
-                        Arc::new(self.look(&target.app_id, Some(surface.surface), None).await?);
+                    let snapshot = Arc::new(
+                        self.look(&target.app_id, Some(surface.surface), None)
+                            .await?,
+                    );
                     self.confirm_known(&snapshot, mark);
                     captured.insert(surface.surface, (snapshot.clone(), mark));
                     (snapshot, mark)
@@ -901,7 +944,12 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
             }
         }
         // A menu item with no menu open is a menu bar's own entry, in the window.
-        if in_a_menu { menu.or(window) } else { window.or(menu) }.cloned()
+        if in_a_menu {
+            menu.or(window)
+        } else {
+            window.or(menu)
+        }
+        .cloned()
     }
 
     /// The same, for a target that names a menu item: it waits a moment for the menu, since
@@ -1086,9 +1134,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
                     let mark = self.world.damage_mark();
                     let at = Instant::now();
                     let part = self.confirming_region(&surface, known.bbox);
-                    let snapshot = self
-                        .look(&target.app_id, Some(known.surface), part)
-                        .await?;
+                    let snapshot = self.look(&target.app_id, Some(known.surface), part).await?;
                     timings.look_ms = at.elapsed().as_millis() as u64;
                     self.confirm_known(&snapshot, mark);
                     match self.known.get(&key).cloned() {

@@ -18,6 +18,7 @@ speech = ["nemo", "pulse"]
 
 [dependencies]
 archie-types.workspace = true
+archie-orb.workspace = true
 archie-speech.workspace = true
 archie-model-runtime.workspace = true
 archie-stage.workspace = true

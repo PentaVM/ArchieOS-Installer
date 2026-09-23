@@ -10,6 +10,7 @@
 #include <QDateTime>
 #include <QFile>
 #include <QFutureWatcher>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkReply>
@@ -22,14 +23,17 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <vector>
 
 namespace {
 constexpr auto snapshotUrl = "http://127.0.0.1:7666/api/snapshot";
 constexpr auto worldUrl = "http://127.0.0.1:7666/api/world";
 constexpr auto kernelUrl = "http://127.0.0.1:7666/api/kernel";
+constexpr auto orbUrl = "http://127.0.0.1:7666/api/orb";
 constexpr auto geoFabricUrl = "http://127.0.0.1:7666/api/geofabric";
 constexpr int maximumProjectionBytes = 2 * 1024 * 1024;
+constexpr int maximumOrbProjectionBytes = 8 * 1024 * 1024;
 
 /// The model's own world, unaltered.
 ///
@@ -392,6 +396,10 @@ ArchieBridge::ArchieBridge(QObject *parent)
     m_kernelTimer.setTimerType(Qt::CoarseTimer);
     connect(&m_kernelTimer, &QTimer::timeout, this, &ArchieBridge::refreshKernel);
 
+    m_orbTimer.setInterval(250);
+    m_orbTimer.setTimerType(Qt::CoarseTimer);
+    connect(&m_orbTimer, &QTimer::timeout, this, &ArchieBridge::refreshOrb);
+
     m_clockTimer.setInterval(1000);
     m_clockTimer.setTimerType(Qt::CoarseTimer);
     connect(&m_clockTimer, &QTimer::timeout, this, &ArchieBridge::updateEarthAngle);
@@ -399,6 +407,7 @@ ArchieBridge::ArchieBridge(QObject *parent)
     m_snapshotTimer.start();
     m_worldTimer.start();
     m_kernelTimer.start();
+    m_orbTimer.start();
     m_clockTimer.start();
     m_frameTimer.start();
     updateEarthAngle();
@@ -409,6 +418,7 @@ ArchieBridge::ArchieBridge(QObject *parent)
     refreshSnapshot();
     refreshWorld();
     refreshKernel();
+    refreshOrb();
     // No timer for this one. The plan `/api/geofabric` reports is a constant of the
     // daemon's build — it cannot change while the process runs — so one fetch at
     // startup is the whole of the polling this needs, and a repeating timer would only
@@ -431,6 +441,14 @@ void ArchieBridge::refreshWorld()
 void ArchieBridge::refreshKernel()
 {
     request(Projection::Kernel, QUrl(QString::fromLatin1(kernelUrl)));
+}
+
+void ArchieBridge::refreshOrb()
+{
+    if (m_orbRequestPending)
+        return;
+    m_orbRequestPending = true;
+    request(Projection::Orb, QUrl(QString::fromLatin1(orbUrl)));
 }
 
 void ArchieBridge::refreshGeoFabric()
@@ -491,6 +509,8 @@ void ArchieBridge::request(Projection projection, const QUrl &url)
         const auto failure = reply->error();
         const auto message = reply->errorString();
         reply->deleteLater();
+        if (projection == Projection::Orb)
+            m_orbRequestPending = false;
         m_pendingRequests = std::max(0, m_pendingRequests - 1);
         emit busyChanged();
 
@@ -498,8 +518,13 @@ void ArchieBridge::request(Projection projection, const QUrl &url)
             fail(message);
             return;
         }
-        if (body.size() > maximumProjectionBytes) {
-            fail(QStringLiteral("projection exceeded the 2 MiB safety limit"));
+        const qsizetype maximumBytes = projection == Projection::Orb
+                                           ? maximumOrbProjectionBytes
+                                           : maximumProjectionBytes;
+        if (body.size() > maximumBytes) {
+            fail(projection == Projection::Orb
+                     ? QStringLiteral("orb projection exceeded the 8 MiB safety limit")
+                     : QStringLiteral("projection exceeded the 2 MiB safety limit"));
             return;
         }
         accept(projection, body);
@@ -585,6 +610,79 @@ void ArchieBridge::accept(Projection projection, const QByteArray &body)
         // same process, so there is nothing here for a revision counter to be counting.
         m_geoFabric = document.object().toVariantMap();
         emit geoFabricChanged();
+        return;
+    }
+
+    if (projection == Projection::Orb) {
+        const auto object = document.object();
+        const auto nodeArray = object.value(QStringLiteral("nodes")).toArray();
+        const auto edgeArray = object.value(QStringLiteral("edges")).toArray();
+        QHash<QString, QVector3D> positions;
+        QVariantList nodes;
+        nodes.reserve(nodeArray.size());
+        for (const auto &value : nodeArray) {
+            const auto node = value.toObject();
+            const auto p = node.value(QStringLiteral("position")).toArray();
+            if (p.size() != 3) continue;
+            const QString id = node.value(QStringLiteral("id")).toString();
+            const QVector3D pos(p[0].toDouble(), p[1].toDouble(), p[2].toDouble());
+            if (id.isEmpty() || !std::isfinite(pos.x()) || !std::isfinite(pos.y()) || !std::isfinite(pos.z())) continue;
+            positions.insert(id, pos);
+            const QString status = node.value(QStringLiteral("action_status")).toString();
+            QColor color(QStringLiteral("#58c7dd"));
+            if (status == QStringLiteral("verified")) color = QColor(QStringLiteral("#47d18b"));
+            else if (status == QStringLiteral("error")) color = QColor(QStringLiteral("#f2626b"));
+            else if (status == QStringLiteral("predicted")) color = QColor(QStringLiteral("#f0b429"));
+            else if (node.value(QStringLiteral("selected")).toBool()) color = QColor(QStringLiteral("#c084fc"));
+            else if (node.value(QStringLiteral("voice_overlap")).toDouble() > 0.0) color = QColor(QStringLiteral("#6fe3f5"));
+            nodes.push_back(QVariantMap{
+                {QStringLiteral("id"), id},
+                {QStringLiteral("label"), node.value(QStringLiteral("label")).toString()},
+                {QStringLiteral("kind"), node.value(QStringLiteral("kind")).toString()},
+                {QStringLiteral("status"), status},
+                {QStringLiteral("position"), QVariant::fromValue(pos)},
+                // Qt Quick3D's built-in sphere has a 50-unit radius. The Orb model's
+                // render radius is already in world units, so convert once here before
+                // the scene root's hardware scale is applied in QML.
+                {QStringLiteral("radius"), std::clamp(node.value(QStringLiteral("render_radius")).toDouble(0.025), 0.006, 0.08) / 50.0},
+                {QStringLiteral("focus"), node.value(QStringLiteral("focus_score")).toDouble() / 50.0},
+                {QStringLiteral("voice"), node.value(QStringLiteral("voice_overlap")).toDouble() / 50.0},
+                {QStringLiteral("color"), color}
+            });
+        }
+        QVariantList edges;
+        edges.reserve(edgeArray.size());
+        for (const auto &value : edgeArray) {
+            const auto edge = value.toObject();
+            const QString from = edge.value(QStringLiteral("source")).toString();
+            const QString to = edge.value(QStringLiteral("target")).toString();
+            if (!positions.contains(from) || !positions.contains(to)) continue;
+            auto item = makeEdge(positions.value(from), positions.value(to), QColor(QStringLiteral("#557786")));
+            item.insert(QStringLiteral("opacity"), std::clamp(edge.value(QStringLiteral("weight")).toDouble(0.2), 0.04, 0.65));
+            edges.push_back(item);
+        }
+        const auto fieldObject = object.value(QStringLiteral("field")).toObject();
+        const auto vertices = fieldObject.value(QStringLiteral("vertices")).toArray();
+        const auto indices = fieldObject.value(QStringLiteral("triangle_indices")).toArray();
+        QByteArray packedVertices(static_cast<qsizetype>(vertices.size()) * 6 * sizeof(float), Qt::Uninitialized);
+        auto *dst = reinterpret_cast<float *>(packedVertices.data());
+        for (qsizetype i = 0; i < vertices.size(); ++i) {
+            const auto v = vertices[i].toArray();
+            if (v.size() != 3) continue;
+            QVector3D p(v[0].toDouble(), v[1].toDouble(), v[2].toDouble());
+            const QVector3D n = p.normalized();
+            dst[i*6] = p.x(); dst[i*6+1] = p.y(); dst[i*6+2] = p.z();
+            dst[i*6+3] = n.x(); dst[i*6+4] = n.y(); dst[i*6+5] = n.z();
+        }
+        QByteArray packedIndices(static_cast<qsizetype>(indices.size()) * sizeof(quint32), Qt::Uninitialized);
+        auto *indexDst = reinterpret_cast<quint32 *>(packedIndices.data());
+        for (qsizetype i = 0; i < indices.size(); ++i) indexDst[i] = static_cast<quint32>(indices[i].toInt());
+        m_orbField = {{QStringLiteral("packedVertices"), packedVertices}, {QStringLiteral("packedIndices"), packedIndices}};
+        m_orb = object.toVariantMap();
+        m_orbNodes = std::move(nodes);
+        m_orbEdges = std::move(edges);
+        ++m_orbRevision;
+        emit orbChanged();
         return;
     }
 

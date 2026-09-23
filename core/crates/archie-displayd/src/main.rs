@@ -48,6 +48,14 @@ struct Args {
     #[arg(long, default_value_t = 60_000)]
     world_poll_ms: u64,
 
+    /// Private one-way TFOG signal socket shared with local Archie producers.
+    #[arg(
+        long,
+        default_value = "/run/archie-display/orb.sock",
+        value_name = "PATH"
+    )]
+    orb_socket: String,
+
     /// Human-readable logs instead of JSON.
     #[arg(long)]
     text_logs: bool,
@@ -102,6 +110,17 @@ async fn main() -> std::process::ExitCode {
     let address = listener.local_addr().unwrap_or(args.bind);
     info!(address = %address, fixture = observatory.is_fixture(), "observatory listening");
     println!("archie-displayd: http://{address}");
+
+    #[cfg(unix)]
+    if !observatory.is_fixture() {
+        let orb_observatory = observatory.clone();
+        let orb_socket = args.orb_socket.clone();
+        tokio::spawn(async move {
+            if let Err(e) = orb_observatory.receive_orb_signals(&orb_socket).await {
+                error!(error = %e, path = %orb_socket, "TFOG signal socket unavailable");
+            }
+        });
+    }
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 

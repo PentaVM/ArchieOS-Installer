@@ -40,6 +40,12 @@ class ArchieBridge final : public QObject
     // configured: the honest state is an empty list, not an invented building.
     Q_PROPERTY(QVariantMap buildings READ buildings NOTIFY buildingsChanged)
     Q_PROPERTY(QVariantList buildingMeshes READ buildingMeshes NOTIFY buildingsChanged)
+    // Read-only semantic Orb frame and its renderer-ready, bounded mesh/node/edge data.
+    Q_PROPERTY(QVariantMap orb READ orb NOTIFY orbChanged)
+    Q_PROPERTY(QVariantMap orbField READ orbField NOTIFY orbChanged)
+    Q_PROPERTY(QVariantList orbNodes READ orbNodes NOTIFY orbChanged)
+    Q_PROPERTY(QVariantList orbEdges READ orbEdges NOTIFY orbChanged)
+    Q_PROPERTY(int orbRevision READ orbRevision NOTIFY orbChanged)
 
     // Everything below comes out of `archie::visual::Observatory` rather than from this
     // class. The bridge used to derive positions from a hash of the node name, colours
@@ -71,10 +77,16 @@ public:
     QVariantMap geoFabric() const { return m_geoFabric; }
     QVariantMap buildings() const { return m_buildings; }
     QVariantList buildingMeshes() const { return m_buildingMeshes; }
+    QVariantMap orb() const { return m_orb; }
+    QVariantMap orbField() const { return m_orbField; }
+    QVariantList orbNodes() const { return m_orbNodes; }
+    QVariantList orbEdges() const { return m_orbEdges; }
+    int orbRevision() const { return m_orbRevision; }
 
     Q_INVOKABLE void refreshSnapshot();
     Q_INVOKABLE void refreshWorld();
     Q_INVOKABLE void refreshKernel();
+    Q_INVOKABLE void refreshOrb();
     Q_INVOKABLE void refreshGeoFabric();
     /// Reads `ARCHIE_OSM_EXTRACT` and, if it names a readable `.osm.pbf` file, parses it
     /// and rebuilds `buildingMeshes`. Called once at construction, like refreshGeoFabric:
@@ -110,9 +122,10 @@ signals:
     void frameChanged();
     void geoFabricChanged();
     void buildingsChanged();
+    void orbChanged();
 
 private:
-    enum class Projection { Snapshot, World, Kernel, GeoFabric };
+    enum class Projection { Snapshot, World, Kernel, GeoFabric, Orb };
 
     void request(Projection projection, const QUrl &url);
     void accept(Projection projection, const QByteArray &body);
@@ -131,6 +144,7 @@ private:
     QTimer m_snapshotTimer;
     QTimer m_worldTimer;
     QTimer m_kernelTimer;
+    QTimer m_orbTimer;
     QTimer m_clockTimer;
     /// Drives `tick`. Advancing is not the same as a payload arriving: freshness decays,
     /// entries and departures play out, and the camera moves, all between snapshots.
@@ -144,6 +158,10 @@ private:
     QVariantMap m_geoFabric;
     QVariantMap m_buildings;
     QVariantList m_buildingMeshes;
+    QVariantMap m_orb;
+    QVariantMap m_orbField;
+    QVariantList m_orbNodes;
+    QVariantList m_orbEdges;
     /// Bumped on every `loadBuildings` call and captured by the background task; a result
     /// that arrives for an older generation is discarded rather than applied, which is
     /// what keeps a stale parse from overwriting a fresher one if `loadBuildings` is ever
@@ -157,6 +175,8 @@ private:
     int m_snapshotRevision = 0;
     int m_worldRevision = 0;
     int m_kernelRevision = 0;
+    int m_orbRevision = 0;
+    bool m_orbRequestPending = false;
     bool m_connected = false;
     float m_earthAngle = 0.0F;
 };

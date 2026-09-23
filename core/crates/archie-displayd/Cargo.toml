@@ -18,6 +18,7 @@ path = "src/main.rs"
 archie-core.workspace = true
 archie-geofabric.workspace = true
 archie-observability.workspace = true
+archie-orb.workspace = true
 archie-state.workspace = true
 archie-types.workspace = true
 archie-worldd = { workspace = true, default-features = false }

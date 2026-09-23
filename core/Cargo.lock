@@ -155,6 +155,7 @@ dependencies = [
  "archie-core",
  "archie-geofabric",
  "archie-observability",
+ "archie-orb",
  "archie-state",
  "archie-types",
  "archie-worldd",
@@ -314,6 +315,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "archie-orb"
+version = "0.1.0"
+dependencies = [
+ "archie-types",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "archie-paint"
 version = "0.1.0"
 dependencies = [
@@ -427,6 +439,7 @@ dependencies = [
  "archie-a11y",
  "archie-iris",
  "archie-model-runtime",
+ "archie-orb",
  "archie-policy",
  "archie-reflex",
  "archie-stage",
@@ -456,6 +469,7 @@ dependencies = [
 name = "archie-stage"
 version = "0.1.0"
 dependencies = [
+ "archie-orb",
  "archie-policy",
  "archie-types",
  "hex",
@@ -474,6 +488,7 @@ version = "0.1.0"
 dependencies = [
  "archie-memory",
  "archie-observability",
+ "archie-orb",
  "archie-postgres",
  "archie-state",
  "archie-types",
@@ -550,6 +565,7 @@ dependencies = [
  "archie-a11y",
  "archie-iris",
  "archie-model-runtime",
+ "archie-orb",
  "archie-policy",
  "archie-sight",
  "archie-speech",

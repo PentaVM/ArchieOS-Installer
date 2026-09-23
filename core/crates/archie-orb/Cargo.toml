@@ -1,0 +1,14 @@
+[package]
+name = "archie-orb"
+description = "Read-only TFOG semantic orbital model and bounded signal contract."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+archie-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["net", "sync"] }

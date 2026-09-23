@@ -11,6 +11,7 @@ archie-a11y.workspace = true
 archie-reflex.workspace = true
 archie-iris.workspace = true
 archie-model-runtime.workspace = true
+archie-orb.workspace = true
 archie-policy.workspace = true
 archie-stage.workspace = true
 archie-types.workspace = true
