@@ -11,6 +11,7 @@
 #include <QCommandLineParser>
 #include <QFile>
 #include <QGuiApplication>
+#include <QScreen>
 #include <QQmlApplicationEngine>
 #include <QQuickWindow>
 #include <QStandardPaths>
@@ -50,6 +51,11 @@ int main(int argc, char *argv[])
                        "a polygon of its corners."),
         QStringLiteral("px/s"));
     const QCommandLineOption windowed(QStringLiteral("windowed"), QStringLiteral("Do not go full screen."));
+    const QCommandLineOption screen(
+        QStringLiteral("screen"),
+        QStringLiteral("Which screen to take, counting from zero. Left out, Archie takes the last "
+                       "one when there is more than one, so the person keeps the first."),
+        QStringLiteral("n"));
     const QCommandLineOption width(QStringLiteral("width"), QStringLiteral("Window width."), QStringLiteral("px"),
                                    QStringLiteral("1600"));
     const QCommandLineOption height(QStringLiteral("height"), QStringLiteral("Window height."),
@@ -63,7 +69,7 @@ int main(int argc, char *argv[])
                                        QStringLiteral("ms"));
     const QCommandLineOption quitAfter(QStringLiteral("quit-after-ms"), QStringLiteral("Exit after this long."),
                                        QStringLiteral("ms"));
-    parser.addOptions({socketName, control, keyFile, reducedMotion, tier, tempo, strokeSpeed, windowed, width, height, grab, grabAfter,
+    parser.addOptions({socketName, control, keyFile, reducedMotion, tier, tempo, strokeSpeed, windowed, screen, width, height, grab, grabAfter,
                        grabEvery, quitAfter});
     parser.process(app);
 
@@ -110,14 +116,40 @@ int main(int argc, char *argv[])
         options.tier = archie::visual::RenderTier::Ultra;
     }
 
+    // Which screen Archie works on. A stage that is half a screen wide, or cut off at the
+    // edge of one, is a stage nobody can watch: when Archie takes a screen it takes all of
+    // it. Left to itself it takes the last screen, so a person with two keeps the first.
+    const QList<QScreen *> screens = QGuiApplication::screens();
+    int taken = screens.size() > 1 ? screens.size() - 1 : 0;
+    if (parser.isSet(screen)) {
+        bool read = false;
+        const int asked = parser.value(screen).toInt(&read);
+        if (read && asked >= 0 && asked < screens.size()) {
+            taken = asked;
+        } else {
+            qWarning("archie-stage: --screen is 0 to %lld", static_cast<long long>(screens.size() - 1));
+        }
+    }
+    for (int at = 0; at < screens.size(); ++at) {
+        const QRect where = screens.at(at)->geometry();
+        qInfo("archie-stage: screen %d is %dx%d at %d,%d%s", at, where.width(), where.height(),
+              where.x(), where.y(), at == taken ? " <- taken" : "");
+    }
+    const QRect stand = screens.isEmpty() ? QRect(0, 0, 1280, 800) : screens.at(taken)->geometry();
+
     StageController controller(options);
     QQmlApplicationEngine engine;
     engine.setInitialProperties({
         {QStringLiteral("stage"), QVariant::fromValue(&controller)},
         {QStringLiteral("stageSocketName"), parser.value(socketName)},
         {QStringLiteral("fullscreen"), !parser.isSet(windowed)},
-        {QStringLiteral("initialWidth"), parser.value(width).toInt()},
-        {QStringLiteral("initialHeight"), parser.value(height).toInt()},
+        {QStringLiteral("screenIndex"), taken},
+        // Windowed, the size asked for; otherwise the whole screen, so the stage is never
+        // three quarters of one with its edge off the side.
+        {QStringLiteral("initialWidth"),
+         parser.isSet(windowed) ? parser.value(width).toInt() : stand.width()},
+        {QStringLiteral("initialHeight"),
+         parser.isSet(windowed) ? parser.value(height).toInt() : stand.height()},
     });
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                      [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);

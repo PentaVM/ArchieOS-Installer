@@ -234,7 +234,11 @@ async fn an_approved_action_goes_through_and_a_wrong_key_is_answered_with_sequen
         .await
         .unwrap();
     match rejected {
-        ActOutcome::Receipt { sequence, outcome } => {
+        ActOutcome::Receipt {
+            sequence,
+            outcome,
+            ..
+        } => {
             assert_eq!(sequence, 0);
             assert_ne!(outcome, "executed");
         }

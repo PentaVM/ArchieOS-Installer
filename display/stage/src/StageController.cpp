@@ -657,10 +657,17 @@ void StageController::readFrom(QLocalSocket *socket)
 
 QByteArray StageController::receipt(std::uint64_t sequence, const QString &outcome) const
 {
-    return line_of(QJsonObject{{QStringLiteral("event"), QStringLiteral("receipt")},
-                               {QStringLiteral("seq"), static_cast<qint64>(sequence)},
-                               {QStringLiteral("outcome"), outcome},
-                               {QStringLiteral("observed_revision"), static_cast<qint64>(m_table.revision())}});
+    QJsonObject said{{QStringLiteral("event"), QStringLiteral("receipt")},
+                     {QStringLiteral("seq"), static_cast<qint64>(sequence)},
+                     {QStringLiteral("outcome"), outcome},
+                     {QStringLiteral("observed_revision"), static_cast<qint64>(m_table.revision())}};
+    // A drawing that did not finish says how much of it did. Without this, a person moving
+    // the mouse through a drawing of sixty lines costs all sixty; with it, it costs the one
+    // that was being drawn.
+    if (m_active && m_active->command.action == StageAction::Stroke && !m_active->command.lifts.empty()) {
+        said.insert(QStringLiteral("finished"), m_finished);
+    }
+    return line_of(said);
 }
 
 void StageController::sendReceipt(std::uint64_t sequence, const QString &outcome)
@@ -708,6 +715,7 @@ void StageController::handleLine(QLocalSocket *socket, const QByteArray &line)
     m_lastSequence = command.sequence;
     const Surface *surface = m_table.find(command.surface);
     m_active = std::move(*decoded.command);
+    m_finished = 0;
     m_textRoute.reset();
     m_commandSocket = socket;
     m_capture.reset();
@@ -751,6 +759,10 @@ void StageController::deliver(const InputStep &step)
     QWaylandSeat *s = seat();
     if (!s || !m_active) {
         return;
+    }
+    // The pen coming up is a line finished.
+    if (step.kind == StepKind::Release) {
+        ++m_finished;
     }
     QWaylandQuickItem *item = itemFor(m_active->command.surface);
     const Surface *surface = m_table.find(m_active->command.surface);
