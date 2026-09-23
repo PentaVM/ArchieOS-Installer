@@ -8,15 +8,21 @@
 //! - [`tools::os_control`] — the tools it may propose: the stage's own vocabulary, so every
 //!   proposal maps to an action the stage already checks and can refuse.
 //! - [`segment::Segmenter`] — streamed text cut where a voice can stop.
+//! - [`act::decide`] and [`hands::Hands`] — a proposal read strictly and either refused in
+//!   words or carried out through the stage gate, with what came of it told to the model.
 //!
 //! The shape follows the voice agents Hugging Face runs in production: listening, thinking
 //! and speaking are separate stages rather than one network, so that the thinking can be a
 //! model that uses tools and speaks Spanish, and so that each stage can be replaced without
 //! the others noticing.
 
+pub mod act;
+pub mod hands;
 pub mod nemotron;
 pub mod segment;
 pub mod tools;
 
+pub use act::{decide, Plan, Refusal};
+pub use hands::{Grounding, Hands, Launch, Performed};
 pub use nemotron::{NebiusSource, NemotronCognitive, TurnSource, TurnStream, Update, PERSONA_ES};
 pub use segment::{Segmenter, Spoken};

@@ -685,6 +685,27 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
         &self.world
     }
 
+    /// Performs an action that needs nothing found first — typing, a key, a scroll —
+    /// through this session's own seat. A caller that both types and clicks by sight goes
+    /// through here for both, so one key never seals two competing sequences.
+    pub async fn act(&mut self, request: &ActRequest) -> Result<ActOutcome, SightError> {
+        drain(&mut self.client, &mut self.world).await?;
+        Ok(self
+            .operator
+            .act(&mut self.client, &mut self.world, request, self.receipt_timeout)
+            .await?)
+    }
+
+    /// Listens to the stage until `settled` holds of it, or `timeout` passes, and says
+    /// whether it holds: an application opening, a window taking the focus.
+    pub async fn wait_until(
+        &mut self,
+        timeout: Duration,
+        settled: impl FnMut(&StageWorld) -> bool,
+    ) -> Result<bool, SightError> {
+        Ok(wait_until(&mut self.client, &mut self.world, timeout, settled).await?)
+    }
+
     /// Forgets every position, so the next pass asks the grounding model again.
     pub fn forget_all(&mut self) {
         for (_, handle) in std::mem::take(&mut self.pending) {

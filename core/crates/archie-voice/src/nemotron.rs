@@ -25,7 +25,7 @@
 
 use crate::segment::{Segmenter, Spoken};
 use archie_model_runtime::{
-    InferenceClient, StreamEvent, ToolChatMessage, ToolChatRequest, ToolDefinition,
+    InferenceClient, StreamEvent, ToolCall, ToolChatMessage, ToolChatRequest, ToolDefinition,
 };
 use archie_speech::{
     validate_request, CancelReason, CognitiveError, CognitiveEvent, CognitiveModelAdapter,
@@ -120,6 +120,10 @@ const MEMORY: usize = 12;
 struct Turn {
     id: String,
     stream: TurnStream,
+    /// What was released to the voice, and the tools asked for, so the exchange can be
+    /// carried into the next step.
+    said: Vec<String>,
+    calls: Vec<(String, ToolCall)>,
     segmenter: Segmenter,
     gate: ResponseGate,
     next_sequence: u32,
@@ -140,6 +144,11 @@ pub struct NemotronCognitive<S: TurnSource> {
     history: Vec<ToolChatMessage>,
     turn: Option<Turn>,
     last_request: Option<ToolChatRequest>,
+    /// The exchange about the utterance being answered: what the person said, then each
+    /// step Archie took and what the tools answered. Reset by every new utterance.
+    chain: Vec<ToolChatMessage>,
+    /// Tools the last finished step asked for, waiting for their results.
+    awaiting: Vec<(String, ToolCall)>,
 }
 
 impl<S: TurnSource> NemotronCognitive<S> {
@@ -161,7 +170,60 @@ impl<S: TurnSource> NemotronCognitive<S> {
             history: Vec::new(),
             turn: None,
             last_request: None,
+            chain: Vec::new(),
+            awaiting: Vec::new(),
         }
+    }
+
+    /// Carries an utterance one step further, once the tools its last step asked for
+    /// have been decided on.
+    ///
+    /// `results` answers each proposal by its correlation id: what happened, or why it did
+    /// not. A proposal left unanswered is reported to the model as not done, never as done.
+    /// The model then sees its own request and the outcome, and either proposes the next
+    /// step — "abre firefox y busca el clima" is two — or says what it has to say.
+    pub fn follow_up(
+        &mut self,
+        turn_id: impl Into<String>,
+        results: &[(String, String)],
+        budget: SpeechBudget,
+    ) -> Result<(), CognitiveError> {
+        let turn_id = turn_id.into();
+        if let Some(running) = &self.turn {
+            return Err(CognitiveError::TurnAlreadyRunning {
+                running: running.id.clone(),
+                requested: turn_id,
+            });
+        }
+        if self.awaiting.is_empty() {
+            return Err(CognitiveError::Backend(
+                "no step is waiting for tool results".into(),
+            ));
+        }
+        for (correlation, call) in std::mem::take(&mut self.awaiting) {
+            let outcome = results
+                .iter()
+                .find(|(id, _)| *id == correlation)
+                .map(|(_, outcome)| outcome.clone())
+                .unwrap_or_else(|| "No se hizo.".to_string());
+            self.chain.push(ToolChatMessage::Tool {
+                call_id: call.id,
+                content: outcome,
+            });
+        }
+        let outgoing = self.request_with(budget);
+        outgoing
+            .validate()
+            .map_err(|reason| CognitiveError::Backend(reason.to_string()))?;
+        let stream = self.source.start(outgoing.clone());
+        self.last_request = Some(outgoing);
+        self.turn = Some(Turn::new(turn_id, stream, budget));
+        Ok(())
+    }
+
+    /// Whether the last finished step asked for tools that have not been answered.
+    pub fn awaiting_results(&self) -> bool {
+        !self.awaiting.is_empty()
     }
 
     /// Facts for the next turns that the model cannot know: the time, the date, which
@@ -199,8 +261,8 @@ impl<S: TurnSource> NemotronCognitive<S> {
         self.last_request.as_ref()
     }
 
-    fn request_for(&self, request: &CognitiveRequest) -> ToolChatRequest {
-        let length = match request.budget {
+    fn request_with(&self, budget: SpeechBudget) -> ToolChatRequest {
+        let length = match budget {
             SpeechBudget::Sentence => "Responde en una sola frase.",
             _ => "Responde con lo que haga falta, y breve.",
         };
@@ -211,12 +273,12 @@ impl<S: TurnSource> NemotronCognitive<S> {
         }
         let mut messages = vec![ToolChatMessage::System(system)];
         messages.extend(self.history.iter().cloned());
-        messages.push(ToolChatMessage::User(request.transcript.clone()));
+        messages.extend(self.chain.iter().cloned());
         ToolChatRequest {
             model: self.provider_model.clone(),
             messages,
             tools: self.tools.clone(),
-            max_tokens: if matches!(request.budget, SpeechBudget::Sentence) {
+            max_tokens: if matches!(budget, SpeechBudget::Sentence) {
                 96
             } else {
                 400
@@ -239,22 +301,16 @@ impl<S: TurnSource> CognitiveModelAdapter for NemotronCognitive<S> {
             });
         }
         validate_request(&request, &self.languages)?;
-        let outgoing = self.request_for(&request);
+        // A new utterance starts a new exchange; anything the last one left waiting is moot.
+        self.chain = vec![ToolChatMessage::User(request.transcript.clone())];
+        self.awaiting.clear();
+        let outgoing = self.request_with(request.budget);
         outgoing
             .validate()
             .map_err(|reason| CognitiveError::Backend(reason.to_string()))?;
         let stream = self.source.start(outgoing.clone());
         self.last_request = Some(outgoing);
-        self.turn = Some(Turn {
-            id: request.turn_id,
-            stream,
-            segmenter: Segmenter::default(),
-            gate: ResponseGate::new(request.budget),
-            next_sequence: 0,
-            tool_calls: 0,
-            queue: VecDeque::new(),
-            ended: false,
-        });
+        self.turn = Some(Turn::new(request.turn_id, stream, request.budget));
         Ok(())
     }
 
@@ -271,6 +327,7 @@ impl<S: TurnSource> CognitiveModelAdapter for NemotronCognitive<S> {
                 Ok(Update::Event(StreamEvent::ToolCall(call))) => {
                     let correlation_id = format!("{}#{}", turn.id, turn.tool_calls);
                     turn.tool_calls += 1;
+                    turn.calls.push((correlation_id.clone(), call.clone()));
                     turn.queue
                         .push_back(CognitiveEvent::ToolIntent(SpeechToolIntentCandidate {
                             correlation_id,
@@ -315,7 +372,15 @@ impl<S: TurnSource> CognitiveModelAdapter for NemotronCognitive<S> {
         }
         let event = turn.queue.pop_front();
         if turn.ended && turn.queue.is_empty() {
-            self.turn = None;
+            if let Some(done) = self.turn.take() {
+                if !done.said.is_empty() || !done.calls.is_empty() {
+                    self.chain.push(ToolChatMessage::Assistant {
+                        content: (!done.said.is_empty()).then(|| done.said.join(" ")),
+                        tool_calls: done.calls.iter().map(|(_, call)| call.clone()).collect(),
+                    });
+                }
+                self.awaiting = done.calls;
+            }
         }
         event
     }
@@ -344,7 +409,25 @@ fn release(turn: &mut Turn, spoken: Spoken) {
     };
     if turn.gate.admit(&segment) {
         turn.next_sequence += 1;
+        turn.said.push(segment.text.clone());
         turn.queue.push_back(CognitiveEvent::Segment(segment));
+    }
+}
+
+impl Turn {
+    fn new(id: String, stream: TurnStream, budget: SpeechBudget) -> Self {
+        Self {
+            id,
+            stream,
+            said: Vec::new(),
+            calls: Vec::new(),
+            segmenter: Segmenter::default(),
+            gate: ResponseGate::new(budget),
+            next_sequence: 0,
+            tool_calls: 0,
+            queue: VecDeque::new(),
+            ended: false,
+        }
     }
 }
 
@@ -565,6 +648,58 @@ mod tests {
         assert!(matches!(&sent.messages[3], ToolChatMessage::User(text) if text == "qué hora es"));
         assert_eq!(sent.tools.len(), crate::tools::os_control().len());
         assert_eq!(sent.max_tokens, 96, "one sentence does not need four hundred tokens");
+    }
+
+    #[test]
+    fn the_next_step_sees_what_was_asked_for_and_what_came_of_it() {
+        let mut cognitive = adapter(TOOL);
+        assert!(
+            cognitive.follow_up("t9", &[], SpeechBudget::Full).is_err(),
+            "nothing to follow up before anything was asked"
+        );
+        cognitive
+            .begin(ask("t9", "abre firefox po", SpeechBudget::Full))
+            .unwrap();
+        drain(&mut cognitive);
+        assert!(cognitive.awaiting_results());
+        cognitive
+            .follow_up(
+                "t9.1",
+                &[("t9#0".into(), "Firefox está abierto y al frente.".into())],
+                SpeechBudget::Full,
+            )
+            .unwrap();
+        let sent = cognitive.last_request().unwrap();
+        assert_eq!(sent.messages.len(), 4, "system, the question, the step, its result");
+        assert!(matches!(&sent.messages[1], ToolChatMessage::User(text) if text == "abre firefox po"));
+        let asked = match &sent.messages[2] {
+            ToolChatMessage::Assistant { tool_calls, .. } => tool_calls.clone(),
+            other => panic!("the step Archie took, not {other:?}"),
+        };
+        assert_eq!(asked.len(), 1);
+        assert_eq!(asked[0].name, "open_app");
+        assert!(matches!(
+            &sent.messages[3],
+            ToolChatMessage::Tool { call_id, content }
+                if *call_id == asked[0].id && content.contains("abierto")
+        ));
+        assert!(!cognitive.awaiting_results(), "each result is given once");
+
+        // An unanswered proposal is reported as not done, never as done.
+        drain(&mut cognitive);
+        cognitive.follow_up("t9.2", &[], SpeechBudget::Full).unwrap();
+        let sent = cognitive.last_request().unwrap();
+        assert!(matches!(
+            sent.messages.last(),
+            Some(ToolChatMessage::Tool { content, .. }) if content == "No se hizo."
+        ));
+
+        // And a new utterance starts over.
+        drain(&mut cognitive);
+        cognitive
+            .begin(ask("t10", "gracias", SpeechBudget::Full))
+            .unwrap();
+        assert_eq!(cognitive.last_request().unwrap().messages.len(), 2);
     }
 
     #[test]

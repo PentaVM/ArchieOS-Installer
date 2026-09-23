@@ -10,6 +10,11 @@ license.workspace = true
 archie-types.workspace = true
 archie-speech.workspace = true
 archie-model-runtime.workspace = true
+archie-stage.workspace = true
+archie-sight.workspace = true
+archie-iris.workspace = true
+archie-policy.workspace = true
+hex.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 # The clock the model is given, read before any thread starts so the local offset is known.
