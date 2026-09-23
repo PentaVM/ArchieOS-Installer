@@ -1,12 +1,14 @@
-//! `archie-paint` — Archie draws a picture on the stage, one stroke at a time.
+//! `archie-paint` â Archie draws a picture on the stage, one stroke at a time.
 //!
 //! ```text
+//! archie-paint score --drawn <file.png> --against <file.png> [--lines N] [--commands N]
+//!                    [--seconds S] [--refused N]
 //! archie-paint --socket <path> --key-file <path> --policy <apps.toml> --app <app_id>
 //!              --image <file.png> [--surface N] [--inset 40] [--spacing 5]
 //!              [--canvas x,y,w,h] [--limit N] [--levels 70:14,110:11,...]
 //!              [--pen 2] [--points 2] [--find-paper]
 //!              [--flow [--seeding 7] [--step 4] [--steps 120] [--darker-than 96] [--least-form 0.4] [--most N] [--seconds S --speed 950 --per-command 0.11] [--batch 64] [--weight 1]
-//!                      [--swatches "#141210,…"] [--palette x,y,step]]
+//!                      [--swatches "#141210,â¦"] [--palette x,y,step]]
 //!              [--dry-run [--preview <file.png>] [--as-seen <px/s>] [--frames 60]]
 //! ```
 //!
@@ -19,6 +21,15 @@ async fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     // A picture can be planned anywhere. Drawing one needs a stage, and a stage is a Unix
     // socket on the machine it runs on.
+    if args.first().is_some_and(|first| first == "score") {
+        return match scoring::main(args) {
+            Ok(code) => code,
+            Err(message) => {
+                eprintln!("archie-paint: {message}");
+                std::process::ExitCode::FAILURE
+            }
+        };
+    }
     if args.iter().any(|arg| arg == "--dry-run") {
         return match planning::main(args) {
             Ok(code) => code,
@@ -40,6 +51,120 @@ async fn main() -> std::process::ExitCode {
              or pass --dry-run to plan a picture here"
         );
         std::process::ExitCode::FAILURE
+    }
+}
+
+/// What a drawing came to, measured against the picture it was of.
+///
+/// The same two files always give the same numbers: no sampling, no randomness, no clock.
+/// That is the whole point of it â a score worth keeping is one that can be compared with
+/// last week's, and a benchmark that wanders is not a benchmark.
+///
+/// Both pictures are reduced to the same grid of tiles and read as darkness from nothing to
+/// one. Then, over the tiles:
+///
+///   said      = the darkness the drawing and the picture agree on, tile by tile
+///   coverage  = said / the picture's darkness      — how much of it got said
+///   restraint = said / the drawing's darkness      — how much of what was said belonged
+///   balance   = the harmonic mean of the two, which neither a blank sheet nor a black one
+///               can game: a blank sheet says nothing and covers nothing, a black one covers
+///               everything and belongs nowhere
+///
+/// The score is that balance in thousandths. The counts alongside it — lines, commands,
+/// seconds, pixels of line a second — are what it cost to get there, because a drawing is
+/// only worth its score in the time it took.
+mod scoring {
+    use archie_paint::Picture;
+    use std::path::Path;
+    use std::process::ExitCode;
+
+    /// How wide a tile is, in the drawing's own pixels. Small enough to tell a face from a
+    /// shoulder, wide enough that a line an artist would call the same line lands in it.
+    const TILE: u32 = 4;
+
+    pub fn main(mut args: Vec<String>) -> Result<ExitCode, String> {
+        args.remove(0);
+        let drawn_at = super::take(&mut args, "--drawn").ok_or("--drawn is required")?;
+        let against_at = super::take(&mut args, "--against").ok_or("--against is required")?;
+        let lines: usize = super::number(&mut args, "--lines")?.unwrap_or(0);
+        let commands: usize = super::number(&mut args, "--commands")?.unwrap_or(0);
+        let refused: usize = super::number(&mut args, "--refused")?.unwrap_or(0);
+        let seconds: f32 = super::number(&mut args, "--seconds")?.unwrap_or(0.0);
+        if !args.is_empty() {
+            return Err(format!("unexpected arguments: {args:?}"));
+        }
+        let drawn = Picture::read(Path::new(&drawn_at)).map_err(|e| e.to_string())?;
+        let against = Picture::read(Path::new(&against_at)).map_err(|e| e.to_string())?;
+        let marked = tiles(&drawn);
+        let wanted = tiles(&against);
+
+        let (mut said, mut ink, mut want) = (0.0_f32, 0.0_f32, 0.0_f32);
+        let across = marked.0.min(wanted.0);
+        let down = marked.1.min(wanted.1);
+        for y in 0..down {
+            for x in 0..across {
+                let d = marked.2[y * marked.0 + x];
+                let t = wanted.2[y * wanted.0 + x];
+                said += d.min(t);
+                ink += d;
+                want += t;
+            }
+        }
+        let coverage = if want > 0.0 { said / want } else { 0.0 };
+        let restraint = if ink > 0.0 { said / ink } else { 0.0 };
+        let balance = if coverage + restraint > 0.0 {
+            2.0 * coverage * restraint / (coverage + restraint)
+        } else {
+            0.0
+        };
+        let score = (balance * 1000.0).round() as i64;
+
+        println!("score {score} of 1000");
+        println!("  coverage  {:.3}  of the picture's darkness was said", coverage);
+        println!("  restraint {:.3}  of what was said belonged there", restraint);
+        println!(
+            "  drawn     {}x{} in tiles of {TILE}, {:.0} tiles of ink against {:.0} wanted",
+            drawn.width(),
+            drawn.height(),
+            ink,
+            want
+        );
+        if lines > 0 || commands > 0 || seconds > 0.0 {
+            println!(
+                "  cost      {lines} lines in {commands} commands, {refused} refused, {seconds:.1}s\n                 {}",
+                if seconds > 0.0 && lines > 0 {
+                    format!(" ({:.1} lines a second)", lines as f32 / seconds)
+                } else {
+                    String::new()
+                }
+            );
+        }
+        Ok(ExitCode::SUCCESS)
+    }
+
+    /// A picture as darkness per tile, from nothing to one.
+    fn tiles(picture: &Picture) -> (usize, usize, Vec<f32>) {
+        let across = (picture.width() / TILE).max(1) as usize;
+        let down = (picture.height() / TILE).max(1) as usize;
+        let mut darkness = vec![0.0_f32; across * down];
+        for ty in 0..down {
+            for tx in 0..across {
+                let mut sum = 0.0_f32;
+                let mut seen = 0.0_f32;
+                for y in 0..TILE {
+                    for x in 0..TILE {
+                        let at_x = tx as u32 * TILE + x;
+                        let at_y = ty as u32 * TILE + y;
+                        if let Some(light) = picture.grey(at_x, at_y) {
+                            sum += f32::from(255 - light) / 255.0;
+                            seen += 1.0;
+                        }
+                    }
+                }
+                darkness[ty * across + tx] = if seen > 0.0 { sum / seen } else { 0.0 };
+            }
+        }
+        (across, down, darkness)
     }
 }
 
@@ -236,7 +361,7 @@ impl Palette {
     }
 }
 
-/// `--swatches "#1b1a17,#6b4a2f,…"`, and the default the demo canvas has.
+/// `--swatches "#1b1a17,#6b4a2f,â¦"`, and the default the demo canvas has.
 fn swatches_of(args: &mut Vec<String>) -> Result<Vec<[u8; 3]>, String> {
     let text = take(args, "--swatches").unwrap_or_else(|| {
         "#141210,#4a352a,#8a6a46,#c39c6d,#e6d3b3,#5d6b63".to_string()
@@ -309,7 +434,7 @@ fn travel_of(groups: &[(usize, archie_paint::Plan)]) -> f32 {
 ///
 /// An application looks at the pointer at its own rate and joins what it saw with straight
 /// runs, so a line drawn faster than about fifteen pixels between looks arrives as a polygon.
-/// That fixes how much line a second can carry — near a thousand pixels — and everything
+/// That fixes how much line a second can carry â near a thousand pixels â and everything
 /// else the stage does only decides how much of each second goes into line rather than into
 /// travelling, waiting for a receipt, or drawing the stage's own cinematics.
 fn say_what_it_costs(drawn: f32, travelled: f32, speed: f32, commands: usize) {
@@ -329,7 +454,7 @@ fn say_what_it_costs(drawn: f32, travelled: f32, speed: f32, commands: usize) {
 ///
 /// Lines closer together than the pen is wide leave no paper between them, and what was
 /// planned as shading comes out as a filled shape. The plan knows this before anything is
-/// drawn — it is the ink the pen lays down against the paper there is — and twenty minutes
+/// drawn â it is the ink the pen lays down against the paper there is â and twenty minutes
 /// of drawing is a long way to go to find it out.
 fn say_how_covered(length: f32, pen: u32, canvas: archie_paint::Canvas) {
     let paper = (canvas.width as f32) * (canvas.height as f32);
@@ -344,7 +469,7 @@ fn say_how_covered(length: f32, pen: u32, canvas: archie_paint::Canvas) {
     } else {
         "more ink than paper: the dark will fill in"
     };
-    println!("the pen covers {covered:.2} of the paper — {note}");
+    println!("the pen covers {covered:.2} of the paper â {note}");
 }
 
 /// How the lines that follow the form are to be drawn, as the command line says it.
@@ -732,7 +857,7 @@ mod unix {
                     button: PointerButton::Left,
                 },
             };
-            let request = ActRequest {
+            let mut request = ActRequest {
                 app_id: app.clone(),
                 surface: Some(found.surface),
                 action,
@@ -754,6 +879,7 @@ mod unix {
             // being spent against a stage that is refusing it. The compositor gives the
             // agent the stage back after its own quiet period.
             let mut waited_ms = 0_u64;
+            let mut carried = 0_usize;
             let outcome = loop {
                 let outcome = operator
                     .act(&mut client, &mut world, &request, Duration::from_secs(30))
@@ -764,6 +890,28 @@ mod unix {
                     ActOutcome::Receipt { outcome, .. }
                         if outcome == "operator_has_control" || outcome == "preempted_by_operator"
                 );
+                // A drawing the person interrupted says how much of it was made. What was
+                // made is not made again: the rest is asked for on its own, so a hand on the
+                // mouse costs the line it landed in and not the fifty behind it.
+                if let (
+                    ActOutcome::Receipt { finished, .. },
+                    StageAction::Strokes { paths, button },
+                ) = (&outcome, &request.action)
+                {
+                    if held && *finished > 0 && *finished < paths.len() {
+                        carried += *finished;
+                        let rest = paths[*finished..].to_vec();
+                        println!(
+                            "a person took the stage after {} of {} lines; the rest waits",
+                            carried,
+                            carried + rest.len()
+                        );
+                        request.action = StageAction::Strokes {
+                            paths: rest,
+                            button: *button,
+                        };
+                    }
+                }
                 if !held || waited_ms >= PATIENCE_MS {
                     break outcome;
                 }

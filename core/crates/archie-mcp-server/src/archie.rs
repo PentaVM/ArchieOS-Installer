@@ -204,7 +204,7 @@ impl ArchieToolbox {
             .await
         {
             Ok(outcome) if outcome.executed() => ToolOutcome::json(&json!({"outcome": "executed"})),
-            Ok(ActOutcome::Receipt { sequence: 0, outcome }) => ToolOutcome::error(format!(
+            Ok(ActOutcome::Receipt { sequence: 0, outcome, .. }) => ToolOutcome::error(format!(
                 "the stage could not verify the command ({outcome}): this server's key is not the compositor's"
             )),
             Ok(ActOutcome::Receipt { outcome, .. }) => ToolOutcome::error(match outcome.as_str() {

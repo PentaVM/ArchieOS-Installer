@@ -123,6 +123,11 @@ pub enum StageEvent {
         seq: u64,
         outcome: String,
         observed_revision: u64,
+        /// How many lines of a drawing were finished before it stopped. Present only for a
+        /// command that carried several, so that whatever asked for it can carry on from
+        /// there rather than draw the whole thing again after an interruption.
+        #[serde(default)]
+        finished: usize,
     },
     /// Where the capture a snapshot command asked for was written. Sent only to the
     /// connection that sent the command, before its receipt.

@@ -1,0 +1,10 @@
+data: {"id":"chatcmpl-d5c902bc","object":"chat.completion.chunk","created":1790135298,"model":"nvidia/Nemotron-3_5-Lightning","choices":[{"index":0,"delta":{"role":"assistant"}}]}
+
+data: {"id":"chatcmpl-d5c902bc","object":"chat.completion.chunk","created":1790135298,"model":"nvidia/Nemotron-3_5-Lightning","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_c71a7c0b9d824c1eade54558","type":"function","function":{"name":"open_app"}}]}}]}
+
+data: {"id":"chatcmpl-d5c902bc","object":"chat.completion.chunk","created":1790135298,"model":"nvidia/Nemotron-3_5-Lightning","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"app\":\"firefox\"}"}}]}}]}
+
+data: {"id":"chatcmpl-d5c902bc","object":"chat.completion.chunk","created":1790135298,"model":"nvidia/Nemotron-3_5-Lightning","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+

@@ -13,6 +13,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+/// The most arguments, and the longest argument, a launch entry may have.
+pub const MAX_LAUNCH_ARGS: usize = 32;
+pub const MAX_LAUNCH_ARG_BYTES: usize = 512;
+
 /// What the agent may do with one application.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -37,6 +41,15 @@ pub struct AppPolicy {
     /// terminal runs a command, `delete` in a file browser removes something.
     #[serde(default)]
     pub approval_keys: BTreeSet<NamedKey>,
+    /// How to open this application on the stage: the program and its arguments, run
+    /// directly and never through a shell. Empty means the agent may not open it at all.
+    ///
+    /// A person writes this, and nothing an agent says ever becomes part of it. Asked to
+    /// "open firefox", the agent may only name the application; the name is matched against
+    /// this entry, and what runs is exactly what is written here — not some other program,
+    /// and not this one with arguments of the model's choosing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub launch: Vec<String>,
 }
 
 fn public_grade() -> PrivacyGrade {
@@ -80,6 +93,17 @@ impl AppPolicy {
                 kind: *kind,
             });
         }
+        if !self.launch.is_empty() {
+            let program_ok = self.launch[0].trim() == self.launch[0] && !self.launch[0].is_empty();
+            let bounded = self.launch.len() <= MAX_LAUNCH_ARGS
+                && self
+                    .launch
+                    .iter()
+                    .all(|arg| arg.len() <= MAX_LAUNCH_ARG_BYTES && !arg.contains('\0'));
+            if !program_ok || !bounded {
+                return Err(PolicyError::Launch(self.app_id.clone()));
+            }
+        }
         if !self.approval_keys.is_empty() && !self.allow.contains(&ActionKind::Key) {
             return Err(PolicyError::ApprovalForDisallowed {
                 app_id: self.app_id.clone(),
@@ -104,6 +128,8 @@ pub enum PolicyError {
     ApprovalForDisallowed { app_id: String, kind: ActionKind },
     #[error("duplicate app id {0}")]
     Duplicate(String),
+    #[error("{0}: launch must name a program, with at most {MAX_LAUNCH_ARGS} arguments of at most {MAX_LAUNCH_ARG_BYTES} bytes")]
+    Launch(String),
     #[error("stage policy is not valid: {0}")]
     Parse(String),
     #[error("cannot read stage policy: {0}")]
@@ -143,6 +169,25 @@ impl StagePolicy {
 
     pub fn apps(&self) -> impl Iterator<Item = &AppPolicy> {
         self.apps.values()
+    }
+
+    /// The application a person meant by a name they said: its id, its display name, or
+    /// the last part of a dotted id (`org.mozilla.firefox` is "firefox"), ignoring case and
+    /// the spaces around it. Only one match counts; a name that could be two applications
+    /// is not an instruction to pick one.
+    pub fn named(&self, spoken: &str) -> Option<&AppPolicy> {
+        let wanted = spoken.trim().to_lowercase();
+        if wanted.is_empty() {
+            return None;
+        }
+        let mut found = self.apps.values().filter(|app| {
+            let id = app.app_id.to_lowercase();
+            id == wanted
+                || app.display_name.trim().to_lowercase() == wanted
+                || id.rsplit('.').next() == Some(wanted.as_str())
+        });
+        let first = found.next()?;
+        found.next().is_none().then_some(first)
     }
 
     pub fn len(&self) -> usize {
@@ -190,7 +235,58 @@ mod tests {
             allow_modified_keys: false,
             requires_approval: BTreeSet::new(),
             approval_keys: BTreeSet::new(),
+            launch: Vec::new(),
         }
+    }
+
+    #[test]
+    fn an_application_is_opened_only_as_a_person_wrote_it() {
+        let policy = StagePolicy::parse(
+            r#"
+[[app]]
+app_id = "org.mozilla.firefox"
+display_name = "Firefox"
+allow = ["click"]
+launch = ["firefox", "--new-window"]
+
+[[app]]
+app_id = "org.qt-project.qml"
+display_name = "Lienzo"
+allow = ["stroke"]
+"#,
+        )
+        .unwrap();
+        let firefox = policy.named("  FireFox ").expect("the last part of a dotted id is its name");
+        assert_eq!(firefox.launch, vec!["firefox", "--new-window"]);
+        assert_eq!(policy.named("lienzo").map(|app| app.app_id.as_str()), Some("org.qt-project.qml"));
+        assert!(policy.named("lienzo").unwrap().launch.is_empty(), "no entry, no opening");
+        assert!(policy.named("chrome").is_none(), "what is not written here is not opened");
+        assert!(policy.named("").is_none());
+    }
+
+    #[test]
+    fn a_name_that_could_be_two_applications_opens_neither() {
+        let mut policy = StagePolicy::new();
+        let mut one = app("org.a.editor");
+        one.display_name = "Editor".into();
+        let mut two = app("org.b.editor");
+        two.display_name = "Otro".into();
+        policy.allow(one).unwrap();
+        policy.allow(two).unwrap();
+        assert!(policy.named("editor").is_none());
+        assert!(policy.named("org.a.editor").is_some(), "the full id is still exact");
+    }
+
+    #[test]
+    fn a_launch_entry_has_to_be_a_program_and_not_a_script() {
+        for bad in [vec!["".to_string()], vec![" firefox".to_string()], vec!["x".repeat(MAX_LAUNCH_ARG_BYTES + 1)]] {
+            let mut entry = app("org.bad.app");
+            entry.launch = bad;
+            assert!(matches!(entry.validate(), Err(PolicyError::Launch(_))));
+        }
+        let mut many = app("org.bad.app");
+        many.launch = vec!["x".to_string(); MAX_LAUNCH_ARGS + 1];
+        assert!(matches!(many.validate(), Err(PolicyError::Launch(_))));
     }
 
     #[test]

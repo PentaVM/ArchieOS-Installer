@@ -205,6 +205,10 @@ private:
     archie::visual::PlaybackPolicy m_playbackPolicy;
     std::optional<archie::visual::Playback> m_playback;
     std::optional<archie::stage::DecodedCommand> m_active;
+    /// How many lines of the active drawing have been finished, counted by the pen coming
+    /// up. A drawing that a person interrupts says this in its receipt, so that whatever
+    /// asked for it can carry on from there instead of starting the whole thing again.
+    int m_finished = 0;
     /// The route the active text takes, chosen at its first character.
     std::optional<KeyTyper::Route> m_textRoute;
     /// The connection the active command came from. A capture's pixels go back to it alone.

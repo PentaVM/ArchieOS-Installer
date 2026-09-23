@@ -339,6 +339,13 @@ impl<C: CognitiveModelAdapter> SpeechSession<C> {
     pub fn cognitive(&self) -> &C {
         &self.cognitive
     }
+
+    /// The cognitive backend, for what the adapter contract does not cover — carrying a
+    /// turn past the tools it asked for. What it produces for the running turn still
+    /// passes through [`Self::pump`], the gate and the commit log.
+    pub fn cognitive_mut(&mut self) -> &mut C {
+        &mut self.cognitive
+    }
 }
 
 /// Tag-prefix language match, the same rule the adapters and the router use.

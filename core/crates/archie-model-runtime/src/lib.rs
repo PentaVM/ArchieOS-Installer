@@ -13,6 +13,11 @@ use std::env;
 use std::time::Duration;
 use thiserror::Error;
 
+pub mod stream;
+pub use stream::{
+    SseAssembler, SseError, StreamEvent, ToolCall, ToolChatMessage, ToolChatRequest, ToolDefinition,
+};
+
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(90);
 const DEFAULT_MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_MESSAGES: usize = 128;
@@ -342,6 +347,10 @@ pub enum RuntimeError {
     Transport(#[from] reqwest::Error),
     #[error("provider returned invalid JSON: {0}")]
     Decode(#[from] serde_json::Error),
+    #[error("streamed request refused before sending: {0}")]
+    StreamRequest(&'static str),
+    #[error("provider stream could not be read: {0:?}")]
+    Stream(stream::SseError),
 }
 
 #[derive(Clone)]
@@ -438,6 +447,57 @@ impl InferenceClient {
             return Err(RuntimeError::EmptyCompletion);
         }
         Ok(decoded)
+    }
+
+    /// Asks for an answer that arrives while it is being written, with tools on offer.
+    ///
+    /// The same gate as [`InferenceClient::chat`] runs first — the provider has to be the
+    /// one the descriptor names, the locality has to match, and the privacy grade has to be
+    /// one the model may see — and the same ceiling on how much the provider may send.
+    /// Every event is handed to `on_event` as soon as it is whole; the call returns when
+    /// the stream finishes, and an error if it could not be read to the end.
+    pub async fn chat_stream<F>(
+        &self,
+        descriptor: &ModelDescriptor,
+        privacy: PrivacyGrade,
+        request: &stream::ToolChatRequest,
+        mut on_event: F,
+    ) -> Result<(), RuntimeError>
+    where
+        F: FnMut(stream::StreamEvent),
+    {
+        request.validate().map_err(RuntimeError::StreamRequest)?;
+        self.authorize(descriptor, privacy)?;
+        if request.model != provider_model_id(descriptor)? {
+            return Err(RuntimeError::ProviderMismatch);
+        }
+        let response = self
+            .send(self.endpoint.url("chat/completions")?, Some(&request.body()))
+            .await?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(RuntimeError::HttpStatus(status));
+        }
+        let mut assembler = stream::SseAssembler::new();
+        let mut received = 0_usize;
+        let mut bytes = response.bytes_stream();
+        while let Some(chunk) = bytes.next().await {
+            let chunk = chunk?;
+            received = received.saturating_add(chunk.len());
+            if received > self.endpoint.max_response_bytes {
+                return Err(RuntimeError::ResponseTooLarge);
+            }
+            for event in assembler.feed(&chunk).map_err(RuntimeError::Stream)? {
+                on_event(event);
+            }
+            if assembler.is_finished() {
+                break;
+            }
+        }
+        for event in assembler.close().map_err(RuntimeError::Stream)? {
+            on_event(event);
+        }
+        Ok(())
     }
 
     fn authorize(
