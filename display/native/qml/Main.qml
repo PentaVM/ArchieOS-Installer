@@ -463,13 +463,13 @@ ApplicationWindow {
                         // bright: the sunlit limb, a specular glint, a bright marker. The
                         // HDR floor is above 1.0 so nothing in the midtones blooms — a
                         // globe where everything glows is the cyberpunk cliche this is
-                        // meant to avoid. Off entirely under memory pressure, where the
-                        // observatory is not the thing worth spending the GPU on.
-                        glowEnabled: !root.budgetReduced()
-                        glowStrength: root.scene === "orb" ? 1.4 : 0.85
-                        glowIntensity: root.scene === "orb" ? 0.68 : 0.28
-                        glowBloom: root.scene === "orb" ? 0.65 : 0.18
-                        glowHDRMinimumValue: root.scene === "orb" ? 0.45 : 1.05
+                        // meant to avoid. The orb uses its bounded field light pass;
+                        // this HDR effect remains for the world and core scenes.
+                        glowEnabled: root.scene !== "orb" && !root.budgetReduced()
+                        glowStrength: 0.85
+                        glowIntensity: 0.28
+                        glowBloom: 0.18
+                        glowHDRMinimumValue: 1.05
                         glowHDRMaximumValue: 8.0
                         glowHDRScale: 2.0
                         glowQualityHigh: archieBridge.frame.msaaSamples >= 4
@@ -703,10 +703,10 @@ ApplicationWindow {
                         property real spin: 0
                         eulerRotation: Qt.vector3d(0, spin, 0)
                         Timer {
-                            interval: 50
+                            interval: 100
                             repeat: true
                             running: orbRoot.visible
-                            onTriggered: orbRoot.spin = (orbRoot.spin + 0.45) % 360
+                            onTriggered: orbRoot.spin = (orbRoot.spin + 0.9) % 360
                         }
                         Model {
                             geometry: MeshGeometry {
