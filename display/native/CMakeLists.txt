@@ -43,6 +43,8 @@ qt_add_resources(archie-display "archie-native-assets"
         shaders/atmosphere.frag
         shaders/star.vert
         shaders/star.frag
+        shaders/orb_light.vert
+        shaders/orb_light.frag
 )
 
 target_link_libraries(archie-display PRIVATE

@@ -191,7 +191,7 @@ impl Default for OrbConfig {
 impl OrbConfig {
     pub fn for_profile(profile: ResourceProfile) -> Self {
         let (visible_nodes, lat, lon, neighbours) = match profile {
-            ResourceProfile::Low => (128, 18, 36, 12),
+            ResourceProfile::Low => (256, 18, 36, 12),
             ResourceProfile::Balanced => (512, 30, 60, 18),
             ResourceProfile::High => (2048, 48, 96, MAX_NEIGHBOURS),
         };

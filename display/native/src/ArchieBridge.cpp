@@ -24,6 +24,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -38,12 +39,15 @@ constexpr int maximumOrbProjectionBytes = 8 * 1024 * 1024;
 // One buffer per visual layer avoids hundreds of Quick3D models on low profile
 // machines. Every primitive samples the model's field or its real graph edges.
 struct OrbMeshBuilder {
+    explicit OrbMeshBuilder(float lift = 0.0F) : radialLift(lift) {}
+    float radialLift;
     std::vector<float> vertices;
     std::vector<quint32> indices;
 
     void vertex(const QVector3D &position, const QVector3D &normal)
     {
-        vertices.insert(vertices.end(), {position.x(), position.y(), position.z(),
+        const QVector3D visiblePosition = position + normal * radialLift;
+        vertices.insert(vertices.end(), {visiblePosition.x(), visiblePosition.y(), visiblePosition.z(),
                                           normal.x(), normal.y(), normal.z()});
     }
 
@@ -81,6 +85,13 @@ struct OrbMeshBuilder {
         vertex(point - east * size, normal); vertex(point - north * size, normal);
         indices.insert(indices.end(), {start, start + 1, start + 2,
                                        start, start + 2, start + 3});
+        // A second crossing plane keeps a data glint visible as the orb turns.
+        // A single tangent quad disappears edge-on for half a rotation.
+        const quint32 crossing = static_cast<quint32>(vertices.size() / 6);
+        vertex(point + east * size, normal); vertex(point + normal * size, normal);
+        vertex(point - east * size, normal); vertex(point - normal * size, normal);
+        indices.insert(indices.end(), {crossing, crossing + 1, crossing + 2,
+                                       crossing, crossing + 2, crossing + 3});
     }
 
     QVariantMap packed() const
@@ -93,6 +104,32 @@ struct OrbMeshBuilder {
                 {QStringLiteral("packedIndices"), packedIndices}};
     }
 };
+
+// Render-only category sectors make the machine's architecture readable while
+// retaining TFOG's graph direction and each entity's radial depth. The hash is
+// fixed across frames and devices; a node never moves because of list order.
+QVector3D orbDisplayPosition(const QString &id, const QString &kind, const QVector3D &source)
+{
+    QVector3D anchor(0.0F, 0.0F, 1.0F);
+    if (kind == QStringLiteral("service")) anchor = QVector3D(0.15F, 0.78F, 0.60F);
+    else if (kind == QStringLiteral("process")) anchor = QVector3D(-0.72F, -0.18F, 0.67F);
+    else if (kind == QStringLiteral("device")) anchor = QVector3D(0.77F, 0.20F, 0.60F);
+    else if (kind == QStringLiteral("directory")) anchor = QVector3D(0.52F, -0.74F, 0.43F);
+    else if (kind == QStringLiteral("module")) anchor = QVector3D(-0.55F, 0.48F, 0.68F);
+    else if (kind == QStringLiteral("model")) anchor = QVector3D(0.08F, -0.48F, 0.87F);
+    quint64 hash = 0xcbf29ce484222325ULL;
+    for (const char byte : id.toUtf8())
+        hash = (hash ^ static_cast<quint8>(byte)) * 0x100000001b3ULL;
+    const float azimuth = 6.2831853F * static_cast<float>(hash & 0xffffU) / 65535.0F;
+    const float elevation = 2.0F * static_cast<float>((hash >> 16) & 0xffffU) / 65535.0F - 1.0F;
+    const float ring = std::sqrt(std::max(0.0F, 1.0F - elevation * elevation));
+    const QVector3D spread(ring * std::cos(azimuth), elevation, ring * std::sin(azimuth));
+    const QVector3D graph = source.lengthSquared() > 0.01F ? source.normalized() : spread;
+    const QVector3D direction = (anchor.normalized() * 0.62F + graph * 0.32F + spread * 0.24F).normalized();
+    const float radius = kind == QStringLiteral("system") ? 0.18F
+        : std::clamp(source.length(), 0.30F, 0.88F);
+    return direction * radius;
+}
 
 /// The model's own world, unaltered.
 ///
@@ -455,7 +492,11 @@ ArchieBridge::ArchieBridge(QObject *parent)
     m_kernelTimer.setTimerType(Qt::CoarseTimer);
     connect(&m_kernelTimer, &QTimer::timeout, this, &ArchieBridge::refreshKernel);
 
-    m_orbTimer.setInterval(250);
+    // Polling changes semantic state as well as geometry. Keep the default responsive,
+    // but let constrained WSL graphics stacks trade update rate for headroom.
+    bool orbPollValid = false;
+    const int orbPollOverride = qEnvironmentVariableIntValue("ARCHIE_ORB_POLL_MS", &orbPollValid);
+    m_orbTimer.setInterval(orbPollValid ? std::clamp(orbPollOverride, 200, 2000) : 500);
     m_orbTimer.setTimerType(Qt::CoarseTimer);
     connect(&m_orbTimer, &QTimer::timeout, this, &ArchieBridge::refreshOrb);
 
@@ -680,25 +721,43 @@ void ArchieBridge::accept(Projection projection, const QByteArray &body)
         std::vector<std::pair<QVector3D, float>> concentrations;
         QVariantList nodes;
         nodes.reserve(nodeArray.size());
+        OrbMeshBuilder nodeDots(0.014F);
         for (const auto &value : nodeArray) {
             const auto node = value.toObject();
             const auto p = node.value(QStringLiteral("position")).toArray();
             if (p.size() != 3) continue;
             const QString id = node.value(QStringLiteral("id")).toString();
+            const QString kind = node.value(QStringLiteral("kind")).toString();
             const QVector3D pos(p[0].toDouble(), p[1].toDouble(), p[2].toDouble());
             if (id.isEmpty() || !std::isfinite(pos.x()) || !std::isfinite(pos.y()) || !std::isfinite(pos.z())) continue;
-            positions.insert(id, pos);
+            const QVector3D displayPos = orbDisplayPosition(id, kind, pos);
+            positions.insert(id, displayPos);
             const auto direction = node.value(QStringLiteral("direction")).toArray();
             if (direction.size() == 3) {
                 const QVector3D bearing(direction[0].toDouble(), direction[1].toDouble(), direction[2].toDouble());
                 if (bearing.lengthSquared() > 0.1F)
-                    concentrations.emplace_back(bearing.normalized(),
+                    concentrations.emplace_back(displayPos.normalized(),
                         std::clamp(static_cast<float>(node.value(QStringLiteral("mass")).toDouble()
                                                      + node.value(QStringLiteral("activity")).toDouble()
                                                      + node.value(QStringLiteral("focus_score")).toDouble()), 0.0F, 2.0F));
             }
             const QString status = node.value(QStringLiteral("action_status")).toString();
+            const float mass = static_cast<float>(node.value(QStringLiteral("mass")).toDouble());
+            const float activity = static_cast<float>(node.value(QStringLiteral("activity")).toDouble());
+            const float focus = static_cast<float>(node.value(QStringLiteral("focus_score")).toDouble());
+            const float voice = static_cast<float>(node.value(QStringLiteral("voice_overlap")).toDouble());
+            const float markerPriority = mass + activity * 2.0F + focus * 5.0F + voice * 2.0F
+                + (status.isEmpty() ? 0.0F : 5.0F)
+                + (node.value(QStringLiteral("selected")).toBool() ? 5.0F : 0.0F);
+            if (displayPos.lengthSquared() > 0.1F)
+                nodeDots.glint(displayPos, std::clamp(
+                    static_cast<float>(node.value(QStringLiteral("render_radius")).toDouble(0.025)) * 1.5F,
+                    0.010F, 0.035F));
             QColor color(QStringLiteral("#ffc466"));
+            if (kind == QStringLiteral("process")) color = QColor(QStringLiteral("#ff9c55"));
+            else if (kind == QStringLiteral("device")) color = QColor(QStringLiteral("#6fe3f5"));
+            else if (kind == QStringLiteral("directory")) color = QColor(QStringLiteral("#c084fc"));
+            else if (kind == QStringLiteral("system")) color = QColor(QStringLiteral("#fff1b5"));
             if (status == QStringLiteral("verified")) color = QColor(QStringLiteral("#47d18b"));
             else if (status == QStringLiteral("error")) color = QColor(QStringLiteral("#f2626b"));
             else if (status == QStringLiteral("predicted")) color = QColor(QStringLiteral("#f0b429"));
@@ -707,9 +766,10 @@ void ArchieBridge::accept(Projection projection, const QByteArray &body)
             nodes.push_back(QVariantMap{
                 {QStringLiteral("id"), id},
                 {QStringLiteral("label"), node.value(QStringLiteral("label")).toString()},
-                {QStringLiteral("kind"), node.value(QStringLiteral("kind")).toString()},
+                {QStringLiteral("kind"), kind},
                 {QStringLiteral("status"), status},
-                {QStringLiteral("position"), QVariant::fromValue(pos)},
+                {QStringLiteral("markerPriority"), markerPriority},
+                {QStringLiteral("position"), QVariant::fromValue(displayPos)},
                 // Qt Quick3D's built-in sphere has a 50-unit radius. The Orb model's
                 // render radius is already in world units, so convert once here before
                 // the scene root's hardware scale is applied in QML.
@@ -719,9 +779,31 @@ void ArchieBridge::accept(Projection projection, const QByteArray &body)
                 {QStringLiteral("color"), color}
             });
         }
+        std::sort(nodes.begin(), nodes.end(), [](const QVariant &a, const QVariant &b) {
+            const auto left = a.toMap();
+            const auto right = b.toMap();
+            const double scoreA = left.value(QStringLiteral("markerPriority")).toDouble();
+            const double scoreB = right.value(QStringLiteral("markerPriority")).toDouble();
+            return scoreA == scoreB
+                ? left.value(QStringLiteral("id")).toString() < right.value(QStringLiteral("id")).toString()
+                : scoreA > scoreB;
+        });
+        if (nodes.size() > 96) nodes = nodes.mid(0, 96);
+        // One batched light pass for the sampled shell; graph links stay inside it.
+        OrbMeshBuilder filaments(0.014F);
+        OrbMeshBuilder halo(0.011F);
+        OrbMeshBuilder glints(0.016F);
+        OrbMeshBuilder glintHalo(0.012F);
+        OrbMeshBuilder iris(0.014F);
+        OrbMeshBuilder irisHalo(0.011F);
         QVariantList edges;
         edges.reserve(edgeArray.size());
         OrbMeshBuilder linkMesh;
+        bool tunnelLimitValid = false;
+        const int tunnelLimitOverride = qEnvironmentVariableIntValue("ARCHIE_ORB_MAX_TUNNELS", &tunnelLimitValid);
+        const int tunnelLimit = tunnelLimitValid ? std::clamp(tunnelLimitOverride, 0, 192)
+            : (object.value(QStringLiteral("profile")).toString() == QStringLiteral("low") ? 48 : 128);
+        std::vector<std::tuple<uint, QVector3D, QVector3D>> tunnelCandidates;
         for (const auto &value : edgeArray) {
             const auto edge = value.toObject();
             const QString from = edge.value(QStringLiteral("source")).toString();
@@ -731,8 +813,35 @@ void ArchieBridge::accept(Projection projection, const QByteArray &body)
             const float similarity = std::clamp(static_cast<float>(edge.value(QStringLiteral("similarity")).toDouble(0.2)), 0.0F, 1.0F);
             item.insert(QStringLiteral("opacity"), std::clamp(static_cast<double>(similarity), 0.04, 0.65));
             edges.push_back(item);
-            if (linkMesh.indices.size() < 360 * 6 && similarity > 0.7F)
-                linkMesh.segment(positions.value(from), positions.value(to), 0.0008F + 0.0012F * similarity);
+            const QVector3D a = positions.value(from);
+            const QVector3D b = positions.value(to);
+            if (linkMesh.indices.size() < 96 * 6 && similarity > 0.85F)
+                linkMesh.segment(a, b, 0.0008F + 0.0012F * similarity);
+            bool structural = false;
+            for (const auto &relation : edge.value(QStringLiteral("relations")).toArray()) {
+                const QString name = relation.toString();
+                structural |= name == QStringLiteral("hierarchy")
+                    || name == QStringLiteral("dependency") || name == QStringLiteral("runtime");
+            }
+            const uint tunnelHash = qHash(from + QLatin1Char('>') + to, 0U);
+            if (structural) tunnelCandidates.emplace_back(tunnelHash, a, b);
+        }
+        // Pick across the whole graph, not the first rows of the projection:
+        // those are usually one system parent and made every tunnel converge there.
+        std::sort(tunnelCandidates.begin(), tunnelCandidates.end(),
+                  [](const auto &left, const auto &right) { return std::get<0>(left) < std::get<0>(right); });
+        for (int i = 0; i < std::min(tunnelLimit, static_cast<int>(tunnelCandidates.size())); ++i) {
+            const auto &[hash, a, b] = tunnelCandidates[static_cast<std::size_t>(i)];
+            const QVector3D control = (a + b) * (0.16F + static_cast<float>(hash & 7U) * 0.014F);
+            QVector3D previous = a;
+            for (int step = 1; step <= 8; ++step) {
+                const float t = static_cast<float>(step) / 8.0F;
+                const QVector3D next = a * ((1.0F - t) * (1.0F - t))
+                    + control * (2.0F * t * (1.0F - t)) + b * (t * t);
+                filaments.segment(previous, next, 0.0036F);
+                halo.segment(previous, next, 0.011F);
+                previous = next;
+            }
         }
         const auto fieldObject = object.value(QStringLiteral("field")).toObject();
         const auto vertices = fieldObject.value(QStringLiteral("vertices")).toArray();
@@ -755,46 +864,122 @@ void ArchieBridge::accept(Projection projection, const QByteArray &body)
         QByteArray packedIndices(static_cast<qsizetype>(indices.size()) * sizeof(quint32), Qt::Uninitialized);
         auto *indexDst = reinterpret_cast<quint32 *>(packedIndices.data());
         for (qsizetype i = 0; i < indices.size(); ++i) indexDst[i] = static_cast<quint32>(indices[i].toInt());
-        OrbMeshBuilder filaments;
-        OrbMeshBuilder glints;
+        // The lift above keeps light ribbons above the field depth buffer.
         const int columns = indices.size() > 1 ? indices[1].toInt() : 0;
         if (columns > 2 && columns <= 97 && fieldPositions.size() % static_cast<std::size_t>(columns) == 0) {
             const int rows = static_cast<int>(fieldPositions.size() / static_cast<std::size_t>(columns));
-            for (int row = 1; row < rows - 1; ++row) {
+            bool gridStepValid = false;
+            const int gridStepOverride = qEnvironmentVariableIntValue("ARCHIE_ORB_GRID_STEP", &gridStepValid);
+            const int ringStep = gridStepValid ? std::clamp(gridStepOverride, 1, 4) : 1;
+            const int meridianStep = ringStep * 2 + 2;
+            const auto shellPoint = [&fieldPositions](std::size_t index) {
+                return fieldPositions[index].normalized() * 0.86F;
+            };
+
+            // Broken circuit traces are anchored to observed nodes. Their short
+            // deterministic jogs are visual paths, not extra graph entities.
+            for (const auto &value : nodeArray) {
+                const auto node = value.toObject();
+                const QString id = node.value(QStringLiteral("id")).toString();
+                if (!positions.contains(id)) continue;
+                const QVector3D direction = positions.value(id).normalized();
+                if (direction.lengthSquared() < 0.5F) continue;
+                QVector3D east = QVector3D::crossProduct(QVector3D(0, 1, 0), direction);
+                if (east.lengthSquared() < 0.01F)
+                    east = QVector3D::crossProduct(QVector3D(1, 0, 0), direction);
+                east.normalize();
+                const QVector3D north = QVector3D::crossProduct(direction, east).normalized();
+                const uint traceHash = qHash(id, 0U);
+                const float handedness = (traceHash & 1U) ? 1.0F : -1.0F;
+                const float length = 0.055F + static_cast<float>((traceHash >> 4) & 7U) * 0.007F;
+                const auto surface = [](const QVector3D &v) { return v.normalized() * 0.867F; };
+                const QVector3D start = surface(direction);
+                const QVector3D bend = surface(direction + east * (length * handedness));
+                const QVector3D corner = surface(direction + east * (length * handedness)
+                    + north * (length * 0.34F));
+                const QVector3D end = surface(direction + east * (length * handedness * 1.7F)
+                    + north * (length * 0.34F));
+                filaments.segment(start, bend, 0.0029F);
+                filaments.segment(bend, corner, 0.0029F);
+                filaments.segment(corner, end, 0.0029F);
+                halo.segment(start, bend, 0.009F);
+                halo.segment(bend, corner, 0.009F);
+                halo.segment(corner, end, 0.009F);
+                if ((traceHash & 3U) == 0U) glints.glint(corner, 0.008F);
+            }
+
+            // Continuous parallels and meridians preserve a Dyson-shell silhouette.
+            // The field supplies angles and density; a fixed outer radius prevents
+            // active concentrations from deforming the whole outline into spikes.
+            for (int row = 1; row < rows - 1; row += ringStep) {
                 for (int column = 0; column < columns - 1; ++column) {
                     const auto index = static_cast<std::size_t>(row * columns + column);
-                    const QVector3D point = fieldPositions[index];
-                    if (point.lengthSquared() < 0.1F) continue;
-                    const QVector3D bearing = point.normalized();
+                    const QVector3D point = shellPoint(index);
+                    const QVector3D next = shellPoint(index + 1);
                     float support = 0.0F;
+                    const QVector3D bearing = point.normalized();
                     for (const auto &[direction, weight] : concentrations)
                         support = std::max(support, std::max(0.0F, QVector3D::dotProduct(bearing, direction) - 0.7F) * weight * 3.0F);
                     support = std::clamp(support, 0.0F, 1.0F);
-                    quint32 hash = static_cast<quint32>(row * 2654435761U) ^ static_cast<quint32>((column + 1) * 2246822519U);
-                    hash ^= hash >> 15;
-                    const int duty = 55 + static_cast<int>(support * 40.0F);
-                    if (static_cast<int>(hash % 100U) < duty) {
-                        const QVector3D next = fieldPositions[index + 1];
-                        filaments.segment(point, next, 0.0026F + 0.0014F * support);
-                        if (static_cast<int>((hash >> 7) % 100U) < duty / 2 && row + 1 < rows - 1)
-                            filaments.segment(point, fieldPositions[index + static_cast<std::size_t>(columns)], 0.0020F);
-                        if (hash % 2U == 0U)
-                            glints.glint((point + next) * 0.5F, 0.0045F + support * 0.006F);
-                    }
-                    if (hash % 13U == 0U)
-                        filaments.segment(point * 0.95F, point * (1.03F + 0.06F * support), 0.0020F);
-                    if (hash % 3U != 0U || support > 0.4F)
-                        glints.glint(point, 0.0050F + support * 0.011F);
-                    if (row > rows / 4 && row < rows * 3 / 4 && hash % 3U == 0U) {
-                        filaments.segment(point * 0.55F, fieldPositions[index + 1] * 0.55F, 0.0022F);
-                        glints.glint(point * 0.55F, 0.006F + support * 0.008F);
+                    const float width = 0.0038F + 0.0018F * support;
+                    filaments.segment(point, next, width);
+                    halo.segment(point, next, width * 3.0F);
+                    if (column % meridianStep == 0) {
+                        const float size = 0.009F + 0.012F * support;
+                        glints.glint(point, size);
+                        if ((row / ringStep + column / meridianStep) % 2 == 0)
+                            glintHalo.glint(point, size * 2.6F);
                     }
                 }
             }
+            for (int column = 0; column < columns - 1; column += meridianStep) {
+                for (int row = 1; row < rows - 2; ++row) {
+                    const auto index = static_cast<std::size_t>(row * columns + column);
+                    const QVector3D point = shellPoint(index);
+                    const QVector3D next = shellPoint(index + static_cast<std::size_t>(columns));
+                    filaments.segment(point, next, 0.0032F);
+                    halo.segment(point, next, 0.009F);
+                }
+            }
+
+            // The inner eye is a field-density readout, not an additional entity.
+            // Keeping it inside the shell gives the operator a stable visual centre.
+            const int equator = rows / 2;
+            const QVector3D eyeNormal(0.0F, 0.509F, 0.861F);
+            const QVector3D eyeUp(0.0F, 0.861F, -0.509F);
+            const QVector3D eyeRight(1.0F, 0.0F, 0.0F);
+            for (int column = 0; column < columns - 1; ++column) {
+                const auto sample = static_cast<std::size_t>(equator * columns + column);
+                const float a = 6.2831853F * static_cast<float>(column) / static_cast<float>(columns - 1);
+                const float b = 6.2831853F * static_cast<float>(column + 1) / static_cast<float>(columns - 1);
+                const float ra = 0.30F + 0.16F * (fieldPositions[sample].length() - 0.72F);
+                const float rb = 0.30F + 0.16F * (fieldPositions[sample + 1].length() - 0.72F);
+                const QVector3D p = eyeNormal * 0.90F + eyeRight * (ra * std::cos(a)) + eyeUp * (ra * std::sin(a));
+                const QVector3D q = eyeNormal * 0.90F + eyeRight * (rb * std::cos(b)) + eyeUp * (rb * std::sin(b));
+                iris.segment(p, q, 0.006F);
+                irisHalo.segment(p, q, 0.019F);
+                if (column % meridianStep == 0) iris.glint(p, 0.013F);
+                const QVector3D innerP = eyeNormal * 0.91F + eyeRight * (ra * 0.52F * std::cos(a))
+                    + eyeUp * (ra * 0.52F * std::sin(a));
+                const QVector3D innerQ = eyeNormal * 0.91F + eyeRight * (rb * 0.52F * std::cos(b))
+                    + eyeUp * (rb * 0.52F * std::sin(b));
+                iris.segment(innerP, innerQ, 0.004F);
+                irisHalo.segment(innerP, innerQ, 0.012F);
+                if (column % 6 == 0) {
+                    iris.segment(innerP, p, 0.003F);
+                    irisHalo.segment(innerP, p, 0.009F);
+                }
+            }
+            iris.glint(eyeNormal * 0.92F, 0.028F);
         }
         m_orbField = {{QStringLiteral("packedVertices"), packedVertices}, {QStringLiteral("packedIndices"), packedIndices}};
         m_orbFilaments = filaments.packed();
+        m_orbHalo = halo.packed();
         m_orbGlints = glints.packed();
+        m_orbGlintHalo = glintHalo.packed();
+        m_orbNodeDots = nodeDots.packed();
+        m_orbIris = iris.packed();
+        m_orbIrisHalo = irisHalo.packed();
         m_orbLinks = linkMesh.packed();
         m_orb = object.toVariantMap();
         m_orbNodes = std::move(nodes);

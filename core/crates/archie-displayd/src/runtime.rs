@@ -1,8 +1,9 @@
 //! Bounded, read-only inventory of this machine for the orbital projection.
 //!
-//! Process names, parenthood, CPU tick deltas, service cgroup names, and device class
-//! names are enough to show a working OS. Command lines, environment, user paths,
-//! open files, and process memory never enter the display daemon's orb feed.
+//! Process names, parenthood, CPU tick deltas, installed service unit names, and device
+//! class names show the architecture of a working OS. Fixed system directories are
+//! checked for existence only. Command lines, environment, user paths, open files,
+//! and process memory never enter the display daemon's orb feed.
 
 use archie_orb::OrbEntity;
 #[cfg(target_os = "linux")]
@@ -15,9 +16,9 @@ use std::path::Path;
 #[cfg(target_os = "linux")]
 const MAX_PROCESSES: usize = 256;
 #[cfg(target_os = "linux")]
-const MAX_SERVICES: usize = 128;
+const MAX_SERVICES: usize = 256;
 #[cfg(target_os = "linux")]
-const MAX_DEVICES: usize = 32;
+const MAX_DEVICES: usize = 64;
 
 #[derive(Default)]
 pub struct RuntimeInventory {
@@ -88,7 +89,7 @@ impl RuntimeInventory {
             .iter()
             .map(|fact| (fact.pid, fact.id.clone()))
             .collect::<BTreeMap<_, _>>();
-        let mut entities = Vec::with_capacity(facts.len() + MAX_SERVICES + MAX_DEVICES);
+        let mut entities = Vec::with_capacity(facts.len() + MAX_SERVICES + MAX_DEVICES + 8);
         let mut service_members = BTreeMap::<String, Vec<String>>::new();
         for fact in facts {
             let previous = self
@@ -121,10 +122,10 @@ impl RuntimeInventory {
                     .get(&fact.ppid)
                     .cloned()
                     .or_else(|| Some("system:archieos".into())),
-                related_ids: fact
-                    .service
-                    .as_ref()
-                    .map_or_else(Vec::new, |service| vec![format!("service:{service}")]),
+                related_ids: fact.service.as_ref().map_or_else(
+                    || vec!["directory:/proc".into()],
+                    |service| vec![format!("service:{service}"), "directory:/proc".into()],
+                ),
                 kind: EntityKind::Process,
                 token: semantic_features(&format!(
                     "process {} {}",
@@ -145,7 +146,37 @@ impl RuntimeInventory {
             });
         }
         self.previous_ticks = next_ticks;
-        for (service, members) in service_members.into_iter().take(MAX_SERVICES) {
+        let mut service_units = BTreeSet::new();
+        for directory in [
+            "/usr/lib/systemd/system",
+            "/etc/systemd/system",
+            "/run/systemd/system",
+        ] {
+            if let Ok(entries) = std::fs::read_dir(directory) {
+                for entry in entries.flatten() {
+                    let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+                        continue;
+                    };
+                    if entry.path().is_file()
+                        && name.ends_with(".service")
+                        && name.len() <= 96
+                        && !name.chars().any(char::is_control)
+                    {
+                        service_units.insert(name);
+                    }
+                }
+            }
+        }
+        // Keep running units ahead of installed but inactive ones when the
+        // inventory cap is reached on a larger machine.
+        let active_names = service_members.keys().cloned().collect::<BTreeSet<_>>();
+        let prioritized_units = active_names
+            .iter()
+            .cloned()
+            .chain(service_units.into_iter().filter(|name| !active_names.contains(name)));
+        for service in prioritized_units.take(MAX_SERVICES) {
+            let members = service_members.remove(&service).unwrap_or_default();
+            let active = !members.is_empty();
             let label = service.trim_end_matches(".service");
             entities.push(OrbEntity {
                 id: format!("service:{service}"),
@@ -153,13 +184,18 @@ impl RuntimeInventory {
                 related_ids: members.into_iter().take(64).collect(),
                 kind: EntityKind::Service,
                 token: semantic_features(&format!("service {label}")),
-                class_probs: BTreeMap::from([("service".into(), 1.0)]),
+                class_probs: BTreeMap::from([
+                    ("service".into(), 1.0),
+                    (if active { "active" } else { "installed" }.into(), 0.8),
+                ]),
                 size_bytes: 0,
-                activity: 0.25,
-                importance: if label.starts_with("archie") {
-                    0.7
+                activity: if active { 0.25 } else { 0.0 },
+                importance: if label.starts_with("archie") && active {
+                    0.75
+                } else if active {
+                    0.35
                 } else {
-                    0.25
+                    0.12
                 },
                 uncertainty: 0.05,
                 runtime: Vec::new(),
@@ -171,6 +207,10 @@ impl RuntimeInventory {
             ("/sys/class/net", "network"),
             ("/sys/block", "storage"),
             ("/sys/class/drm", "display"),
+            ("/sys/class/power_supply", "power"),
+            ("/sys/class/hwmon", "sensor"),
+            ("/sys/class/thermal", "thermal"),
+            ("/sys/devices/system/cpu", "compute"),
         ] {
             let Ok(entries) = std::fs::read_dir(directory) else {
                 continue;
@@ -184,6 +224,10 @@ impl RuntimeInventory {
                 };
                 if name.len() > 64
                     || name.chars().any(char::is_control)
+                    || (class == "compute"
+                        && !name.strip_prefix("cpu").is_some_and(|number| {
+                            !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit())
+                        }))
                     || !seen.insert((class, name.clone()))
                 {
                     continue;
@@ -191,7 +235,7 @@ impl RuntimeInventory {
                 entities.push(OrbEntity {
                     id: format!("device:{class}:{name}"),
                     parent_id: Some("system:archieos".into()),
-                    related_ids: Vec::new(),
+                    related_ids: vec!["directory:/sys".into()],
                     kind: EntityKind::Device,
                     token: semantic_features(&format!("device {class} {name}")),
                     class_probs: BTreeMap::from([("device".into(), 1.0), (class.into(), 0.8)]),
@@ -203,6 +247,25 @@ impl RuntimeInventory {
                     label: name,
                 });
             }
+        }
+        for directory in ["/proc", "/sys", "/dev", "/run", "/etc", "/usr", "/var", "/tmp"] {
+            if !Path::new(directory).is_dir() {
+                continue;
+            }
+            entities.push(OrbEntity {
+                id: format!("directory:{directory}"),
+                parent_id: Some("system:archieos".into()),
+                related_ids: Vec::new(),
+                kind: EntityKind::Directory,
+                token: semantic_features(&format!("system directory {directory}")),
+                class_probs: BTreeMap::from([("directory".into(), 1.0)]),
+                size_bytes: 0,
+                activity: 0.0,
+                importance: 0.3,
+                uncertainty: 0.0,
+                runtime: Vec::new(),
+                label: directory.into(),
+            });
         }
         entities
     }
