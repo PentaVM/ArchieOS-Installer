@@ -37,13 +37,39 @@ pub enum StageStatus {
     Error,
 }
 
+/// Named source lanes in the observatory. These are observations, not authorities.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowComponent {
+    Wanda,
+    Cortex,
+    Vision,
+    Iris,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowPhase {
+    Waiting,
+    Observe,
+    Consent,
+    Score,
+    Hypothesis,
+    Graph,
+    Evidence,
+    Capture,
+    Reflex,
+    Ground,
+    Verify,
+    Error,
+}
+
 /// Sanitized, transient observations used only to update the orb.
 ///
 /// Speech carries a feature vector, never transcript/audio. Stage carries an opaque
 /// operation reference and target identity, never the command or typed text. The
 /// event codec rejects unknown fields so raw payloads cannot be smuggled through.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Signal {
     pub schema: u32,
     pub at_ms: i64,
@@ -91,6 +117,12 @@ pub enum SignalKind {
         surface: u32,
         pid: Option<u32>,
         control_id: String,
+    },
+    Workflow {
+        component: WorkflowComponent,
+        phase: WorkflowPhase,
+        active: bool,
+        count: u16,
     },
 }
 
@@ -184,6 +216,13 @@ impl Signal {
                 valid_ref(app_id)?;
                 valid_ref(control_id)
             }
+            SignalKind::Workflow { count, .. } => {
+                if *count <= 4096 {
+                    Ok(())
+                } else {
+                    Err(SignalError::Invalid)
+                }
+            }
         }
     }
 
@@ -191,7 +230,27 @@ impl Signal {
         if bytes.is_empty() || bytes.len() > MAX_SIGNAL_BYTES {
             return Err(SignalError::Invalid);
         }
-        let signal: Self = serde_json::from_slice(bytes).map_err(|_| SignalError::Invalid)?;
+        // Serde cannot combine `flatten` with `deny_unknown_fields` on the outer
+        // struct. Split the envelope first; the tagged SignalKind then rejects
+        // any unexpected payload keys instead of silently dropping a signal.
+        let mut object: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_slice(bytes).map_err(|_| SignalError::Invalid)?;
+        let schema = object
+            .remove("schema")
+            .and_then(|value| value.as_u64())
+            .and_then(|value| u32::try_from(value).ok())
+            .ok_or(SignalError::Invalid)?;
+        let at_ms = object
+            .remove("at_ms")
+            .and_then(|value| value.as_i64())
+            .ok_or(SignalError::Invalid)?;
+        let kind = serde_json::from_value(serde_json::Value::Object(object))
+            .map_err(|_| SignalError::Invalid)?;
+        let signal = Self {
+            schema,
+            at_ms,
+            kind,
+        };
         signal.validate()?;
         Ok(signal)
     }

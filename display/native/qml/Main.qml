@@ -455,7 +455,9 @@ ApplicationWindow {
                                              : (archieBridge.frame.msaaSamples >= 2
                                                 ? SceneEnvironment.High
                                                 : SceneEnvironment.Medium)
-                        tonemapMode: SceneEnvironment.TonemapModeAces
+                        tonemapMode: root.scene === "orb"
+                                     ? SceneEnvironment.TonemapModeLinear
+                                     : SceneEnvironment.TonemapModeAces
 
                         // Bloom, and only bloom, and only where the image is genuinely
                         // bright: the sunlit limb, a specular glint, a bright marker. The
@@ -464,10 +466,10 @@ ApplicationWindow {
                         // meant to avoid. Off entirely under memory pressure, where the
                         // observatory is not the thing worth spending the GPU on.
                         glowEnabled: !root.budgetReduced()
-                        glowStrength: 0.85
-                        glowIntensity: 0.28
-                        glowBloom: 0.18
-                        glowHDRMinimumValue: 1.05
+                        glowStrength: root.scene === "orb" ? 1.4 : 0.85
+                        glowIntensity: root.scene === "orb" ? 0.68 : 0.28
+                        glowBloom: root.scene === "orb" ? 0.65 : 0.18
+                        glowHDRMinimumValue: root.scene === "orb" ? 0.45 : 1.05
                         glowHDRMaximumValue: 8.0
                         glowHDRScale: 2.0
                         glowQualityHigh: archieBridge.frame.msaaSamples >= 4
@@ -697,33 +699,65 @@ ApplicationWindow {
                     Node {
                         id: orbRoot
                         visible: root.scene === "orb"
-                        scale: Qt.vector3d(8, 8, 8)
+                        scale: Qt.vector3d(13.5, 13.5, 13.5)
+                        property real spin: 0
+                        eulerRotation: Qt.vector3d(0, spin, 0)
+                        Timer {
+                            interval: 50
+                            repeat: true
+                            running: orbRoot.visible
+                            onTriggered: orbRoot.spin = (orbRoot.spin + 0.45) % 360
+                        }
                         Model {
                             geometry: MeshGeometry {
                                 vertices: archieBridge.orbField.packedVertices || ""
                                 triangleIndices: archieBridge.orbField.packedIndices || ""
                             }
                             materials: PrincipledMaterial {
-                                baseColor: "#164354"
-                                emissiveFactor: Qt.vector3d(0.025, 0.09, 0.12)
-                                opacity: 0.34
+                                baseColor: "#9e4c0b"
+                                emissiveFactor: Qt.vector3d(0.38, 0.16, 0.015)
+                                opacity: 0.055
                                 cullMode: Material.NoCulling
-                                lighting: PrincipledMaterial.NoLighting
+                                lighting: PrincipledMaterial.FragmentLighting
                             }
                         }
-                        Repeater3D {
-                            model: archieBridge.orbEdges
-                            delegate: Model {
-                                required property var modelData
-                                source: "#Cylinder"
-                                position: modelData.position
-                                rotation: modelData.rotation
-                                scale: Qt.vector3d(0.004, modelData.length / 200.0, 0.004)
-                                materials: PrincipledMaterial {
-                                    baseColor: modelData.color
-                                    opacity: modelData.opacity
-                                    lighting: PrincipledMaterial.NoLighting
-                                }
+                        Model {
+                            geometry: MeshGeometry {
+                                vertices: archieBridge.orbFilaments.packedVertices || ""
+                                triangleIndices: archieBridge.orbFilaments.packedIndices || ""
+                            }
+                            materials: PrincipledMaterial {
+                                baseColor: "#ffbd45"
+                                emissiveFactor: Qt.vector3d(12.0, 4.8, 0.42)
+                                opacity: 1.0
+                                cullMode: Material.NoCulling
+                                lighting: PrincipledMaterial.FragmentLighting
+                            }
+                        }
+                        Model {
+                            geometry: MeshGeometry {
+                                vertices: archieBridge.orbLinks.packedVertices || ""
+                                triangleIndices: archieBridge.orbLinks.packedIndices || ""
+                            }
+                            materials: PrincipledMaterial {
+                                baseColor: "#ad6421"
+                                emissiveFactor: Qt.vector3d(1.6, 0.52, 0.055)
+                                opacity: 0.36
+                                cullMode: Material.NoCulling
+                                lighting: PrincipledMaterial.FragmentLighting
+                            }
+                        }
+                        Model {
+                            geometry: MeshGeometry {
+                                vertices: archieBridge.orbGlints.packedVertices || ""
+                                triangleIndices: archieBridge.orbGlints.packedIndices || ""
+                            }
+                            materials: PrincipledMaterial {
+                                baseColor: "#fff0b0"
+                                emissiveFactor: Qt.vector3d(18.0, 9.0, 1.6)
+                                opacity: 1.0
+                                cullMode: Material.NoCulling
+                                lighting: PrincipledMaterial.FragmentLighting
                             }
                         }
                         Repeater3D {
@@ -741,8 +775,9 @@ ApplicationWindow {
                                 scale: Qt.vector3d(pulse, pulse, pulse)
                                 materials: PrincipledMaterial {
                                     baseColor: root.selection && root.selection.id === modelData.id ? "#ffffff" : modelData.color
-                                    emissiveFactor: Qt.vector3d(0.32 + modelData.focus * 0.5,
-                                                                0.42 + modelData.voice * 0.5, 0.56)
+                                    emissiveFactor: Qt.vector3d(0.9,
+                                                                0.46 + modelData.focus * 0.4,
+                                                                0.12 + modelData.voice * 0.7)
                                     roughness: 0.24
                                 }
                             }
@@ -770,6 +805,78 @@ ApplicationWindow {
                 Connections {
                     target: archieBridge
                     function onSnapshotRevisionChanged() { root.computeSun() }
+                }
+
+                // A light pass over the real field samples gives the WSL software
+                // renderer a visible corona even when its HDR bloom is unavailable.
+                // These points are samples of the field, never additional entities.
+                Canvas {
+                    id: orbAura
+                    anchors.fill: parent
+                    visible: root.scene === "orb"
+                    function project(point, cosine, sine, radius) {
+                        var x = Number(point[0]) * cosine + Number(point[2]) * sine
+                        var depth = -Number(point[0]) * sine + Number(point[2]) * cosine
+                        var perspective = 1 + depth * 0.16
+                        return [width / 2 + x * radius * perspective,
+                                height / 2 - Number(point[1]) * radius * perspective,
+                                depth]
+                    }
+                    onPaint: {
+                        var ctx = getContext("2d")
+                        ctx.clearRect(0, 0, width, height)
+                        if (!visible || !root.orb.field || !root.orb.field.vertices) return
+                        var samples = root.orb.field.vertices
+                        var nodes = root.orb.nodes || []
+                        var angle = orbRoot.spin * Math.PI / 180
+                        var cosine = Math.cos(angle), sine = Math.sin(angle)
+                        var radius = Math.min(width, height) * 0.37
+                        var core = ctx.createRadialGradient(width / 2, height / 2, 2,
+                                                            width / 2, height / 2, radius * 0.48)
+                        core.addColorStop(0, "rgba(255,174,48,0.23)")
+                        core.addColorStop(0.3, "rgba(255,128,16,0.09)")
+                        core.addColorStop(1, "rgba(255,105,12,0)")
+                        ctx.fillStyle = core
+                        ctx.beginPath(); ctx.arc(width / 2, height / 2, radius * 0.48, 0, Math.PI * 2); ctx.fill()
+                        ctx.globalCompositeOperation = "lighter"
+                        var stride = Math.max(1, Math.ceil(samples.length / 1400))
+                        var columns = root.orb.field.triangle_indices
+                                      ? Number(root.orb.field.triangle_indices[1]) : 0
+                        for (var i = 0; i < samples.length; i += stride) {
+                            var p = project(samples[i], cosine, sine, radius)
+                            var front = p[2] > 0
+                            if (columns > 2 && i % columns < columns - 1
+                                    && i + 1 < samples.length && i % 5 !== 0) {
+                                var next = project(samples[i + 1], cosine, sine, radius)
+                                ctx.strokeStyle = front ? "rgba(255,151,27,0.34)" : "rgba(255,108,18,0.13)"
+                                ctx.lineWidth = front ? 0.8 : 0.5
+                                ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(next[0], next[1]); ctx.stroke()
+                                ctx.fillStyle = front ? "rgba(255,187,61,0.7)" : "rgba(255,111,25,0.23)"
+                                ctx.fillRect((p[0] + next[0]) / 2, (p[1] + next[1]) / 2, 1, 1)
+                            }
+                            ctx.fillStyle = front ? "rgba(255,174,54,0.65)" : "rgba(255,105,25,0.28)"
+                            var size = front ? 1.35 : 0.8
+                            ctx.fillRect(p[0] - size / 2, p[1] - size / 2, size, size)
+                        }
+                        ctx.shadowColor = "#ff9b22"
+                        ctx.shadowBlur = 12
+                        for (var n = 0; n < nodes.length; n++) {
+                            var node = nodes[n]
+                            var q = project(node.position, cosine, sine, radius)
+                            var activity = Number(node.activity || 0) + Number(node.focus_score || 0)
+                            var dot = Math.min(3.8, 1.2 + activity * 2.2)
+                            ctx.fillStyle = q[2] > 0 ? "rgba(255,210,113,0.92)" : "rgba(255,154,36,0.55)"
+                            ctx.beginPath(); ctx.arc(q[0], q[1], dot, 0, Math.PI * 2); ctx.fill()
+                        }
+                        ctx.shadowBlur = 0
+                        ctx.globalCompositeOperation = "source-over"
+                    }
+                    Timer {
+                        interval: 100
+                        repeat: true
+                        running: orbAura.visible
+                        onTriggered: orbAura.requestPaint()
+                    }
                 }
 
                 MouseArea {
@@ -846,6 +953,48 @@ ApplicationWindow {
                     }
                 }
 
+                Rectangle {
+                    visible: root.scene === "orb"
+                    anchors.top: parent.top; anchors.topMargin: 70
+                    anchors.right: parent.right; anchors.rightMargin: 18
+                    width: 240; height: 232
+                    color: "#b0080b10"
+                    border.color: "#6c3e1c"; border.width: 1
+                    Column {
+                        anchors.fill: parent; anchors.margins: 12
+                        spacing: 7
+                        Text {
+                            text: "COGNITIVE WORKFLOWS · OBSERVED"
+                            color: "#f6b75c"; font.family: "monospace"; font.pixelSize: 9
+                            font.letterSpacing: 1.0
+                        }
+                        Repeater {
+                            model: root.orb.workflows || []
+                            delegate: Column {
+                                required property var modelData
+                                spacing: 1
+                                Text {
+                                    text: modelData.component.toUpperCase() + "  ·  "
+                                          + (modelData.active ? "ACTIVE" : modelData.observed ? "RECENT" : "WAITING")
+                                    color: modelData.active ? "#ffd27b" : "#82909c"
+                                    font.family: "monospace"; font.pixelSize: 11; font.bold: true
+                                }
+                                Text {
+                                    text: {
+                                        var purpose = ({wanda: "consent / hypotheses", cortex: "evidence / graph",
+                                                        vision: "capture / grounding", iris: "scene / reflex / verify"})[modelData.component]
+                                        return (purpose || "observing") + "  ·  "
+                                               + (modelData.observed
+                                                  ? modelData.phase + " · " + Math.floor(modelData.age_ms / 1000) + "s"
+                                                  : "no event")
+                                    }
+                                    color: "#66727d"; font.family: "monospace"; font.pixelSize: 9
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Column {
                     anchors.left: parent.left; anchors.leftMargin: 18
                     anchors.bottom: parent.bottom; anchors.bottomMargin: 18
@@ -862,7 +1011,8 @@ ApplicationWindow {
                             if (root.scene === "orb") {
                                 var state = root.orb.state || ({})
                                 var activity = state.listen > 0.05 ? "LISTEN" : state.think > 0.05 ? "THINK" : state.speak > 0.05 ? "SPEAK" : "IDLE"
-                                return "TFOG ORB · " + (root.orb.entity_count || 0) + " ENTITIES · " + (root.orb.profile || "waiting") + " · " + activity
+                                return "TFOG ORB · " + (root.orb.entity_count || 0) + " REAL ENTITIES · "
+                                       + (root.orb.profile || "waiting") + " · " + activity
                             }
                             var n = archieBridge.frame.totalNodes
                             return "ARCHIE CORE · DECLARED DEPENDENCIES · " + n
@@ -874,7 +1024,7 @@ ApplicationWindow {
                         text: root.scene === "world"
                               ? "marker size = reported magnitude · source = " + (root.provider.authority || "none")
                               : root.scene === "orb"
-                                ? "semantic field · focus, speech, selection and Stage signals · read only"
+                                ? "field samples are not entities · focus, speech, Stage and workflow are observed"
                                 : "position = dependency depth · colour = severity · opacity = freshness"
                         color: root.dim; font.family: "monospace"; font.pixelSize: 9
                     }

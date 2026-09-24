@@ -18,6 +18,7 @@ pub mod geofabric;
 pub mod http;
 pub mod kernel;
 pub mod orb;
+pub mod runtime;
 pub mod snapshot;
 pub mod world;
 
@@ -161,6 +162,11 @@ impl Observatory {
     /// Re-read `/proc` and `/sys`. Independent of whether `archied` answered.
     pub async fn refresh_kernel(&self) {
         self.kernel.refresh().await;
+    }
+
+    /// Read bounded local runtime facts independently of the control daemon.
+    pub async fn refresh_runtime(&self) {
+        self.orb.observe_runtime().await;
     }
 
     /// The machine's own telemetry to serve right now.

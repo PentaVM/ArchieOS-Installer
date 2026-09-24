@@ -1,4 +1,7 @@
-use crate::signal::{EntityKind, OrbEntity, Signal, SignalKind, StageStatus, TOKEN_DIMENSIONS};
+use crate::signal::{
+    EntityKind, OrbEntity, Signal, SignalKind, StageStatus, WorkflowComponent, WorkflowPhase,
+    TOKEN_DIMENSIONS,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -78,6 +81,17 @@ pub struct OrbFrame {
     pub morphotype: Morphotype,
     pub source_count: usize,
     pub stale_signals: usize,
+    pub workflows: Vec<WorkflowView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowView {
+    pub component: WorkflowComponent,
+    pub phase: WorkflowPhase,
+    pub active: bool,
+    pub observed: bool,
+    pub count: u16,
+    pub age_ms: Option<i64>,
 }
 
 /// Spherical field sampled for the current hardware profile. Coefficients use real
@@ -177,8 +191,8 @@ impl Default for OrbConfig {
 impl OrbConfig {
     pub fn for_profile(profile: ResourceProfile) -> Self {
         let (visible_nodes, lat, lon, neighbours) = match profile {
-            ResourceProfile::Low => (128, 12, 24, 12),
-            ResourceProfile::Balanced => (512, 24, 48, 18),
+            ResourceProfile::Low => (128, 18, 36, 12),
+            ResourceProfile::Balanced => (512, 30, 60, 18),
             ResourceProfile::High => (2048, 48, 96, MAX_NEIGHBOURS),
         };
         Self {
@@ -220,6 +234,7 @@ pub struct OrbModel {
     speaking_features: Vec<f32>,
     stage: BTreeMap<(String, u32), (String, Option<u32>, StageStatus, i64)>,
     selected: Option<(String, u32, String, i64)>,
+    workflows: BTreeMap<WorkflowComponent, (WorkflowPhase, bool, u16, i64)>,
     targets: OrbState,
     state: OrbState,
     stale_signals: usize,
@@ -246,6 +261,7 @@ impl OrbModel {
             speaking_features: Vec::new(),
             stage: BTreeMap::new(),
             selected: None,
+            workflows: BTreeMap::new(),
             targets: OrbState::default(),
             state: OrbState::default(),
             stale_signals: 0,
@@ -273,6 +289,16 @@ impl OrbModel {
                 }
                 let id = entity.id.clone();
                 let old = self.entities.get(&id);
+                let graph_changed = old.is_none_or(|previous| {
+                    let before = &previous.entity;
+                    before.kind != entity.kind
+                        || before.parent_id != entity.parent_id
+                        || before.related_ids != entity.related_ids
+                        || before.token != entity.token
+                        || before.class_probs != entity.class_probs
+                        || before.size_bytes != entity.size_bytes
+                        || before.runtime != entity.runtime
+                });
                 self.entities.insert(
                     id,
                     EntityState {
@@ -287,7 +313,7 @@ impl OrbModel {
                         last_seen_ms: signal.at_ms,
                     },
                 );
-                self.graph_dirty = true;
+                self.graph_dirty |= graph_changed;
             }
             SignalKind::EntityRemove { id } => {
                 self.entities.remove(&id);
@@ -369,6 +395,15 @@ impl OrbModel {
                     format!("control:{control_id}"),
                     signal.at_ms,
                 ));
+            }
+            SignalKind::Workflow {
+                component,
+                phase,
+                active,
+                count,
+            } => {
+                self.workflows
+                    .insert(component, (phase, active, count, signal.at_ms));
             }
         }
         Ok(())
@@ -547,6 +582,40 @@ impl OrbModel {
             .filter(|edge| visible_ids.contains(&edge.source) && visible_ids.contains(&edge.target))
             .collect::<Vec<_>>();
         let field = build_field(&nodes, &edges, morphotype, self.config);
+        let workflows = [
+            WorkflowComponent::Wanda,
+            WorkflowComponent::Cortex,
+            WorkflowComponent::Vision,
+            WorkflowComponent::Iris,
+        ]
+        .into_iter()
+        .map(|component| match self.workflows.get(&component) {
+            Some((phase, active, count, at_ms)) => {
+                let age_ms = now_ms.saturating_sub(*at_ms).max(0);
+                let observed = age_ms <= 60_000;
+                WorkflowView {
+                    component,
+                    phase: if observed {
+                        *phase
+                    } else {
+                        WorkflowPhase::Waiting
+                    },
+                    active: *active && age_ms <= self.config.signal_ttl_ms,
+                    observed,
+                    count: if observed { *count } else { 0 },
+                    age_ms: Some(age_ms),
+                }
+            }
+            None => WorkflowView {
+                component,
+                phase: WorkflowPhase::Waiting,
+                active: false,
+                observed: false,
+                count: 0,
+                age_ms: None,
+            },
+        })
+        .collect();
         OrbFrame {
             generated_at_ms: now_ms,
             state: self.state,
@@ -558,6 +627,7 @@ impl OrbModel {
             morphotype,
             source_count: self.source_count,
             stale_signals: self.stale_signals,
+            workflows,
         }
     }
 
@@ -721,6 +791,12 @@ impl OrbModel {
             })
             .collect::<Vec<_>>();
         let mut candidate_map: BTreeMap<(usize, usize), f32> = BTreeMap::new();
+        let mut children = BTreeMap::<&str, Vec<usize>>::new();
+        for (index, id) in ids.iter().enumerate() {
+            if let Some(parent) = self.entities[id].entity.parent_id.as_deref() {
+                children.entry(parent).or_default().push(index);
+            }
+        }
         let mut by_bucket = (0..4)
             .map(|_| BTreeMap::<u8, Vec<usize>>::new())
             .collect::<Vec<_>>();
@@ -763,14 +839,14 @@ impl OrbModel {
                         .take(self.config.neighbours * 2),
                 );
             }
-            let parent = self.entities[&ids[i]].entity.parent_id.as_deref();
-            candidates.extend(ids.iter().enumerate().filter_map(|(j, id)| {
-                let other = &self.entities[id].entity;
-                (j != i
-                    && (other.parent_id.as_deref() == Some(ids[i].as_str())
-                        || parent == Some(id.as_str())))
-                .then_some(j)
-            }));
+            if let Some(parent) = self.entities[&ids[i]].entity.parent_id.as_deref() {
+                if let Ok(index) = ids.binary_search_by(|id| id.as_str().cmp(parent)) {
+                    candidates.insert(index);
+                }
+            }
+            if let Some(descendants) = children.get(ids[i].as_str()) {
+                candidates.extend(descendants.iter().copied());
+            }
             candidates.remove(&i);
             let mut scored = candidates
                 .into_iter()
@@ -1102,21 +1178,24 @@ fn build_field(
             coefficients[index] += 4.0 * std::f32::consts::PI * weight / total_weight * basis;
         }
     }
+    let directions = nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node.direction))
+        .collect::<BTreeMap<_, _>>();
     let edge_centers = edges
         .iter()
         .take(512)
         .filter_map(|edge| {
-            let source = nodes.iter().find(|node| node.id == edge.source)?;
-            let target = nodes.iter().find(|node| node.id == edge.target)?;
-            Some((
-                normalize(add(source.direction, target.direction)),
-                edge.similarity,
-            ))
+            let source = directions.get(edge.source.as_str())?;
+            let target = directions.get(edge.target.as_str())?;
+            Some((normalize(add(*source, *target)), edge.similarity))
         })
         .collect::<Vec<_>>();
     let lat = config.mesh_latitude_segments.clamp(8, 48);
     let lon = config.mesh_longitude_segments.clamp(16, 96);
-    let mut vertices = Vec::with_capacity((lat + 1) * (lon + 1));
+    let mut directions = Vec::with_capacity((lat + 1) * (lon + 1));
+    let mut densities = Vec::with_capacity((lat + 1) * (lon + 1));
+    let concentration = 20.0_f32;
     for row in 0..=lat {
         let theta = std::f32::consts::PI * row as f32 / lat as f32;
         for column in 0..=lon {
@@ -1126,21 +1205,38 @@ fn build_field(
                 theta.cos(),
                 theta.sin() * phi.sin(),
             ];
-            let harmonics = spherical_harmonics(direction, DEGREE);
-            let field = coefficients
+            let density = nodes
                 .iter()
-                .zip(harmonics)
-                .map(|(a, b)| a * b)
+                .map(|node| {
+                    let weight = node.mass + node.focus_score + node.activity + node.voice_overlap;
+                    weight
+                        * (concentration * (dot(direction, node.direction).clamp(-1.0, 1.0) - 1.0))
+                            .exp()
+                })
                 .sum::<f32>();
-            let edge_energy = edge_centers
-                .iter()
-                .filter(|(center, _)| dot(*center, direction) > 0.92)
-                .map(|(_, similarity)| *similarity)
-                .sum::<f32>()
-                .min(1.0);
-            let radial = 0.82 + morphotype.roughness * field.clamp(-1.0, 1.0) + 0.04 * edge_energy;
-            vertices.push(scale(direction, radial.clamp(0.55, 1.2)));
+            directions.push(direction);
+            densities.push(density);
         }
+    }
+    let mean = densities.iter().sum::<f32>() / densities.len().max(1) as f32;
+    let deviation = (densities
+        .iter()
+        .map(|value| (value - mean).powi(2))
+        .sum::<f32>()
+        / densities.len().max(1) as f32)
+        .sqrt()
+        .max(1e-5);
+    let mut vertices = Vec::with_capacity(directions.len());
+    for (direction, density) in directions.into_iter().zip(densities) {
+        let edge_energy = edge_centers
+            .iter()
+            .filter(|(center, _)| dot(*center, direction) > 0.92)
+            .map(|(_, similarity)| *similarity)
+            .sum::<f32>()
+            .min(1.0);
+        let normalized = (density - mean) / deviation;
+        let radial = 0.82 * (1.0 + morphotype.roughness * normalized.tanh()) + 0.04 * edge_energy;
+        vertices.push(scale(direction, radial.clamp(0.55, 1.2)));
     }
     let mut triangle_indices = Vec::with_capacity(lat * lon * 6);
     for row in 0..lat {

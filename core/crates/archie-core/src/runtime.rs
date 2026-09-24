@@ -327,12 +327,24 @@ impl Runtime {
         }
 
         let topology = modules.compile_topology(&context);
+        archie_orb::publish(&archie_orb::signal(archie_orb::SignalKind::Workflow {
+            component: archie_orb::WorkflowComponent::Cortex,
+            phase: archie_orb::WorkflowPhase::Graph,
+            active: true,
+            count: 0,
+        }));
         match crate::cortex::refresh_module_graph(
             state.as_ref(),
             &modules,
             Timestamp::now().as_millis(),
         ) {
             Ok(snapshot) => {
+                archie_orb::publish(&archie_orb::signal(archie_orb::SignalKind::Workflow {
+                    component: archie_orb::WorkflowComponent::Cortex,
+                    phase: archie_orb::WorkflowPhase::Graph,
+                    active: false,
+                    count: snapshot.nodes.len().min(4096) as u16,
+                }));
                 #[cfg(unix)]
                 if let Err(error) = crate::cortex::export_module_graph(&paths, &snapshot) {
                     report.warn(format!("Cortex snapshot export unavailable: {error}"));
@@ -340,7 +352,15 @@ impl Runtime {
                 #[cfg(not(unix))]
                 let _ = snapshot;
             }
-            Err(error) => report.warn(format!("Cortex module projection unavailable: {error}")),
+            Err(error) => {
+                archie_orb::publish(&archie_orb::signal(archie_orb::SignalKind::Workflow {
+                    component: archie_orb::WorkflowComponent::Cortex,
+                    phase: archie_orb::WorkflowPhase::Error,
+                    active: false,
+                    count: 0,
+                }));
+                report.warn(format!("Cortex module projection unavailable: {error}"));
+            }
         }
         if !topology.cycles.is_empty() {
             report.push(BootStage::failed(

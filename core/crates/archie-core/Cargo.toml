@@ -11,6 +11,7 @@ archie-types.workspace = true
 archie-observability.workspace = true
 archie-state.workspace = true
 archie-memory.workspace = true
+archie-orb.workspace = true
 archie-fabric.workspace = true
 archie-registry.workspace = true
 archie-scheduler.workspace = true

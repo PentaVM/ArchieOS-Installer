@@ -43,6 +43,9 @@ class ArchieBridge final : public QObject
     // Read-only semantic Orb frame and its renderer-ready, bounded mesh/node/edge data.
     Q_PROPERTY(QVariantMap orb READ orb NOTIFY orbChanged)
     Q_PROPERTY(QVariantMap orbField READ orbField NOTIFY orbChanged)
+    Q_PROPERTY(QVariantMap orbFilaments READ orbFilaments NOTIFY orbChanged)
+    Q_PROPERTY(QVariantMap orbGlints READ orbGlints NOTIFY orbChanged)
+    Q_PROPERTY(QVariantMap orbLinks READ orbLinks NOTIFY orbChanged)
     Q_PROPERTY(QVariantList orbNodes READ orbNodes NOTIFY orbChanged)
     Q_PROPERTY(QVariantList orbEdges READ orbEdges NOTIFY orbChanged)
     Q_PROPERTY(int orbRevision READ orbRevision NOTIFY orbChanged)
@@ -79,6 +82,9 @@ public:
     QVariantList buildingMeshes() const { return m_buildingMeshes; }
     QVariantMap orb() const { return m_orb; }
     QVariantMap orbField() const { return m_orbField; }
+    QVariantMap orbFilaments() const { return m_orbFilaments; }
+    QVariantMap orbGlints() const { return m_orbGlints; }
+    QVariantMap orbLinks() const { return m_orbLinks; }
     QVariantList orbNodes() const { return m_orbNodes; }
     QVariantList orbEdges() const { return m_orbEdges; }
     int orbRevision() const { return m_orbRevision; }
@@ -160,6 +166,9 @@ private:
     QVariantList m_buildingMeshes;
     QVariantMap m_orb;
     QVariantMap m_orbField;
+    QVariantMap m_orbFilaments;
+    QVariantMap m_orbGlints;
+    QVariantMap m_orbLinks;
     QVariantList m_orbNodes;
     QVariantList m_orbEdges;
     /// Bumped on every `loadBuildings` call and captured by the background task; a result

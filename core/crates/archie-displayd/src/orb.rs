@@ -4,8 +4,10 @@ use archie_orb::{
     TOKEN_DIMENSIONS,
 };
 use std::collections::{BTreeMap, BTreeSet};
+#[cfg(unix)]
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use tokio::sync::Mutex;
 
 /// The read-only TFOG projection owned by the display bridge.
@@ -14,6 +16,8 @@ pub struct OrbService {
     model: Arc<Mutex<OrbModel>>,
     last_frame_ms: Arc<Mutex<i64>>,
     snapshot_ids: Arc<Mutex<BTreeSet<String>>>,
+    runtime_ids: Arc<Mutex<BTreeSet<String>>>,
+    runtime: Arc<StdMutex<crate::runtime::RuntimeInventory>>,
 }
 
 impl Default for OrbService {
@@ -22,11 +26,51 @@ impl Default for OrbService {
             model: Arc::new(Mutex::new(OrbModel::new(OrbConfig::default()))),
             last_frame_ms: Arc::new(Mutex::new(0)),
             snapshot_ids: Arc::new(Mutex::new(BTreeSet::new())),
+            runtime_ids: Arc::new(Mutex::new(BTreeSet::new())),
+            runtime: Arc::new(StdMutex::new(crate::runtime::RuntimeInventory::default())),
         }
     }
 }
 
 impl OrbService {
+    /// Processes, active service cgroups and devices come from local read-only kernel
+    /// views. Collection runs off the async executor and never waits on archied.
+    pub async fn observe_runtime(&self) {
+        let inventory = self.runtime.clone();
+        let Ok(entities) = tokio::task::spawn_blocking(move || {
+            inventory
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .read()
+        })
+        .await
+        else {
+            return;
+        };
+        let at_ms = archie_types::Timestamp::now().as_millis().max(1);
+        let current_ids = entities
+            .iter()
+            .map(|entity| entity.id.clone())
+            .collect::<BTreeSet<_>>();
+        let mut model = self.model.lock().await;
+        let mut previous_ids = self.runtime_ids.lock().await;
+        for id in previous_ids.difference(&current_ids) {
+            let _ = model.apply(Signal {
+                schema: TFOG_SCHEMA,
+                at_ms,
+                kind: SignalKind::EntityRemove { id: id.clone() },
+            });
+        }
+        for entity in entities {
+            let _ = model.apply(Signal {
+                schema: TFOG_SCHEMA,
+                at_ms,
+                kind: SignalKind::EntityUpsert { entity },
+            });
+        }
+        *previous_ids = current_ids;
+    }
+
     pub async fn current(&self) -> OrbFrame {
         let now = archie_types::Timestamp::now().as_millis();
         let mut last = self.last_frame_ms.lock().await;

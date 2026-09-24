@@ -180,6 +180,21 @@ async fn main() -> std::process::ExitCode {
                 }
             }
         });
+
+        let runtime_observatory = observatory.clone();
+        let mut shutdown = shutdown_rx.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(Duration::from_secs(2));
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tokio::select! {
+                    _ = shutdown.changed() => {
+                        if *shutdown.borrow() { return; }
+                    }
+                    _ = ticker.tick() => runtime_observatory.refresh_runtime().await,
+                }
+            }
+        });
     }
 
     let serving = {

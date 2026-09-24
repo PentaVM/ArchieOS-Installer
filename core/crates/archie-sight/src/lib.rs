@@ -58,7 +58,7 @@ use archie_iris::{
     SourceId,
 };
 use archie_model_runtime::{VisionImage, VisionMime};
-use archie_orb::{SignalKind, StageStatus};
+use archie_orb::{SignalKind, StageStatus, WorkflowComponent, WorkflowPhase};
 use archie_policy::{
     Action, CapabilityRequest, Constraints, PolicyEngine, Principal, Resource, Scope,
 };
@@ -456,6 +456,15 @@ fn publish_followup(app_id: &str, surface: u32, pid: Option<u32>, status: StageS
     }));
 }
 
+fn publish_workflow(component: WorkflowComponent, phase: WorkflowPhase, active: bool, count: u16) {
+    archie_orb::publish(&archie_orb::signal(SignalKind::Workflow {
+        component,
+        phase,
+        active,
+        count,
+    }));
+}
+
 /// Where a control is expected to redraw itself when it reacts.
 fn watched(bbox: Rect) -> DamageRect {
     DamageRect {
@@ -627,6 +636,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
     /// of the box that was there, and still looks like what was there.
     fn refind(&self, known: &Known, snapshot: &Snapshot) -> Option<Rect> {
         let sees = self.sees.as_ref()?;
+        publish_workflow(WorkflowComponent::Iris, WorkflowPhase::Reflex, true, 1);
         let mut best: Option<(Rect, f32)> = None;
         let (was_x, was_y) = (
             known.bbox.x as f32 + known.bbox.width as f32 / 2.0,
@@ -654,6 +664,12 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
                 best = Some((control, distance));
             }
         }
+        publish_workflow(
+            WorkflowComponent::Iris,
+            WorkflowPhase::Reflex,
+            false,
+            u16::from(best.is_some()),
+        );
         best.map(|(control, _)| control)
     }
 
@@ -766,6 +782,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
         surface: Option<u32>,
         region: Option<Region>,
     ) -> Result<Snapshot, SightError> {
+        publish_workflow(WorkflowComponent::Iris, WorkflowPhase::Capture, true, 1);
         let request = ActRequest {
             app_id: app_id.to_string(),
             surface,
@@ -777,7 +794,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
             approved: false,
             justification: "look for what the task names".into(),
         };
-        match self
+        let result = self
             .operator
             .look(
                 &mut self.client,
@@ -786,8 +803,14 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
                 &self.snapshot_dir,
                 self.receipt_timeout,
             )
-            .await?
-        {
+            .await;
+        publish_workflow(
+            WorkflowComponent::Iris,
+            WorkflowPhase::Capture,
+            false,
+            u16::from(matches!(&result, Ok(LookOutcome::Captured(_)))),
+        );
+        match result? {
             LookOutcome::Captured(snapshot) => Ok(snapshot),
             LookOutcome::NotCaptured(outcome) => Err(SightError::NotCaptured(outcome)),
         }
@@ -1071,6 +1094,7 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
         operation_id: u64,
     ) -> Result<Sighting, SightError> {
         let started = Instant::now();
+        publish_workflow(WorkflowComponent::Iris, WorkflowPhase::Observe, true, 1);
         let mut timings = Timings::default();
         // What the compositor said while nobody was listening counts too.
         drain(&mut self.client, &mut self.world).await?;
@@ -1263,6 +1287,12 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Sight<R, W> {
         timings.act_ms = executor.act_ms;
         timings.verify_ms = executor.verify_ms;
         timings.total_ms = started.elapsed().as_millis() as u64;
+        publish_workflow(
+            WorkflowComponent::Iris,
+            WorkflowPhase::Verify,
+            false,
+            u16::from(outcome.is_ok()),
+        );
         match outcome {
             Ok(outcome) => Ok(Sighting {
                 before,
@@ -1291,7 +1321,8 @@ async fn ground(
     let now_ms = Timestamp::now().as_millis();
     let capsule = target_capsule(target, destination, now_ms)?;
     let request = grounding_request(snapshot, target)?;
-    let proposal: GroundingProposal = grounding
+    publish_workflow(WorkflowComponent::Vision, WorkflowPhase::Ground, true, 1);
+    let result: Result<GroundingProposal, LocateAnythingError> = grounding
         .ground(
             &target.task_id,
             &request,
@@ -1299,8 +1330,14 @@ async fn ground(
             vision_image(snapshot),
             now_ms,
         )
-        .await?;
-    Ok(proposal.bbox)
+        .await;
+    publish_workflow(
+        WorkflowComponent::Vision,
+        WorkflowPhase::Ground,
+        false,
+        u16::from(result.is_ok()),
+    );
+    Ok(result?.bbox)
 }
 
 /// A position a grounding model found, ready to be remembered.

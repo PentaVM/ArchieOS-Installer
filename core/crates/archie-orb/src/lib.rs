@@ -12,11 +12,11 @@ mod transport;
 
 pub use model::{
     Morphotype, OrbConfig, OrbEdge, OrbField, OrbFrame, OrbModel, OrbNode, OrbState, Relation,
-    ResourceProfile,
+    ResourceProfile, WorkflowView,
 };
 pub use signal::{
-    EntityKind, OrbEntity, Signal, SignalError, SignalKind, StageStatus, TFOG_SCHEMA,
-    TOKEN_DIMENSIONS,
+    EntityKind, OrbEntity, Signal, SignalError, SignalKind, StageStatus, WorkflowComponent,
+    WorkflowPhase, TFOG_SCHEMA, TOKEN_DIMENSIONS,
 };
 pub use transport::{SignalPublisher, SignalReceiver};
 
