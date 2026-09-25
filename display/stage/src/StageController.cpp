@@ -172,6 +172,8 @@ StageController::StageController(Options options, QObject *parent)
 
 StageController::~StageController()
 {
+    // A key left down when the stage goes away would stay down in the application.
+    releaseHeldKeys("shutdown");
     if (m_window) {
         m_window->removeEventFilter(this);
     }
@@ -230,6 +232,14 @@ void StageController::handleKeyboardFocus(QWaylandSurface *newFocus)
             m_table.focus(it.key());
             m_focusedItem = it.value().data();
         }
+    }
+    // A key held for one window is let go when the keyboard moves to another: it would
+    // otherwise keep acting on whatever window has the focus now.
+    const bool elsewhere = std::any_of(m_heldKeys.cbegin(), m_heldKeys.cend(), [&](const HeldKey &held) {
+        return !focused.isDouble() || held.surface != static_cast<SurfaceId>(focused.toInteger());
+    });
+    if (elsewhere) {
+        releaseHeldKeys("focus_moved");
     }
     emit focusChanged();
     broadcast(line_of(QJsonObject{{QStringLiteral("event"), QStringLiteral("focus")},
@@ -599,6 +609,8 @@ void StageController::acceptConnection()
         m_clients.append(socket);
         connect(socket, &QLocalSocket::readyRead, this, [this, socket] { readFrom(socket); });
         connect(socket, &QLocalSocket::disconnected, this, [this, socket] {
+            // Whoever pressed a key and is gone can no longer let it go.
+            releaseHeldKeys("connection_closed", socket);
             m_buffers.remove(socket);
             m_clients.removeAll(socket);
             socket->deleteLater();
@@ -842,8 +854,18 @@ void StageController::deliver(const InputStep &step)
             const int key = m_active->keys.at(static_cast<qsizetype>(step.index));
             const bool pressed = step.kind == StepKind::KeyPress;
             KeyTyper *keys = typer();
-            if ((!keys || !keys->key(key, pressed)) && pressed) {
+            const bool delivered = keys && keys->key(key, pressed);
+            if (!delivered && pressed) {
                 failPlayback(CommandRefusal::NotTypeable);
+                break;
+            }
+            const StageAction action = m_active->command.action;
+            if (action == StageAction::KeyDown && pressed) {
+                // Pressing it again renews it: a controller that keeps meaning it says so.
+                m_heldKeys.insert(key, HeldKey{m_active->command.surface, m_commandSocket,
+                                               monotonic() + kMaxKeyHoldMs});
+            } else if (action == StageAction::KeyUp && !pressed) {
+                m_heldKeys.remove(key);
             }
         }
         break;
@@ -954,6 +976,8 @@ void StageController::stopPlayback(const QString &outcome, std::optional<Command
     if (m_typer) {
         m_typer->releaseAll();
     }
+    // releaseAll let go of every key, held ones included.
+    m_heldKeys.clear();
     sendReceipt(m_active->command.sequence, outcome);
     if (failure) {
         m_director.command_failed(*failure, now);
@@ -984,6 +1008,9 @@ void StageController::noteAuthority(AuthorityMode before)
     m_director.authority_changed(mode, now);
     if (mode != AuthorityMode::Autonomous) {
         cancelPlayback("preempted_by_operator");
+        // Also what a finished KeyDown left pressed: the person takes a keyboard with no
+        // key down that they did not press.
+        releaseHeldKeys("preempted_by_operator");
     }
     if (m_window) {
         if (mode == AuthorityMode::Autonomous) {
@@ -1143,10 +1170,50 @@ void StageController::tick()
     if (m_playback) {
         sooner(now + kInputIntervalMs);
     }
+    if (const auto due = expireHeldKeys(now)) {
+        sooner(*due);
+    }
     if (const auto resume = m_authority.resumes_at_ms()) {
         sooner(*resume);
     }
     schedule(next);
+}
+
+void StageController::releaseHeldKeys(const char *why, const QLocalSocket *owner)
+{
+    KeyTyper *keys = m_typer.get();
+    for (auto it = m_heldKeys.begin(); it != m_heldKeys.end();) {
+        if (owner && it->owner.data() != owner) {
+            ++it;
+            continue;
+        }
+        if (keys) {
+            keys->key(it.key(), false);
+        }
+        qInfo("archie-stage: let go of a held key (%s)", why);
+        it = m_heldKeys.erase(it);
+    }
+}
+
+std::optional<std::int64_t> StageController::expireHeldKeys(std::int64_t now)
+{
+    std::optional<std::int64_t> next;
+    KeyTyper *keys = m_typer.get();
+    for (auto it = m_heldKeys.begin(); it != m_heldKeys.end();) {
+        if (now >= it->until_ms) {
+            if (keys) {
+                keys->key(it.key(), false);
+            }
+            qInfo("archie-stage: let go of a held key (hold_expired)");
+            it = m_heldKeys.erase(it);
+            continue;
+        }
+        if (!next || it->until_ms < *next) {
+            next = it->until_ms;
+        }
+        ++it;
+    }
+    return next;
 }
 
 void StageController::schedule(std::optional<std::int64_t> at)

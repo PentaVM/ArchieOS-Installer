@@ -198,6 +198,33 @@ void text_and_chords_arrive_as_units() {
     CHECK(parse_key("  " + QByteArray(64, 'a') + "\n").has_value());
 }
 
+void a_held_key_is_one_key() {
+    CASE("key_down and key_up carry exactly one key, and nothing else");
+
+    const Golden g = golden();
+    const auto decoded = [&](const QByteArray& action) {
+        return decode_command(seal(g.key, payload(action, 10'000, 12'000)), g.key, 10'500);
+    };
+    const auto down = decoded(R"({"kind":"key_down","key":"w"})");
+    CHECK(down.command.has_value());
+    if (down.command) {
+        CHECK(down.command->command.action == StageAction::KeyDown);
+        CHECK(down.command->keys == (QList<int>{Qt::Key_W}));
+        CHECK_EQ(down.command->command.key_count, 1);
+    }
+    const auto up = decoded(R"({"kind":"key_up","key":"arrow_left"})");
+    CHECK(up.command.has_value());
+    if (up.command) {
+        CHECK(up.command->command.action == StageAction::KeyUp);
+        CHECK(up.command->keys == (QList<int>{Qt::Key_Left}));
+    }
+    CHECK_BECAUSE(decoded(R"({"kind":"key_down","modifiers":["ctrl"],"key":"w"})").error ==
+                      QStringLiteral("command_malformed"),
+                  "a held chord is several holds, not one command with modifiers");
+    CHECK(decoded(R"({"kind":"key_down","key":"Enter"})").error == QStringLiteral("command_malformed"));
+    CHECK(decoded(R"({"kind":"key_up"})").error == QStringLiteral("command_malformed"));
+}
+
 }  // namespace
 
 int main() {
@@ -206,5 +233,6 @@ int main() {
     a_command_is_for_now();
     a_verifying_payload_must_still_be_a_command();
     text_and_chords_arrive_as_units();
+    a_held_key_is_one_key();
     return archie::visual::test::report();
 }

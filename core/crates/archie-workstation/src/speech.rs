@@ -101,6 +101,9 @@ pub enum SpeechError {
 pub struct LocalSpeechRuntime {
     command: PathBuf,
     model: PathBuf,
+    /// The locale Nemotron 3.5 transcribes, such as `es-US`, or `auto` to let the model
+    /// detect it. The multilingual model needs to be told; left alone it guesses.
+    language: String,
 }
 
 impl LocalSpeechRuntime {
@@ -108,7 +111,14 @@ impl LocalSpeechRuntime {
         Self {
             command: command.into(),
             model: model.into(),
+            language: "auto".into(),
         }
+    }
+
+    /// Transcribes as `language` (a locale such as `es-US`) instead of detecting it.
+    pub fn with_language(mut self, language: impl Into<String>) -> Self {
+        self.language = language.into();
+        self
     }
 
     pub fn transcribe(&self, audio: &Path) -> Result<Vec<TranscriptEvent>, SpeechError> {
@@ -122,6 +132,8 @@ impl LocalSpeechRuntime {
             .arg("--model")
             .arg(&self.model)
             .arg("--stream")
+            .arg("--language")
+            .arg(&self.language)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())

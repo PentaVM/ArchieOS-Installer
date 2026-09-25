@@ -2,9 +2,13 @@
 set -euo pipefail
 
 runtime_commit=a5b6953c4a579a2bbd1c0913ad8a85c2a4d99953
-model_sha256=d9a01898d2a611c8764e23a1c2f45e70bbd5a425dc4de93692ac951dd603812d
-model_name=nemotron-speech-streaming-en-0.6b.q8_0.gguf
-model_url="https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b/resolve/main/$model_name"
+# Nemotron 3.5 ASR: 40 language-locales in one model, Spanish among them. The English-only
+# nemotron-speech-streaming-en-0.6b cannot hear the operator. Pinned to the revision and
+# digest NeMo-Speech.cpp's own model index names.
+model_revision=1c8deaecc64b91f034d73e08dd8b64625eb3395d
+model_sha256=a5c435f294eea8f88ce68dd27b8c3bfea7f777cb2fbba04fcd30eaa555f429ae
+model_name=nemotron-3.5-asr-streaming-0.6b.q8_0.gguf
+model_url="https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b/resolve/$model_revision/$model_name"
 sentencepiece_commit=17d7580d6407802f85855d2cc9190634e2c95624
 
 if [[ $EUID -eq 0 ]]; then

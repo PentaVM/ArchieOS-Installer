@@ -294,6 +294,12 @@ impl StageGate {
                     return refuse(StageRefusal::TextNotPlain);
                 }
             }
+            StageAction::KeyDown {
+                key: Key::Named(named),
+            } if app.approval_keys.contains(named) => {
+                // Holding a key a person must approve is still pressing it.
+                approval = Some("policy requires approval for this key");
+            }
             StageAction::Key { chord } => {
                 if chord.is_reserved() {
                     return refuse(StageRefusal::ChordReserved);
@@ -344,7 +350,9 @@ impl StageGate {
             | StageAction::DoubleClick { .. }
             | StageAction::Drag { .. }
             | StageAction::Focus
-            | StageAction::Snapshot { .. } => {}
+            | StageAction::Snapshot { .. }
+            | StageAction::KeyDown { .. }
+            | StageAction::KeyUp { .. } => {}
         }
         if app.requires_approval.contains(&kind) {
             approval = Some("policy requires approval for this action");

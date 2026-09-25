@@ -64,6 +64,7 @@ fn dependency_added_later_is_connected_without_changing_parent_manifest() {
 }
 #[cfg(unix)]
 #[test]
+#[ignore = "needs a PostgreSQL cluster: run `node tests/with-postgres.mjs --core` from tools/engineering-dashboard"]
 fn snapshot_publication_is_atomic_readable_and_leaves_no_temporary_files() {
     use std::os::unix::fs::PermissionsExt;
     let root = std::env::temp_dir().join(format!(

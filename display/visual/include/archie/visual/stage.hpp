@@ -211,6 +211,12 @@ enum class StageAction {
     /// Press, follow a way through the surface, and let go: one continuous line, which is
     /// what drawing is. A drag is the two-point case of it.
     Stroke,
+    /// Press one key and keep it down — a game's "walk forward" — until `KeyUp` lets it go,
+    /// or the stage lets it go itself: after `kMaxKeyHoldMs` without being pressed again, when
+    /// a person takes the stage, when the keyboard focus leaves the surface, or when the
+    /// connection that pressed it closes. A held key is never left behind.
+    KeyDown,
+    KeyUp,
 };
 
 /// One point of a stroke, in a surface's own logical pixels.
@@ -237,6 +243,9 @@ inline constexpr std::size_t kMaxStrokePaths = 64;
 inline constexpr std::size_t kMaxStrokePointsInAll = 1024;
 inline constexpr int kMaxScrollSteps = 60;
 inline constexpr int kMaxChordKeys = 4;
+/// How long a key pressed by `KeyDown` stays down without being pressed again. Pressing it
+/// again renews it; a controller that stops renewing has stopped meaning it.
+inline constexpr std::int64_t kMaxKeyHoldMs = 5'000;
 
 /// A command that the control plane has already authorised and sealed. This is the part
 /// the compositor re-checks against the stage as it is when the command runs.

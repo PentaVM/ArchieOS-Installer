@@ -11,12 +11,16 @@
 //! archie-stage-cli act    --socket <path> --key-file <path> --app <app_id> <action...>
 //!     click <x> <y> | double-click <x> <y> | move <x> <y> | drag <x> <y> <to_x> <to_y>
 //!     scroll <x> <y> <steps_y> | type <text> | key [ctrl+][shift+][alt+]<key> | focus
-//!     stroke <x,y> <x,y> [<x,y>...]
+//!     stroke <x,y> <x,y> [<x,y>...] | key-down <key> | key-up <key>
 //! ```
 //!
 //! Coordinates are surface-local. `--surface` picks a surface when an application has more
 //! than one; otherwise the first surface the compositor reports for `--app` is used.
 //! `--approve` stands for the person at the keyboard approving an action the policy holds.
+//!
+//! A held key belongs to the connection that pressed it, and the stage lets go of it when
+//! that connection closes. This command closes its connection once the receipt is in, so
+//! `key-down` alone is a tap; `--stay <ms>` keeps the connection open that long afterwards.
 
 #[cfg(unix)]
 fn main() -> std::process::ExitCode {
@@ -35,8 +39,8 @@ fn main() -> std::process::ExitCode {
 mod unix {
     use archie_policy::{PolicyEngine, Principal};
     use archie_stage::{
-        learn, ActOutcome, ActRequest, CommandKey, KeyChord, Operator, PointerButton, StageAction,
-        StageClient, StagePolicy, StageText, StageWorld, StrokePoint,
+        learn, ActOutcome, ActRequest, CommandKey, Key, KeyChord, Operator, PointerButton,
+        StageAction, StageClient, StagePolicy, StageText, StageWorld, StrokePoint,
     };
     use archie_types::PrivacyGrade;
     use std::io::Write;
@@ -193,6 +197,17 @@ mod unix {
                     .ok_or("not a key this stage can press, like enter or ctrl+s")?;
                 StageAction::Key { chord }
             }
+            // `key-down w` ... `key-up w`: a key kept down in between, as a game needs it.
+            "key-down" | "key-up" => {
+                let spec = words.get(1).ok_or("key-down and key-up need one key")?;
+                let key =
+                    Key::parse(spec).ok_or("not a key this stage can hold, like w or space")?;
+                if verb == "key-down" {
+                    StageAction::KeyDown { key }
+                } else {
+                    StageAction::KeyUp { key }
+                }
+            }
             // `stroke 10,10 80,10 80,60` — a line through those points, drawn in one
             // continuous press.
             "stroke" => {
@@ -235,6 +250,10 @@ mod unix {
             .transpose()
             .map_err(|_| "--sequence is a number")?;
         let approved = flag(&mut args, "--approve");
+        let stay = take(&mut args, "--stay")
+            .map(|s| s.parse::<u64>())
+            .transpose()
+            .map_err(|_| "--stay is a number of milliseconds")?;
         let (action, text_grade) = parse_action(&args)?;
         let policy = StagePolicy::load(&policy_path).map_err(|e| e.to_string())?;
 
@@ -272,6 +291,11 @@ mod unix {
             .act(&mut client, &mut world, &request, Duration::from_secs(30))
             .await
             .map_err(|e| e.to_string())?;
+        if let Some(ms) = stay {
+            // The connection, and with it anything this command holds, stays until then.
+            tokio::time::sleep(Duration::from_millis(ms)).await;
+        }
+        drop(client);
         Ok(match outcome {
             ActOutcome::Receipt {
                 sequence: 0,

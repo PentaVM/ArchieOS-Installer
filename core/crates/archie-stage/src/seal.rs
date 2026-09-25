@@ -127,6 +127,12 @@ pub enum WireAction {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         region: Option<Region>,
     },
+    KeyDown {
+        key: Key,
+    },
+    KeyUp {
+        key: Key,
+    },
 }
 
 impl From<&StageAction> for WireAction {
@@ -184,6 +190,8 @@ impl From<&StageAction> for WireAction {
             StageAction::Snapshot { region } => Self::Snapshot {
                 region: region.filter(|region| !region.is_empty()),
             },
+            StageAction::KeyDown { key } => Self::KeyDown { key: *key },
+            StageAction::KeyUp { key } => Self::KeyUp { key: *key },
         }
     }
 }
@@ -233,6 +241,8 @@ impl WireAction {
                     })
             }
             Self::Focus => true,
+            // One key; a key alone is never one of the system's chords.
+            Self::KeyDown { .. } | Self::KeyUp { .. } => true,
             // A part of a window is two corners of it, and it has to be a real rectangle
             // before it is sealed: the compositor checks it again against the live window.
             Self::Snapshot { region: None } => true,
