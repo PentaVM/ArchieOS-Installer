@@ -455,7 +455,7 @@ async fn local_command(command: &Command, root: &Path, json: bool) -> std::proce
                     command: ModelCommand::Status,
                 },
         } => {
-            let model = root.join("models/nemotron-speech-streaming-en-0.6b.q8_0.gguf");
+            let model = root.join("models/nemotron-3.5-asr-streaming-0.6b.q8_0.gguf");
             println!(
                 "model={} path={}",
                 if model.is_file() { "ready" } else { "missing" },
