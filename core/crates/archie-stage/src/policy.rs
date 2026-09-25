@@ -16,6 +16,10 @@ use std::path::Path;
 /// The most arguments, and the longest argument, a launch entry may have.
 pub const MAX_LAUNCH_ARGS: usize = 32;
 pub const MAX_LAUNCH_ARG_BYTES: usize = 512;
+/// The most other names one application may be called by.
+pub const MAX_ALIASES: usize = 16;
+/// The longest of those names.
+pub const MAX_ALIAS_CHARS: usize = 64;
 
 /// What the agent may do with one application.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -50,6 +54,11 @@ pub struct AppPolicy {
     /// and not this one with arguments of the model's choosing.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub launch: Vec<String>,
+    /// Other names a person uses for it: "terminal", "el navegador". A name that two
+    /// applications answer to opens neither, so an alias can only make a request
+    /// clearer, never quietly pick one of two.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
 }
 
 fn public_grade() -> PrivacyGrade {
@@ -104,6 +113,16 @@ impl AppPolicy {
                 return Err(PolicyError::Launch(self.app_id.clone()));
             }
         }
+        let aliases_ok = self.aliases.len() <= MAX_ALIASES
+            && self.aliases.iter().all(|alias| {
+                let trimmed = alias.trim();
+                !trimmed.is_empty()
+                    && trimmed.chars().count() <= MAX_ALIAS_CHARS
+                    && !trimmed.chars().any(char::is_control)
+            });
+        if !aliases_ok {
+            return Err(PolicyError::Alias(self.app_id.clone()));
+        }
         if !self.approval_keys.is_empty() && !self.allow.contains(&ActionKind::Key) {
             return Err(PolicyError::ApprovalForDisallowed {
                 app_id: self.app_id.clone(),
@@ -130,6 +149,8 @@ pub enum PolicyError {
     Duplicate(String),
     #[error("{0}: launch must name a program, with at most {MAX_LAUNCH_ARGS} arguments of at most {MAX_LAUNCH_ARG_BYTES} bytes")]
     Launch(String),
+    #[error("{0}: at most {MAX_ALIASES} aliases, each a name of 1..={MAX_ALIAS_CHARS} characters")]
+    Alias(String),
     #[error("stage policy is not valid: {0}")]
     Parse(String),
     #[error("cannot read stage policy: {0}")]
@@ -176,15 +197,16 @@ impl StagePolicy {
     /// the spaces around it. Only one match counts; a name that could be two applications
     /// is not an instruction to pick one.
     pub fn named(&self, spoken: &str) -> Option<&AppPolicy> {
-        let wanted = spoken.trim().to_lowercase();
+        let wanted = spoken_name(spoken);
         if wanted.is_empty() {
             return None;
         }
         let mut found = self.apps.values().filter(|app| {
             let id = app.app_id.to_lowercase();
             id == wanted
-                || app.display_name.trim().to_lowercase() == wanted
+                || spoken_name(&app.display_name) == wanted
                 || id.rsplit('.').next() == Some(wanted.as_str())
+                || app.aliases.iter().any(|alias| spoken_name(alias) == wanted)
         });
         let first = found.next()?;
         found.next().is_none().then_some(first)
@@ -221,6 +243,18 @@ impl StagePolicy {
     }
 }
 
+/// A name as a person says it: lower case, trimmed, without a leading article — "la
+/// terminal" is the terminal, "the browser" the browser.
+fn spoken_name(name: &str) -> String {
+    let lowered = name.trim().to_lowercase();
+    for article in ["el ", "la ", "los ", "las ", "un ", "una ", "the ", "a "] {
+        if let Some(rest) = lowered.strip_prefix(article) {
+            return rest.trim().to_string();
+        }
+    }
+    lowered
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -236,6 +270,7 @@ mod tests {
             requires_approval: BTreeSet::new(),
             approval_keys: BTreeSet::new(),
             launch: Vec::new(),
+            aliases: Vec::new(),
         }
     }
 
@@ -256,11 +291,22 @@ allow = ["stroke"]
 "#,
         )
         .unwrap();
-        let firefox = policy.named("  FireFox ").expect("the last part of a dotted id is its name");
+        let firefox = policy
+            .named("  FireFox ")
+            .expect("the last part of a dotted id is its name");
         assert_eq!(firefox.launch, vec!["firefox", "--new-window"]);
-        assert_eq!(policy.named("lienzo").map(|app| app.app_id.as_str()), Some("org.qt-project.qml"));
-        assert!(policy.named("lienzo").unwrap().launch.is_empty(), "no entry, no opening");
-        assert!(policy.named("chrome").is_none(), "what is not written here is not opened");
+        assert_eq!(
+            policy.named("lienzo").map(|app| app.app_id.as_str()),
+            Some("org.qt-project.qml")
+        );
+        assert!(
+            policy.named("lienzo").unwrap().launch.is_empty(),
+            "no entry, no opening"
+        );
+        assert!(
+            policy.named("chrome").is_none(),
+            "what is not written here is not opened"
+        );
         assert!(policy.named("").is_none());
     }
 
@@ -274,12 +320,65 @@ allow = ["stroke"]
         policy.allow(one).unwrap();
         policy.allow(two).unwrap();
         assert!(policy.named("editor").is_none());
-        assert!(policy.named("org.a.editor").is_some(), "the full id is still exact");
+        assert!(
+            policy.named("org.a.editor").is_some(),
+            "the full id is still exact"
+        );
+    }
+
+    #[test]
+    fn an_application_answers_to_what_people_call_it() {
+        let mut policy = StagePolicy::new();
+        let mut terminal = app("foot");
+        terminal.aliases = vec!["terminal".into(), "consola".into()];
+        let mut browser = app("firefox");
+        browser.aliases = vec!["navegador".into()];
+        policy.allow(terminal).unwrap();
+        policy.allow(browser).unwrap();
+        assert_eq!(
+            policy.named("la terminal").map(|a| a.app_id.as_str()),
+            Some("foot")
+        );
+        assert_eq!(
+            policy.named("Consola").map(|a| a.app_id.as_str()),
+            Some("foot")
+        );
+        assert_eq!(
+            policy.named("el navegador").map(|a| a.app_id.as_str()),
+            Some("firefox")
+        );
+        assert!(policy.named("el").is_none());
+
+        // Two applications that answer to the same name: neither opens.
+        let mut other = app("alacritty");
+        other.aliases = vec!["Terminal".into()];
+        policy.allow(other).unwrap();
+        assert!(policy.named("la terminal").is_none());
+    }
+
+    #[test]
+    fn an_alias_is_a_short_plain_name() {
+        for bad in [
+            vec!["  ".to_string()],
+            vec!["a\nb".to_string()],
+            vec!["x".repeat(MAX_ALIAS_CHARS + 1)],
+        ] {
+            let mut entry = app("org.bad.app");
+            entry.aliases = bad;
+            assert!(matches!(entry.validate(), Err(PolicyError::Alias(_))));
+        }
+        let mut many = app("org.bad.app");
+        many.aliases = vec!["x".to_string(); MAX_ALIASES + 1];
+        assert!(matches!(many.validate(), Err(PolicyError::Alias(_))));
     }
 
     #[test]
     fn a_launch_entry_has_to_be_a_program_and_not_a_script() {
-        for bad in [vec!["".to_string()], vec![" firefox".to_string()], vec!["x".repeat(MAX_LAUNCH_ARG_BYTES + 1)]] {
+        for bad in [
+            vec!["".to_string()],
+            vec![" firefox".to_string()],
+            vec!["x".repeat(MAX_LAUNCH_ARG_BYTES + 1)],
+        ] {
             let mut entry = app("org.bad.app");
             entry.launch = bad;
             assert!(matches!(entry.validate(), Err(PolicyError::Launch(_))));
