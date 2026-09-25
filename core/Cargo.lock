@@ -149,6 +149,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "archie-cut"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "archie-displayd"
 version = "0.1.0"
 dependencies = [
@@ -249,6 +258,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "archie-iris-bridge"
+version = "0.1.0"
+dependencies = [
+ "archie-policy",
+ "archie-stage",
+ "archie-types",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "archie-mcp"
 version = "0.1.0"
 dependencies = [
@@ -268,6 +289,7 @@ name = "archie-mcp-server"
 version = "0.1.0"
 dependencies = [
  "archie-core",
+ "archie-cut",
  "archie-policy",
  "archie-stage",
  "archie-state",

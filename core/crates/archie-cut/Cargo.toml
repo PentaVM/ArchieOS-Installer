@@ -1,0 +1,16 @@
+[package]
+name = "archie-cut"
+description = "Archie edits video: a timeline checked and confined to a media folder, written as MLT and rendered by melt, the engine under Kdenlive and Shotcut."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+
+[[bin]]
+name = "archie-cut"
+path = "src/bin/archie-cut.rs"

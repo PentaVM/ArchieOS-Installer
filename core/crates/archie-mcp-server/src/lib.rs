@@ -33,7 +33,9 @@
 pub mod archie;
 pub mod server;
 pub mod toolbox;
+pub mod video;
 
 pub use archie::ArchieToolbox;
 pub use server::{McpServer, MAX_MESSAGE_BYTES, MAX_RESULT_BYTES, SUPPORTED_VERSIONS};
 pub use toolbox::{Clearance, Effect, ToolOutcome, ToolSpec, Toolbox};
+pub use video::VideoTools;

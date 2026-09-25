@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 archie-core.workspace = true
+archie-cut.workspace = true
 archie-policy.workspace = true
 archie-stage.workspace = true
 archie-state.workspace = true

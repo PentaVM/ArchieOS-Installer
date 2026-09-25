@@ -1,6 +1,7 @@
 //! The tools: the node's state through archied's control socket, and the Archie Stage.
 
 use crate::toolbox::{Effect, ToolOutcome, ToolSpec, Toolbox};
+use crate::video::VideoTools;
 use archie_core::control::{request_over, ControlRequest, ControlResponse};
 use archie_core::endpoint;
 use archie_policy::Principal;
@@ -50,6 +51,8 @@ pub struct ArchieToolbox {
     /// The IDE agent as the node's policy sees it: an agent of its own, never a person.
     #[cfg_attr(not(unix), allow(dead_code))]
     principal: Principal,
+    /// Present only when the operator named a media folder.
+    video: Option<VideoTools>,
 }
 
 impl ArchieToolbox {
@@ -65,7 +68,14 @@ impl ArchieToolbox {
             principal: Principal::Agent {
                 agent: AgentId::new(),
             },
+            video: None,
         }
+    }
+
+    /// Offers the video tools, working in `video.media`.
+    pub fn with_video(mut self, video: VideoTools) -> Self {
+        self.video = Some(video);
+        self
     }
 
     async fn daemon(&self, request: ControlRequest) -> Result<ControlResponse, String> {
@@ -409,6 +419,9 @@ impl Toolbox for ArchieToolbox {
                 });
             }
         }
+        if self.video.is_some() {
+            tools.extend(VideoTools::specs());
+        }
         tools
     }
 
@@ -418,6 +431,10 @@ impl Toolbox for ArchieToolbox {
             "stage_surfaces" => self.stage_surfaces().await,
             #[cfg(unix)]
             "stage_act" => self.stage_act(&arguments).await,
+            video if video.starts_with("video_") => match &self.video {
+                Some(tools) => tools.call(video, arguments).await,
+                None => ToolOutcome::error("no media folder was given to this server"),
+            },
             _ => {
                 if !arguments.is_empty() {
                     return ToolOutcome::error("this tool takes no arguments");
