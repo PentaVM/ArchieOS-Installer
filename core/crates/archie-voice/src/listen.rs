@@ -31,8 +31,25 @@ const NAMES: &[&str] = &["archie", "archi", "archy"];
 
 /// Utterances that acknowledge and ask nothing, compared without accents or punctuation.
 const ACKNOWLEDGEMENTS: &[&str] = &[
-    "ya", "ok", "okay", "oka", "mhm", "mm", "aja", "aha", "si", "vale", "listo", "dale",
-    "perfecto", "bueno", "claro", "ya po", "si po", "ah ya", "ok gracias",
+    "ya",
+    "ok",
+    "okay",
+    "oka",
+    "mhm",
+    "mm",
+    "aja",
+    "aha",
+    "si",
+    "vale",
+    "listo",
+    "dale",
+    "perfecto",
+    "bueno",
+    "claro",
+    "ya po",
+    "si po",
+    "ah ya",
+    "ok gracias",
 ];
 
 /// Lower case, without accents or punctuation, words separated by single spaces.
@@ -58,9 +75,7 @@ pub fn plain(text: &str) -> String {
 
 /// Whether the utterance names Archie.
 pub fn names_archie(text: &str) -> bool {
-    plain(text)
-        .split(' ')
-        .any(|word| NAMES.contains(&word))
+    plain(text).split(' ').any(|word| NAMES.contains(&word))
 }
 
 /// Whether the utterance is only an acknowledgement.
@@ -141,7 +156,11 @@ pub fn after_utterance(
         interruption_utility: Probability::ZERO,
         response_utility: Probability::new(if addressed { 0.9 } else { 0.1 }),
         urgency: Probability::new(0.2),
-        context_sufficiency: Probability::new(if heard.text.trim().is_empty() { 0.0 } else { 0.8 }),
+        context_sufficiency: Probability::new(if heard.text.trim().is_empty() {
+            0.0
+        } else {
+            0.8
+        }),
         acknowledgement_only: Probability::new(if acknowledgement { 0.95 } else { 0.0 }),
         overlap: OverlapState::None,
         recent_interruption: InterruptionDirection::None,
@@ -196,10 +215,8 @@ mod tests {
 
     #[test]
     fn a_request_that_names_archie_gets_an_answer() {
-        let decision = FloorPolicy::default().decide(&after_utterance(
-            &heard("Oye Archie, ¿qué hora es?"),
-            None,
-        ));
+        let decision = FloorPolicy::default()
+            .decide(&after_utterance(&heard("Oye Archie, ¿qué hora es?"), None));
         assert_eq!(decision.action, FloorAction::TakeFloor);
         assert_eq!(decision.budget, SpeechBudget::Full);
     }
@@ -209,17 +226,26 @@ mod tests {
         let state = after_utterance(&heard("¿Y tú fuiste al cumpleaños de la Cata?"), None);
         let decision = FloorPolicy::default().decide(&state);
         assert_eq!(decision.action, FloorAction::Silent);
-        assert!(state.evidence.iter().any(|line| line.contains("neither names")));
+        assert!(state
+            .evidence
+            .iter()
+            .any(|line| line.contains("neither names")));
     }
 
     #[test]
     fn a_reply_right_after_archie_spoke_needs_no_name() {
-        let answering = after_utterance(&heard("Sí, el de la izquierda."), Some(Duration::from_secs(3)));
+        let answering = after_utterance(
+            &heard("Sí, el de la izquierda."),
+            Some(Duration::from_secs(3)),
+        );
         assert_eq!(
             FloorPolicy::default().decide(&answering).action,
             FloorAction::TakeFloor
         );
-        let too_late = after_utterance(&heard("Sí, el de la izquierda."), Some(Duration::from_secs(40)));
+        let too_late = after_utterance(
+            &heard("Sí, el de la izquierda."),
+            Some(Duration::from_secs(40)),
+        );
         assert_eq!(
             FloorPolicy::default().decide(&too_late).action,
             FloorAction::Silent
@@ -229,13 +255,18 @@ mod tests {
     #[test]
     fn an_acknowledgement_neither_starts_nor_stops_archie() {
         let after = after_utterance(&heard("ya"), Some(Duration::from_secs(1)));
-        assert_eq!(FloorPolicy::default().decide(&after).action, FloorAction::Silent);
+        assert_eq!(
+            FloorPolicy::default().decide(&after).action,
+            FloorAction::Silent
+        );
         assert_eq!(
             FloorPolicy::default().decide(&over_archie("mhm")).action,
             FloorAction::ContinueSpeaking
         );
         assert_eq!(
-            FloorPolicy::default().decide(&over_archie("no, espera")).action,
+            FloorPolicy::default()
+                .decide(&over_archie("no, espera"))
+                .action,
             FloorAction::Yield
         );
         assert_eq!(
@@ -253,7 +284,9 @@ mod tests {
             silence_ms: 450,
         };
         assert_eq!(
-            FloorPolicy::default().decide(&after_utterance(&hanging, None)).action,
+            FloorPolicy::default()
+                .decide(&after_utterance(&hanging, None))
+                .action,
             FloorAction::Silent
         );
     }

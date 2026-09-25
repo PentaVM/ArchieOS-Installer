@@ -13,6 +13,10 @@
 # newline is always an Enter key, and Enter is where a policy can ask for a person.
 # Super and Ctrl+Alt chords are never sent, whatever an entry says.
 #
+# `launch` is how the agent may open an application when asked to, run exactly as written
+# and never through a shell; an entry without it can be operated but not opened. `aliases`
+# are what a person calls it out loud. A name two entries answer to opens neither.
+#
 # Installed to /etc/archie/stage/apps.toml. Edit that copy on a node.
 
 [[app]]
@@ -24,6 +28,44 @@ max_text_chars = 512
 allow_modified_keys = true
 # Enter runs whatever was typed. A person approves each command before it runs.
 approval_keys = ["enter"]
+launch = ["foot"]
+aliases = ["terminal", "consola"]
+
+[[app]]
+app_id = "firefox"
+display_name = "Firefox"
+allow = ["move", "click", "double_click", "scroll", "text", "key", "focus"]
+max_text_grade = "public"
+max_text_chars = 512
+allow_modified_keys = true
+# Enter can submit a form or a purchase. A person approves it until voice approval exists.
+approval_keys = ["enter"]
+launch = ["firefox", "--new-window"]
+aliases = ["navegador", "el navegador", "internet", "browser"]
+
+[[app]]
+# A plain text editor: nano in its own terminal window, told apart from the terminal by
+# its app id so that typing a note never reaches a shell.
+app_id = "archie.editor"
+display_name = "Editor de texto"
+allow = ["move", "click", "scroll", "text", "key", "focus"]
+max_text_grade = "internal"
+max_text_chars = 2000
+allow_modified_keys = true
+launch = ["foot", "--app-id", "archie.editor", "nano"]
+aliases = ["editor", "notas", "bloc de notas", "texto"]
+
+[[app]]
+app_id = "org.kde.kdenlive"
+display_name = "Kdenlive"
+allow = ["move", "click", "double_click", "drag", "scroll", "text", "key", "focus"]
+max_text_grade = "public"
+max_text_chars = 256
+allow_modified_keys = true
+# Delete removes clips from a timeline; undo exists, but a person should see it.
+approval_keys = ["delete"]
+launch = ["kdenlive"]
+aliases = ["editor de video", "editor de vídeo", "video", "vídeo"]
 
 [[app]]
 app_id = "org.freecad.FreeCAD"

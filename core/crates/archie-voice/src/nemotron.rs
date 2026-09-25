@@ -538,9 +538,15 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert!(segments.len() >= 2, "a real answer is more than one piece: {events:?}");
+        assert!(
+            segments.len() >= 2,
+            "a real answer is more than one piece: {events:?}"
+        );
         for (at, segment) in segments.iter().enumerate() {
-            assert_eq!(segment.sequence, at as u32, "numbered from zero without gaps");
+            assert_eq!(
+                segment.sequence, at as u32,
+                "numbered from zero without gaps"
+            );
             assert_eq!(segment.source, SpokenContentSource::CognitiveModel);
             assert!(
                 segment.text.chars().any(char::is_alphanumeric),
@@ -569,9 +575,15 @@ mod tests {
                 _ => None,
             })
             .collect();
-        let sentences = segments.iter().filter(|segment| segment.ends_sentence).count();
+        let sentences = segments
+            .iter()
+            .filter(|segment| segment.ends_sentence)
+            .count();
         assert_eq!(sentences, 1, "one sentence, complete: {segments:?}");
-        assert!(segments.last().unwrap().ends_sentence, "and it is the last thing said");
+        assert!(
+            segments.last().unwrap().ends_sentence,
+            "and it is the last thing said"
+        );
     }
 
     #[test]
@@ -591,9 +603,15 @@ mod tests {
         assert_eq!(intents.len(), 1, "{events:?}");
         assert_eq!(intents[0].tool_name, "open_app");
         assert!(intents[0].raw_arguments.to_lowercase().contains("firefox"));
-        assert_eq!(intents[0].correlation_id, "t7#0", "correlated to the utterance");
+        assert_eq!(
+            intents[0].correlation_id, "t7#0",
+            "correlated to the utterance"
+        );
         assert!(intents[0].source_adapter.starts_with("nemotron:"));
-        assert!(matches!(events.last(), Some(CognitiveEvent::Completed { .. })));
+        assert!(matches!(
+            events.last(),
+            Some(CognitiveEvent::Completed { .. })
+        ));
     }
 
     #[test]
@@ -608,7 +626,11 @@ mod tests {
         assert!(matches!(first, Some(CognitiveEvent::Segment(_))));
         cognitive.cancel("t2", CancelReason::Interrupted);
         assert!(*stopped.lock().unwrap(), "the stream itself was stopped");
-        assert_eq!(cognitive.poll(), None, "nothing further for the stopped turn");
+        assert_eq!(
+            cognitive.poll(),
+            None,
+            "nothing further for the stopped turn"
+        );
         assert_eq!(cognitive.running_turn(), None);
     }
 
@@ -633,14 +655,19 @@ mod tests {
             cognitive.begin(ask("t5", "   ", SpeechBudget::Full)),
             Err(CognitiveError::EmptyTranscript)
         );
-        assert!(cognitive.begin(ask("t5", "hola", SpeechBudget::Token)).is_err());
+        assert!(cognitive
+            .begin(ask("t5", "hola", SpeechBudget::Token))
+            .is_err());
         let mut german = ask("t5", "hallo", SpeechBudget::Full);
         german.language = "de-DE".into();
         assert!(matches!(
             cognitive.begin(german),
             Err(CognitiveError::UnsupportedLanguage { .. })
         ));
-        assert!(cognitive.last_request().is_none(), "none of that left the machine");
+        assert!(
+            cognitive.last_request().is_none(),
+            "none of that left the machine"
+        );
     }
 
     #[test]
@@ -657,12 +684,22 @@ mod tests {
             other => panic!("the first message is the system prompt, not {other:?}"),
         };
         assert!(system.contains("14:02"), "the clock is given, not guessed");
-        assert!(system.contains("No inventes"), "and it is told not to invent");
+        assert!(
+            system.contains("No inventes"),
+            "and it is told not to invent"
+        );
         assert!(system.contains("una sola frase"), "and how much it may say");
-        assert_eq!(sent.messages.len(), 4, "system, the past exchange, and this question");
+        assert_eq!(
+            sent.messages.len(),
+            4,
+            "system, the past exchange, and this question"
+        );
         assert!(matches!(&sent.messages[3], ToolChatMessage::User(text) if text == "qué hora es"));
         assert_eq!(sent.tools.len(), crate::tools::os_control().len());
-        assert_eq!(sent.max_tokens, 96, "one sentence does not need four hundred tokens");
+        assert_eq!(
+            sent.max_tokens, 96,
+            "one sentence does not need four hundred tokens"
+        );
     }
 
     #[test]
@@ -673,7 +710,11 @@ mod tests {
             .unwrap();
         drain(&mut cognitive);
         cognitive
-            .follow_up("t11", &[("t11#0".into(), "No se hizo.".into())], SpeechBudget::Full)
+            .follow_up(
+                "t11",
+                &[("t11#0".into(), "No se hizo.".into())],
+                SpeechBudget::Full,
+            )
             .unwrap();
         let second: Vec<String> = drain(&mut cognitive)
             .into_iter()
@@ -685,14 +726,18 @@ mod tests {
         assert_eq!(second, vec!["t11#1".to_string()], "not a second t11#0");
 
         cognitive.source.bytes = TEXT;
-        cognitive
-            .follow_up("t11", &[], SpeechBudget::Full)
-            .unwrap();
-        let first_said = drain(&mut cognitive).into_iter().find_map(|event| match event {
-            CognitiveEvent::Segment(segment) => Some(segment.sequence),
-            _ => None,
-        });
-        assert_eq!(first_said, Some(0), "nothing had been said, so speech starts at 0");
+        cognitive.follow_up("t11", &[], SpeechBudget::Full).unwrap();
+        let first_said = drain(&mut cognitive)
+            .into_iter()
+            .find_map(|event| match event {
+                CognitiveEvent::Segment(segment) => Some(segment.sequence),
+                _ => None,
+            });
+        assert_eq!(
+            first_said,
+            Some(0),
+            "nothing had been said, so speech starts at 0"
+        );
     }
 
     #[test]
@@ -715,8 +760,14 @@ mod tests {
             )
             .unwrap();
         let sent = cognitive.last_request().unwrap();
-        assert_eq!(sent.messages.len(), 4, "system, the question, the step, its result");
-        assert!(matches!(&sent.messages[1], ToolChatMessage::User(text) if text == "abre firefox po"));
+        assert_eq!(
+            sent.messages.len(),
+            4,
+            "system, the question, the step, its result"
+        );
+        assert!(
+            matches!(&sent.messages[1], ToolChatMessage::User(text) if text == "abre firefox po")
+        );
         let asked = match &sent.messages[2] {
             ToolChatMessage::Assistant { tool_calls, .. } => tool_calls.clone(),
             other => panic!("the step Archie took, not {other:?}"),
@@ -732,7 +783,9 @@ mod tests {
 
         // An unanswered proposal is reported as not done, never as done.
         drain(&mut cognitive);
-        cognitive.follow_up("t9.2", &[], SpeechBudget::Full).unwrap();
+        cognitive
+            .follow_up("t9.2", &[], SpeechBudget::Full)
+            .unwrap();
         let sent = cognitive.last_request().unwrap();
         assert!(matches!(
             sent.messages.last(),
@@ -762,7 +815,13 @@ mod tests {
             .collect::<Vec<_>>()
             .join(" ");
         let lowered = said.to_lowercase();
-        for note in ["the user", "we need", "let's", "respond in spanish", "okay,"] {
+        for note in [
+            "the user",
+            "we need",
+            "let's",
+            "respond in spanish",
+            "okay,",
+        ] {
             assert!(
                 !lowered.contains(note),
                 "a reasoning note reached the voice ({note:?}): {said}"

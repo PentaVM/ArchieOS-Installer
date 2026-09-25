@@ -1,0 +1,15 @@
+[package]
+name = "archie-iris-bridge"
+description = "What IRIS proposes, checked against the live stage and turned into an action the stage gate still has to allow — and what happened, told back to IRIS."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+archie-policy.workspace = true
+archie-stage.workspace = true
+archie-types.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true

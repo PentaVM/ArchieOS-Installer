@@ -47,8 +47,8 @@ fn assessment(disputed: bool) -> AnalyticalAssessment {
     assess_hypothesis("hypothesis:one", &signals, &AnalysisPolicy::default(), NOW).unwrap()
 }
 fn output() -> Value {
-    json!({"proposal_id":"proposal:one","hypothesis_id":"hypothesis:one","model_id":"test.model",
-        "model_sha256":format!("sha256:{}", "a".repeat(64)),"stance":"supports","score_permille":900,
+    json!({"proposal_id":"proposal:one","hypothesis_id":"hypothesis:one",
+        "stance":"supports","score_permille":900,
         "evidence_refs":["vault:evidence/0","vault:evidence/1"],"produced_at_ms":NOW})
 }
 fn check(value: Value) -> AdvisoryResult {
@@ -78,6 +78,16 @@ fn high_uncertainty() {
     let mut v = output();
     v["score_permille"] = json!(100);
     assert_eq!(check(v).code(), "model_uncertain");
+}
+#[test]
+fn a_model_that_names_itself_or_its_checkpoint_is_refused() {
+    // It cannot know the hash of its own weights; a claimed one is always invented.
+    let mut claims_digest = output();
+    claims_digest["model_sha256"] = json!(format!("sha256:{}", "a".repeat(64)));
+    assert_eq!(check(claims_digest).code(), "invalid_proposal_json");
+    let mut claims_identity = output();
+    claims_identity["model_id"] = json!("test.model");
+    assert_eq!(check(claims_identity).code(), "invalid_proposal_json");
 }
 #[test]
 fn invalid_json() {

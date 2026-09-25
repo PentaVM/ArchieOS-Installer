@@ -4,6 +4,7 @@
 //! archie-mcp-server [--clearance public|internal] [--root DIR]
 //!                   [--stage-socket PATH]
 //!                   [--allow-stage-actions --stage-key FILE [--stage-policy FILE]]
+//!                   [--video-media DIR [--melt PATH] [--ffprobe PATH]]
 //! ```
 //!
 //! Standard output carries protocol messages and nothing else; diagnostics go to standard
@@ -20,6 +21,7 @@ use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
 const USAGE: &str = "usage: archie-mcp-server [--clearance public|internal] [--root DIR]
                          [--stage-socket PATH]
                          [--allow-stage-actions --stage-key FILE [--stage-policy FILE]]
+                         [--video-media DIR [--melt PATH] [--ffprobe PATH]]
 
   --clearance            the most sensitive data a tool may return (default: public).
                          internal only when the IDE's model provider retention is verified.
@@ -28,7 +30,11 @@ const USAGE: &str = "usage: archie-mcp-server [--clearance public|internal] [--r
                          (default: $XDG_RUNTIME_DIR/archie-stage/control.sock).
   --allow-stage-actions  offer stage_act, which operates applications. Needs --stage-key.
   --stage-key            the stage command key file (64 hex characters, mode 0600).
-  --stage-policy         the stage policy (default: /etc/archie/stage/apps.toml).";
+  --stage-policy         the stage policy (default: /etc/archie/stage/apps.toml).
+  --video-media          offer video_sources, video_probe and video_render, working only
+                         inside this folder; renders go to its renders/ folder. The tools
+                         carry file names, so they need --clearance internal.
+  --melt, --ffprobe      the MLT renderer and ffprobe (default: from PATH).";
 
 struct Config {
     clearance: Clearance,
@@ -37,6 +43,9 @@ struct Config {
     allow_stage_actions: bool,
     stage_key: Option<PathBuf>,
     stage_policy: PathBuf,
+    video_media: Option<PathBuf>,
+    melt: PathBuf,
+    ffprobe: PathBuf,
 }
 
 fn parse(args: Vec<String>) -> Result<Option<Config>, String> {
@@ -47,6 +56,9 @@ fn parse(args: Vec<String>) -> Result<Option<Config>, String> {
         allow_stage_actions: false,
         stage_key: None,
         stage_policy: PathBuf::from("/etc/archie/stage/apps.toml"),
+        video_media: None,
+        melt: PathBuf::from("melt"),
+        ffprobe: PathBuf::from("ffprobe"),
     };
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
@@ -62,6 +74,9 @@ fn parse(args: Vec<String>) -> Result<Option<Config>, String> {
             "--stage-key" => config.stage_key = Some(PathBuf::from(value("--stage-key")?)),
             "--stage-policy" => config.stage_policy = PathBuf::from(value("--stage-policy")?),
             "--allow-stage-actions" => config.allow_stage_actions = true,
+            "--video-media" => config.video_media = Some(PathBuf::from(value("--video-media")?)),
+            "--melt" => config.melt = PathBuf::from(value("--melt")?),
+            "--ffprobe" => config.ffprobe = PathBuf::from(value("--ffprobe")?),
             "--help" | "-h" => return Ok(None),
             other => return Err(format!("unknown argument {other:?}")),
         }
@@ -193,7 +208,21 @@ async fn main() -> ExitCode {
         Some(root) => StatePaths::rooted(root),
         None => StatePaths::from_env(),
     };
-    let toolbox = ArchieToolbox::new(paths, config.stage_socket.clone(), operator);
+    let mut toolbox = ArchieToolbox::new(paths, config.stage_socket.clone(), operator);
+    if let Some(media) = &config.video_media {
+        if !media.is_dir() {
+            eprintln!(
+                "archie-mcp-server: --video-media {} is not a folder",
+                media.display()
+            );
+            return ExitCode::from(2);
+        }
+        toolbox = toolbox.with_video(archie_mcp_server::VideoTools {
+            media: media.clone(),
+            melt: config.melt.clone(),
+            ffprobe: config.ffprobe.clone(),
+        });
+    }
     let mut server = McpServer::new(toolbox, config.clearance);
     eprintln!(
         "archie-mcp-server: ready, clearance {:?}, stage actions {}",

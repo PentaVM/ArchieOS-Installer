@@ -12,18 +12,21 @@
 //!              [--model …] [--budget …] [--language …]
 //!
 //! archie-voice converse --grade public
-//!              --asr-model <nemotron-3.5-asr .gguf> --tts-model <magpie .gguf>
-//!              --codec-model <nanocodec .gguf> --tts-tokenizer <dir> [--voice <name>]
+//!              --asr-model <nemotron-3.5-asr .gguf>
+//!              [--voice-engine piper --piper <binary> --piper-model <voice.onnx>]
+//!              [--voice-engine magpie --tts-model <magpie .gguf> --codec-model <nanocodec .gguf>
+//!               --tts-tokenizer <dir> [--voice <name>]]
 //!              [--listen-language es-US] [--tts-language es-US] [--always] [--headphones]
-//!              [--wav-in <file>] [--wav-out <file>] [the stage flags of do]
+//!              [--wav-in <file>] [--wav-out <file>]
+//!              [the stage flags of do]
 //! ```
 //!
 //! `converse` is the whole thing, spoken: the microphone through Nemotron 3.5 ASR, the
 //! floor deciding whether to answer, Nemotron on Nebius answering and proposing, the hands
-//! acting when a stage is given, and Magpie saying the answer. Built with
-//! `--features speech`, where NeMo-Speech.cpp and PulseAudio are installed. `--wav-in` and
-//! `--wav-out` put recordings where the microphone and the speaker were, which is how the
-//! loop is tested without a room.
+//! acting when a stage is given, and a voice — Piper on a CPU, Magpie with a GPU — saying
+//! the answer. Built with `--features speech`, where NeMo-Speech.cpp and PulseAudio are
+//! installed. `--wav-in` and `--wav-out` put recordings where the microphone and the
+//! speaker were, which is how the loop is tested without a room.
 //!
 //! `ask` is the cognitive half on its own: what was heard goes in, and out come the pieces
 //! a voice would say and the tools the model proposes, each stamped with how long after the
@@ -122,7 +125,8 @@ fn asking(
     offset: Option<time::UtcOffset>,
     words: bool,
 ) -> Result<Asking, String> {
-    let model = take(&mut args, "--model").unwrap_or_else(|| "nvidia/Nemotron-3_5-Lightning".into());
+    let model =
+        take(&mut args, "--model").unwrap_or_else(|| "nvidia/Nemotron-3_5-Lightning".into());
     let language = take(&mut args, "--language").unwrap_or_else(|| "es-CL".into());
     let budget = match take(&mut args, "--budget").as_deref() {
         None | Some("full") => SpeechBudget::Full,
@@ -134,9 +138,11 @@ fn asking(
         Some("internal") => PrivacyGrade::Internal,
         Some(other) => return Err(format!("--grade is public or internal, not {other}")),
         None => {
-            return Err("say how private this is with --grade; it has no default, because what \
+            return Err(
+                "say how private this is with --grade; it has no default, because what \
                         a person says to their computer is theirs"
-                .into())
+                    .into(),
+            )
         }
     };
     let heard = if words {
@@ -201,11 +207,17 @@ fn ask(mut asking: Asking) -> Result<ExitCode, String> {
         return Ok(ExitCode::from(4));
     }
     for intent in &step.intents {
-        println!("        tool  {}({})   proposed, not done", intent.tool_name, intent.raw_arguments);
+        println!(
+            "        tool  {}({})   proposed, not done",
+            intent.tool_name, intent.raw_arguments
+        );
     }
     match step.first_piece {
         Some(ms) => println!("first words after {ms} ms, with {}", asking.model),
-        None => println!("no words: the model only proposed tools, with {}", asking.model),
+        None => println!(
+            "no words: the model only proposed tools, with {}",
+            asking.model
+        ),
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -342,7 +354,10 @@ fn connect(
     let mut sight = Sight::new(operator, client, world, snapshot_dir, principal.clone());
     // What applications declare about their controls is the first way to find one: exact,
     // live, and it needs neither a capture nor a model.
-    match asking.runtime.block_on(archie_a11y::Accessibility::connect()) {
+    match asking
+        .runtime
+        .block_on(archie_a11y::Accessibility::connect())
+    {
         Ok(bus) => sight = sight.asking(Box::new(bus)),
         Err(error) => eprintln!("archie-voice: nothing to ask about controls ({error})"),
     }
@@ -364,7 +379,8 @@ fn connect(
         .map_err(|error| error.to_string())?;
         let descriptor = descriptor(model, "look", cloud, asking.grade)?;
         let locality = descriptor.locality;
-        let client = LocateAnythingClient::new(endpoint, descriptor).map_err(|error| error.to_string())?;
+        let client =
+            LocateAnythingClient::new(endpoint, descriptor).map_err(|error| error.to_string())?;
         hands = hands.seeing(Grounding {
             client: Arc::new(client),
             locality,
@@ -381,7 +397,10 @@ fn context_for(clock: &str, front: Option<String>, openable: &[String]) -> Strin
         None => "\nNo hay ninguna aplicación al frente.".to_string(),
     });
     if !openable.is_empty() {
-        context.push_str(&format!("\nAplicaciones que puedes abrir: {}.", openable.join(", ")));
+        context.push_str(&format!(
+            "\nAplicaciones que puedes abrir: {}.",
+            openable.join(", ")
+        ));
     }
     context
 }
@@ -495,9 +514,12 @@ fn flag(args: &mut Vec<String>, name: &str) -> bool {
 #[allow(dead_code)]
 struct SpeechFlags {
     asr_model: String,
-    tts_model: String,
-    codec_model: String,
-    tts_tokenizer: String,
+    engine: String,
+    piper: String,
+    piper_model: Option<String>,
+    tts_model: Option<String>,
+    codec_model: Option<String>,
+    tts_tokenizer: Option<String>,
     voice: Option<String>,
     tts_language: String,
     listen_language: String,
@@ -514,9 +536,13 @@ struct SpeechFlags {
 fn speech_flags(args: &mut Vec<String>) -> Result<SpeechFlags, String> {
     Ok(SpeechFlags {
         asr_model: take(args, "--asr-model").ok_or("converse needs --asr-model")?,
-        tts_model: take(args, "--tts-model").ok_or("converse needs --tts-model")?,
-        codec_model: take(args, "--codec-model").ok_or("converse needs --codec-model")?,
-        tts_tokenizer: take(args, "--tts-tokenizer").ok_or("converse needs --tts-tokenizer")?,
+        // Piper keeps up with speech on a laptop CPU; Magpie needs a GPU to.
+        engine: take(args, "--voice-engine").unwrap_or_else(|| "piper".into()),
+        piper: take(args, "--piper").unwrap_or_else(|| "piper".into()),
+        piper_model: take(args, "--piper-model"),
+        tts_model: take(args, "--tts-model"),
+        codec_model: take(args, "--codec-model"),
+        tts_tokenizer: take(args, "--tts-tokenizer"),
         voice: take(args, "--voice"),
         tts_language: take(args, "--tts-language").unwrap_or_else(|| "es-US".into()),
         listen_language: take(args, "--listen-language").unwrap_or_else(|| "es-US".into()),
@@ -535,7 +561,10 @@ fn speech_flags(args: &mut Vec<String>) -> Result<SpeechFlags, String> {
         // Thirteen 80 ms frames: the least lookahead that kept up with speech on a
         // Ryzen 5 4500U. A faster machine can answer sooner with less.
         lookahead: take(args, "--asr-lookahead")
-            .map(|n| n.parse::<i32>().map_err(|_| "--asr-lookahead is a number of frames"))
+            .map(|n| {
+                n.parse::<i32>()
+                    .map_err(|_| "--asr-lookahead is a number of frames")
+            })
             .transpose()?
             .unwrap_or(13),
         name_boost: take(args, "--name-boost")
@@ -551,9 +580,11 @@ fn converse(
     _speech: SpeechFlags,
     _stage: Option<StageFlags>,
 ) -> Result<ExitCode, String> {
-    Err("this build has no ears or voice: build archie-voice with --features speech, \
+    Err(
+        "this build has no ears or voice: build archie-voice with --features speech, \
          where NeMo-Speech.cpp and PulseAudio are installed"
-        .into())
+            .into(),
+    )
 }
 
 /// Listens, answers out loud, and acts — until a recording runs out or the process is
@@ -580,37 +611,68 @@ fn converse(
         Some(flags) => Some(connect(&asking, flags)?),
         None => None,
     };
-    let openable = stage.as_ref().map(|(_, policy)| openable(policy)).unwrap_or_default();
+    let openable = stage
+        .as_ref()
+        .map(|(_, policy)| openable(policy))
+        .unwrap_or_default();
 
     let at = Instant::now();
-    let ears =
-        Ears::load(Path::new(&speech.asr_model), Some(speech.lookahead)).map_err(|e| e.to_string())?;
+    let ears = Ears::load(Path::new(&speech.asr_model), Some(speech.lookahead))
+        .map_err(|e| e.to_string())?;
     println!(
         "ears ready in {} ms (NeMo-Speech.cpp {})",
         at.elapsed().as_millis(),
         archie_voice::native::runtime_version()
     );
     let at = Instant::now();
-    let voice = Voice::load(
-        &VoiceFiles {
-            magpie: Path::new(&speech.tts_model),
-            codec: Path::new(&speech.codec_model),
-            tokenizer_dir: Path::new(&speech.tts_tokenizer),
-        },
-        &speech.tts_language,
-        speech.voice.as_deref(),
-        speech.threads,
-    )
-    .map_err(|e| e.to_string())?;
+    let voice: Box<dyn archie_voice::voice::Speaks> = match speech.engine.as_str() {
+        "magpie" => {
+            let needed = |value: &Option<String>, flag: &str| {
+                value
+                    .clone()
+                    .ok_or(format!("the magpie voice needs {flag}"))
+            };
+            let (magpie, codec, tokenizer) = (
+                needed(&speech.tts_model, "--tts-model")?,
+                needed(&speech.codec_model, "--codec-model")?,
+                needed(&speech.tts_tokenizer, "--tts-tokenizer")?,
+            );
+            let voice = Voice::load(
+                &VoiceFiles {
+                    magpie: Path::new(&magpie),
+                    codec: Path::new(&codec),
+                    tokenizer_dir: Path::new(&tokenizer),
+                },
+                &speech.tts_language,
+                speech.voice.as_deref(),
+                speech.threads,
+            )
+            .map_err(|e| e.to_string())?;
+            println!("voices: {}", voice.voices().join(", "));
+            Box::new(voice)
+        }
+        "piper" => {
+            let model = speech
+                .piper_model
+                .clone()
+                .ok_or("the piper voice needs --piper-model <voice.onnx>")?;
+            Box::new(archie_voice::piper::Piper::start(
+                Path::new(&speech.piper),
+                Path::new(&model),
+                None,
+            )?)
+        }
+        other => return Err(format!("--voice-engine is piper or magpie, not {other}")),
+    };
     let rate = voice.sample_rate();
     println!(
-        "voice ready in {} ms, {rate} Hz; voices: {}",
-        at.elapsed().as_millis(),
-        voice.voices().join(", ")
+        "voice ({}) ready in {} ms, {rate} Hz",
+        speech.engine,
+        at.elapsed().as_millis()
     );
 
     let hearing = match &speech.wav_in {
-        Some(path) => Hearing::recording(Path::new(path), Duration::from_secs(30))?,
+        Some(path) => Hearing::recording(Path::new(path), Duration::from_secs(4))?,
         None => Hearing::Microphone(Microphone::open("Archie").map_err(|e| e.to_string())?),
     };
     let saying = match &speech.wav_out {
@@ -660,10 +722,7 @@ fn converse(
         }
     };
     let mut context = || {
-        let front = stage
-            .borrow()
-            .as_ref()
-            .and_then(|(hands, _)| hands.front());
+        let front = stage.borrow().as_ref().and_then(|(hands, _)| hands.front());
         context_for(&clock, front, &openable)
     };
     let started = Instant::now();
@@ -691,6 +750,8 @@ fn converse(
             Moment::Did { report } => println!("{at:>7} ms  resultado {report}"),
             Moment::Interrupted => println!("{at:>7} ms  me interrumpieron: me callo"),
             Moment::Alert(message) => println!("{at:>7} ms  alerta   {message}"),
+            // The loudness of the room and the voice's turns are for a display, not a log.
+            Moment::Level { .. } | Moment::Speaking { .. } | Moment::Ready => {}
         }
     };
     let setup = Setup {
@@ -705,8 +766,16 @@ fn converse(
     println!(
         "escuchando ({}{}){}",
         speech.listen_language,
-        if speech.always { ", respondo a todo" } else { ", di «Archie» para hablarme" },
-        if speech.headphones { ", con audífonos: puedes interrumpirme" } else { "" }
+        if speech.always {
+            ", respondo a todo"
+        } else {
+            ", di «Archie» para hablarme"
+        },
+        if speech.headphones {
+            ", con audífonos: puedes interrumpirme"
+        } else {
+            ""
+        }
     );
     conversation::converse(
         &setup,
@@ -731,8 +800,15 @@ fn plan_name(plan: &archie_voice::Plan) -> String {
         Plan::Click { app_id, target } => format!("click {target:?} in {app_id}"),
         Plan::Type { app_id, text } => format!("type {} chars in {app_id}", text.chars().count()),
         Plan::Keys { app_id, chord } => format!("keys {} in {app_id}", chord.key.name()),
-        Plan::Scroll { app_id, down, steps } => {
-            format!("scroll {} {steps} in {app_id}", if *down { "down" } else { "up" })
+        Plan::Scroll {
+            app_id,
+            down,
+            steps,
+        } => {
+            format!(
+                "scroll {} {steps} in {app_id}",
+                if *down { "down" } else { "up" }
+            )
         }
     }
 }
@@ -826,7 +902,11 @@ fn descriptor(
         } else {
             ProviderKind::NvidiaNim
         },
-        locality: if cloud { Locality::Cloud } else { Locality::Local },
+        locality: if cloud {
+            Locality::Cloud
+        } else {
+            Locality::Local
+        },
         node: None,
         context_window: 32_000,
         // A grounding model that reasons before it answers needs room for one box.

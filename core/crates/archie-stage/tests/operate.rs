@@ -235,9 +235,7 @@ async fn an_approved_action_goes_through_and_a_wrong_key_is_answered_with_sequen
         .unwrap();
     match rejected {
         ActOutcome::Receipt {
-            sequence,
-            outcome,
-            ..
+            sequence, outcome, ..
         } => {
             assert_eq!(sequence, 0);
             assert_ne!(outcome, "executed");
@@ -339,7 +337,10 @@ async fn a_capture_is_read_verified_and_removed() {
         .look(
             &mut client,
             &mut world,
-            &request("org.freecad.FreeCAD", StageAction::Snapshot { region: None }),
+            &request(
+                "org.freecad.FreeCAD",
+                StageAction::Snapshot { region: None },
+            ),
             &dir.join("snapshots"),
             Duration::from_secs(5),
         )
@@ -393,7 +394,10 @@ async fn a_capture_that_does_not_match_or_lives_elsewhere_is_not_believed() {
         .look(
             &mut client,
             &mut world,
-            &request("org.freecad.FreeCAD", StageAction::Snapshot { region: None }),
+            &request(
+                "org.freecad.FreeCAD",
+                StageAction::Snapshot { region: None },
+            ),
             &dir.join("snapshots"),
             Duration::from_secs(5),
         )
@@ -415,7 +419,10 @@ async fn a_capture_that_does_not_match_or_lives_elsewhere_is_not_believed() {
         .look(
             &mut client,
             &mut world,
-            &request("org.freecad.FreeCAD", StageAction::Snapshot { region: None }),
+            &request(
+                "org.freecad.FreeCAD",
+                StageAction::Snapshot { region: None },
+            ),
             &elsewhere.join("snapshots"),
             Duration::from_secs(5),
         )
@@ -451,7 +458,10 @@ async fn capturing_needs_its_own_grant() {
         .look(
             &mut client,
             &mut world,
-            &request("org.freecad.FreeCAD", StageAction::Snapshot { region: None }),
+            &request(
+                "org.freecad.FreeCAD",
+                StageAction::Snapshot { region: None },
+            ),
             &dir.join("snapshots"),
             Duration::from_secs(5),
         )

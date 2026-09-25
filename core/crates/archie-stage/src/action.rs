@@ -528,11 +528,7 @@ impl StageAction {
             } => vec![(*x, *y), (*to_x, *to_y)],
             // Every point of a line is a place the pointer is put.
             Self::Stroke { points, .. } => points.iter().map(|at| (at.x, at.y)).collect(),
-            Self::Strokes { paths, .. } => paths
-                .iter()
-                .flatten()
-                .map(|at| (at.x, at.y))
-                .collect(),
+            Self::Strokes { paths, .. } => paths.iter().flatten().map(|at| (at.x, at.y)).collect(),
             // A capture touches nothing, but a part of a surface is still two corners of
             // it, and they are checked like any other coordinates.
             Self::Snapshot {

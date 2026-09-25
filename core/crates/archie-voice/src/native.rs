@@ -15,6 +15,9 @@ use std::marker::PhantomData;
 use std::path::Path;
 use std::ptr;
 
+pub use crate::voice::Said;
+use crate::voice::Speaks;
+
 #[derive(Debug, thiserror::Error)]
 pub enum NativeError {
     #[error("{what}: {message}")]
@@ -220,13 +223,20 @@ mod ffi {
         ) -> AsrStatus;
         pub fn nemo_speech_asr_stream_force_endpoint(stream: *mut Stream) -> AsrStatus;
         pub fn nemo_speech_asr_stream_finish(stream: *mut Stream) -> AsrStatus;
-        pub fn nemo_speech_asr_stream_next(stream: *mut Stream, out: *mut *mut AsrResult) -> AsrStatus;
+        pub fn nemo_speech_asr_stream_next(
+            stream: *mut Stream,
+            out: *mut *mut AsrResult,
+        ) -> AsrStatus;
         pub fn nemo_speech_asr_stream_close(stream: *mut Stream);
         pub fn nemo_speech_asr_result_is_final(result: *const AsrResult) -> bool;
         pub fn nemo_speech_asr_result_audio_processed(result: *const AsrResult) -> f32;
         pub fn nemo_speech_asr_result_alternative_count(result: *const AsrResult) -> usize;
-        pub fn nemo_speech_asr_result_transcript(result: *const AsrResult, alt: usize) -> *const c_char;
-        pub fn nemo_speech_asr_result_language_count(result: *const AsrResult, alt: usize) -> usize;
+        pub fn nemo_speech_asr_result_transcript(
+            result: *const AsrResult,
+            alt: usize,
+        ) -> *const c_char;
+        pub fn nemo_speech_asr_result_language_count(result: *const AsrResult, alt: usize)
+            -> usize;
         pub fn nemo_speech_asr_result_language_code(
             result: *const AsrResult,
             alt: usize,
@@ -248,7 +258,10 @@ mod ffi {
         pub fn nemo_speech_tts_destroy(synthesizer: *mut Synthesizer);
         pub fn nemo_speech_tts_sample_rate(synthesizer: *const Synthesizer) -> i32;
         pub fn nemo_speech_tts_speaker_count(synthesizer: *const Synthesizer) -> i32;
-        pub fn nemo_speech_tts_speaker_name(synthesizer: *const Synthesizer, i: usize) -> *const c_char;
+        pub fn nemo_speech_tts_speaker_name(
+            synthesizer: *const Synthesizer,
+            i: usize,
+        ) -> *const c_char;
         pub fn nemo_speech_tts_synthesize_text(
             synthesizer: *mut Synthesizer,
             options: *const TtsSynthesisOptions,
@@ -268,7 +281,9 @@ fn owned(text: *const c_char) -> String {
     }
     // SAFETY: the library returns NUL-terminated strings valid until its next call on
     // this thread; this copies before any such call.
-    unsafe { CStr::from_ptr(text) }.to_string_lossy().into_owned()
+    unsafe { CStr::from_ptr(text) }
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn asr_error(what: &'static str) -> NativeError {
@@ -530,18 +545,6 @@ pub struct Voice {
 // SAFETY: the synthesizer is only driven through `&mut self`.
 unsafe impl Send for Voice {}
 
-/// How one sentence was said.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Said {
-    pub sample_rate: u32,
-    pub audio_s: f64,
-    pub elapsed_s: f64,
-    /// Milliseconds until the first audio was ready.
-    pub first_audio_ms: f64,
-    /// Whether the listener stopped it before the end.
-    pub stopped: bool,
-}
-
 impl Voice {
     pub fn load(
         files: &VoiceFiles<'_>,
@@ -605,7 +608,11 @@ impl Voice {
 
     /// Says `text`, handing each piece of audio (mono PCM16) to `hear` as it is made.
     /// `hear` returns false to stop — a person started talking.
-    pub fn say<F: FnMut(&[i16]) -> bool>(&mut self, text: &str, hear: F) -> Result<Said, NativeError> {
+    pub fn say<F: FnMut(&[i16]) -> bool>(
+        &mut self,
+        text: &str,
+        hear: F,
+    ) -> Result<Said, NativeError> {
         extern "C" fn trampoline<F: FnMut(&[i16]) -> bool>(
             pcm: *const u8,
             n_bytes: usize,
@@ -679,6 +686,16 @@ impl Voice {
     }
 }
 
+impl Speaks for Voice {
+    fn sample_rate(&self) -> u32 {
+        Voice::sample_rate(self)
+    }
+
+    fn say(&mut self, text: &str, hear: &mut dyn FnMut(&[i16]) -> bool) -> Result<Said, String> {
+        Voice::say(self, text, |pcm| hear(pcm)).map_err(|error| error.to_string())
+    }
+}
+
 impl Drop for Voice {
     fn drop(&mut self) {
         // SAFETY: created by nemo_speech_tts_create and destroyed once.
@@ -697,13 +714,28 @@ mod tests {
     #[test]
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     fn structs_returned_by_value_are_the_size_the_library_writes() {
-        assert_eq!(size_of::<ffi::AsrRecognitionOptions>(), ABI.asr_recognition_options);
+        assert_eq!(
+            size_of::<ffi::AsrRecognitionOptions>(),
+            ABI.asr_recognition_options
+        );
         assert_eq!(size_of::<ffi::TtsRuntimeConfig>(), ABI.tts_runtime_config);
-        assert_eq!(size_of::<ffi::TtsSynthesisOptions>(), ABI.tts_synthesis_options);
-        assert_eq!(size_of::<ffi::AsrRecognizerConfig>(), ABI.asr_recognizer_config);
+        assert_eq!(
+            size_of::<ffi::TtsSynthesisOptions>(),
+            ABI.tts_synthesis_options
+        );
+        assert_eq!(
+            size_of::<ffi::AsrRecognizerConfig>(),
+            ABI.asr_recognizer_config
+        );
         assert_eq!(size_of::<ffi::TtsModelConfig>(), ABI.tts_model_config);
-        assert_eq!(size_of::<ffi::TtsSynthesizerConfig>(), ABI.tts_synthesizer_config);
-        assert_eq!(size_of::<ffi::AsrStreamingConfig>(), ABI.asr_streaming_config);
+        assert_eq!(
+            size_of::<ffi::TtsSynthesizerConfig>(),
+            ABI.tts_synthesizer_config
+        );
+        assert_eq!(
+            size_of::<ffi::AsrStreamingConfig>(),
+            ABI.asr_streaming_config
+        );
     }
 
     struct Abi {

@@ -20,12 +20,28 @@ use serde_json::{Map, Value};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Plan {
     /// Start an application, exactly as its policy entry says.
-    Open { app_id: String, argv: Vec<String> },
+    Open {
+        app_id: String,
+        argv: Vec<String>,
+    },
     /// Find something by what it looks like, and press it.
-    Click { app_id: String, target: String },
-    Type { app_id: String, text: String },
-    Keys { app_id: String, chord: KeyChord },
-    Scroll { app_id: String, down: bool, steps: i32 },
+    Click {
+        app_id: String,
+        target: String,
+    },
+    Type {
+        app_id: String,
+        text: String,
+    },
+    Keys {
+        app_id: String,
+        chord: KeyChord,
+    },
+    Scroll {
+        app_id: String,
+        down: bool,
+        steps: i32,
+    },
 }
 
 impl Plan {
@@ -133,9 +149,8 @@ pub fn decide(
         "press_keys" => {
             let args = arguments(&intent.raw_arguments, &["keys"])?;
             let spec = text(&args, "keys", 64)?;
-            let chord = chord_of(spec).ok_or_else(|| {
-                refuse("unknown_keys", format!("No sé qué teclas son «{spec}»."))
-            })?;
+            let chord = chord_of(spec)
+                .ok_or_else(|| refuse("unknown_keys", format!("No sé qué teclas son «{spec}».")))?;
             let app_id = front_app(front)?;
             let app = permitted(policy, &app_id, ActionKind::Key, "usar el teclado")?;
             if !chord.modifiers.is_empty() && !app.allow_modified_keys {
@@ -175,9 +190,7 @@ pub fn decide(
                     .as_i64()
                     .filter(|steps| (1..=i64::from(MAX_SCROLL_STEPS)).contains(steps))
                     .map(|steps| steps as i32)
-                    .ok_or_else(|| {
-                        refuse("bad_arguments", "No entendí cuánto desplazarme.")
-                    })?,
+                    .ok_or_else(|| refuse("bad_arguments", "No entendí cuánto desplazarme."))?,
             };
             let app_id = front_app(front)?;
             permitted(policy, &app_id, ActionKind::Scroll, "desplazar la vista")?;
@@ -221,9 +234,12 @@ fn text<'a>(args: &'a Map<String, Value>, key: &str, most: usize) -> Result<&'a 
 }
 
 fn front_app(front: Option<&str>) -> Result<String, Refusal> {
-    front
-        .map(str::to_string)
-        .ok_or_else(|| refuse("nothing_in_front", "No hay ninguna aplicación al frente para eso."))
+    front.map(str::to_string).ok_or_else(|| {
+        refuse(
+            "nothing_in_front",
+            "No hay ninguna aplicación al frente para eso.",
+        )
+    })
 }
 
 fn permitted<'a>(
@@ -247,7 +263,10 @@ fn permitted<'a>(
     if app.requires_approval.contains(&kind) {
         return Err(refuse(
             "needs_approval",
-            format!("Para {doing} en {} necesito que me lo apruebes tú.", app.display_name),
+            format!(
+                "Para {doing} en {} necesito que me lo apruebes tú.",
+                app.display_name
+            ),
         ));
     }
     Ok(app)
@@ -333,19 +352,23 @@ allow = ["stroke", "click"]
 
     #[test]
     fn an_application_without_a_launch_entry_is_not_opened_and_the_person_hears_why() {
-        let refused = decide(&intent("open_app", r#"{"app":"lienzo"}"#), &policy(), None)
-            .unwrap_err();
+        let refused =
+            decide(&intent("open_app", r#"{"app":"lienzo"}"#), &policy(), None).unwrap_err();
         assert_eq!(refused.code, "not_openable");
         assert!(refused.spoken.contains("Lienzo"), "{}", refused.spoken);
-        let unknown = decide(&intent("open_app", r#"{"app":"chrome"}"#), &policy(), None)
-            .unwrap_err();
+        let unknown =
+            decide(&intent("open_app", r#"{"app":"chrome"}"#), &policy(), None).unwrap_err();
         assert!(unknown.spoken.contains("chrome"), "{}", unknown.spoken);
     }
 
     #[test]
     fn typing_goes_to_the_application_in_front_within_its_bounds() {
-        let plan = decide(&intent("type_text", r#"{"text":"clima santiago"}"#), &policy(), FOX)
-            .unwrap();
+        let plan = decide(
+            &intent("type_text", r#"{"text":"clima santiago"}"#),
+            &policy(),
+            FOX,
+        )
+        .unwrap();
         assert_eq!(plan.app_id(), "org.mozilla.firefox");
         let long = format!(r#"{{"text":"{}"}}"#, "a".repeat(65));
         assert_eq!(
@@ -385,8 +408,12 @@ allow = ["stroke", "click"]
 
     #[test]
     fn keys_are_read_the_way_a_model_writes_them_and_approval_keys_wait_for_a_person() {
-        let plan = decide(&intent("press_keys", r#"{"keys":"Ctrl + S"}"#), &policy(), FOX)
-            .unwrap();
+        let plan = decide(
+            &intent("press_keys", r#"{"keys":"Ctrl + S"}"#),
+            &policy(),
+            FOX,
+        )
+        .unwrap();
         let Plan::Keys { chord, .. } = plan else {
             panic!("a key plan");
         };
@@ -398,9 +425,13 @@ allow = ["stroke", "click"]
             "needs_approval"
         );
         assert_eq!(
-            decide(&intent("press_keys", r#"{"keys":"hyper+q"}"#), &policy(), FOX)
-                .unwrap_err()
-                .code,
+            decide(
+                &intent("press_keys", r#"{"keys":"hyper+q"}"#),
+                &policy(),
+                FOX
+            )
+            .unwrap_err()
+            .code,
             "unknown_keys"
         );
     }
@@ -408,7 +439,12 @@ allow = ["stroke", "click"]
     #[test]
     fn scroll_is_bounded_and_speaks_either_language() {
         assert_eq!(
-            decide(&intent("scroll", r#"{"direction":"abajo"}"#), &policy(), FOX).unwrap(),
+            decide(
+                &intent("scroll", r#"{"direction":"abajo"}"#),
+                &policy(),
+                FOX
+            )
+            .unwrap(),
             Plan::Scroll {
                 app_id: "org.mozilla.firefox".into(),
                 down: true,

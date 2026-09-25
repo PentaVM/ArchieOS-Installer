@@ -29,6 +29,8 @@ members = [
     "crates/archie-installer",
     "crates/archie-speech",
     "crates/archie-voice",
+    "crates/archie-cut",
+    "crates/archie-iris-bridge",
     "crates/archie-geofabric",
     "crates/archie-model-runtime",
     "crates/archie-vault",
@@ -73,6 +75,8 @@ archie-core = { path = "crates/archie-core" }
 archie-installer = { path = "crates/archie-installer" }
 archie-speech = { path = "crates/archie-speech" }
 archie-voice = { path = "crates/archie-voice" }
+archie-cut = { path = "crates/archie-cut" }
+archie-iris-bridge = { path = "crates/archie-iris-bridge" }
 archie-geofabric = { path = "crates/archie-geofabric" }
 archie-displayd = { path = "crates/archie-displayd" }
 archie-worldd = { path = "crates/archie-worldd", default-features = false }

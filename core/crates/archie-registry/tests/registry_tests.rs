@@ -890,9 +890,8 @@ description = "Adversarial review"
 priority = 50
 
 [worker]
-kind = "python"
-module = "workers.critic"
-entrypoint = "main"
+kind = "unimplemented"
+reason = "not written yet"
 "#,
     )
     .unwrap();
@@ -1174,5 +1173,39 @@ fn the_suit_module_is_refused_without_an_explicit_actuation_grant() {
     assert!(
         !topology.is_loaded(&ModuleId::parse("devices.suit").unwrap()),
         "a module requesting device-actuate must not load under the default policy"
+    );
+}
+
+#[test]
+fn no_shipped_module_names_an_interpreter_or_passes_for_runnable() {
+    // ArchieOS ships no Python runtime. A module whose code does not exist says so, and
+    // is never reported as loaded on a node that has everything else it needs.
+    let registry = ModuleRegistry::load_from_dir(shipped_modules()).unwrap();
+    let everything = TopologyContext::new(
+        registry
+            .manifests()
+            .flat_map(|m| m.required_capabilities.iter().cloned())
+            .collect(),
+        "x86_64",
+        "server",
+    );
+    let topology = registry.compile_topology(&everything);
+    for manifest in registry.manifests() {
+        if matches!(manifest.worker, WorkerImpl::Unimplemented { .. }) {
+            assert!(
+                !topology.is_loaded(&manifest.id),
+                "{} has no implementation and must not load",
+                manifest.id
+            );
+        }
+    }
+    // Given everything else, at least the modules with no dependencies left unmet say
+    // plainly that they are unwritten.
+    assert!(
+        topology
+            .excluded()
+            .into_iter()
+            .any(|(_, why)| why.contains("not implemented yet")),
+        "an unwritten module is reported as unwritten"
     );
 }

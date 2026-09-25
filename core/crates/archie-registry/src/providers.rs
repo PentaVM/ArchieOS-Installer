@@ -18,7 +18,7 @@
 //!
 //! Manifests are TOML, matching the module system and hand-editable by an operator.
 //! `protocols/provider.schema.json` describes the same data model in a
-//! language-independent way for the Python workers and any external tooling; a schema
+//! language-independent way for native workers and any external tooling; a schema
 //! describes a shape, not a file syntax.
 
 use archie_types::{Capability, CapabilitySet};

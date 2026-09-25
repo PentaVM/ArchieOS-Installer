@@ -7,8 +7,7 @@
 
 use crate::action::{
     ActionKind, Key, StageAction, MAX_COORDINATE, MAX_SCROLL_STEPS, MAX_STROKE_PATHS,
-    MAX_STROKE_POINTS, MAX_STROKE_POINTS_IN_ALL,
-    MAX_TEXT_CHARS,
+    MAX_STROKE_POINTS, MAX_STROKE_POINTS_IN_ALL, MAX_TEXT_CHARS,
 };
 use crate::policy::StagePolicy;
 use archie_policy::{Lease, LeaseRejection, Operation, Principal, Resource};

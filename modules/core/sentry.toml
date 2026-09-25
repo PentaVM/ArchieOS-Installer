@@ -14,9 +14,8 @@ dependencies = ["core.archie"]
 permissions = ["read-telemetry", "device-communicate"]
 
 [worker]
-kind = "python"
-module = "workers.sentry"
-entrypoint = "main"
+kind = "unimplemented"
+reason = "Sentry's C++ libraries and the archie-sentry command exist; the daemon this module runs is not written yet."
 
 [health_check]
 kind = "heartbeat"

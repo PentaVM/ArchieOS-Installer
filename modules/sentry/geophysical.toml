@@ -14,9 +14,8 @@ dependencies = ["core.sentry"]
 permissions = ["read-knowledge", "write-knowledge", "network-internet"]
 
 [worker]
-kind = "python"
-module = "workers.sentry.geophysical"
-entrypoint = "main"
+kind = "unimplemented"
+reason = "No native implementation yet. The Python worker this named never existed, and ArchieOS ships no Python runtime."
 
 [health_check]
 kind = "heartbeat"

@@ -154,7 +154,12 @@ mod tests {
 
     #[test]
     fn fragments_become_whole_sentences() {
-        let out = run(&["Un vol", "cán es una mon", "taña. Por den", "tro tiene magma."]);
+        let out = run(&[
+            "Un vol",
+            "cán es una mon",
+            "taña. Por den",
+            "tro tiene magma.",
+        ]);
         assert_eq!(
             out,
             vec![
@@ -183,7 +188,10 @@ mod tests {
                     encuentra en el camino y se enfría despacio formando roca nueva";
         let mut segmenter = Segmenter::new(60);
         let out = segmenter.push(long);
-        assert!(!out.is_empty(), "a long sentence does not wait for its full stop");
+        assert!(
+            !out.is_empty(),
+            "a long sentence does not wait for its full stop"
+        );
         for piece in &out {
             assert!(!piece.ends_sentence, "a clause is not a sentence end");
             assert!(

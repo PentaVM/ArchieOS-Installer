@@ -18,7 +18,7 @@
 
 use archie_types::{
     Capability, CapabilitySet, DeviceAdapterManifest, DeviceAdapterOrigin, ModuleId,
-    ModuleManifest, ModulePermission, ModuleState,
+    ModuleManifest, ModulePermission, ModuleState, WorkerImpl,
 };
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::Path;
@@ -358,6 +358,14 @@ impl ModuleRegistry {
         if !uninstalled.is_empty() {
             return ModuleState::MissingDependency {
                 missing: uninstalled,
+            };
+        }
+
+        // Last, so that what this node lacks is said first: a module that could not run
+        // here even once written should say why here, not only that it is unwritten.
+        if let WorkerImpl::Unimplemented { reason } = &manifest.worker {
+            return ModuleState::NotImplemented {
+                reason: reason.clone(),
             };
         }
 

@@ -521,7 +521,9 @@ impl From<TaskStatus> for KanbanColumn {
             TaskStatus::Active | TaskStatus::Running => KanbanColumn::InProgress,
             TaskStatus::WaitingApproval => KanbanColumn::Review,
             TaskStatus::Succeeded => KanbanColumn::Done,
-            TaskStatus::Paused | TaskStatus::Failed | TaskStatus::Cancelled => KanbanColumn::Archived,
+            TaskStatus::Paused | TaskStatus::Failed | TaskStatus::Cancelled => {
+                KanbanColumn::Archived
+            }
         }
     }
 }
