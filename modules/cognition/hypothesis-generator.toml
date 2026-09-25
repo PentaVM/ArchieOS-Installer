@@ -12,9 +12,8 @@ dependencies = ["core.memory", "cognition.critic"]
 permissions = ["read-knowledge"]
 
 [worker]
-kind = "python"
-module = "workers.hypothesis"
-entrypoint = "main"
+kind = "unimplemented"
+reason = "No native implementation yet. The Python worker this named never existed, and ArchieOS ships no Python runtime."
 
 [health_check]
 kind = "none"

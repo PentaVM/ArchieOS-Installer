@@ -38,6 +38,8 @@ pub enum ModuleState {
     Disabled,
     /// Manifest failed validation.
     Invalid { reason: String },
+    /// Nothing implements it yet.
+    NotImplemented { reason: String },
 }
 
 impl ModuleState {
@@ -56,6 +58,7 @@ impl ModuleState {
             Self::UnsupportedArchitecture { .. } => "wrong-arch",
             Self::Disabled => "disabled",
             Self::Invalid { .. } => "invalid",
+            Self::NotImplemented { .. } => "not-implemented",
         }
     }
 
@@ -86,6 +89,7 @@ impl ModuleState {
             }
             Self::Disabled => "disabled by configuration".into(),
             Self::Invalid { reason } => format!("invalid manifest: {reason}"),
+            Self::NotImplemented { reason } => format!("not implemented yet: {reason}"),
         }
     }
 }
@@ -131,8 +135,12 @@ impl ModulePermission {
 pub enum WorkerImpl {
     /// Compiled into `archied`. Only control-plane modules may use this.
     Builtin { symbol: String },
-    /// A Python worker from `python/workers/`.
-    Python { module: String, entrypoint: String },
+    /// Declared, not written: the module's contract exists and its implementation does
+    /// not. Reported as not implemented rather than dressed as something that could run.
+    ///
+    /// There is no interpreter variant. ArchieOS ships no Python runtime, so a module
+    /// that named one could never run where it is installed.
+    Unimplemented { reason: String },
     /// An external process.
     Process { command: String, args: Vec<String> },
     /// Declarative only; the module contributes configuration, not execution.
@@ -678,11 +686,28 @@ mod tests {
     #[test]
     fn only_builtin_workers_are_trusted() {
         assert!(WorkerImpl::Builtin { symbol: "x".into() }.is_trusted());
-        assert!(!WorkerImpl::Python {
-            module: "m".into(),
-            entrypoint: "run".into()
+        assert!(!WorkerImpl::Process {
+            command: "archie-sentry".into(),
+            args: Vec::new()
         }
         .is_trusted());
+        assert!(!WorkerImpl::Unimplemented {
+            reason: "later".into()
+        }
+        .is_trusted());
+    }
+
+    #[test]
+    fn a_manifest_cannot_name_an_interpreter() {
+        let python = r#"{"kind": "python", "module": "workers.critic", "entrypoint": "main"}"#;
+        assert!(serde_json::from_str::<WorkerImpl>(python).is_err());
+        let honest = r#"{"kind": "unimplemented", "reason": "not written yet"}"#;
+        assert_eq!(
+            serde_json::from_str::<WorkerImpl>(honest).unwrap(),
+            WorkerImpl::Unimplemented {
+                reason: "not written yet".into()
+            }
+        );
     }
 
     #[test]
@@ -699,9 +724,8 @@ mod tests {
     fn manifest_round_trips_through_json() {
         let mut m = manifest("cognition.critic");
         m.permissions.push(ModulePermission::ReadKnowledge);
-        m.worker = WorkerImpl::Python {
-            module: "workers.critic".into(),
-            entrypoint: "main".into(),
+        m.worker = WorkerImpl::Unimplemented {
+            reason: "the critic is not written yet".into(),
         };
         m.health_check = HealthCheck::Heartbeat {
             interval_seconds: 30,
@@ -720,9 +744,8 @@ description = "Literature discovery"
 required_capabilities = ["network.internet"]
 
 [worker]
-kind = "python"
-module = "workers.research"
-entrypoint = "main"
+kind = "unimplemented"
+reason = "not written yet"
 "#;
         let m: ModuleManifest = toml::from_str(toml_src).unwrap();
         assert_eq!(m.priority, 100);
