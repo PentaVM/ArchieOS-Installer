@@ -115,16 +115,20 @@ pub fn document(timeline: &Timeline, files: &Resolved) -> String {
     }
     let _ = writeln!(xml, "  </playlist>");
 
-    // Music under everything, for as long as the video runs.
+    // Music under everything, for as long as the video runs. The producer is declared
+    // outside the playlist: MLT takes a producer written inside one as an entry of its
+    // own, and with the entry below the music played twice and the video ran double.
+    if let (Some(music), Some(path)) = (&timeline.music, &files.music) {
+        let _ = writeln!(
+            xml,
+            r#"  <producer id="song"><property name="resource">{}</property><filter><property name="mlt_service">volume</property><property name="gain">{:.3}</property></filter></producer>"#,
+            escape(&path.to_string_lossy()),
+            music.volume,
+        );
+    }
     let _ = writeln!(xml, r#"  <playlist id="music">"#);
     match (&timeline.music, &files.music) {
-        (Some(music), Some(path)) => {
-            let _ = writeln!(
-                xml,
-                r#"    <producer id="song" in="0" out="{last}"><property name="resource">{}</property><filter><property name="mlt_service">volume</property><property name="gain">{:.3}</property></filter></producer>"#,
-                escape(&path.to_string_lossy()),
-                music.volume,
-            );
+        (Some(_), Some(_)) => {
             let _ = writeln!(xml, r#"    <entry producer="song" in="0" out="{last}"/>"#);
         }
         _ => {
@@ -244,6 +248,14 @@ mod tests {
         let xml = document(&timeline, &files);
         assert!(xml.contains(r#"<property name="gain">0.200</property>"#));
         assert!(xml.contains("<property name=\"mlt_service\">mix</property>"));
+        // No producer inside a playlist: MLT would play it as an extra entry.
+        for playlist in xml.split("<playlist").skip(1) {
+            let body = &playlist[..playlist.find("</playlist>").unwrap()];
+            assert!(
+                !body.contains("<producer"),
+                "a producer inside a playlist: {body}"
+            );
+        }
         assert!(xml.contains("0=0;10=1;89=1;99=0"), "{xml}");
 
         let mut silent = timeline.clone();
