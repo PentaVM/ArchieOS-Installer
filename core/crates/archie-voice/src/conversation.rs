@@ -24,11 +24,12 @@
 
 use crate::audio::{loudness, AudioError, Microphone, Speaker, VoiceActivity};
 use crate::listen::{after_utterance, over_archie, Utterance};
-use crate::native::{Ears, Voice};
+use crate::native::Ears;
 use crate::nemotron::{NemotronCognitive, TurnSource};
+use crate::voice::Speaks;
+use crate::wav::{read_wav, write_wav};
 use archie_speech::{
-    FloorAction, SessionEvent, SpeechBudget, SpeechSession,
-    SpeechToolIntentCandidate,
+    FloorAction, SessionEvent, SpeechBudget, SpeechSession, SpeechToolIntentCandidate,
 };
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -68,9 +69,10 @@ impl Hearing {
     /// The next 20 ms of sound and its rate, or `None` when a recording has run out.
     fn frame(&mut self) -> Result<Option<(Vec<f32>, u32)>, AudioError> {
         match self {
-            Self::Microphone(microphone) => {
-                Ok(Some((microphone.frame()?.to_vec(), crate::audio::CAPTURE_RATE)))
-            }
+            Self::Microphone(microphone) => Ok(Some((
+                microphone.frame()?.to_vec(),
+                crate::audio::CAPTURE_RATE,
+            ))),
             Self::Recording {
                 samples,
                 rate,
@@ -102,7 +104,11 @@ impl Hearing {
 /// Where the voice goes.
 pub enum Saying {
     Speaker(Speaker),
-    Recording { path: PathBuf, samples: Vec<i16>, rate: u32 },
+    Recording {
+        path: PathBuf,
+        samples: Vec<i16>,
+        rate: u32,
+    },
 }
 
 impl Saying {
@@ -121,7 +127,11 @@ impl Saying {
             Self::Speaker(speaker) => {
                 let _ = speaker.drain();
             }
-            Self::Recording { path, samples, rate } => {
+            Self::Recording {
+                path,
+                samples,
+                rate,
+            } => {
                 let _ = write_wav(path, samples, *rate);
             }
         }
@@ -169,24 +179,59 @@ impl Default for Setup {
 /// What the loop reports as it goes: printed by the command line, kept by a test.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Moment {
-    Heard { text: String, at_ms: u128 },
-    Floor { action: String, reason: String, evidence: Vec<String> },
-    Said { text: String, first_audio_ms: f64, audio_s: f64, stopped: bool },
-    Proposed { tool: String, arguments: String },
-    Did { report: String },
+    Heard {
+        text: String,
+        at_ms: u128,
+    },
+    Floor {
+        action: String,
+        reason: String,
+        evidence: Vec<String>,
+    },
+    Said {
+        text: String,
+        first_audio_ms: f64,
+        audio_s: f64,
+        stopped: bool,
+    },
+    Proposed {
+        tool: String,
+        arguments: String,
+    },
+    Did {
+        report: String,
+    },
     Interrupted,
     Alert(String),
+    /// About ten times a second: how loud the room is, and whether that is a voice.
+    Level {
+        level: f32,
+        voiced: bool,
+    },
+    /// The voice began saying this.
+    Speaking {
+        text: String,
+    },
+    /// Nothing is being answered or said: back to listening.
+    Ready,
 }
 
 enum ToVoice {
     /// Said only while `generation` is still current.
-    Say { generation: u64, sequence: u32, text: String },
+    Say {
+        generation: u64,
+        sequence: u32,
+        text: String,
+    },
     /// Everything queued so far is dropped.
     Hush,
     Finish,
 }
 
 enum FromVoice {
+    Began {
+        text: String,
+    },
     Spoke {
         sequence: u32,
         text: String,
@@ -206,7 +251,7 @@ enum FromVoice {
 pub fn converse<S: TurnSource>(
     setup: &Setup,
     ears: &Ears,
-    voice: Voice,
+    voice: Box<dyn Speaks>,
     mut hearing: Hearing,
     saying: Saying,
     session: &mut SpeechSession<NemotronCognitive<S>>,
@@ -241,6 +286,8 @@ pub fn converse<S: TurnSource>(
     let mut turn_number = 0u32;
     let mut turn: Option<Answering> = None;
     let mut forced = false;
+    let mut frames = 0u64;
+    let mut was_busy = false;
     let trace = std::env::var_os("ARCHIE_VOICE_TRACE").is_some();
     // Audio goes to the ears a model step at a time: asking after every 20 ms frame made
     // the same recogniser three times slower than the runtime's own benchmark.
@@ -255,11 +302,26 @@ pub fn converse<S: TurnSource>(
                 }
                 std::thread::sleep(Duration::from_millis(20));
                 pump_voice(&from_voice, session, &mut speaking, &mut last_spoke, report)?;
-                advance(session, &mut turn, setup, act, context, &to_voice, &generation, &mut speaking, report)?;
+                advance(
+                    session,
+                    &mut turn,
+                    setup,
+                    act,
+                    context,
+                    &to_voice,
+                    &generation,
+                    &mut speaking,
+                    report,
+                )?;
                 continue;
             };
             audio_ms += (frame.len() as u64 * 1000) / rate.max(1) as u64;
-            let voiced = activity.hear(loudness(&frame));
+            let level = loudness(&frame);
+            let voiced = activity.hear(level);
+            frames += 1;
+            if frames % 5 == 0 {
+                report(Moment::Level { level, voiced });
+            }
 
             let archie_talking = speaking > 0;
             if archie_talking && setup.headphones && voiced {
@@ -327,7 +389,9 @@ pub fn converse<S: TurnSource>(
                     session.cognitive_mut().set_context(context());
                     turn_number += 1;
                     let id = format!("voz-{turn_number}");
-                    let decision = session.heard(&id, &said, &state).map_err(|e| e.to_string())?;
+                    let decision = session
+                        .heard(&id, &said, &state)
+                        .map_err(|e| e.to_string())?;
                     report(Moment::Floor {
                         action: format!("{:?}", decision.action),
                         reason: decision.reason.clone(),
@@ -355,7 +419,22 @@ pub fn converse<S: TurnSource>(
             }
 
             pump_voice(&from_voice, session, &mut speaking, &mut last_spoke, report)?;
-            advance(session, &mut turn, setup, act, context, &to_voice, &generation, &mut speaking, report)?;
+            advance(
+                session,
+                &mut turn,
+                setup,
+                act,
+                context,
+                &to_voice,
+                &generation,
+                &mut speaking,
+                report,
+            )?;
+            let busy = turn.is_some() || speaking > 0;
+            if was_busy && !busy {
+                report(Moment::Ready);
+            }
+            was_busy = busy;
 
             if !hearing.is_live() {
                 // A recording is read faster than real time; the voice thread still gets
@@ -416,7 +495,9 @@ fn advance<S: TurnSource>(
                 report(Moment::Did {
                     report: outcome.clone(),
                 });
-                answering.results.push((intent.correlation_id.clone(), outcome));
+                answering
+                    .results
+                    .push((intent.correlation_id.clone(), outcome));
             }
             SessionEvent::Withheld { .. } => {}
             SessionEvent::Alert(message) => report(Moment::Alert(message)),
@@ -476,6 +557,7 @@ fn pump_voice<S: TurnSource>(
                     stopped,
                 });
             }
+            Ok(FromVoice::Began { text }) => report(Moment::Speaking { text }),
             Ok(FromVoice::Idle) => {
                 *speaking = 0;
             }
@@ -491,7 +573,7 @@ fn pump_voice<S: TurnSource>(
 
 /// The voice's thread: says each piece as it arrives, in order, and says when it is done.
 fn speak(
-    mut voice: Voice,
+    mut voice: Box<dyn Speaks>,
     mut saying: Saying,
     inbox: Receiver<ToVoice>,
     outbox: Sender<FromVoice>,
@@ -514,8 +596,9 @@ fn speak(
                     });
                     continue;
                 }
+                let _ = outbox.send(FromVoice::Began { text: text.clone() });
                 let mut failed = None;
-                let result = voice.say(&text, |pcm| {
+                let result = voice.say(&text, &mut |pcm| {
                     if current.load(Ordering::SeqCst) != generation {
                         return false;
                     }
@@ -572,86 +655,16 @@ pub fn tidy(text: &str) -> String {
     out
 }
 
-/// Reads a mono or stereo 16-bit PCM WAV as mono float samples and its rate.
-pub fn read_wav(path: &std::path::Path) -> Result<(Vec<f32>, u32), String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
-        return Err(format!("{}: not a WAV file", path.display()));
-    }
-    let (mut channels, mut rate, mut bits) = (0u16, 0u32, 0u16);
-    let mut at = 12;
-    while at + 8 <= bytes.len() {
-        let id = &bytes[at..at + 4];
-        let size = u32::from_le_bytes([bytes[at + 4], bytes[at + 5], bytes[at + 6], bytes[at + 7]]) as usize;
-        let body = &bytes[at + 8..(at + 8 + size).min(bytes.len())];
-        if id == b"fmt " && body.len() >= 16 {
-            channels = u16::from_le_bytes([body[2], body[3]]);
-            rate = u32::from_le_bytes([body[4], body[5], body[6], body[7]]);
-            bits = u16::from_le_bytes([body[14], body[15]]);
-        } else if id == b"data" {
-            if bits != 16 || channels == 0 {
-                return Err(format!("{}: only 16-bit PCM is read", path.display()));
-            }
-            let samples = body
-                .chunks_exact(2 * channels as usize)
-                .map(|frame| {
-                    let sum: i32 = frame
-                        .chunks_exact(2)
-                        .map(|s| i16::from_le_bytes([s[0], s[1]]) as i32)
-                        .sum();
-                    sum as f32 / channels as f32 / 32768.0
-                })
-                .collect();
-            return Ok((samples, rate));
-        }
-        at += 8 + size + (size & 1);
-    }
-    Err(format!("{}: no audio in it", path.display()))
-}
-
-/// Writes mono PCM16 as a WAV file.
-pub fn write_wav(path: &std::path::Path, samples: &[i16], rate: u32) -> std::io::Result<()> {
-    let data = samples.len() * 2;
-    let mut out = Vec::with_capacity(44 + data);
-    out.extend_from_slice(b"RIFF");
-    out.extend_from_slice(&((36 + data) as u32).to_le_bytes());
-    out.extend_from_slice(b"WAVEfmt ");
-    out.extend_from_slice(&16u32.to_le_bytes());
-    out.extend_from_slice(&1u16.to_le_bytes());
-    out.extend_from_slice(&1u16.to_le_bytes());
-    out.extend_from_slice(&rate.to_le_bytes());
-    out.extend_from_slice(&(rate * 2).to_le_bytes());
-    out.extend_from_slice(&2u16.to_le_bytes());
-    out.extend_from_slice(&16u16.to_le_bytes());
-    out.extend_from_slice(b"data");
-    out.extend_from_slice(&(data as u32).to_le_bytes());
-    for sample in samples {
-        out.extend_from_slice(&sample.to_le_bytes());
-    }
-    std::fs::write(path, out)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn a_run_of_punctuation_through_silence_becomes_one_mark() {
-        assert_eq!(tidy("Oye Archi, ¿qué hora es?.............."), "Oye Archi, ¿qué hora es?");
+        assert_eq!(
+            tidy("Oye Archi, ¿qué hora es?.............."),
+            "Oye Archi, ¿qué hora es?"
+        );
         assert_eq!(tidy("  hola.  "), "hola.");
-    }
-
-    #[test]
-    fn a_wav_written_is_read_back_the_same() {
-        let dir = std::env::temp_dir().join(format!("archie-voice-wav-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("tone.wav");
-        let samples: Vec<i16> = (0..2205).map(|i| ((i % 100) as i16 - 50) * 300).collect();
-        write_wav(&path, &samples, 22_050).unwrap();
-        let (read, rate) = read_wav(&path).unwrap();
-        assert_eq!(rate, 22_050);
-        assert_eq!(read.len(), samples.len());
-        assert!((read[7] - samples[7] as f32 / 32768.0).abs() < 1e-6);
-        let _ = std::fs::remove_dir_all(dir);
     }
 }

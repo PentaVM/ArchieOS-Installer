@@ -31,8 +31,11 @@ pub mod listen;
 #[cfg(feature = "nemo")]
 pub mod native;
 pub mod nemotron;
+pub mod piper;
 pub mod segment;
 pub mod tools;
+pub mod voice;
+pub mod wav;
 
 pub use act::{decide, Plan, Refusal};
 pub use hands::{Grounding, Hands, Launch, Performed};

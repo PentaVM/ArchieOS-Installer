@@ -93,11 +93,17 @@ mod tests {
         for tool in &tools {
             assert_eq!(tool.parameters["type"], "object", "{}", tool.name);
             assert!(
-                tool.parameters["required"].as_array().is_some_and(|r| !r.is_empty()),
+                tool.parameters["required"]
+                    .as_array()
+                    .is_some_and(|r| !r.is_empty()),
                 "{} says what it needs",
                 tool.name
             );
-            assert!(tool.description.len() > 20, "{} says what it does", tool.name);
+            assert!(
+                tool.description.len() > 20,
+                "{} says what it does",
+                tool.name
+            );
         }
     }
 }

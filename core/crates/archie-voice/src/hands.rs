@@ -119,12 +119,19 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Hands<R, W> {
                 let action = StageAction::Text {
                     text: StageText::new(text.clone()),
                 };
-                self.act(app_id, action, "Tecleado en la ventana al frente.").await
+                self.act(app_id, action, "Tecleado en la ventana al frente.")
+                    .await
             }
             Plan::Keys { app_id, chord } => {
                 let done = format!("Pulsé {}.", chord_name(chord));
-                self.act(app_id, StageAction::Key { chord: chord.clone() }, &done)
-                    .await
+                self.act(
+                    app_id,
+                    StageAction::Key {
+                        chord: chord.clone(),
+                    },
+                    &done,
+                )
+                .await
             }
             Plan::Scroll {
                 app_id,
@@ -154,7 +161,11 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Hands<R, W> {
         if self.window_size(app_id).is_some() {
             // Already open: bring it forward rather than start a second one.
             return self
-                .act(app_id, StageAction::Focus, "Ya estaba abierta; ahora está al frente.")
+                .act(
+                    app_id,
+                    StageAction::Focus,
+                    "Ya estaba abierta; ahora está al frente.",
+                )
                 .await;
         }
         let Some((program, args)) = argv.split_first() else {
@@ -163,9 +174,16 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Hands<R, W> {
         let mut command = Command::new(program);
         command.args(args).stdin(Stdio::null());
         let log = self.launch.log.as_ref().and_then(|path| {
-            std::fs::OpenOptions::new().create(true).append(true).open(path).ok()
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .ok()
         });
-        match log.as_ref().and_then(|file| Some((file.try_clone().ok()?, file.try_clone().ok()?))) {
+        match log
+            .as_ref()
+            .and_then(|file| Some((file.try_clone().ok()?, file.try_clone().ok()?)))
+        {
             Some((out, err)) => command.stdout(out).stderr(err),
             None => command.stdout(Stdio::null()).stderr(Stdio::null()),
         };
@@ -287,7 +305,9 @@ fn reported(outcome: &ActOutcome, app_id: &str, done: &str) -> Performed {
         ActOutcome::Refused { code, .. } => {
             Performed::not_done(format!("la política no lo permite ({code})."))
         }
-        ActOutcome::NoSurface => Performed::not_done(format!("{app_id} no tiene una ventana abierta.")),
+        ActOutcome::NoSurface => {
+            Performed::not_done(format!("{app_id} no tiene una ventana abierta."))
+        }
     }
 }
 
@@ -316,7 +336,14 @@ fn kind_of(target: &str) -> NodeKind {
     let has = |words: &[&str]| words.iter().any(|word| lowered.contains(word));
     if has(&["enlace", "link", "vínculo"]) {
         NodeKind::Link
-    } else if has(&["campo", "cuadro", "barra", "casilla de texto", "buscador", "input"]) {
+    } else if has(&[
+        "campo",
+        "cuadro",
+        "barra",
+        "casilla de texto",
+        "buscador",
+        "input",
+    ]) {
         NodeKind::Input
     } else if has(&["pestaña", "tab"]) {
         NodeKind::Tab
@@ -352,7 +379,7 @@ mod tests {
         let executed = ActOutcome::Receipt {
             sequence: 4,
             outcome: "executed".into(),
-                finished: 0,
+            finished: 0,
         };
         assert!(reported(&executed, "firefox", "Escrito.").done);
         for outcome in [

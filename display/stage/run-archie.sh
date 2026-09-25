@@ -1,0 +1,95 @@
+#!/bin/sh
+# Archie, whole: the stage on a screen, and a voice that listens, answers and acts on it.
+#
+#   NEBIUS_TOKEN_FACTORY_KEY=... display/stage/run-archie.sh public
+#
+# The argument is how private what you say is. It has no default, because what a person
+# says to their computer is theirs: `public` lets it reach Nemotron on Nebius, whose
+# retention nobody has verified; anything else is refused before it leaves the machine.
+#
+# Say "Archie" to be heard. Applications open only as the stage policy spells them out.
+# Move the mouse over the stage and Archie stops acting until you let go.
+#
+# Environment (all optional):
+#   STAGE, STAGE_CLI, ARCHIE_VOICE   binaries                  default: from PATH
+#   POLICY        stage policy                     default: core/crates/archie-stage/policy/apps.toml
+#   ASR_MODEL     Nemotron 3.5 ASR GGUF            default: the one `nemo-speech pull` cached
+#   PIPER, PIPER_MODEL   Piper and its voice       default: piper, /root/piper-voices/es_MX-ald-medium.onnx
+#   HOST_WAYLAND  session the stage opens in       default: $WAYLAND_DISPLAY
+#                 (WSLg: /mnt/wslg/runtime-dir/wayland-0)
+#   SCREEN        which screen the stage takes     default: the last one
+#   RUN_DIR       key, sockets, logs               default: /tmp/archie-run
+#   HEADPHONES=1  keep listening while Archie speaks, so it can be interrupted
+set -eu
+
+GRADE=${1:-}
+case "$GRADE" in
+    public|internal) ;;
+    *) echo "run-archie: say how private this is: run-archie.sh public (or internal)" >&2; exit 64 ;;
+esac
+[ -n "${NEBIUS_TOKEN_FACTORY_KEY:-}" ] || { echo "run-archie: set NEBIUS_TOKEN_FACTORY_KEY" >&2; exit 64; }
+
+# Accessibility needs a session bus, and the stage's clients inherit it.
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && command -v dbus-run-session >/dev/null; then
+    exec dbus-run-session -- "$0" "$@"
+fi
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+REPO=$(cd "$HERE/../.." && pwd)
+STAGE=${STAGE:-archie-stage}
+STAGE_CLI=${STAGE_CLI:-archie-stage-cli}
+ARCHIE_VOICE=${ARCHIE_VOICE:-archie-voice}
+POLICY=${POLICY:-$REPO/core/crates/archie-stage/policy/apps.toml}
+ASR_MODEL=${ASR_MODEL:-$(ls "$HOME"/.cache/nemo-speech/models/nvidia/nemotron-3.5-asr-streaming-0.6b/*/*.gguf 2>/dev/null | head -n 1)}
+PIPER=${PIPER:-piper}
+PIPER_MODEL=${PIPER_MODEL:-/root/piper-voices/es_MX-ald-medium.onnx}
+HOST_WAYLAND=${HOST_WAYLAND:-${WAYLAND_DISPLAY:-}}
+RUN_DIR=${RUN_DIR:-/tmp/archie-run}
+SOCKET_NAME=archie-stage
+
+[ -n "$HOST_WAYLAND" ] || { echo "run-archie: set HOST_WAYLAND to the Wayland session to open the stage in" >&2; exit 1; }
+
+# The stage gets its own runtime directory, and PulseAudio finds its server through that
+# variable: name the person's sound server before it changes, or the voice goes deaf.
+if [ -z "${PULSE_SERVER:-}" ]; then
+    if [ -S /mnt/wslg/PulseServer ]; then
+        export PULSE_SERVER=unix:/mnt/wslg/PulseServer
+    elif [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -S "$XDG_RUNTIME_DIR/pulse/native" ]; then
+        export PULSE_SERVER="unix:$XDG_RUNTIME_DIR/pulse/native"
+    fi
+fi
+[ -n "$ASR_MODEL" ] && [ -f "$ASR_MODEL" ] || { echo "run-archie: no ASR model; run nemo-speech pull nemotron-3.5 or set ASR_MODEL" >&2; exit 1; }
+
+mkdir -p "$RUN_DIR/xdg"
+chmod 700 "$RUN_DIR" "$RUN_DIR/xdg"
+rm -f "$RUN_DIR/control.sock" "$RUN_DIR/xdg/$SOCKET_NAME"
+[ -f "$RUN_DIR/key" ] || "$STAGE_CLI" keygen "$RUN_DIR/key" >/dev/null
+
+if [ -x /usr/lib/at-spi-bus-launcher ]; then
+    /usr/lib/at-spi-bus-launcher --launch-immediately >/dev/null 2>&1 &
+fi
+
+set -- --socket-name "$SOCKET_NAME" --control "$RUN_DIR/control.sock" --key-file "$RUN_DIR/key"
+[ -n "${SCREEN:-}" ] && set -- "$@" --screen "$SCREEN"
+XDG_RUNTIME_DIR="$RUN_DIR/xdg" WAYLAND_DISPLAY="$HOST_WAYLAND" QT_QPA_PLATFORM=wayland \
+    "$STAGE" "$@" > "$RUN_DIR/stage.log" 2>&1 &
+STAGE_PID=$!
+trap 'kill "$STAGE_PID" 2>/dev/null || true' EXIT INT TERM
+
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    [ -S "$RUN_DIR/control.sock" ] && [ -S "$RUN_DIR/xdg/$SOCKET_NAME" ] && break
+    sleep 0.5
+done
+[ -S "$RUN_DIR/xdg/$SOCKET_NAME" ] || { echo "run-archie: the stage did not start; see $RUN_DIR/stage.log" >&2; exit 1; }
+
+set -- converse --grade "$GRADE" --asr-model "$ASR_MODEL" \
+    --voice-engine piper --piper "$PIPER" --piper-model "$PIPER_MODEL" \
+    --socket "$RUN_DIR/control.sock" --key-file "$RUN_DIR/key" --policy "$POLICY" \
+    --stage-display "$SOCKET_NAME" --app-log "$RUN_DIR/apps.log"
+[ "${HEADPHONES:-0}" = 1 ] && set -- "$@" --headphones
+
+# Two thread pools share this process's cores; spinning ones starve each other.
+# Applications opened by voice inherit the stage's runtime directory and software rendering.
+XDG_RUNTIME_DIR="$RUN_DIR/xdg" OMP_WAIT_POLICY=PASSIVE \
+    QT_QUICK_BACKEND=software LIBGL_ALWAYS_SOFTWARE=1 QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 \
+    "$ARCHIE_VOICE" "$@"
