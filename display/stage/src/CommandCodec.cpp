@@ -326,6 +326,17 @@ DecodeResult decode_command(const QByteArray& raw_line, const QByteArray& key, s
         decoded.keys.append(*key_code);
         c.action = StageAction::Key;
         c.key_count = static_cast<int>(decoded.keys.size());
+    } else if (kind == QLatin1String("key_down") || kind == QLatin1String("key_up")) {
+        // One key, pressed and kept down, or let go. No modifiers: a held chord is several
+        // holds, and each is let go on its own.
+        if (!exact_keys(action, {"kind", "key"}) || !action.value(QLatin1String("key")).isString()) {
+            return fail("command_malformed");
+        }
+        const auto key_code = named_key(action.value(QLatin1String("key")).toString());
+        if (!key_code) return fail("command_malformed");
+        decoded.keys.append(*key_code);
+        c.action = kind == QLatin1String("key_down") ? StageAction::KeyDown : StageAction::KeyUp;
+        c.key_count = 1;
     } else if (kind == QLatin1String("stroke")) {
         // A line: where the button goes down, every point it is dragged through, and where
         // it comes up. The stage re-checks every one of them against the window.

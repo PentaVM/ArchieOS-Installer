@@ -171,6 +171,10 @@ private:
     void finishCapture(std::uint64_t sequence);
     QString snapshotDirectory() const;
     void noteAuthority(archie::visual::AuthorityMode before);
+    /// Lets go of keys a KeyDown left pressed: all of them, or those one connection pressed.
+    void releaseHeldKeys(const char *why, const QLocalSocket *owner = nullptr);
+    /// Lets go of held keys whose time is up. Returns when the next one is due.
+    std::optional<std::int64_t> expireHeldKeys(std::int64_t now);
     void tick();
     void publish(const archie::visual::StageFrame &frame);
     void schedule(std::optional<std::int64_t> at);
@@ -213,6 +217,15 @@ private:
     std::optional<KeyTyper::Route> m_textRoute;
     /// The connection the active command came from. A capture's pixels go back to it alone.
     QPointer<QLocalSocket> m_commandSocket;
+    /// Keys a KeyDown left pressed: on which surface, for which connection, and until when.
+    /// Nothing else keeps a key down after its command ends, so this is the whole list the
+    /// watchdog has to let go of.
+    struct HeldKey {
+        archie::visual::SurfaceId surface = 0;
+        QPointer<QLocalSocket> owner;
+        std::int64_t until_ms = 0;
+    };
+    QHash<int, HeldKey> m_heldKeys;
     struct Capture {
         std::uint64_t sequence = 0;
         archie::visual::SurfaceId surface = 0;

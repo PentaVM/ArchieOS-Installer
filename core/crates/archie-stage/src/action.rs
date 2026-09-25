@@ -52,6 +52,9 @@ pub enum ActionKind {
     Focus,
     Snapshot,
     Stroke,
+    /// Keeping a key down, for as long as a game needs "walk forward". A separate grant:
+    /// an application that takes keys does not thereby take held keys.
+    Hold,
 }
 
 impl ActionKind {
@@ -67,6 +70,7 @@ impl ActionKind {
             Self::Stroke => "stroke",
             Self::Focus => "focus",
             Self::Snapshot => "snapshot",
+            Self::Hold => "hold",
         }
     }
 
@@ -402,6 +406,15 @@ pub enum StageAction {
     Snapshot {
         region: Option<Region>,
     },
+    /// Press one key and keep it down until `KeyUp`. The compositor lets it go by itself
+    /// after five seconds without it being pressed again, when a person takes the stage,
+    /// when the focus leaves the surface, or when the connection that pressed it closes.
+    KeyDown {
+        key: Key,
+    },
+    KeyUp {
+        key: Key,
+    },
 }
 
 /// One point of a stroke, in the surface's own pixels.
@@ -513,6 +526,7 @@ impl StageAction {
             Self::Stroke { .. } | Self::Strokes { .. } => ActionKind::Stroke,
             Self::Focus => ActionKind::Focus,
             Self::Snapshot { .. } => ActionKind::Snapshot,
+            Self::KeyDown { .. } | Self::KeyUp { .. } => ActionKind::Hold,
         }
     }
 
@@ -534,9 +548,12 @@ impl StageAction {
             Self::Snapshot {
                 region: Some(region),
             } => vec![(region.x, region.y), region.far()],
-            Self::Text { .. } | Self::Key { .. } | Self::Focus | Self::Snapshot { .. } => {
-                Vec::new()
-            }
+            Self::Text { .. }
+            | Self::Key { .. }
+            | Self::KeyDown { .. }
+            | Self::KeyUp { .. }
+            | Self::Focus
+            | Self::Snapshot { .. } => Vec::new(),
         }
     }
 }

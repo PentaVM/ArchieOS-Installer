@@ -286,6 +286,13 @@ std::optional<CommandRefusal> check_command(const StageCommand& command,
                 return CommandRefusal::ChordOutOfBounds;
             }
             break;
+        case StageAction::KeyDown:
+        case StageAction::KeyUp:
+            // One key at a time: a held chord is several holds, each let go on its own.
+            if (command.key_count != 1) {
+                return CommandRefusal::ChordOutOfBounds;
+            }
+            break;
         case StageAction::Snapshot: {
             // No part named is the whole surface. A part named has to be a real rectangle
             // inside it, so that a capture cannot be asked for pixels the window has not.
@@ -649,6 +656,17 @@ Playback Playback::start(const StageCommand& command, const Surface& surface, Po
             end = keys > 0 ? at - policy.key_interval_ms : now_ms;
             break;
         }
+        case StageAction::KeyDown:
+            step(now_ms, StepKind::FocusSurface, pointer_now, PointerButton::Left, 0);
+            step(now_ms + policy.focus_settle_ms, StepKind::KeyPress, pointer_now, PointerButton::Left, 0);
+            end = now_ms + policy.focus_settle_ms;
+            break;
+        case StageAction::KeyUp:
+            // Let go where it was pressed: no focus change, which could send the release to
+            // another window and leave the key down in the first.
+            step(now_ms, StepKind::KeyRelease, pointer_now, PointerButton::Left, 0);
+            end = now_ms;
+            break;
         case StageAction::Focus:
             step(now_ms, StepKind::FocusSurface, pointer_now, PointerButton::Left, 0);
             end = now_ms;

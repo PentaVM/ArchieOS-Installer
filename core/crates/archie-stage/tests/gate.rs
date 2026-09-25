@@ -664,3 +664,80 @@ allow = ["click"]
         StageAdmission::Refused(StageRefusal::ActionNotAllowed { .. })
     ));
 }
+
+#[test]
+fn a_held_key_is_its_own_grant_and_keeps_the_approval_its_key_needs() {
+    // Taking keys does not mean taking held keys: the terminal lists "key", not "hold".
+    let w = StageAction::KeyDown {
+        key: Key::parse("w").unwrap(),
+    };
+    assert_eq!(
+        refusal(gate(TERMINAL, w.clone())),
+        StageRefusal::ActionNotAllowed {
+            app_id: TERMINAL.into(),
+            kind: ActionKind::Hold
+        }
+    );
+
+    let game = StagePolicy::parse(
+        r#"
+[[app]]
+app_id = "org.example.game"
+display_name = "Game"
+allow = ["key", "hold", "focus"]
+approval_keys = ["enter"]
+"#,
+    )
+    .unwrap();
+    let principal = agent();
+    let lease = lease_for(
+        &principal,
+        stage_resource("org.example.game"),
+        Action::Execute,
+        OPERATION,
+    );
+    let judge = |action: StageAction| {
+        StageGate::authorize(
+            &game,
+            &lease,
+            &principal,
+            false,
+            &proposal("org.example.game", action),
+            Timestamp::now(),
+        )
+    };
+    assert!(
+        judge(w).allowed().is_some(),
+        "walking forward is a held key"
+    );
+    assert!(judge(StageAction::KeyUp {
+        key: Key::parse("w").unwrap()
+    })
+    .allowed()
+    .is_some());
+    // Holding Enter is still pressing Enter.
+    assert!(matches!(
+        judge(StageAction::KeyDown {
+            key: Key::Named(NamedKey::Enter)
+        }),
+        StageAdmission::NeedsApproval { .. }
+    ));
+}
+
+#[test]
+fn a_held_key_goes_on_the_wire_as_the_compositor_reads_it() {
+    let down = archie_stage::WireAction::from(&StageAction::KeyDown {
+        key: Key::parse("w").unwrap(),
+    });
+    assert_eq!(
+        serde_json::to_value(&down).unwrap(),
+        serde_json::json!({"kind": "key_down", "key": "w"})
+    );
+    let up = archie_stage::WireAction::from(&StageAction::KeyUp {
+        key: Key::Named(NamedKey::ArrowLeft),
+    });
+    assert_eq!(
+        serde_json::to_value(&up).unwrap(),
+        serde_json::json!({"kind": "key_up", "key": "arrow_left"})
+    );
+}
