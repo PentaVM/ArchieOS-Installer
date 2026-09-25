@@ -41,7 +41,7 @@ fn proposal(assessment: &archie_memory::AnalyticalAssessment) -> ModelProposal {
         proposal_id: "proposal:one".into(),
         hypothesis_id: assessment.hypothesis_id().to_string(),
         model_id: "model:analyst-v1".into(),
-        model_sha256: DIGEST.into(),
+        model_sha256: Some(DIGEST.into()),
         stance: EvidenceStance::Supports,
         score_permille: 950,
         evidence_refs: assessment.evidence_refs().to_vec(),

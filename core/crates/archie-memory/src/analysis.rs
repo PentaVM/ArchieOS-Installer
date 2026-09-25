@@ -337,8 +337,14 @@ pub fn assess_hypothesis(
 pub struct ModelProposal {
     pub proposal_id: String,
     pub hypothesis_id: String,
+    /// Which model this came from, stamped by the caller from its registry after the
+    /// model's output was parsed. Never taken from what the model wrote about itself.
     pub model_id: String,
-    pub model_sha256: String,
+    /// The checkpoint's digest, when the caller can verify one. A model cannot know the
+    /// hash of its own weights, and a hosted one exposes none, so this is absent rather
+    /// than invented.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_sha256: Option<String>,
     pub stance: EvidenceStance,
     pub score_permille: u16,
     pub evidence_refs: Vec<String>,
@@ -390,7 +396,10 @@ pub fn gate_model_proposal(
     if !reference(&proposal.proposal_id)
         || !reference(&proposal.hypothesis_id)
         || !reference(&proposal.model_id)
-        || !valid_digest(&proposal.model_sha256)
+        || proposal
+            .model_sha256
+            .as_deref()
+            .is_some_and(|digest| !valid_digest(digest))
         || proposal.score_permille > 1000
         || proposal.produced_at_ms <= 0
         || proposal.evidence_refs.is_empty()
