@@ -33,8 +33,9 @@ C++ for the native and visual subsystems. Nothing in ArchieOS itself is Python.
 - `archie-voice live`: the same conversation reached from a browser page (microphone,
   speaker and camera over a loopback WebSocket), with **IRIS as Archie's eyes**. Archie is
   told only what IRIS reads, how old it is, and what was there before and left. It can
-  look closer at an object, find out what it is and read about it (web detection or a
-  vision model, then web search), keep that until asked, and never identifies people.
+  look closer at an object, find out what it is with a vision model on Nebius (Kimi K3,
+  then MiniCPM-V 4.5, on the conversation's own key) and read about it, keep that until
+  asked, and it never identifies people: faces are blacked out of every crop.
   A gentle voice style is applied after synthesis. Tested end to end, speech to speech.
 - `display/stage/run-archie.sh`: one command for the stage and the voice together.
 
@@ -106,7 +107,7 @@ archie-voice live --grade public --asr-model <nemotron-3.5-asr.gguf> \
 ```
 
 The page listens on loopback (`--port`, default 8770); reach it through an SSH tunnel.
-`GOOGLE_VISION_API_KEY`, `ARCHIE_LIVE_VLM` and `TAVILY_API_KEY` are optional.
+`ARCHIE_LIVE_VLM` (another vision model list) and `TAVILY_API_KEY` (web reading) are optional.
 
 The Observatory (Qt 6.6+ with Quick 3D) and its data daemon:
 
