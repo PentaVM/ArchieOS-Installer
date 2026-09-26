@@ -232,12 +232,23 @@ impl Memory {
         if age <= Duration::from_secs(4) && !scene.seen.iter().any(|item| is_person(&item.phrase)) {
             lines.push("No se ve a ninguna persona frente a la cámara ahora.".into());
         }
+        // A person is one entry however many of their parts IRIS boxed, and only while
+        // nobody is in view now.
+        let someone_here = scene.seen.iter().any(|item| is_person(&item.phrase));
+        let mut person_told = someone_here;
         let gone: Vec<String> = self
             .gone(now)
             .into_iter()
             .filter(|thing| !scene.seen.iter().any(|item| item.phrase == thing.phrase))
+            .filter_map(|thing| {
+                let since = ago(now.duration_since(thing.last_seen));
+                if !is_person(&thing.phrase) {
+                    return Some(format!("{} (dejó de verse hace {since})", thing.phrase));
+                }
+                (!std::mem::replace(&mut person_told, true))
+                    .then(|| format!("una persona (dejó de verse hace {since})"))
+            })
             .take(8)
-            .map(|thing| format!("{} (dejó de verse hace {})", thing.phrase, ago(now.duration_since(thing.last_seen))))
             .collect();
         if !gone.is_empty() {
             lines.push(format!(
@@ -294,7 +305,7 @@ mod tests {
         assert!(told.contains("chair"), "{told}");
         assert!(told.contains("No se ve a ninguna persona"), "{told}");
         assert!(told.contains("cell phone (dejó de verse hace 58 s)"), "{told}");
-        assert!(told.contains("person (dejó de verse hace 58 s)"), "{told}");
+        assert!(told.contains("una persona (dejó de verse hace 58 s)"), "{told}");
     }
 
     #[test]
