@@ -472,9 +472,12 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         "You are Archie reviewing your own run of a benchmark, to do better next time.\nTASK: {}\nTIME LIMIT: {tier} s\n\
          SCORE: {:.1}/100 (best before at this limit: {})\nCRITIC: {}\nYOUR NOTES: {}\nLESSONS YOU WERE GIVEN: {}\n\
          WHAT HAPPENED (one JSON line per decision or action):\n{}\n\nReply with one line of JSON: {{\"lessons\": \
-         [\"at most 6 short, concrete lessons for the next run: which keys or clicks did what, where tools and colours \
-         are on screen (in screenshot pixels), what wasted time, what to do first\"]}}. Keep the given lessons that \
-         held, correct the ones that were wrong.",
+         [\"at most 6 short, concrete lessons for the next run: which keys or clicks did what, what wasted time, what \
+         to do first. Say where a control is by what it looks like and where it sits in the layout (\\\"the black \
+         square at the bottom of the left toolbar\\\"), never by pixels alone: the window and the document change \
+         size between runs, and a remembered coordinate once sent a click to empty space and the colour's hex \
+         digits into Photopea as shortcuts (e = eraser). Say too what to check on screen before typing.\"]}}. Keep \
+         the given lessons that held, correct the ones that were wrong.",
         task.prompt,
         score,
         memory.best(&task.id, tier).map_or("none".into(), |b| format!("{b:.1}")),
