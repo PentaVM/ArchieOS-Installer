@@ -21,7 +21,7 @@ use archie_paint::bench::{self, Sheet};
 use archie_paint::Picture;
 use archie_policy::{PolicyEngine, Principal};
 use archie_stage::{
-    learn, ActOutcome, ActRequest, CommandKey, LookOutcome, Operator, StageAction, StageClient, StagePolicy,
+    drain, learn, ActOutcome, ActRequest, CommandKey, LookOutcome, Operator, StageAction, StageClient, StagePolicy,
     StageWorld,
 };
 use archie_types::PrivacyGrade;
@@ -86,6 +86,7 @@ impl Seat {
     }
 
     async fn look(&mut self) -> Result<Sheet, String> {
+        drain(&mut self.client, &mut self.world).await.map_err(|e| e.to_string())?;
         let request = self.request(StageAction::Snapshot { region: None }, "look at the window")?;
         match self
             .operator
@@ -99,6 +100,10 @@ impl Seat {
     }
 
     async fn act(&mut self, action: StageAction, why: &str, timeout: Duration) -> Result<ActOutcome, String> {
+        // What the compositor said since the last action first: a dialog that opened moved the
+        // window's geometry on, and a command prepared for the old one is refused as
+        // surface_changed.
+        drain(&mut self.client, &mut self.world).await.map_err(|e| e.to_string())?;
         let request = self.request(action, why)?;
         self.operator
             .act(&mut self.client, &mut self.world, &request, timeout)

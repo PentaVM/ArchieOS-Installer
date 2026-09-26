@@ -66,13 +66,14 @@ EOF
     start observatory "$BUILD/native/archie-display" --scene "${SCENE:-orb}"
   # The Archie Stage beside it: the compositor Archie works in, its control socket sealed
   # with this session's key, at the agent's tempo (the pointer's paths on a quarter of the
-  # clock; TEMPO=person to watch it at a person's pace). Applications opened on it use its
-  # own Wayland socket.
+  # clock; TEMPO=person to watch it at a person's pace) and lines at 4000 px/s rather than a
+  # hand's 900 (STROKE_SPEED): straight strokes lose nothing, and in Archie Arena covering a
+  # canvas took 11 s of a 60 s run. Applications opened on it use its own Wayland socket.
   [ -f "$RUN/key" ] || "$CORE/archie-stage-cli" keygen "$RUN/key" >/dev/null
   if ! running stage; then rm -f "$RUN/control.sock" "$XDG_RUNTIME_DIR/archie-stage"; fi
   LIBGL_ALWAYS_SOFTWARE=1 QT_QPA_PLATFORM=wayland \
     start stage "$BUILD/stage/archie-stage" --socket-name archie-stage --control "$RUN/control.sock" \
-      --key-file "$RUN/key" --tempo "${TEMPO:-agent}"
+      --key-file "$RUN/key" --tempo "${TEMPO:-agent}" --stroke-speed "${STROKE_SPEED:-4000}"
   status
 }
 

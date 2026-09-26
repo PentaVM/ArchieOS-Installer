@@ -12,9 +12,13 @@ if [ -f "$RUN/firefox.pid" ] && kill -0 "$(cat "$RUN/firefox.pid")" 2>/dev/null;
   kill "$(cat "$RUN/firefox.pid")" 2>/dev/null || true
   for _ in $(seq 1 50); do kill -0 "$(cat "$RUN/firefox.pid")" 2>/dev/null || break; sleep 0.2; done
 fi
+# A new profile every run: Photopea keeps its last documents and settings (a layer's
+# opacity, the colours) in the browser's storage, and reopened a transparent document from
+# an earlier run. Every run starts from the same nothing.
+rm -rf "$RUN/ff"
 mkdir -p "$RUN/ff"
-[ -f "$RUN/ff/prefs.js" ] || firefox --headless -CreateProfile "arena $RUN/ff" >/dev/null 2>&1 || true
-# One window, one tab, nothing restored from the last run.
+firefox --headless -CreateProfile "arena $RUN/ff" >/dev/null 2>&1 || true
+# One window, one tab, nothing restored.
 cat > "$RUN/ff/user.js" <<'EOF'
 user_pref("browser.sessionstore.resume_from_crash", false);
 user_pref("browser.startup.page", 0);
