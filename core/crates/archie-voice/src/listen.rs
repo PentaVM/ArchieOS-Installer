@@ -29,6 +29,38 @@ pub const FOLLOW_UP_WINDOW: Duration = Duration::from_secs(10);
 /// "Archy" are the same word said aloud.
 const NAMES: &[&str] = &["archie", "archi", "archy"];
 
+/// Real words one letter from the name, which must not wake Archie.
+const NOT_NAMES: &[&str] = &["arch", "archive", "archer", "arco", "marchi"];
+
+/// Letters to turn `a` into `b`, one insertion, deletion or change at a time.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut diagonal = row[0];
+        row[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let above = row[j + 1];
+            row[j + 1] = (above + 1).min(row[j] + 1).min(diagonal + usize::from(ca != *cb));
+            diagonal = above;
+        }
+    }
+    row[b.len()]
+}
+
+/// Whether one written word is the name as a recogniser mishears it: "Archier", "Arshi",
+/// "Harchi". Only words that start like the name count, so "marchi" or "ancho" never do.
+fn sounds_like_archie(word: &str) -> bool {
+    if NAMES.contains(&word) {
+        return true;
+    }
+    if NOT_NAMES.contains(&word) || !(4..=8).contains(&word.chars().count()) {
+        return false;
+    }
+    let starts_like = ["ar", "har", "ahr", "ars"].iter().any(|start| word.starts_with(start));
+    starts_like && (edit_distance(word, "archi") <= 1 || edit_distance(word, "archie") <= 1)
+}
+
 /// Utterances that acknowledge and ask nothing, compared without accents or punctuation.
 const ACKNOWLEDGEMENTS: &[&str] = &[
     "ya",
@@ -73,9 +105,15 @@ pub fn plain(text: &str) -> String {
     out.trim_end().to_string()
 }
 
-/// Whether the utterance names Archie.
+/// Whether the utterance names Archie — also when the recogniser misspelled the name or
+/// split it in two ("ar chi").
 pub fn names_archie(text: &str) -> bool {
-    plain(text).split(' ').any(|word| NAMES.contains(&word))
+    let plain = plain(text);
+    let words: Vec<&str> = plain.split(' ').collect();
+    words.iter().any(|word| sounds_like_archie(word))
+        || words
+            .windows(2)
+            .any(|pair| pair[0].len() <= 3 && sounds_like_archie(&format!("{}{}", pair[0], pair[1])))
 }
 
 /// Whether the utterance is only an acknowledgement.
@@ -101,9 +139,19 @@ pub fn after_utterance(
     heard: &Utterance,
     since_archie_spoke: Option<Duration>,
 ) -> ConversationalFloorState {
+    after_utterance_within(heard, since_archie_spoke, FOLLOW_UP_WINDOW)
+}
+
+/// As [`after_utterance`], with the follow-up window given: how long after Archie spoke a
+/// reply needs no name.
+pub fn after_utterance_within(
+    heard: &Utterance,
+    since_archie_spoke: Option<Duration>,
+    follow_up: Duration,
+) -> ConversationalFloorState {
     let mut evidence = Vec::new();
     let named = names_archie(&heard.text);
-    let replying = since_archie_spoke.is_some_and(|since| since <= FOLLOW_UP_WINDOW);
+    let replying = since_archie_spoke.is_some_and(|since| since <= follow_up);
     let addressed = named || replying;
     if named {
         evidence.push("the utterance names Archie".to_string());
@@ -208,6 +256,12 @@ mod tests {
         assert_eq!(plain("¿Qué hora es, Archie?"), "que hora es archie");
         assert!(names_archie("Oye Archi, abre Firefox."));
         assert!(!names_archie("la arquitectura del edificio"));
+        for misheard in ["Archier, qué ves?", "Oye Arshi.", "Harchi, mira esto", "oye ar chi qué es esto"] {
+            assert!(names_archie(misheard), "{misheard}");
+        }
+        for other in ["Busca el archivo.", "el arco del puente", "voy a marchar", "es muy ancho", "the arch"] {
+            assert!(!names_archie(other), "{other}");
+        }
         assert!(is_acknowledgement("Sí."));
         assert!(is_acknowledgement("ya po"));
         assert!(!is_acknowledgement("sí, ábrelo"));

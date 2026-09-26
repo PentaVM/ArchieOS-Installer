@@ -215,6 +215,14 @@ mod ffi {
             options: *const AsrRecognitionOptions,
             out: *mut *mut Stream,
         ) -> AsrStatus;
+        pub fn nemo_speech_asr_recognize_f32(
+            recognizer: *mut Recognizer,
+            options: *const AsrRecognitionOptions,
+            samples: *const f32,
+            n_samples: usize,
+            sample_rate: i32,
+            out: *mut *mut AsrResult,
+        ) -> AsrStatus;
         pub fn nemo_speech_asr_stream_push_f32(
             stream: *mut Stream,
             samples: *const f32,
@@ -331,10 +339,16 @@ impl Ears {
     /// costs more per second of audio: on a Ryzen 5 4500U only 13 kept up with speech
     /// (real-time factor 1.41 at 13, 0.95 at 6, 0.74 at 3, 0.47 at 1).
     pub fn load(model: &Path, right_context: Option<i32>) -> Result<Self, NativeError> {
+        Self::load_on(model, right_context, -1)
+    }
+
+    /// As [`Self::load`], on GPU `gpu` (a CUDA device index), or the CPU when it is -1. On
+    /// a GPU the ears keep up with far less lookahead, so they answer sooner.
+    pub fn load_on(model: &Path, right_context: Option<i32>, gpu: i32) -> Result<Self, NativeError> {
         let path = c_path(model, "the ASR model path")?;
         let backend = ffi::AsrBackendConfig {
             size: size_of::<ffi::AsrBackendConfig>(),
-            gpu: -1,
+            gpu,
         };
         let model = ffi::AsrModelConfig {
             size: size_of::<ffi::AsrModelConfig>(),
@@ -415,6 +429,69 @@ impl Ears {
             _ears: PhantomData,
         })
     }
+
+    /// Transcribes one whole utterance at once — for an offline model such as Parakeet
+    /// TDT, which hears the utterance end to end and so gets more of it right than a
+    /// streaming model deciding as the words arrive. `language` is a locale, or `None`
+    /// for a model that finds the language itself.
+    pub fn recognize(
+        &self,
+        samples: &[f32],
+        sample_rate: u32,
+        language: Option<&str>,
+    ) -> Result<Heard, NativeError> {
+        let language = language
+            .map(|code| c_string(code, "the language code"))
+            .transpose()?;
+        // SAFETY: returns a fully initialised struct by value.
+        let mut options = unsafe { ffi::nemo_speech_asr_recognition_options_default() };
+        if let Some(language) = &language {
+            options.language_code = language.as_ptr();
+        }
+        options.enable_automatic_punctuation = true;
+        let mut result = ptr::null_mut();
+        // SAFETY: the options and the samples outlive the call; `result` receives a handle
+        // that `read_result` destroys.
+        let status = unsafe {
+            ffi::nemo_speech_asr_recognize_f32(
+                self.recognizer,
+                &options,
+                samples.as_ptr(),
+                samples.len(),
+                sample_rate as i32,
+                &mut result,
+            )
+        };
+        if status != ffi::OK || result.is_null() {
+            return Err(asr_error("transcribing the utterance"));
+        }
+        // SAFETY: a live result handle, owned here.
+        Ok(unsafe { read_result(result) })
+    }
+}
+
+/// Copies what a result says and destroys it.
+///
+/// # Safety
+/// `result` must be a live handle from the runtime, not used afterwards.
+unsafe fn read_result(result: *mut ffi::AsrResult) -> Heard {
+    let alternatives = ffi::nemo_speech_asr_result_alternative_count(result);
+    let text = if alternatives > 0 {
+        owned(ffi::nemo_speech_asr_result_transcript(result, 0))
+    } else {
+        String::new()
+    };
+    let language = (alternatives > 0 && ffi::nemo_speech_asr_result_language_count(result, 0) > 0)
+        .then(|| owned(ffi::nemo_speech_asr_result_language_code(result, 0, 0)))
+        .filter(|code| !code.is_empty());
+    let heard = Heard {
+        text,
+        is_final: ffi::nemo_speech_asr_result_is_final(result),
+        audio_s: ffi::nemo_speech_asr_result_audio_processed(result),
+        language,
+    };
+    ffi::nemo_speech_asr_result_destroy(result);
+    heard
 }
 
 impl Drop for Ears {
@@ -476,29 +553,8 @@ impl Listening<'_> {
         if result.is_null() {
             return Ok(None);
         }
-        // SAFETY: `result` is a live handle until destroyed at the end of this block; the
-        // strings read from it are copied first.
-        let heard = unsafe {
-            let alternatives = ffi::nemo_speech_asr_result_alternative_count(result);
-            let text = if alternatives > 0 {
-                owned(ffi::nemo_speech_asr_result_transcript(result, 0))
-            } else {
-                String::new()
-            };
-            let language = (alternatives > 0
-                && ffi::nemo_speech_asr_result_language_count(result, 0) > 0)
-                .then(|| owned(ffi::nemo_speech_asr_result_language_code(result, 0, 0)))
-                .filter(|code| !code.is_empty());
-            let heard = Heard {
-                text,
-                is_final: ffi::nemo_speech_asr_result_is_final(result),
-                audio_s: ffi::nemo_speech_asr_result_audio_processed(result),
-                language,
-            };
-            ffi::nemo_speech_asr_result_destroy(result);
-            heard
-        };
-        Ok(Some(heard))
+        // SAFETY: a live handle, destroyed by `read_result` after its strings are copied.
+        Ok(Some(unsafe { read_result(result) }))
     }
 
     /// Declares the utterance over now, as when the person has clearly stopped.
@@ -595,6 +651,13 @@ impl Voice {
     pub fn sample_rate(&self) -> u32 {
         // SAFETY: a live synthesizer.
         unsafe { ffi::nemo_speech_tts_sample_rate(self.synthesizer) }.max(0) as u32
+    }
+
+    /// The language the next sentences are said in (a locale such as `es-US` or `en-US`):
+    /// the model is multilingual, and a person may switch languages between turns.
+    pub fn set_language(&mut self, language: &str) -> Result<(), NativeError> {
+        self.language = c_string(language, "the language code")?;
+        Ok(())
     }
 
     /// The voices this model has, by name.

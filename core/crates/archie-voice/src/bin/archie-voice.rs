@@ -21,6 +21,21 @@
 //!              [the stage flags of do]
 //! ```
 //!
+//! `live` is `converse` with a browser page for microphone, speaker and camera (loopback;
+//! reach it through an SSH tunnel), IRIS for eyes, and curiosity: it looks closer at what
+//! is in front, finds out what it is and reads about it, and keeps that until asked:
+//!
+//! ```text
+//! archie-voice live --grade public --asr-model … --voice-engine magpie --tts-model …
+//!              --codec-model … --tts-tokenizer … [--listen-language auto]
+//!              [--tts-language es-US] [--tts-english en-US] [--port 8770]
+//!              [--iris http://127.0.0.1:8765] [--curiosity 40] [--always] [--headphones]
+//! ```
+//!
+//! Built with `--features live`. Finding out uses `GOOGLE_VISION_API_KEY` (web detection)
+//! or `NEBIUS_TOKEN_FACTORY_KEY` with `ARCHIE_LIVE_VLM` (a vision model); reading uses
+//! `TAVILY_API_KEY`. Each is optional, and none is printed.
+//!
 //! `converse` is the whole thing, spoken: the microphone through Nemotron 3.5 ASR, the
 //! floor deciding whether to answer, Nemotron on Nebius answering and proposing, the hands
 //! acting when a stage is given, and a voice — Piper on a CPU, Magpie with a GPU — saying
@@ -93,9 +108,15 @@ fn run(mut args: Vec<String>, offset: Option<time::UtcOffset>) -> Result<ExitCod
     const USAGE: &str =
         "usage: archie-voice ask|do \"<what was said>\" --grade public | converse --grade public …";
     let command = match args.first().map(String::as_str) {
-        Some("ask") | Some("do") | Some("converse") => args.remove(0),
+        Some("ask") | Some("do") | Some("converse") | Some("live") => args.remove(0),
         _ => return Err(USAGE.into()),
     };
+    if command == "live" {
+        let speech = speech_flags(&mut args)?;
+        let flags = live_flags(&mut args)?;
+        let asking = asking(args, offset, false)?;
+        return live(asking, speech, flags);
+    }
     if command == "converse" {
         // Its own flags first; the stage is optional, since a conversation need not act.
         let speech = speech_flags(&mut args)?;
@@ -531,6 +552,8 @@ struct SpeechFlags {
     end_after_ms: u64,
     lookahead: i32,
     name_boost: f32,
+    /// The CUDA device the ears run on; -1 is the CPU.
+    asr_gpu: i32,
 }
 
 fn speech_flags(args: &mut Vec<String>) -> Result<SpeechFlags, String> {
@@ -571,7 +594,220 @@ fn speech_flags(args: &mut Vec<String>) -> Result<SpeechFlags, String> {
             .map(|n| n.parse::<f32>().map_err(|_| "--name-boost is a number"))
             .transpose()?
             .unwrap_or(5.0),
+        asr_gpu: take(args, "--asr-gpu")
+            .map(|n| n.parse::<i32>().map_err(|_| "--asr-gpu is a CUDA device index, or -1"))
+            .transpose()?
+            .unwrap_or(-1),
     })
+}
+
+struct LiveFlags {
+    port: u16,
+    iris: String,
+    tts_english: String,
+    curiosity: u32,
+    /// An offline ASR model (Parakeet TDT) that hears each finished utterance again, whole.
+    rehear_model: Option<String>,
+    voice_style: String,
+    /// Seconds after Archie spoke that a reply needs no name.
+    follow_up_s: u64,
+}
+
+fn live_flags(args: &mut Vec<String>) -> Result<LiveFlags, String> {
+    Ok(LiveFlags {
+        port: take(args, "--port")
+            .map(|n| n.parse::<u16>().map_err(|_| "--port is a port number"))
+            .transpose()?
+            .unwrap_or(8770),
+        iris: take(args, "--iris").unwrap_or_else(|| "http://127.0.0.1:8765".into()),
+        tts_english: take(args, "--tts-english").unwrap_or_else(|| "en-US".into()),
+        // Looks closer that curiosity may take on its own in one session: each is a
+        // paid call to web detection or a vision model.
+        curiosity: take(args, "--curiosity")
+            .map(|n| n.parse::<u32>().map_err(|_| "--curiosity is a number of looks"))
+            .transpose()?
+            .unwrap_or(40),
+        rehear_model: take(args, "--rehear-model"),
+        voice_style: take(args, "--voice-style").unwrap_or_else(|| "plain".into()),
+        follow_up_s: take(args, "--follow-up-s")
+            .map(|n| n.parse::<u64>().map_err(|_| "--follow-up-s is a number of seconds"))
+            .transpose()?
+            .unwrap_or(15),
+    })
+}
+
+#[cfg(not(all(unix, feature = "live")))]
+fn live(_asking: Asking, _speech: SpeechFlags, _flags: LiveFlags) -> Result<ExitCode, String> {
+    Err("this build has no live session: build archie-voice with --features live, where \
+         NeMo-Speech.cpp is installed"
+        .into())
+}
+
+/// Talks with a person through a browser page: their microphone and camera in, the voice
+/// out, IRIS for eyes, and curiosity keeping what it found out until it is asked.
+#[cfg(all(unix, feature = "live"))]
+fn live(asking: Asking, speech: SpeechFlags, flags: LiveFlags) -> Result<ExitCode, String> {
+    use archie_speech::{FloorPolicy, SessionPlan, SpeechCapabilities, SpeechSession};
+    use archie_voice::conversation::{self, Hearing, Saying, Setup, StreamedVoice};
+    use archie_voice::live::{self, curiosity, eyes, language};
+    use archie_voice::native::{Ears, Voice, VoiceFiles};
+    use std::path::Path;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::{mpsc, Arc};
+
+    if speech.engine != "magpie" {
+        return Err("live speaks with Magpie: give --voice-engine magpie and its model files".into());
+    }
+    let at = Instant::now();
+    let ears = Ears::load_on(Path::new(&speech.asr_model), Some(speech.lookahead), speech.asr_gpu)
+        .map_err(|e| e.to_string())?;
+    println!("ears ready in {} ms", at.elapsed().as_millis());
+    let rehear = match &flags.rehear_model {
+        Some(model) => {
+            let at = Instant::now();
+            let second = Ears::load_on(Path::new(model), None, speech.asr_gpu).map_err(|e| e.to_string())?;
+            println!("second hearing ready in {} ms", at.elapsed().as_millis());
+            Some(second)
+        }
+        None => None,
+    };
+    let style = live::style::Style::parse(&flags.voice_style)?;
+    let needed = |value: &Option<String>, flag: &str| value.clone().ok_or(format!("live needs {flag}"));
+    let (magpie, codec, tokenizer) = (
+        needed(&speech.tts_model, "--tts-model")?,
+        needed(&speech.codec_model, "--codec-model")?,
+        needed(&speech.tts_tokenizer, "--tts-tokenizer")?,
+    );
+    let at = Instant::now();
+    let voice = Voice::load(
+        &VoiceFiles {
+            magpie: Path::new(&magpie),
+            codec: Path::new(&codec),
+            tokenizer_dir: Path::new(&tokenizer),
+        },
+        &speech.tts_language,
+        speech.voice.as_deref(),
+        speech.threads,
+    )
+    .map_err(|e| e.to_string())?;
+    let voice = live::style::StyledVoice::new(
+        language::FollowingVoice::new(voice, &speech.tts_language, &flags.tts_english),
+        style,
+    );
+    let rate = archie_voice::voice::Speaks::sample_rate(&voice);
+    println!("voice ready in {} ms, {rate} Hz", at.elapsed().as_millis());
+
+    let (audio_in, audio) = mpsc::channel::<Vec<f32>>();
+    let (voice_out, voice_audio) = mpsc::channel();
+    let identifier = curiosity::Identifier::from_environment()?;
+    let researcher = curiosity::Researcher::from_environment()?;
+    println!(
+        "curiosity: identify with {}; search {}",
+        if identifier.means().is_empty() {
+            "IRIS only".to_string()
+        } else {
+            identifier.means().join(" + ")
+        },
+        if researcher.is_some() { "with Tavily" } else { "off (no TAVILY_API_KEY)" }
+    );
+    let senses = live::Senses::new(audio_in, identifier, researcher, rate, flags.curiosity);
+    let eyes = eyes::IrisEyes::new(&flags.iris, 0.35)?;
+    {
+        let senses = senses.clone();
+        let port = flags.port;
+        asking.runtime.spawn(async move {
+            if let Err(error) = live::serve(senses, eyes, port).await {
+                eprintln!("live page: {error}");
+            }
+        });
+    }
+    live::forward_voice(voice_audio, senses.clone());
+    println!("open http://127.0.0.1:{} (through the tunnel)", flags.port);
+
+    let languages = vec!["es".to_string(), "en".to_string()];
+    let plan = SessionPlan {
+        language: asking.language.clone(),
+        listener: SpeechCapabilities {
+            partial_transcript: true,
+            languages: languages.clone(),
+            input_sample_rates: vec![archie_voice::audio::CAPTURE_RATE],
+            ..SpeechCapabilities::default()
+        },
+        voice: SpeechCapabilities {
+            accepts_external_response_text: true,
+            renders_external_response_verbatim: true,
+            languages,
+            output_sample_rates: vec![rate],
+            ..SpeechCapabilities::default()
+        },
+    };
+    let Asking {
+        runtime,
+        mut cognitive,
+        clock,
+        ..
+    } = asking;
+    cognitive.set_persona(live::PERSONA);
+    cognitive.add_tools(live::tools());
+    cognitive.put_context_beside_utterance();
+    let mut session =
+        SpeechSession::new(plan, FloorPolicy::default(), cognitive).map_err(|e| e.to_string())?;
+    let mut act = |intent: &archie_speech::SpeechToolIntentCandidate| -> String {
+        runtime
+            .block_on(senses.handle_tool(&intent.tool_name, &intent.raw_arguments))
+            .unwrap_or_else(|| format!("No se hizo: aquí no tengo la herramienta {}.", intent.tool_name))
+    };
+    let mut context = || senses.context(&clock);
+    let started = Instant::now();
+    let mut report = |moment: conversation::Moment| {
+        if let conversation::Moment::Heard { text, .. } = &moment {
+            senses.heard(text);
+        }
+        senses.publish(live::moment_json(&moment));
+        let at = started.elapsed().as_millis();
+        match &moment {
+            conversation::Moment::Heard { text, .. } => println!("{at:>7} ms  oí       {text}"),
+            conversation::Moment::Said { text, .. } => println!("{at:>7} ms  dije     {text}"),
+            conversation::Moment::Proposed { tool, arguments } => {
+                println!("{at:>7} ms  propone  {tool}({arguments})")
+            }
+            conversation::Moment::Did { report } => println!("{at:>7} ms  resultado {report}"),
+            conversation::Moment::Alert(message) => println!("{at:>7} ms  alerta   {message}"),
+            _ => {}
+        }
+    };
+    let setup = Setup {
+        listen_language: speech.listen_language.clone(),
+        always: speech.always,
+        headphones: speech.headphones,
+        end_after: Duration::from_millis(speech.end_after_ms),
+        follow_up: Duration::from_secs(flags.follow_up_s),
+        steps: 4,
+        phrases: vec!["Archie".into(), "Archi".into()],
+        phrase_boost: speech.name_boost,
+    };
+    println!(
+        "{}",
+        if speech.always {
+            "answering everything (--always)"
+        } else {
+            "answering when named, or within the follow-up window"
+        }
+    );
+    conversation::converse(
+        &setup,
+        &ears,
+        rehear.as_ref(),
+        Box::new(voice),
+        Hearing::Stream(audio),
+        Saying::Stream(StreamedVoice::new(voice_out, rate)),
+        &mut session,
+        &mut act,
+        &mut context,
+        Arc::new(AtomicBool::new(false)),
+        &mut report,
+    )?;
+    Ok(ExitCode::SUCCESS)
 }
 
 #[cfg(not(all(unix, feature = "speech")))]
@@ -759,6 +995,7 @@ fn converse(
         always: speech.always,
         headphones: speech.headphones,
         end_after: Duration::from_millis(speech.end_after_ms),
+        follow_up: archie_voice::listen::FOLLOW_UP_WINDOW,
         steps,
         phrases: vec!["Archie".into()],
         phrase_boost: speech.name_boost,
@@ -780,6 +1017,7 @@ fn converse(
     conversation::converse(
         &setup,
         &ears,
+        None,
         voice,
         hearing,
         saying,

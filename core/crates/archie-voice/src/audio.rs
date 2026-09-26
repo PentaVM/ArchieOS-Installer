@@ -1,4 +1,5 @@
-//! The microphone and the speaker, through PulseAudio.
+//! The microphone and the speaker, through PulseAudio (feature `pulse`), and what every
+//! source of sound shares: the capture rate, loudness, and telling a voice from the room.
 //!
 //! PulseAudio is what a Linux desktop — and WSLg, which forwards Windows' microphone and
 //! speakers — offers every program. Capture is mono float at 16 kHz, what the recogniser
@@ -9,9 +10,13 @@
 //! not played out, because a voice that keeps going for another second after being
 //! interrupted is a voice that was not listening.
 
+#[cfg(feature = "pulse")]
 use libpulse_binding::def::BufferAttr;
+#[cfg(feature = "pulse")]
 use libpulse_binding::sample::{Format, Spec};
+#[cfg(feature = "pulse")]
 use libpulse_binding::stream::Direction;
+#[cfg(feature = "pulse")]
 use libpulse_simple_binding::Simple;
 
 /// The rate the ears hear at.
@@ -26,6 +31,16 @@ pub struct AudioError {
     message: String,
 }
 
+impl AudioError {
+    pub fn new(what: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            what,
+            message: message.into(),
+        }
+    }
+}
+
+#[cfg(feature = "pulse")]
 fn failed(what: &'static str) -> impl FnOnce(libpulse_binding::error::PAErr) -> AudioError {
     move |error| AudioError {
         what,
@@ -34,10 +49,12 @@ fn failed(what: &'static str) -> impl FnOnce(libpulse_binding::error::PAErr) -> 
 }
 
 /// The microphone.
+#[cfg(feature = "pulse")]
 pub struct Microphone {
     simple: Simple,
 }
 
+#[cfg(feature = "pulse")]
 impl Microphone {
     pub fn open(app: &str) -> Result<Self, AudioError> {
         let spec = Spec {
@@ -83,11 +100,13 @@ impl Microphone {
 }
 
 /// The speaker.
+#[cfg(feature = "pulse")]
 pub struct Speaker {
     simple: Simple,
     rate: u32,
 }
 
+#[cfg(feature = "pulse")]
 impl Speaker {
     pub fn open(app: &str, rate: u32) -> Result<Self, AudioError> {
         let spec = Spec {

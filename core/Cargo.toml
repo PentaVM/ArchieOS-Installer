@@ -102,6 +102,8 @@ async-trait = "0.1"
 base64 = "0.22"
 jpeg-decoder = "0.3"
 png = "0.18"
+# Archie's live page: the browser's microphone, speaker and camera over a WebSocket.
+axum = { version = "0.7", default-features = false, features = ["http1", "tokio", "ws"] }
 clap = { version = "4", features = ["derive"] }
 ed25519-dalek = { version = "2", features = ["rand_core", "pkcs8", "pem"] }
 flate2 = "1"
