@@ -735,6 +735,9 @@ fn live(asking: Asking, speech: SpeechFlags, flags: LiveFlags) -> Result<ExitCod
     let mut context = || senses.context(&clock);
     let started = Instant::now();
     let mut report = |moment: conversation::Moment| {
+        if let conversation::Moment::Heard { text, .. } = &moment {
+            senses.heard(text);
+        }
         senses.publish(live::moment_json(&moment));
         let at = started.elapsed().as_millis();
         match &moment {

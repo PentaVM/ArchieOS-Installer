@@ -97,6 +97,8 @@ pub struct Senses {
     curiosity_left: AtomicU32,
     last_look: Mutex<Option<Instant>>,
     voice_rate: u32,
+    /// What the person said last, so the model is told which language to answer in.
+    last_heard: Mutex<String>,
 }
 
 impl Senses {
@@ -120,7 +122,13 @@ impl Senses {
             curiosity_left: AtomicU32::new(curiosity_budget),
             last_look: Mutex::new(None),
             voice_rate,
+            last_heard: Mutex::new(String::new()),
         })
+    }
+
+    /// Remembers what was just heard (before the turn that answers it asks for context).
+    pub fn heard(&self, text: &str) {
+        *self.last_heard.lock().expect("heard lock") = text.to_string();
     }
 
     pub fn publish(&self, value: serde_json::Value) {
@@ -132,7 +140,12 @@ impl Senses {
     pub fn context(&self, clock: &str) -> String {
         let scene = eyes::describe(&self.scene.lock().expect("scene lock"));
         let known = self.buffer.lock().expect("buffer lock").describe();
-        [clock.to_string(), scene, known]
+        let heard = self.last_heard.lock().expect("heard lock").clone();
+        let answer_in = match language::spoken_language(&heard) {
+            "en" => "The person just spoke English: answer in English.",
+            _ => "La persona te habló en español: responde en español.",
+        };
+        [clock.to_string(), answer_in.to_string(), scene, known]
             .into_iter()
             .filter(|part| !part.is_empty())
             .collect::<Vec<_>>()
