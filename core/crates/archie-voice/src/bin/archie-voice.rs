@@ -647,7 +647,7 @@ fn live_flags(args: &mut Vec<String>) -> Result<LiveFlags, String> {
         rvc_index_rate: take(args, "--rvc-index-rate")
             .map(|n| n.parse::<f32>().map_err(|_| "--rvc-index-rate is between 0 and 1"))
             .transpose()?
-            .unwrap_or(0.75),
+            .unwrap_or(0.0),
         ort_library: take(args, "--ort-library").or_else(|| std::env::var("ORT_DYLIB_PATH").ok()),
     })
 }

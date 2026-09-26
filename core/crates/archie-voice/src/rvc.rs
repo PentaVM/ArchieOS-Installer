@@ -44,13 +44,17 @@ pub struct Tuning {
     /// Semitones to move the pitch by before conversion.
     pub key: f32,
     /// How much of each frame's features come from the voice's own training features
-    /// (RVC's index rate): more sounds more like the voice, less keeps the words clearer.
+    /// (RVC's index rate): more sounds more like the voice's speaker, less keeps the
+    /// pronunciation of what was said. A voice trained on English pulls Spanish toward
+    /// English: with Baymax, Nemotron's error on Spanish sentences went from 1.8 % at 0 to
+    /// 22 % at RVC's usual 0.75, which Nelson heard as "a gringo trying to speak Spanish".
+    /// The timbre comes from the synthesizer either way.
     pub index_rate: f32,
 }
 
 impl Default for Tuning {
     fn default() -> Self {
-        Self { key: 0.0, index_rate: 0.75 }
+        Self { key: 0.0, index_rate: 0.0 }
     }
 }
 
