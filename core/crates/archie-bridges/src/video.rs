@@ -61,6 +61,10 @@ impl Bridge for Video {
         &self.manifest
     }
 
+    fn workspace(&self) -> &Workspace {
+        &self.workspace
+    }
+
     fn guide(&self) -> &'static str {
         GUIDE
     }

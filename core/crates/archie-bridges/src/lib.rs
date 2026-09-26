@@ -33,6 +33,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod delivery;
 pub mod index;
 pub mod kicad;
 pub mod manifest;
@@ -116,6 +117,9 @@ impl Outcome {
 /// calls it off its protocol thread.
 pub trait Bridge: Send + Sync {
     fn manifest(&self) -> &Manifest;
+
+    /// The folder the bridge works in.
+    fn workspace(&self) -> &Workspace;
 
     /// The guide a planner reads before calling the tools.
     fn guide(&self) -> &'static str;

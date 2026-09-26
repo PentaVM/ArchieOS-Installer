@@ -1,6 +1,7 @@
 //! The tools: the node's state through archied's control socket, and the Archie Stage.
 
 use crate::toolbox::{Effect, ToolImage, ToolOutcome, ToolSpec, Toolbox};
+use archie_bridges::delivery::Deliverer;
 use archie_bridges::Bridge;
 use archie_core::control::{request_over, ControlRequest, ControlResponse};
 use archie_core::endpoint;
@@ -54,6 +55,8 @@ pub struct ArchieToolbox {
     principal: Principal,
     /// The bridges the operator served, each confined to the folder it was given.
     bridges: Vec<Arc<dyn Bridge>>,
+    /// Where results go on the person's computer, when the operator paired one.
+    deliverer: Option<Arc<Deliverer>>,
 }
 
 impl ArchieToolbox {
@@ -70,7 +73,14 @@ impl ArchieToolbox {
                 agent: AgentId::new(),
             },
             bridges: Vec::new(),
+            deliverer: None,
         }
+    }
+
+    /// Offers the delivery tools, sending to `deliverer`'s desk.
+    pub fn with_delivery(mut self, deliverer: Deliverer) -> Self {
+        self.deliverer = Some(Arc::new(deliverer));
+        self
     }
 
     /// Offers a bridge's tools. Two bridges with the same id are one too many: the second
@@ -475,6 +485,9 @@ impl Toolbox for ArchieToolbox {
                 effect: Effect::ReadOnly,
             });
         }
+        if self.deliverer.is_some() && !self.bridges.is_empty() {
+            tools.extend(crate::delivery::specs());
+        }
         for bridge in &self.bridges {
             tools.extend(bridge.tools().into_iter().map(|tool| ToolSpec {
                 name: tool.name,
@@ -510,6 +523,19 @@ impl Toolbox for ArchieToolbox {
                 },
                 Err(_) => ToolOutcome::error("the tool stopped unexpectedly"),
             };
+        }
+        if crate::delivery::NAMES.contains(&name) {
+            let Some(deliverer) = self.deliverer.clone() else {
+                return ToolOutcome::error("no desk is paired with this server");
+            };
+            let bridges = self.bridges.clone();
+            let name = name.to_string();
+            // Delivery streams files and waits on the network: off the protocol's thread.
+            return tokio::task::spawn_blocking(move || {
+                crate::delivery::call(&deliverer, &bridges, &name, &arguments)
+            })
+            .await
+            .unwrap_or_else(|_| ToolOutcome::error("the delivery stopped unexpectedly"));
         }
         match name {
             #[cfg(unix)]

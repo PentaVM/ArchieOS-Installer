@@ -109,6 +109,9 @@ version = "0.1.0"
 dependencies = [
  "archie-cut",
  "archie-types",
+ "base64",
+ "hex",
+ "ring",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -188,6 +191,22 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "archie-desk"
+version = "0.1.0"
+dependencies = [
+ "archie-bridges",
+ "axum",
+ "futures-util",
+ "hex",
+ "ring",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "toml",
 ]
 
 [[package]]

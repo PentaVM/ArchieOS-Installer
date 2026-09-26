@@ -5,6 +5,7 @@
 //!                   [--stage-socket PATH]
 //!                   [--allow-stage-actions --stage-key FILE [--stage-policy FILE]]
 //!                   [--bridge ID=DIR]... [--program NAME=PATH]...
+//!                   [--deliver-key FILE [--deliver-to 127.0.0.1:7447]]
 //!                   [--video-media DIR [--melt PATH] [--ffprobe PATH]]
 //! ```
 //!
@@ -24,6 +25,7 @@ const USAGE: &str = "usage: archie-mcp-server [--clearance public|internal] [--r
                          [--stage-socket PATH]
                          [--allow-stage-actions --stage-key FILE [--stage-policy FILE]]
                          [--bridge ID=DIR]... [--program NAME=PATH]...
+                         [--deliver-key FILE [--deliver-to 127.0.0.1:7447]]
                          [--video-media DIR [--melt PATH] [--ffprobe PATH]]
 
   --clearance            the most sensitive data a tool may return (default: public).
@@ -39,6 +41,10 @@ const USAGE: &str = "usage: archie-mcp-server [--clearance public|internal] [--r
                          --clearance internal. archie-bridges list names the bridges.
   --program NAME=PATH    where a program a bridge runs is (default: from PATH), e.g.
                          --program kicad-cli=/opt/kicad/bin/kicad-cli.
+  --deliver-key FILE     offer archie_deliver: results go to the workstation paired with
+                         `archie-desk pair`, whose key this file holds (mode 0600).
+  --deliver-to ADDR      where the workstation's ssh -R tunnel ends on this node
+                         (default 127.0.0.1:7447; loopback only).
   --video-media DIR      the same as --bridge video=DIR.
   --melt, --ffprobe      the same as --program melt=PATH, --program ffprobe=PATH.";
 
@@ -51,6 +57,8 @@ struct Config {
     stage_policy: PathBuf,
     bridges: Vec<(String, PathBuf)>,
     programs: Programs,
+    deliver_key: Option<PathBuf>,
+    deliver_to: std::net::SocketAddr,
 }
 
 fn parse(args: Vec<String>) -> Result<Option<Config>, String> {
@@ -63,6 +71,8 @@ fn parse(args: Vec<String>) -> Result<Option<Config>, String> {
         stage_policy: PathBuf::from("/etc/archie/stage/apps.toml"),
         bridges: Vec::new(),
         programs: Programs::default(),
+        deliver_key: None,
+        deliver_to: ([127, 0, 0, 1], archie_bridges::delivery::DEFAULT_PORT).into(),
     };
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
@@ -87,6 +97,12 @@ fn parse(args: Vec<String>) -> Result<Option<Config>, String> {
                 let pair = value("--program")?;
                 let (name, path) = pair.split_once('=').ok_or("--program is NAME=PATH")?;
                 config.programs.set(name, path);
+            }
+            "--deliver-key" => config.deliver_key = Some(PathBuf::from(value("--deliver-key")?)),
+            "--deliver-to" => {
+                config.deliver_to = value("--deliver-to")?
+                    .parse()
+                    .map_err(|_| "--deliver-to is an address such as 127.0.0.1:7447")?
             }
             "--video-media" => config
                 .bridges
@@ -249,6 +265,17 @@ async fn main() -> ExitCode {
                 return ExitCode::from(2);
             }
         };
+    }
+    if let Some(key_file) = &config.deliver_key {
+        let deliverer = archie_bridges::delivery::DeliveryKey::load(key_file)
+            .and_then(|key| archie_bridges::delivery::Deliverer::new(config.deliver_to, key));
+        match deliverer {
+            Ok(deliverer) => toolbox = toolbox.with_delivery(deliverer),
+            Err(error) => {
+                eprintln!("archie-mcp-server: --deliver-key: {error}");
+                return ExitCode::from(2);
+            }
+        }
     }
     let mut server = McpServer::new(toolbox, config.clearance);
     eprintln!(

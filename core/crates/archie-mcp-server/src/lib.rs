@@ -37,6 +37,7 @@
 #![forbid(unsafe_code)]
 
 pub mod archie;
+pub mod delivery;
 pub mod server;
 pub mod toolbox;
 

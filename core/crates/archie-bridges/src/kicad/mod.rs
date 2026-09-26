@@ -733,6 +733,10 @@ impl Bridge for Kicad {
         &self.manifest
     }
 
+    fn workspace(&self) -> &Workspace {
+        &self.workspace
+    }
+
     fn guide(&self) -> &'static str {
         GUIDE
     }
