@@ -58,6 +58,7 @@ function event(m){
   case 'level':$('level').style.width=Math.min(100,m.level*600)+'%';$('level').style.background=m.voiced?'#78dc5a':'#4cc2ff';break;
   case 'scene':scene=m;draw();break;
   case 'known':known(m.known);break;
+  case 'mic':log('tool',`micrófono llega a ${m.samples_per_s} muestras/s (debe ser ~16000), pico ${m.peak.toFixed(3)}`);break;
  }
 }
 function known(k){

@@ -319,7 +319,16 @@ async fn session(socket: WebSocket, senses: Arc<Senses>) {
             }
         }
     });
+    // What the microphone actually delivers: a page resampling wrong sends sound the ears
+    // cannot read, and the level meter alone does not show it.
+    let mut counted = (Instant::now(), 0usize, 0f32);
     while let Some(Ok(message)) = stream.next().await {
+        if counted.0.elapsed() >= Duration::from_secs(5) && counted.1 > 0 {
+            let rate = counted.1 as f32 / counted.0.elapsed().as_secs_f32();
+            eprintln!("microphone: {rate:.0} samples/s (the ears want 16000), peak {:.3}", counted.2);
+            senses.publish(json!({"type": "mic", "samples_per_s": rate.round(), "peak": counted.2}));
+            counted = (Instant::now(), 0, 0.0);
+        }
         match message {
             Message::Binary(data) if data.len() > 1 => match data[0] {
                 // Microphone: f32 little-endian at 16 kHz, in 20 ms frames for the loop.
@@ -328,6 +337,8 @@ async fn session(socket: WebSocket, senses: Arc<Senses>) {
                         .chunks_exact(4)
                         .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
                         .collect();
+                    counted.1 += samples.len();
+                    counted.2 = samples.iter().fold(counted.2, |peak, s| peak.max(s.abs()));
                     for frame in samples.chunks(crate::audio::FRAME) {
                         let _ = senses.audio.send(frame.to_vec());
                     }
