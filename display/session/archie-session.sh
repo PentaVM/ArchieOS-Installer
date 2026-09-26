@@ -8,7 +8,7 @@
 #   archie-session.sh down    stop everything
 #   archie-session.sh status  what is running
 #
-# From the laptop:  ssh -L 6080:127.0.0.1:6080 <host>   then  http://localhost:6080/vnc.html
+# From the laptop:  ssh -L 6080:127.0.0.1:6080 <host>   then  http://localhost:6080 (the gate)
 #
 # Environment: QT_DIR (default /opt/Qt/6.11.2/gcc_64), BUILD (default /workspace/build),
 # CORE (default /workspace/archieos/core/target/release), RUN (default /tmp/archie-session),
@@ -49,8 +49,9 @@ EOF
   for _ in $(seq 1 50); do ls "$XDG_RUNTIME_DIR"/wayland-* >/dev/null 2>&1 && break; sleep 0.2; done
   export WAYLAND_DISPLAY=$(basename "$(ls "$XDG_RUNTIME_DIR"/wayland-? | head -1)")
   echo "$WAYLAND_DISPLAY" > "$RUN/wayland-display"
+  # VNC on loopback; archie-arena-gate (always on, 127.0.0.1:6080) serves noVNC and carries
+  # its WebSocket to this.
   start wayvnc wayvnc 127.0.0.1 5901
-  start novnc websockify --web /usr/share/novnc 127.0.0.1:6080 127.0.0.1:5901
   # The ArchieOS tree of this session, and the read-only bridge the Observatory draws from.
   mkdir -p "$ROOT/etc" "$ROOT/var/lib" "$ROOT/var/log" "$ROOT/run" && chmod 700 "$ROOT/run"
   # archied keeps its state in PostgreSQL 18 with TimescaleDB 2.29.2 and pgvector 0.8.6: a
@@ -64,12 +65,14 @@ EOF
   LIBGL_ALWAYS_SOFTWARE=1 QT_QPA_PLATFORM=wayland \
     start observatory "$BUILD/native/archie-display" --scene "${SCENE:-orb}"
   # The Archie Stage beside it: the compositor Archie works in, its control socket sealed
-  # with this session's key. Applications opened on it use its own Wayland socket.
+  # with this session's key, at the agent's tempo (the pointer's paths on a quarter of the
+  # clock; TEMPO=person to watch it at a person's pace). Applications opened on it use its
+  # own Wayland socket.
   [ -f "$RUN/key" ] || "$CORE/archie-stage-cli" keygen "$RUN/key" >/dev/null
   if ! running stage; then rm -f "$RUN/control.sock" "$XDG_RUNTIME_DIR/archie-stage"; fi
   LIBGL_ALWAYS_SOFTWARE=1 QT_QPA_PLATFORM=wayland \
     start stage "$BUILD/stage/archie-stage" --socket-name archie-stage --control "$RUN/control.sock" \
-      --key-file "$RUN/key"
+      --key-file "$RUN/key" --tempo "${TEMPO:-agent}"
   status
 }
 

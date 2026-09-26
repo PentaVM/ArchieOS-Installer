@@ -21,6 +21,10 @@ pub struct Task {
     pub tiers: Vec<u32>,
     /// How the result is judged: "picture" compares the canvas with the reference.
     pub judge: String,
+    /// The command that gives the application back its first state before the clock starts
+    /// (run from the repository root), when the arena is not given one.
+    #[serde(default)]
+    pub reset: Option<String>,
     /// Models that decide the actions, tried in order.
     #[serde(default = "default_actors")]
     pub actors: Vec<String>,
@@ -29,8 +33,10 @@ pub struct Task {
     pub critics: Vec<String>,
 }
 
+/// Kimi K3 first: in the first runs it worked Photopea's tools (brush key, colour dialog, hex,
+/// brush size) where MiniCPM-V 4.5, though faster, mostly planned in words and did nothing.
 fn default_actors() -> Vec<String> {
-    vec!["openbmb/MiniCPM-V-4_5".into(), "moonshotai/Kimi-K3".into()]
+    vec!["moonshotai/Kimi-K3".into(), "openbmb/MiniCPM-V-4_5".into()]
 }
 
 fn default_critics() -> Vec<String> {
@@ -71,7 +77,7 @@ mod tests {
         .unwrap();
         let task = Task::load(&path).unwrap();
         assert_eq!(task.reference.unwrap(), dir.join("ref.png"));
-        assert_eq!(task.actors[0], "openbmb/MiniCPM-V-4_5");
+        assert_eq!(task.actors[0], "moonshotai/Kimi-K3");
         std::fs::write(&path, "id = \"x\"\nprompt = \"p\"\napp_id = \"a\"\ntiers = [15]\njudge = \"picture\"\n").unwrap();
         assert!(Task::load(&path).is_err(), "a picture task needs its reference");
     }

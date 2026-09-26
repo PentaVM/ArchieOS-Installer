@@ -8,6 +8,8 @@ license.workspace = true
 
 [dependencies]
 archie-paint.workspace = true
+axum.workspace = true
+futures-util.workspace = true
 archie-policy.workspace = true
 archie-stage.workspace = true
 archie-types.workspace = true

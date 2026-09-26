@@ -1,0 +1,11 @@
+# Copy a painting in Photopea, a Photoshop-like editor, with the mouse and keyboard alone.
+# What it measures: finding and working the tools (brush, its size, colours), and precision
+# of the hand — choosing and changing brush and colour as a painter does, under a time limit.
+# The reference: Francisco de Goya, El aquelarre (1797-98, Museo Lázaro Galdiano); Wikimedia Commons, public domain; 384x540.
+id = "aquelarre-goya-photopea"
+app_id = "firefox"
+reference = "aquelarre.png"
+reset = "display/session/arena-reset-photopea.sh 768 1080"
+judge = "picture"
+tiers = [15, 60, 300]
+prompt = """Photopea, a Photoshop-like image editor, is open with a new white document. Paint a copy of the reference picture on that white document, as close to it as you can: same composition, shapes and colours. Use Photopea's tools as a painter would: pick the brush, change its size, change the colour as often as the picture needs, and paint with strokes. Paint only inside the white document."""

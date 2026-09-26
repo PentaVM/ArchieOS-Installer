@@ -12,7 +12,7 @@
 //! the Stage gate. The run writes `<out>/<run>/` (result.json, trajectory.jsonl, final.png,
 //! compare.png) and appends a line to `<out>/results.jsonl`; the lessons go to `--memory`.
 
-use archie_arena::image::{crop, data_url, decode, fit_width, paper};
+use archie_arena::image::{crop, data_url, decode, document_now, fit_width, page_in_editor};
 use archie_arena::memory::{Memory, Remembered};
 use archie_arena::model::Nebius;
 use archie_arena::moves::{decision_of, stage_actions, Frame, Move};
@@ -116,8 +116,9 @@ Reply with ONE JSON object and nothing else: {\"thought\": \"one sentence: what 
 {\"do\":\"type\",\"text\":\"...\"} | {\"do\":\"strokes\",\"paths\":[[[X,Y],[X,Y],...], ...]} (press, draw \
 along the points, release; many lines per action) | {\"do\":\"scroll\",\"x\":X,\"y\":Y,\"dy\":N} | \
 {\"do\":\"wait\",\"ms\":N} | {\"do\":\"note\",\"text\":\"something to remember for next time, such as where a tool is\"} | \
-{\"do\":\"done\"}. Time is short and counts while you think: return many useful actions at once. \
-You will see the result of your actions in the next screenshot.";
+{\"do\":\"done\"}. Time is short and counts while you think: keep the thought to one sentence and \
+ALWAYS return actions — several at once, never an empty list. You will see their result in the next \
+screenshot.";
 
 fn log_line(path: &Path, value: serde_json::Value) {
     if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
@@ -135,7 +136,11 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
     let memory_path = take(&mut args, "--memory").map(PathBuf::from);
     let reset = take(&mut args, "--reset");
     let max_width: u32 = take(&mut args, "--max-width").map(|v| v.parse().unwrap_or(1280)).unwrap_or(1280);
-    let task = Task::load(&task_path)?;
+    let actors_flag = take(&mut args, "--actors");
+    let mut task = Task::load(&task_path)?;
+    if let Some(list) = actors_flag {
+        task.actors = list.split(',').map(|m| m.trim().to_string()).filter(|m| !m.is_empty()).collect();
+    }
     let nebius = Nebius::from_environment()?;
     let stamp = format!("{}-t{tier}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
     let out = out_root.join(&task.id).join(&stamp);
@@ -143,7 +148,7 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
     let trajectory = out.join("trajectory.jsonl");
 
     // The application's first state: the arena's doing, not timed.
-    if let Some(command) = &reset {
+    if let Some(command) = reset.as_ref().or(task.reset.as_ref()) {
         let status = tokio::process::Command::new("sh").arg("-c").arg(command).status().await.map_err(|e| e.to_string())?;
         if !status.success() {
             return Err(format!("the reset failed: {status}"));
@@ -158,8 +163,11 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         snapshots: Path::new(&socket).parent().ok_or("--socket has no directory")?.join("snapshots"),
         app_id: task.app_id.clone(),
     };
-    // Ready when the window is there and, for a picture, its white page is.
+    // Ready when the window is there and, for a picture, its white page sits inside the
+    // editor's workspace in two captures a second apart: a page still loading is all white,
+    // and a run timed from it would be timed from before the editor existed.
     let ready_by = Instant::now() + Duration::from_secs(120);
+    let mut seen_before: Option<(u32, u32, u32, u32)> = None;
     let (first, page) = loop {
         learn(&mut seat.client, &mut seat.world, Duration::from_millis(500)).await.map_err(|e| e.to_string())?;
         if seat.world.surfaces_of(&task.app_id).next().is_some() {
@@ -167,8 +175,12 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
                 if task.judge != "picture" {
                     break (sheet, None);
                 }
-                if let Some(found) = paper(&sheet) {
-                    break (sheet, Some(found));
+                match page_in_editor(&sheet) {
+                    Some((found, workspace)) if seen_before.is_some_and(|b| b == found) => {
+                        break (sheet, Some((found, workspace)));
+                    }
+                    Some((found, _)) => seen_before = Some(found),
+                    None => seen_before = None,
                 }
             }
         }
@@ -234,7 +246,8 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         }
         let mut images: Vec<String> = reference_url.iter().cloned().collect();
         images.push(data_url(&seen));
-        let answer = match nebius.ask(&task.actors, SYSTEM, &text, &images, 6000, left).await {
+        // One decision may not take the whole run: a model that hangs is left for the next.
+        let answer = match nebius.ask(&task.actors, SYSTEM, &text, &images, 3000, left.min(Duration::from_secs(25))).await {
             Ok(answer) => answer,
             Err(error) => {
                 failed_calls += 1;
@@ -313,12 +326,19 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         "notes": notes, "lessons_given": lessons,
     });
     let mut score = 0.0f32;
-    if let (Some(reference), Some((x, y, w, h))) = (&reference, page) {
+    if let (Some(reference), Some((first_page, workspace))) = (&reference, page) {
+        let (x, y, w, h) = document_now(&last, first_page, workspace);
+        result["document"] = json!([x, y, w, h]);
         let drawing = crop(&last, x, y, w, h);
         let target = bench::fitted(reference, drawing.width, drawing.height);
         let ssim = bench::ssim(&target, &drawing);
         let colour_error = bench::colour_error(&target, &drawing);
-        let objective = 0.5 * ssim.max(0.0) + 0.5 * (1.0 - (colour_error / 50.0).min(1.0));
+        // Measured as what was gained over the untouched page: a white page shares the light
+        // parts of most pictures, and unnormalised it outscored a run that painted.
+        let measure = |ssim: f32, colour_error: f32| 0.5 * ssim.max(0.0) + 0.5 * (1.0 - (colour_error / 50.0).min(1.0));
+        let blank = Sheet::white(drawing.width, drawing.height);
+        let untouched = measure(bench::ssim(&target, &blank), bench::colour_error(&target, &blank));
+        let objective = ((measure(ssim, colour_error) - untouched) / (1.0 - untouched).max(1e-3)).clamp(0.0, 1.0);
         let critic_question = "You are an art critic. The FIRST image is a reference picture; the SECOND is a copy an \
             AI made of it by operating a Photoshop-like program with only a mouse and keyboard under a time limit. \
             Judge ONLY the second against the first. Reply with one line of JSON: {\"likeness\": 0-10, \"realism\": \

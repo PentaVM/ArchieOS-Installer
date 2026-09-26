@@ -108,6 +108,56 @@ pub fn paper(sheet: &Sheet) -> Option<(u32, u32, u32, u32)> {
     (height >= sheet.height / 10).then_some((x0, top, run, height))
 }
 
+fn luma(p: [u8; 3]) -> f32 {
+    0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32
+}
+
+/// A white page an editor shows: [`paper`], and only when it sits inside the editor's own
+/// darker workspace — so a page still loading, all white, is not taken for a document.
+/// Returns the page and the workspace's colour around it.
+pub fn page_in_editor(sheet: &Sheet) -> Option<((u32, u32, u32, u32), [u8; 3])> {
+    let (x, y, w, h) = paper(sheet)?;
+    if w > sheet.width * 7 / 10 || x < 8 || x + w + 8 >= sheet.width {
+        return None;
+    }
+    let mid = y + h / 2;
+    let left = sheet.pixels[(mid * sheet.width + x - 6) as usize];
+    let right = sheet.pixels[(mid * sheet.width + x + w + 5) as usize];
+    (luma(left) < 110.0 && luma(right) < 110.0 && (luma(left) - luma(right)).abs() < 25.0).then_some(((x, y, w, h), left))
+}
+
+/// Where the document is when the run ends: everything around the first page's place that
+/// is not the workspace's colour, if it keeps the page's proportions — the document after
+/// Archie painted, zoomed or moved it. Otherwise the page's first place.
+pub fn document_now(sheet: &Sheet, first: (u32, u32, u32, u32), workspace: [u8; 3]) -> (u32, u32, u32, u32) {
+    let (x, y, w, h) = first;
+    let (gx, gy) = (w / 3, h / 3);
+    let (x0, y0) = (x.saturating_sub(gx), y.saturating_sub(gy));
+    let (x1, y1) = ((x + w + gx).min(sheet.width), (y + h + gy).min(sheet.height));
+    let differs = |p: [u8; 3]| (0..3).map(|k| (p[k] as i32 - workspace[k] as i32).abs()).max().unwrap_or(0) > 14;
+    let (mut left, mut top, mut right, mut bottom) = (u32::MAX, u32::MAX, 0, 0);
+    for row in y0..y1 {
+        for col in x0..x1 {
+            if differs(sheet.pixels[(row * sheet.width + col) as usize]) {
+                left = left.min(col);
+                right = right.max(col);
+                top = top.min(row);
+                bottom = bottom.max(row);
+            }
+        }
+    }
+    if left >= right || top >= bottom {
+        return first;
+    }
+    let (nw, nh) = (right - left + 1, bottom - top + 1);
+    let ratio = (nw as f32 / nh as f32) / (w as f32 / h as f32);
+    if (0.9..=1.1).contains(&ratio) {
+        (left, top, nw, nh)
+    } else {
+        first
+    }
+}
+
 /// A sheet as a PNG data URL, for a model.
 pub fn data_url(sheet: &Sheet) -> String {
     use base64::Engine;
@@ -134,6 +184,22 @@ mod tests {
         assert_eq!(paper(&window()), Some((40, 30, 60, 80)));
         let grey = Sheet { width: 50, height: 50, pixels: vec![[60, 60, 60]; 2500] };
         assert_eq!(paper(&grey), None);
+    }
+
+    #[test]
+    fn a_page_still_loading_is_not_a_document_and_a_moved_document_is_found() {
+        let loading = Sheet { width: 160, height: 140, pixels: vec![[250, 250, 252]; 160 * 140] };
+        assert_eq!(page_in_editor(&loading), None, "all white: still loading");
+        let (page, workspace) = page_in_editor(&window()).unwrap();
+        assert_eq!((page, workspace), ((40, 30, 60, 80), [60, 60, 60]));
+        // Painted over and nudged 5 px right: found where it is now.
+        let mut after = Sheet { width: 160, height: 140, pixels: vec![[60, 60, 60]; 160 * 140] };
+        for y in 30..110 {
+            for x in 45..105 {
+                after.pixels[(y * 160 + x) as usize] = [120, 90, 40];
+            }
+        }
+        assert_eq!(document_now(&after, page, workspace), (45, 30, 60, 80));
     }
 
     #[test]
