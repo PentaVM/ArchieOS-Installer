@@ -80,8 +80,8 @@ void MAIN()
     float specular = mix(0.35, 1.2, metalness) * (1.1 - roughness);
     // A little more saturation than the palette: glass deepens colour.
     float luma = dot(lfColor.rgb, vec3(0.2126, 0.7152, 0.0722));
-    vec3 body = max(mix(vec3(luma), lfColor.rgb, 1.6), vec3(0.0));
-    vec3 colour = base / max(lfColor.rgb, vec3(1e-3)) * body * shape * 1.4;
+    vec3 body = max(mix(vec3(luma), lfColor.rgb, 1.9), vec3(0.0));
+    vec3 colour = base / max(lfColor.rgb, vec3(1e-3)) * body * shape * 2.0;
     colour += (warm * sw * 0.9 + cool * sc * 0.6) * specular;
 
     float ndv = max(dot(N, V), 0.0);
@@ -90,7 +90,7 @@ void MAIN()
     float activity = lfData.x;
     float attention = lfData.y;
     // The heart glows with what the entity is doing; engaged nodes burn brightest.
-    colour += body * core * (0.35 + activity * 0.6 + attention * 2.4) * (0.6 + emissive);
+    colour += body * core * (0.6 + activity * 0.8 + attention * 2.8) * (0.6 + emissive);
 
     float flags = lfData.z;
     float selected = mod(flags, 2.0);
@@ -106,7 +106,7 @@ void MAIN()
         rimColour = vec3(1.6, 1.0, 0.3);
     else if (status > 0.5)
         rimColour = vec3(1.2, 0.85, 0.35);
-    colour += rimColour * fresnel * (0.95 + attention * 2.0 + step(0.5, status) * 0.9);
+    colour += rimColour * fresnel * (1.4 + attention * 2.4 + step(0.5, status) * 0.9);
     colour += warm * fresnel * (selected * 1.6 + hovered * 0.8);
     FRAGCOLOR = vec4(colour, 1.0);
 }

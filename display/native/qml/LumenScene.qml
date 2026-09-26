@@ -152,9 +152,9 @@ Node {
 
         // --- Links and relations ---
         LineLayer { name: "backbone"; tint: Qt.vector3d(0.26, 0.38, 0.39); alpha: scene.look.linkOpacity * 4; visible: scene.look.links }
-        LineLayer { name: "fibres"; tint: scene.look.cool; alpha: 0.074; visible: scene.look.links }
-        LineLayer { name: "observed"; tint: scene.look.warm; alpha: 0.25; intensity: 1.4; visible: scene.look.links }
-        LineLayer { name: "semantic"; tint: scene.look.cool; alpha: 0.12; intensity: 1.3; visible: scene.look.links }
+        LineLayer { name: "fibres"; tint: scene.look.cool; alpha: 0.14; visible: scene.look.links }
+        LineLayer { name: "observed"; tint: scene.look.warm; alpha: 0.4; intensity: 1.8; visible: scene.look.links }
+        LineLayer { name: "semantic"; tint: scene.look.cool; alpha: 0.22; intensity: 1.6; visible: scene.look.links }
         LineLayer { name: "guides"; tint: scene.look.warm; alpha: 0.15; visible: scene.look.guides }
         LineLayer { name: "highlight"; tint: scene.look.warm; alpha: scene.look.highlightOpacity; intensity: 1.8 }
 
@@ -185,13 +185,13 @@ Node {
             geometry: LumenGeometry { id: moduleHaloQuad }
             instancing: moduleTable
             Component.onCompleted: lumen.bindLayer("quad", moduleHaloQuad)
-            materials: SpriteMaterial { grow: 2.7; alpha: 0.2 + scene.look.bloomStrength * 0.14; sharpness: 2.0; haloGain: 0.9 }
+            materials: SpriteMaterial { grow: 2.8; alpha: 0.3 + scene.look.bloomStrength * 0.16; sharpness: 1.8; haloGain: 0.9 }
         }
         Model {
             geometry: LumenGeometry { id: entityHaloQuad }
             instancing: entityTable
             Component.onCompleted: lumen.bindLayer("quad", entityHaloQuad)
-            materials: SpriteMaterial { grow: 3.2; alpha: 0.18 + scene.look.bloomStrength * 0.14; sharpness: 1.9; haloGain: 1.1 }
+            materials: SpriteMaterial { grow: 3.3; alpha: 0.28 + scene.look.bloomStrength * 0.16; sharpness: 1.7; haloGain: 1.1 }
         }
 
         // --- Signals travelling along real links ---
