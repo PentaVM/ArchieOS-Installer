@@ -30,7 +30,12 @@ pub struct Task {
     /// there to use.
     #[serde(default = "ends_early")]
     pub ends_early: bool,
-    /// Models that decide the actions, tried in order.
+    /// Models that write the brief before the clock starts, tried in order: slow and
+    /// thorough, since their time is not counted.
+    #[serde(default = "default_planners")]
+    pub planners: Vec<String>,
+    /// Models that decide the actions while the clock runs, tried in order: fast, since every
+    /// second they think is a second not painting. IRIS is to take this part over.
     #[serde(default = "default_actors")]
     pub actors: Vec<String>,
     /// Models that judge and reflect, tried in order.
@@ -42,10 +47,15 @@ fn ends_early() -> bool {
     true
 }
 
-/// Kimi K3 first: in the first runs it worked Photopea's tools (brush key, colour dialog, hex,
-/// brush size) where MiniCPM-V 4.5, though faster, mostly planned in words and did nothing.
+fn default_planners() -> Vec<String> {
+    vec!["moonshotai/Kimi-K3".into()]
+}
+
+/// MiniCPM-V 4.5 answers in about a second where Kimi K3 took 4 to 11 s, and 75 s when
+/// Nebius was busy (2026-09-26): a timed run cannot wait on the planner. Alone, MiniCPM
+/// mostly planned in words; with Kimi's brief in front of it, it has the plan to act on.
 fn default_actors() -> Vec<String> {
-    vec!["moonshotai/Kimi-K3".into(), "openbmb/MiniCPM-V-4_5".into()]
+    vec!["openbmb/MiniCPM-V-4_5".into()]
 }
 
 fn default_critics() -> Vec<String> {
@@ -86,7 +96,8 @@ mod tests {
         .unwrap();
         let task = Task::load(&path).unwrap();
         assert_eq!(task.reference.unwrap(), dir.join("ref.png"));
-        assert_eq!(task.actors[0], "moonshotai/Kimi-K3");
+        assert_eq!(task.planners[0], "moonshotai/Kimi-K3", "the slow, thorough model plans");
+        assert_eq!(task.actors[0], "openbmb/MiniCPM-V-4_5", "the fast one acts on the clock");
         std::fs::write(&path, "id = \"x\"\nprompt = \"p\"\napp_id = \"a\"\ntiers = [15]\njudge = \"picture\"\n").unwrap();
         assert!(Task::load(&path).is_err(), "a picture task needs its reference");
     }

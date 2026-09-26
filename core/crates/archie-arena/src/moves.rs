@@ -7,19 +7,22 @@
 
 use archie_stage::{KeyChord, PointerButton, StageAction, StageText, StrokePoint};
 use archie_stage::{MAX_STROKE_PATHS, MAX_STROKE_POINTS, MAX_STROKE_POINTS_IN_ALL};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// One decision: what the model thinks is happening, and what to do next.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Decision {
     #[serde(default)]
     pub thought: String,
+    /// The ordered steps of a brief, given back at every later decision.
+    #[serde(default)]
+    pub plan: Vec<String>,
     #[serde(default)]
     pub actions: Vec<Move>,
 }
 
 /// One thing to do, in the capture's pixels.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "do", rename_all = "snake_case")]
 pub enum Move {
     Click { x: f32, y: f32 },
@@ -132,11 +135,15 @@ pub fn decision_of(text: &str) -> Result<Decision, String> {
     };
     // Moves that do not parse are dropped one by one, not the whole decision.
     let thought = value["thought"].as_str().unwrap_or("").to_string();
+    let plan = value["plan"]
+        .as_array()
+        .map(|steps| steps.iter().filter_map(|s| s.as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
     let actions = value["actions"]
         .as_array()
         .map(|items| items.iter().filter_map(|item| serde_json::from_value::<Move>(item.clone()).ok()).collect())
         .unwrap_or_default();
-    Ok(Decision { thought, actions })
+    Ok(Decision { thought, plan, actions })
 }
 
 /// The JSON text with the brackets it forgot: a closer that does not match the innermost

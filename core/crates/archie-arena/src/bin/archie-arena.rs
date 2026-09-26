@@ -15,7 +15,7 @@
 use archie_arena::image::{crop, data_url, decode, document_now, fit_width, page_in_editor};
 use archie_arena::memory::{Memory, Remembered};
 use archie_arena::model::Nebius;
-use archie_arena::moves::{decision_of, stage_actions, Frame, Move};
+use archie_arena::moves::{decision_of, stage_actions, Decision, Frame, Move};
 use archie_arena::task::Task;
 use archie_paint::bench::{self, Sheet};
 use archie_paint::Picture;
@@ -142,9 +142,16 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
     let reset = take(&mut args, "--reset");
     let max_width: u32 = take(&mut args, "--max-width").map(|v| v.parse().unwrap_or(1280)).unwrap_or(1280);
     let actors_flag = take(&mut args, "--actors");
+    let planners_flag = take(&mut args, "--planners");
     let mut task = Task::load(&task_path)?;
+    let models = |list: String| -> Vec<String> {
+        list.split(',').map(|m| m.trim().to_string()).filter(|m| !m.is_empty()).collect()
+    };
     if let Some(list) = actors_flag {
-        task.actors = list.split(',').map(|m| m.trim().to_string()).filter(|m| !m.is_empty()).collect();
+        task.actors = models(list);
+    }
+    if let Some(list) = planners_flag {
+        task.planners = models(list);
     }
     let nebius = Nebius::from_environment()?;
     let stamp = format!("{}-t{tier}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
@@ -212,32 +219,9 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
     let mut memory = memory_path.as_ref().map(|p| Memory::load(p)).unwrap_or_default();
     let lessons = memory.lessons(&task.id, tier);
 
-    // The clock: from here on, looking and deciding count as much as acting.
-    let started = Instant::now();
-    let deadline = started + Duration::from_secs(tier as u64);
-    let mut reports: Vec<String> = Vec::new();
-    let mut notes: Vec<String> = Vec::new();
-    let (mut decisions, mut executed, mut refused, mut failed_calls) = (0usize, 0usize, 0usize, 0usize);
-    let mut last_actions = String::new();
-    'run: while Instant::now() < deadline {
-        let window = match seat.look().await {
-            Ok(sheet) => sheet,
-            Err(error) => {
-                reports.push(format!("could not look: {error}"));
-                tokio::time::sleep(Duration::from_millis(300)).await;
-                continue;
-            }
-        };
-        let (seen, scale) = fit_width(&window, max_width);
-        let frame = Frame { scale, width: window.width, height: window.height };
-        let left = deadline.saturating_duration_since(Instant::now());
-        let mut text = format!(
-            "TASK: {}\n\nTime left: {:.1} s of {tier} s. The screenshot is {}x{} pixels.",
-            task.prompt,
-            left.as_secs_f32(),
-            seen.width,
-            seen.height
-        );
+    // What Archie is told at every decision, the brief's and the timed ones alike.
+    let context = |clock: &str, seen: &Sheet| -> String {
+        let mut text = format!("TASK: {}\n\n{clock} The screenshot is {}x{} pixels.", task.prompt, seen.width, seen.height);
         if reference_url.is_some() {
             text.push_str(" The FIRST image is the reference picture; the SECOND is the screenshot.");
         }
@@ -251,34 +235,122 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
             text.push_str("\n\nLESSONS FROM YOUR EARLIER RUNS OF THIS TASK:\n- ");
             text.push_str(&lessons.join("\n- "));
         }
-        if !last_actions.is_empty() {
-            text.push_str(&format!("\n\nYOUR LAST ACTIONS AND WHAT HAPPENED:\n{last_actions}"));
-        }
+        text
+    };
+    let images_with = |seen: &Sheet| -> Vec<String> {
         let mut images: Vec<String> = reference_url.iter().cloned().collect();
-        images.push(data_url(&seen));
-        // One decision may not take the whole run: a model that hangs is left for the next.
-        let answer = match nebius.ask(&task.actors, SYSTEM, &text, &images, 3000, left.min(Duration::from_secs(25))).await {
-            Ok(answer) => answer,
-            Err(error) => {
-                failed_calls += 1;
-                reports.push(format!("no decision: {error}"));
-                log_line(&trajectory, json!({"t": started.elapsed().as_secs_f32(), "error": error}));
-                continue;
+        images.push(data_url(seen));
+        images
+    };
+    // Every screen Archie decided on is kept beside the moves it chose (frames/NNNN.png, in
+    // the coordinates the moves use; the moves are in trajectory.jsonl under the same frame
+    // number): the pairs IRIS learns to act from.
+    let frames = out.join("frames");
+    std::fs::create_dir_all(&frames).map_err(|e| e.to_string())?;
+    let mut frame_count = 0usize;
+    let mut keep_frame = |seen: &Sheet| -> usize {
+        let index = frame_count;
+        let _ = std::fs::write(frames.join(format!("{index:04}.png")), seen.png());
+        frame_count += 1;
+        index
+    };
+
+    // The brief, before the clock. Archie reads the task, the reference and the first screen
+    // and plans with no time counted: the thinking is the planner's (Kimi), what is timed is
+    // the doing, which IRIS is to take over. The plan comes back at every later decision, and
+    // its opening moves run the moment the clock starts.
+    let (brief_seen, brief_scale) = fit_width(&first, max_width);
+    let brief_frame = Frame { scale: brief_scale, width: first.width, height: first.height };
+    let brief_index = keep_frame(&brief_seen);
+    let brief_text = format!(
+        "{}\n\nBEFORE THE CLOCK: the {tier} s have not started yet. Plan now, without hurry: the whole task and the \
+         fastest way to do it well in {tier} s. Reply with ONE JSON object: {{\"thought\": \"one sentence\", \
+         \"plan\": [\"short ordered steps, each concrete: which tool, which colour (hex), where on screen in pixels\"], \
+         \"actions\": [the opening actions, run the moment the clock starts: as many as you are sure of]}}. The plan \
+         is shown to you again at every later step.",
+        context(&format!("Time: the whole {tier} s, from the moment you answer."), &brief_seen)
+    );
+    let mut plan: Vec<String> = Vec::new();
+    let mut briefing_seconds = 0.0f32;
+    let mut pending: Option<(Decision, Frame)> = None;
+    match nebius.ask(&task.planners, SYSTEM, &brief_text, &images_with(&brief_seen), 8000, Duration::from_secs(300)).await {
+        Ok(answer) => {
+            briefing_seconds = answer.seconds;
+            match decision_of(&answer.text) {
+                Ok(decision) => {
+                    plan = decision.plan.clone();
+                    log_line(&trajectory, json!({
+                        "t": 0.0, "brief": true, "model": answer.model, "model_seconds": answer.seconds, "frame": brief_index,
+                        "thought": decision.thought, "plan": plan, "actions": decision.actions.len(), "moves": decision.actions,
+                    }));
+                    pending = Some((decision, brief_frame));
+                }
+                Err(error) => log_line(&trajectory, json!({"t": 0.0, "brief": true, "unreadable": error})),
+            }
+        }
+        Err(error) => log_line(&trajectory, json!({"t": 0.0, "brief": true, "error": error})),
+    }
+    let plan_text = if plan.is_empty() {
+        String::new()
+    } else {
+        format!("\n\nYOUR PLAN (made before the clock):\n- {}", plan.join("\n- "))
+    };
+
+    // The clock: from here on, looking and deciding count as much as acting.
+    let started = Instant::now();
+    let deadline = started + Duration::from_secs(tier as u64);
+    let mut reports: Vec<String> = Vec::new();
+    let mut notes: Vec<String> = Vec::new();
+    let (mut decisions, mut executed, mut refused, mut failed_calls) = (0usize, 0usize, 0usize, 0usize);
+    let mut last_actions = String::new();
+    'run: while Instant::now() < deadline {
+        let (decision, frame) = match pending.take() {
+            Some(briefed) => briefed,
+            None => {
+                let window = match seat.look().await {
+                    Ok(sheet) => sheet,
+                    Err(error) => {
+                        reports.push(format!("could not look: {error}"));
+                        tokio::time::sleep(Duration::from_millis(300)).await;
+                        continue;
+                    }
+                };
+                let (seen, scale) = fit_width(&window, max_width);
+                let frame = Frame { scale, width: window.width, height: window.height };
+                let index = keep_frame(&seen);
+                let left = deadline.saturating_duration_since(Instant::now());
+                let mut text = context(&format!("Time left: {:.1} s of {tier} s.", left.as_secs_f32()), &seen);
+                text.push_str(&plan_text);
+                if !last_actions.is_empty() {
+                    text.push_str(&format!("\n\nYOUR LAST ACTIONS AND WHAT HAPPENED:\n{last_actions}"));
+                }
+                // One decision may not take the whole run: a model that hangs is left for the next.
+                let answer = match nebius.ask(&task.actors, SYSTEM, &text, &images_with(&seen), 3000, left.min(Duration::from_secs(25))).await {
+                    Ok(answer) => answer,
+                    Err(error) => {
+                        failed_calls += 1;
+                        reports.push(format!("no decision: {error}"));
+                        log_line(&trajectory, json!({"t": started.elapsed().as_secs_f32(), "error": error}));
+                        continue;
+                    }
+                };
+                decisions += 1;
+                let decision = match decision_of(&answer.text) {
+                    Ok(decision) => decision,
+                    Err(error) => {
+                        last_actions = format!("(your answer could not be read: {error})");
+                        log_line(&trajectory, json!({"t": started.elapsed().as_secs_f32(), "model": answer.model, "unreadable": answer.text.chars().take(400).collect::<String>()}));
+                        continue;
+                    }
+                };
+                log_line(&trajectory, json!({
+                    "t": started.elapsed().as_secs_f32(), "model": answer.model, "model_seconds": answer.seconds,
+                    "tokens": answer.completion_tokens, "thought": decision.thought, "actions": decision.actions.len(),
+                    "frame": index, "moves": decision.actions,
+                }));
+                (decision, frame)
             }
         };
-        decisions += 1;
-        let decision = match decision_of(&answer.text) {
-            Ok(decision) => decision,
-            Err(error) => {
-                last_actions = format!("(your answer could not be read: {error})");
-                log_line(&trajectory, json!({"t": started.elapsed().as_secs_f32(), "model": answer.model, "unreadable": answer.text.chars().take(400).collect::<String>()}));
-                continue;
-            }
-        };
-        log_line(&trajectory, json!({
-            "t": started.elapsed().as_secs_f32(), "model": answer.model, "model_seconds": answer.seconds,
-            "tokens": answer.completion_tokens, "thought": decision.thought, "actions": decision.actions.len(),
-        }));
         last_actions.clear();
         for step in &decision.actions {
             if Instant::now() >= deadline {
@@ -337,7 +409,7 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
     let mut result = json!({
         "task": task.id, "tier": tier, "run": stamp, "seconds_spent": spent, "decisions": decisions,
         "actions_executed": executed, "actions_refused": refused, "failed_model_calls": failed_calls,
-        "notes": notes, "lessons_given": lessons,
+        "notes": notes, "lessons_given": lessons, "plan": plan, "briefing_seconds": briefing_seconds,
     });
     let mut score = 0.0f32;
     if let (Some(reference), Some((first_page, workspace))) = (&reference, page) {
