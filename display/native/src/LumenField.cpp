@@ -87,7 +87,7 @@ QVariantMap defaults()
         {QStringLiteral("bloomStrength"), 0.42}, {QStringLiteral("bloomRadius"), 0.34},
         {QStringLiteral("bloomThreshold"), 0.76}, {QStringLiteral("visibleLimit"), 360},
         {QStringLiteral("ambientLight"), 1.1}, {QStringLiteral("warmLight"), 15000},
-        {QStringLiteral("coolLight"), 11000}, {QStringLiteral("background"), QStringLiteral("#0d1415")},
+        {QStringLiteral("coolLight"), 11000}, {QStringLiteral("background"), QStringLiteral("#07080c")},
         {QStringLiteral("accentWarm"), QStringLiteral("#e8b47d")},
         {QStringLiteral("accentCool"), QStringLiteral("#78c2ca")},
         {QStringLiteral("shell"), true}, {QStringLiteral("ambient"), true},
@@ -177,7 +177,17 @@ void entry(QByteArray &table, const QVector3D &position, float scale, const lume
     e.row1 = QVector4D(0, scale, 0, position.y());
     e.row2 = QVector4D(0, 0, scale, position.z());
     e.color = QVector4D(colour.r, colour.g, colour.b, alpha);
-    e.instanceData = data;
+    // Qt Quick 3D hands custom materials a flat grey for INSTANCE_COLOR, so the colour
+    // travels in the data channel instead: sRGB at 8 bits a channel in one float (24 bits
+    // are exact in a float), and activity and focus at 8 bits each in another. The
+    // shaders unpack both.
+    const auto byte = [](float linear) {
+        return static_cast<int>(std::lround(std::pow(std::clamp(linear, 0.0F, 1.0F), 1.0F / 2.2F) * 255.0F));
+    };
+    const auto unit = [](float v) { return static_cast<int>(std::lround(std::clamp(v, 0.0F, 1.0F) * 255.0F)); };
+    const float rgb = static_cast<float>(byte(colour.r) * 65536 + byte(colour.g) * 256 + byte(colour.b));
+    const float state = static_cast<float>(unit(data.x()) * 256 + unit(data.y()));
+    e.instanceData = QVector4D(rgb, state, data.z(), data.w());
     table.append(reinterpret_cast<const char *>(&e), sizeof(e));
 }
 
@@ -633,6 +643,56 @@ bool LumenField::drawn(int index) const
     return !m_hiddenCategories.contains(node.category);
 }
 
+float LumenField::attentionOf(int index) const
+{
+    if (index < 0 || static_cast<std::size_t>(index) >= m_nodes.size())
+        return 0.0F;
+    const Node &node = m_nodes[static_cast<std::size_t>(index)];
+    // What the system is doing with this node, from what the model observed: a Stage
+    // action on it, Cortex holding it in focus, or the voice speaking about it. Load alone
+    // is not use: a busy daemon glows from its core but is not lit as engaged.
+    float score = std::max(node.focus, std::min(1.0F, node.voice * 1.2F));
+    if (node.status == QLatin1String("active") || node.status == QLatin1String("error"))
+        score = 1.0F;
+    else if (node.status == QLatin1String("predicted"))
+        score = std::max(score, 0.8F);
+    else if (node.status == QLatin1String("verified"))
+        score = std::max(score, 0.6F);
+    return std::clamp(score, 0.0F, 1.0F);
+}
+
+void LumenField::updateAttention()
+{
+    std::vector<std::pair<float, int>> ranked;
+    for (std::size_t i = 0; i < m_nodes.size(); ++i) {
+        const float score = attentionOf(static_cast<int>(i));
+        if (score >= 0.25F && m_nodes[i].kind != QLatin1String("root"))
+            ranked.emplace_back(score, static_cast<int>(i));
+    }
+    std::sort(ranked.begin(), ranked.end(), [](const auto &a, const auto &b) { return a.first > b.first; });
+    if (ranked.size() > 6)
+        ranked.resize(6);
+    m_attention.clear();
+    QVariantList rows;
+    for (const auto &[score, i] : ranked) {
+        m_attention.push_back(i);
+        const Node &node = m_nodes[static_cast<std::size_t>(i)];
+        rows.push_back(QVariantMap{{QStringLiteral("id"), node.id}, {QStringLiteral("name"), node.name},
+                                  {QStringLiteral("category"), categoryLabel(node.category)},
+                                  {QStringLiteral("score"), score}});
+    }
+    const QString lead = m_attention.empty() ? QString() : m_nodes[static_cast<std::size_t>(m_attention.front())].id;
+    if (rows != m_attentionRows) {
+        m_attentionRows = rows;
+        emit attentionChanged();
+    }
+    if (lead != m_attentionLead) {
+        m_attentionLead = lead;
+        emit attentionMoved(lead.isEmpty() ? QVector3D() : m_nodes[static_cast<std::size_t>(m_attention.front())].anchor,
+                            !lead.isEmpty());
+    }
+}
+
 QVector3D LumenField::positionAt(int index) const
 {
     if (index < 0 || static_cast<std::size_t>(index) >= m_bodies.size())
@@ -797,6 +857,12 @@ void LumenField::accept(const QByteArray &body)
     for (Node &node : nodes)
         node.parentIndex = index.value(node.parent, -1);
 
+    // A field with nothing in common with the last one (the first, or a new lens) is
+    // projected: every orb starts at the centre and springs out to its place.
+    bool fresh = true;
+    for (const Node &node : nodes)
+        if (previous.contains(node.id))
+            fresh = false;
     std::vector<lumen::Body> bodies;
     bodies.reserve(nodes.size());
     for (const Node &node : nodes) {
@@ -810,7 +876,7 @@ void LumenField::accept(const QByteArray &body)
             // A newly opened member grows out of the module that held it.
             body.position = parent->first;
         } else {
-            body.position = body.anchor;
+            body.position = fresh ? Vec3{} : body.anchor;
         }
         bodies.push_back(body);
     }
@@ -915,9 +981,14 @@ void LumenField::accept(const QByteArray &body)
         rebuildMembrane();
         rebuildGhosts();
     }
+    updateAttention();
     select(m_selected);
     updateLook();
     updateCategoryRows();
+    if (fresh && !m_nodes.empty()) {
+        m_projection.start();
+        emit projectionStarted();
+    }
     setStatus(m_lens == QLatin1String("entities") ? QStringLiteral("ENTIDADES · UNA POR OBSERVACIÓN")
                                                   : QStringLiteral("ESTRUCTURA + RELACIONES OBSERVADAS"));
     emit sceneChanged();
@@ -1022,19 +1093,29 @@ void LumenField::updateHighlight()
 {
     m_highlightNodes.clear();
     m_highlightRelations.clear();
-    const int focus = indexOf(m_selected.isEmpty() ? m_hoveredId : m_selected);
+    // What a person points at wins; otherwise what the system is using is lit: each
+    // engaged node, the way from it to the centre, and the relations it takes part in.
+    const int pointed = indexOf(m_selected.isEmpty() ? m_hoveredId : m_selected);
+    const std::vector<int> focuses = pointed >= 0 ? std::vector<int>{pointed} : m_attention;
     const auto budget = static_cast<std::size_t>(number("highlightBudget"));
-    if (focus >= 0) {
-        std::vector<int> parents;
-        parents.reserve(m_nodes.size());
-        for (const Node &node : m_nodes)
-            parents.push_back(node.parentIndex);
-        for (const std::size_t i : lumen::neighbourhood(parents, focus, budget))
-            if (drawn(static_cast<int>(i)) && drawn(parents[i]))
+    std::vector<int> parents;
+    parents.reserve(m_nodes.size());
+    for (const Node &node : m_nodes)
+        parents.push_back(node.parentIndex);
+    QSet<int> seenNodes;
+    QSet<int> seenRelations;
+    for (const int focus : focuses) {
+        const std::size_t share = pointed >= 0 ? budget : std::max<std::size_t>(4, budget / std::max<std::size_t>(1, focuses.size()));
+        for (const std::size_t i : lumen::neighbourhood(parents, focus, share))
+            if (drawn(static_cast<int>(i)) && drawn(parents[i]) && !seenNodes.contains(static_cast<int>(i))) {
+                seenNodes.insert(static_cast<int>(i));
                 m_highlightNodes.push_back(static_cast<int>(i));
+            }
         for (std::size_t r = 0; r < m_relations.size() && m_highlightNodes.size() + m_highlightRelations.size() < budget; ++r)
-            if (m_relations[r].source == focus || m_relations[r].target == focus)
+            if ((m_relations[r].source == focus || m_relations[r].target == focus) && !seenRelations.contains(static_cast<int>(r))) {
+                seenRelations.insert(static_cast<int>(r));
                 m_highlightRelations.push_back(static_cast<int>(r));
+            }
     }
     m_pulseLinks.clear();
     for (const int i : m_highlightNodes)
@@ -1071,14 +1152,17 @@ void LumenField::updateLayers()
             continue;
         const Node &node = m_nodes[i];
         lumen::Rgb colour = colourOf(node.category);
-        if (node.branch)
-            colour = lumen::mix(colour, warm, 0.23F);
+        // The centre is Archie itself: a warm core. Modules keep most of their own hue.
+        if (node.kind == QLatin1String("root"))
+            colour = lumen::mix(colour, warm, 0.75F);
+        else if (node.branch)
+            colour = lumen::mix(colour, warm, 0.1F);
         float flags = statusCode(node.status) * 4.0F;
         if (node.id == m_selected)
             flags += 1.0F;
         if (node.id == m_hoveredId)
             flags += 2.0F;
-        const QVector4D data(std::max(node.activity, node.uncertainty * 0.3F), std::max(node.focus, node.voice), flags,
+        const QVector4D data(std::max(node.activity, node.uncertainty * 0.3F), attentionOf(at), flags,
                              static_cast<float>(seedOf(node.id) & 1023U) / 1023.0F);
         if (node.branch) {
             entry(modules, positionAt(at), orbScale(at), colour, 1.0F, data);
@@ -1191,6 +1275,12 @@ void LumenField::tick()
         motion.reaction = number("reaction");
         motion.reach = number("reach");
         motion.spring = number("spring");
+        // A projection eases in: the pull starts soft and reaches full strength over
+        // 2.2 s, so the field unfolds rather than snaps into place.
+        if (m_projection.isValid() && m_projection.elapsed() < 2200) {
+            const float t = static_cast<float>(m_projection.elapsed()) / 2200.0F;
+            motion.spring *= 0.06F + 0.94F * t * t;
+        }
         motion.damping = number("damping");
         motion.radius = m_fieldRadius * 1.12F;
         std::optional<Vec3> pointer;

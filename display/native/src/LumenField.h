@@ -60,6 +60,9 @@ class LumenField final : public QObject
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(QString error READ error NOTIFY statusChanged)
     Q_PROPERTY(bool loaded READ loaded NOTIFY sceneChanged)
+    /// What the system is using right now, most engaged first: nodes with focus, voice,
+    /// a Stage action or high activity. Each entry has id, name, category and score.
+    Q_PROPERTY(QVariantList attention READ attention NOTIFY attentionChanged)
 
 public:
     explicit LumenField(QObject *parent = nullptr);
@@ -89,6 +92,7 @@ public:
     QString status() const { return m_status; }
     QString error() const { return m_error; }
     bool loaded() const { return !m_nodes.empty(); }
+    QVariantList attention() const { return m_attentionRows; }
 
     /// Hands a QML-created buffer to a layer: "modules", "entities", "satellites",
     /// "ghosts", "pulses" take a LumenInstancing; "orbMesh", "satelliteMesh", "quad",
@@ -134,6 +138,11 @@ signals:
     void fitRequested();
     /// The camera should turn gently towards `position`.
     void focusRequested(const QVector3D &position);
+    void attentionChanged();
+    /// The most engaged node moved (`engaged`) or nothing is engaged any more.
+    void attentionMoved(const QVector3D &position, bool engaged);
+    /// A new field arrived from nothing: its orbs project out of the centre.
+    void projectionStarted();
 
 private:
     struct Node {
@@ -193,6 +202,8 @@ private:
     int indexOf(const QString &id) const;
     bool drawn(int index) const;
     float orbScale(int index) const;
+    float attentionOf(int index) const;
+    void updateAttention();
     archie::visual::lumen::Rgb colourOf(const QString &category) const;
     float number(const char *key) const;
     bool flag(const char *key) const;
@@ -204,6 +215,8 @@ private:
     QTimer m_requestDelay;
     QElapsedTimer m_clock;
     QElapsedTimer m_fpsClock;
+    /// Running while a fresh field projects out of the centre.
+    QElapsedTimer m_projection;
     bool m_active = false;
     bool m_requestPending = false;
     bool m_requestAgain = false;
@@ -244,6 +257,9 @@ private:
     QVariantList m_tree;
     QVariantMap m_selectionInfo;
     QVariantMap m_hoveredInfo;
+    QVariantList m_attentionRows;
+    std::vector<int> m_attention;
+    QString m_attentionLead;
     QVariantMap m_counts;
     QString m_rootId;
     QString m_focusId;

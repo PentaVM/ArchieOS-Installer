@@ -164,7 +164,7 @@ void the_membrane_covers_the_field_and_is_finite() {
         const Vec3 p{shell.vertices[v], shell.vertices[v + 1], shell.vertices[v + 2]};
         const Vec3 n{shell.vertices[v + 3], shell.vertices[v + 4], shell.vertices[v + 5]};
         CHECK(finite(p) && finite(n));
-        CHECK(length(p) >= shell.radius * 0.99F && length(p) <= shell.radius * 1.13F);
+        CHECK(length(p) >= shell.radius * 0.99F && length(p) <= shell.radius * 1.05F);
         CHECK(std::fabs(length(n) - 1.0F) < 1e-3F);
         for (std::size_t c = 6; c < 10; ++c) {
             CHECK(shell.vertices[v + c] >= 0.0F && shell.vertices[v + c] <= 1.0F);

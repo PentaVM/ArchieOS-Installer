@@ -67,31 +67,37 @@ void MAIN()
     vec3 base = lfColor.rgb * marble;
     base = mix(base, base * 1.7 + warm * 0.12, veins * 0.4 * detail);
 
+    // Light that keeps the hue. The key and back lights shape the orb as a scalar, so a
+    // blue process stays blue under the warm key; their colour only tints the highlight.
     vec3 Lw = normalize(warmPosition - lfWorld);
     vec3 Lc = normalize(coolPosition - lfWorld);
-    float dw = max(dot(N, Lw), 0.0) * 0.8 + 0.2;
-    float dc = max(dot(N, Lc), 0.0) * 0.8 + 0.2;
-    float shininess = mix(160.0, 10.0, roughness);
+    float key = max(dot(N, Lw), 0.0);
+    float back = max(dot(N, Lc), 0.0);
+    float shape = 0.28 + 0.62 * key + 0.3 * back;
+    float shininess = mix(140.0, 12.0, roughness);
     float sw = pow(max(dot(N, normalize(Lw + V)), 0.0), shininess);
     float sc = pow(max(dot(N, normalize(Lc + V)), 0.0), shininess);
-    float specular = mix(0.25, 1.4, metalness) * (1.15 - roughness);
-    vec3 colour = base * (ambientLight + warmLight * dw + coolLight * dc);
-    colour += (warmLight * sw + coolLight * sc) * specular * mix(vec3(1.0), lfColor.rgb, metalness);
+    float specular = mix(0.35, 1.2, metalness) * (1.1 - roughness);
+    // A little more saturation than the palette: glass deepens colour.
+    float luma = dot(lfColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+    vec3 body = max(mix(vec3(luma), lfColor.rgb, 1.6), vec3(0.0));
+    vec3 colour = base / max(lfColor.rgb, vec3(1e-3)) * body * shape * 1.4;
+    colour += (warm * sw * 0.9 + cool * sc * 0.6) * specular;
 
     float ndv = max(dot(N, V), 0.0);
-    float fresnel = pow(1.0 - ndv, 3.0);
-    float core = pow(ndv, 2.4);
-    // Self-light: the orb keeps its own colour whatever the key light does to it, and
-    // its heart brightens with what the entity is doing.
-    colour += lfColor.rgb * (0.35 + emissive * 0.9);
-    colour += lfColor.rgb * core * (0.3 + lfData.x * 1.4) * (0.6 + emissive * 1.6);
+    float fresnel = pow(1.0 - ndv, 2.2);
+    float core = pow(ndv, 3.0);
+    float activity = lfData.x;
+    float attention = lfData.y;
+    // The heart glows with what the entity is doing; engaged nodes burn brightest.
+    colour += body * core * (0.35 + activity * 0.6 + attention * 2.4) * (0.6 + emissive);
 
     float flags = lfData.z;
     float selected = mod(flags, 2.0);
     float hovered = mod(floor(flags / 2.0), 2.0);
     float status = floor(flags / 4.0);
     vec3 film = 0.5 + 0.5 * cos(6.28318 * (fresnel * 1.1 + vec3(0.0, 0.33, 0.67)) + seed);
-    vec3 rimColour = mix(lfColor.rgb * 1.5, film, 0.3);
+    vec3 rimColour = mix(body * 1.2, film * body * 1.6, 0.35);
     if (status > 3.5)
         rimColour = vec3(1.6, 0.25, 0.22);
     else if (status > 2.5)
@@ -100,7 +106,7 @@ void MAIN()
         rimColour = vec3(1.6, 1.0, 0.3);
     else if (status > 0.5)
         rimColour = vec3(1.2, 0.85, 0.35);
-    colour += rimColour * fresnel * (0.55 + lfData.y * 1.4 + step(0.5, status) * 0.8);
-    colour += warm * fresnel * (selected * 2.6 + hovered * 1.3);
+    colour += rimColour * fresnel * (0.95 + attention * 2.0 + step(0.5, status) * 0.9);
+    colour += warm * fresnel * (selected * 1.6 + hovered * 0.8);
     FRAGCOLOR = vec4(colour, 1.0);
 }

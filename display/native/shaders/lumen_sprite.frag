@@ -10,7 +10,7 @@ void MAIN()
     if (d > 1.0)
         discard;
     float soft = pow(1.0 - d, sharpness);
-    float lift = 1.0 + haloGain * (lfData.x * 1.5 + lfData.y * 2.0 + mod(lfData.z, 2.0) * 1.5);
+    float lift = 1.0 + haloGain * (lfData.x * 1.5 + lfData.y * 4.0 + mod(lfData.z, 2.0) * 1.5);
     vec3 tint = mix(lfColor.rgb, tintOverride, tintMix);
     FRAGCOLOR = vec4(tint * soft * alpha * lift, soft * alpha);
 }

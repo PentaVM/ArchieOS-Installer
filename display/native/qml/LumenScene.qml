@@ -2,10 +2,15 @@ import QtQuick
 import QtQuick3D
 import Archie.Observatory
 
-// The orb, drawn the Lumenfield way. Every buffer here is filled by `lumen` (LumenField):
-// this file only says which material each layer wears. The layers, back to front:
-// membrane, ghost particles, links, relations, satellites and their fibres, orbs, their
-// glow, travelling signals, and the ring around the selection.
+// The orb. Every buffer here is filled by `lumen` (LumenField); this file says which
+// material each layer wears and how the camera moves. Layers, back to front: membrane,
+// ghost particles, links, relations, satellites and their fibres, orbs, their glow,
+// travelling signals, and the ring around the selection.
+//
+// The camera is cinematic, and it moves because something happened: a new field
+// projects out of the centre while the camera pulls in from far away; when the system
+// starts using something, the camera leans towards it; when it lets go, the camera
+// settles back. Between events there is only a slow drift of the view.
 Node {
     id: scene
 
@@ -13,45 +18,91 @@ Node {
     property alias field: field
     property real aspect: 1.6
     property real flash: 0
-    // The operator's orbit: yaw and pitch about the target, and a distance.
+    // The orbit: yaw and pitch about the target, and a distance.
     property real yaw: 4
-    property real pitch: -2.3
+    property real pitch: -6
     property real distance: 900
     property vector3d target: Qt.vector3d(0, 0, 0)
+    property real home: 900
     readonly property var look: lumen.look
     readonly property var sceneInfo: lumen.scene
 
-    Behavior on distance { NumberAnimation { duration: 520; easing.type: Easing.OutCubic } }
-    Behavior on target { Vector3dAnimation { duration: 520; easing.type: Easing.OutCubic } }
-
-    function fit() {
+    function homeDistance() {
         const radius = Math.max(lumen.fieldRadius * 0.5, lumen.shellRadius || lumen.fieldRadius)
-        const half = 22 * Math.PI / 180
-        scene.distance = radius * Math.max(3.2, 1.2 / (Math.tan(half) * Math.max(0.3, scene.aspect)))
-        scene.target = Qt.vector3d(0, 0, 0)
-        scene.yaw = 4
-        scene.pitch = -2.3
+        const half = 20 * Math.PI / 180
+        return radius * Math.max(3.5, 1.3 / (Math.tan(half) * Math.max(1.0, scene.aspect)))
+    }
+    function glide(distance, target, duration) {
+        travel.stop()
+        dolly.to = distance
+        pan.to = target
+        dolly.duration = duration
+        pan.duration = duration
+        travel.start()
+    }
+    function fit() {
+        scene.home = scene.homeDistance()
+        scene.glide(scene.home, Qt.vector3d(0, 0, 0), 1100)
+    }
+    // A window that is still being laid out reports no size; the framing follows it
+    // once it has one, unless the operator has moved the camera since.
+    onAspectChanged: {
+        const next = scene.homeDistance()
+        if (Math.abs(scene.distance - scene.home) < 1 && !travel.running)
+            scene.distance = next
+        else if (travel.running && Math.abs(dolly.to - scene.home) < 1)
+            scene.glide(next, pan.to, 1200)
+        scene.home = next
+    }
+
+    function approach(factor) {
+        travel.stop()
+        scene.distance = Math.max(20, Math.min(8000, scene.distance * factor))
+    }
+
+    ParallelAnimation {
+        id: travel
+        NumberAnimation { id: dolly; target: scene; property: "distance"; easing.type: Easing.InOutCubic }
+        Vector3dAnimation { id: pan; target: scene; property: "target"; easing.type: Easing.InOutCubic }
     }
 
     Connections {
         target: lumen
         function onFitRequested() { scene.fit() }
-        // "Centrar": the camera turns partway towards the orb, the design's gentle focus.
         function onFocusRequested(position) {
             const world = field.mapPositionToScene(position)
-            scene.target = Qt.vector3d(world.x * 0.22, world.y * 0.22, world.z * 0.22)
+            scene.glide(scene.distance, Qt.vector3d(world.x * 0.3, world.y * 0.3, world.z * 0.3), 900)
         }
-        function onSceneChanged() { if (!scene.fitted && lumen.loaded) { scene.fitted = true; scene.fit() } }
+        // Projection: from far away, the camera pulls in while the field unfolds.
+        function onProjectionStarted() {
+            scene.home = scene.homeDistance()
+            travel.stop()
+            scene.distance = scene.home * 2.4
+            scene.target = Qt.vector3d(0, 0, 0)
+            scene.glide(scene.home, Qt.vector3d(0, 0, 0), 2600)
+        }
+        // Attention: lean towards what the system is using, then settle back.
+        function onAttentionMoved(position, engaged) {
+            if (!!lumen.selection.id)
+                return
+            if (engaged) {
+                const world = field.mapPositionToScene(position)
+                scene.glide(scene.home * 0.78, Qt.vector3d(world.x * 0.35, world.y * 0.35, world.z * 0.35), 1600)
+            } else {
+                scene.glide(scene.home, Qt.vector3d(0, 0, 0), 2200)
+            }
+        }
     }
-    property bool fitted: false
 
     Node {
         position: scene.target
-        eulerRotation: Qt.vector3d(scene.pitch, scene.yaw, 0)
+        // A slow drift of the view between events: a few degrees, over about a minute.
+        eulerRotation: Qt.vector3d(scene.pitch + Math.sin(lumen.time * 0.09) * 3.0,
+                                   scene.yaw + Math.sin(lumen.time * 0.05) * 4.0, 0)
         PerspectiveCamera {
             id: lumenCamera
             position: Qt.vector3d(0, 0, scene.distance)
-            fieldOfView: 44
+            fieldOfView: 40
             clipNear: 1
             clipFar: 20000
         }
@@ -112,7 +163,7 @@ Node {
             geometry: LumenGeometry { id: satelliteMesh }
             instancing: LumenInstancing { id: satelliteTable }
             Component.onCompleted: { lumen.bindLayer("satelliteMesh", satelliteMesh); lumen.bindLayer("satellites", satelliteTable) }
-            materials: OrbMaterial { facet: 0.35; shapeAmount: 0.3; detail: 0.0 }
+            materials: OrbMaterial { facet: 0.2; shapeAmount: 0.12; detail: 0.0 }
         }
 
         // --- Orbs: modules are cut gems, entities polished beads; neither is a plain ball ---
@@ -120,13 +171,13 @@ Node {
             geometry: LumenGeometry { id: orbMesh }
             instancing: LumenInstancing { id: moduleTable }
             Component.onCompleted: { lumen.bindLayer("orbMesh", orbMesh); lumen.bindLayer("modules", moduleTable) }
-            materials: OrbMaterial { facet: 0.55; shapeAmount: 0.42; detail: 1.0 }
+            materials: OrbMaterial { facet: 0.3; shapeAmount: 0.16; detail: 1.0 }
         }
         Model {
             geometry: LumenGeometry { id: entityMesh }
             instancing: LumenInstancing { id: entityTable }
             Component.onCompleted: { lumen.bindLayer("entityMesh", entityMesh); lumen.bindLayer("entities", entityTable) }
-            materials: OrbMaterial { facet: 0.3; shapeAmount: 0.3; detail: 0.7 }
+            materials: OrbMaterial { facet: 0.15; shapeAmount: 0.1; detail: 0.7 }
         }
 
         // --- Glow: a halo per orb, brighter with activity, focus and selection ---
@@ -216,6 +267,7 @@ Node {
         property real detail: 1.0
         property real time: lumen.time
         property vector3d warm: lumen.look.warm
+        property vector3d cool: lumen.look.cool
         property vector3d warmLight: lumen.look.warmLight
         property vector3d coolLight: lumen.look.coolLight
         property vector3d ambientLight: lumen.look.ambientLight

@@ -27,15 +27,21 @@ float vnoise(vec3 x)
 
 void MAIN()
 {
+    // Colour, activity and focus arrive packed in the data channel (see LumenField).
+    float packedColour = floor(INSTANCE_DATA.x + 0.5);
+    vec3 srgb = vec3(floor(packedColour / 65536.0), floor(mod(packedColour / 256.0, 256.0)), mod(packedColour, 256.0)) / 255.0;
+    float packedState = floor(INSTANCE_DATA.y + 0.5);
+    float activity = floor(packedState / 256.0) / 255.0;
+    float attention = mod(packedState, 256.0) / 255.0;
     vec3 dir = normalize(VERTEX);
     float seed = INSTANCE_DATA.w * 37.0;
     float lump = vnoise(dir * 2.2 + seed) * 0.62 + vnoise(dir * 5.3 + seed * 1.7) * 0.38;
-    float breathe = 0.5 + 0.5 * sin(time * (0.7 + INSTANCE_DATA.x * 1.6) + seed * 6.0);
+    float breathe = 0.5 + 0.5 * sin(time * (0.7 + activity * 1.6) + seed * 6.0);
     vec3 local = dir * (1.0 + (lump - 0.5) * shapeAmount * (0.8 + 0.2 * breathe));
     lfLocal = dir;
     lfWorld = (INSTANCE_MODEL_MATRIX * vec4(local, 1.0)).xyz;
     lfSmooth = normalize(mat3(INSTANCE_MODEL_MATRIX) * dir);
-    lfColor = INSTANCE_COLOR;
-    lfData = INSTANCE_DATA;
+    lfColor = vec4(pow(srgb, vec3(2.2)), 1.0);
+    lfData = vec4(activity, attention, INSTANCE_DATA.z, INSTANCE_DATA.w);
     POSITION = INSTANCE_MODELVIEWPROJECTION_MATRIX * vec4(local, 1.0);
 }

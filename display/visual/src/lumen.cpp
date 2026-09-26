@@ -370,8 +370,8 @@ Membrane membrane(const std::vector<Vec3>& nodes, const std::vector<Rgb>& colour
                     tint = n < colours.size() ? colours[n] : warm;
                 }
             }
-            const float swell = 1.0F + std::min(0.11F, gathered * 0.004F)
-                                + std::sin(h.x * 19.0F + h.y * 14.0F) * 0.009F;
+            const float swell = 1.0F + std::min(0.035F, gathered * 0.0015F)
+                                + std::sin(h.x * 19.0F + h.y * 14.0F) * 0.003F;
             positions.push_back(scale(h, radius * swell));
             tints.push_back(mix(tint, warm, 0.46F));
         }

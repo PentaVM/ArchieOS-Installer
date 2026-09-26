@@ -38,9 +38,7 @@ qt_add_qml_module(archie-display
     QML_FILES
         qml/Main.qml
         qml/LumenScene.qml
-        qml/LumenRail.qml
-        qml/LumenInspector.qml
-        qml/LumenOverlay.qml
+        qml/OrbHud.qml
         qml/ForgeView.qml
 )
 
