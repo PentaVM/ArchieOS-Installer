@@ -43,6 +43,7 @@ members = [
     "crates/archie-a11y",
     "crates/archie-reflex",
     "crates/archie-paint",
+    "crates/archie-arena",
     "crates/archie-cerebra",
     "crates/archie-workstation",
     "crates/archie-iris",

@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Archie Arena's reset for Photopea: close the session's Firefox and open Photopea again on a
+# new white document, so every run starts from the same empty canvas. The arena runs this
+# before its clock starts; nothing here is Archie's doing.
+set -euo pipefail
+RUN=${RUN:-/tmp/archie-session}
+if [ -f "$RUN/firefox.pid" ] && kill -0 "$(cat "$RUN/firefox.pid")" 2>/dev/null; then
+  kill "$(cat "$RUN/firefox.pid")" 2>/dev/null || true
+  for _ in $(seq 1 50); do kill -0 "$(cat "$RUN/firefox.pid")" 2>/dev/null || break; sleep 0.2; done
+fi
+mkdir -p "$RUN/ff"
+[ -f "$RUN/ff/prefs.js" ] || firefox --headless -CreateProfile "arena $RUN/ff" >/dev/null 2>&1 || true
+# One window, one tab, nothing restored from the last run.
+cat > "$RUN/ff/user.js" <<'EOF'
+user_pref("browser.sessionstore.resume_from_crash", false);
+user_pref("browser.startup.page", 0);
+user_pref("browser.tabs.warnOnClose", false);
+user_pref("media.webspeech.synth.enabled", false);
+EOF
+rm -f "$RUN/ff/sessionstore.jsonlz4" "$RUN/ff/sessionstore-backups/"* 2>/dev/null || true
+URL='https://www.photopea.com/#%7B%22script%22%3A%22app.documents.add(768%2C1144%2C72%2C%27Archie%27%2CNewDocumentMode.RGB%2CDocumentFill.WHITE)%22%7D'
+( echo 900 > /proc/self/oom_score_adj
+  XDG_RUNTIME_DIR=$RUN/xdg WAYLAND_DISPLAY=archie-stage MOZ_ENABLE_WAYLAND=1 LIBGL_ALWAYS_SOFTWARE=1 \
+    exec nice -n 5 firefox --profile "$RUN/ff" --new-window "$URL" ) > "$RUN/firefox.log" 2>&1 &
+echo $! > "$RUN/firefox.pid"
