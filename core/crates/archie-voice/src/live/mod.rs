@@ -28,7 +28,7 @@ use curiosity::{Buffer, Identifier, Researcher};
 use eyes::{IrisEyes, Scene};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, Notify};
@@ -99,6 +99,10 @@ pub struct Senses {
     voice_rate: u32,
     /// What the person said last, so the model is told which language to answer in.
     last_heard: Mutex<String>,
+    /// The page whose microphone the ears hear: the newest. Two pages streaming into the
+    /// one ear interleave their frames, and the recogniser hears noise at twice the speed.
+    microphone_owner: AtomicU64,
+    pages: AtomicU64,
 }
 
 impl Senses {
@@ -123,6 +127,8 @@ impl Senses {
             last_look: Mutex::new(None),
             voice_rate,
             last_heard: Mutex::new(String::new()),
+            microphone_owner: AtomicU64::new(0),
+            pages: AtomicU64::new(0),
         })
     }
 
@@ -295,10 +301,14 @@ async fn upgrade(ws: WebSocketUpgrade, State(senses): State<Arc<Senses>>) -> imp
 }
 
 async fn session(socket: WebSocket, senses: Arc<Senses>) {
+    let page = senses.pages.fetch_add(1, Ordering::SeqCst) + 1;
+    senses.microphone_owner.store(page, Ordering::SeqCst);
+    senses.publish(json!({"type": "microphone_owner", "page": page}));
     let (mut sink, mut stream) = socket.split();
     let mut outgoing = senses.out.subscribe();
     let hello = json!({
         "type": "hello",
+        "page": page,
         "voice_rate": senses.voice_rate,
         "identify": senses.identifier.means(),
         "search": senses.researcher.is_some(),
@@ -332,6 +342,7 @@ async fn session(socket: WebSocket, senses: Arc<Senses>) {
         match message {
             Message::Binary(data) if data.len() > 1 => match data[0] {
                 // Microphone: f32 little-endian at 16 kHz, in 20 ms frames for the loop.
+                1 if senses.microphone_owner.load(Ordering::SeqCst) != page => {}
                 1 => {
                     let samples: Vec<f32> = data[1..]
                         .chunks_exact(4)

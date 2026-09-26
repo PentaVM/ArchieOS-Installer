@@ -36,7 +36,7 @@ label{font-size:13px;color:var(--muted)}
 <script>
 const $=id=>document.getElementById(id);
 const video=$('video'),overlay=$('overlay'),ctx=overlay.getContext('2d');
-let ws=null,voiceRate=22050,muted=false,scene=null,micCtx=null,playCtx=null,playAt=0,playing=[],started=false;
+let ws=null,page=0,voiceRate=22050,muted=false,scene=null,micCtx=null,playCtx=null,playAt=0,playing=[],started=false;
 const palette=['#4cc2ff','#ffaa00','#78dc5a','#ff5a78','#be78ff','#ffe650','#5affd2','#ff8c3c'],colours={};
 function log(cls,text){const p=document.createElement('p');p.className=cls;p.textContent=text;$('log').appendChild(p);$('log').scrollTop=1e9;}
 function connect(){
@@ -47,7 +47,7 @@ function connect(){
 }
 function event(m){
  switch(m.type){
-  case 'hello':voiceRate=m.voice_rate;$('status').textContent=`conectado · voz ${m.voice_rate} Hz · identificar: ${m.identify.length?m.identify.join(' + '):'solo IRIS'} · búsqueda: ${m.search?'Tavily':'no'}`;break;
+  case 'hello':page=m.page;voiceRate=m.voice_rate;$('status').textContent=`conectado · voz ${m.voice_rate} Hz · identificar: ${m.identify.length?m.identify.join(' + '):'solo IRIS'} · búsqueda: ${m.search?'Tavily':'no'}`;break;
   case 'heard':log('you','Tú: '+m.text);break;
   case 'said':log('archie','Archie: '+m.text+(m.stopped?' (interrumpido)':''));break;
   case 'tool':log('tool',`→ ${m.tool} ${m.arguments}`);break;
@@ -58,6 +58,7 @@ function event(m){
   case 'level':$('level').style.width=Math.min(100,m.level*600)+'%';$('level').style.background=m.voiced?'#78dc5a':'#4cc2ff';break;
   case 'scene':scene=m;draw();break;
   case 'known':known(m.known);break;
+  case 'microphone_owner':if(page&&m.page!==page){$('status').textContent='Otra pestaña tomó el micrófono: esta ya no se escucha. Cierra esta pestaña.';log('tool','⚠ otra pestaña tomó el micrófono');}break;
   case 'mic':log('tool',`micrófono llega a ${m.samples_per_s} muestras/s (debe ser ~16000), pico ${m.peak.toFixed(3)}`);break;
  }
 }
