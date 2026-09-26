@@ -11,6 +11,7 @@ test-support = []
 
 [dependencies]
 archie-memory.workspace = true
+archie-orb.workspace = true
 archie-types.workspace = true
 archie-observability.workspace = true
 archie-postgres.workspace = true

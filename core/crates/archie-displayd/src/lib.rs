@@ -17,6 +17,8 @@ pub mod bridge;
 pub mod geofabric;
 pub mod http;
 pub mod kernel;
+pub mod orb;
+pub mod runtime;
 pub mod snapshot;
 pub mod world;
 
@@ -24,6 +26,7 @@ pub use bridge::Bridge;
 pub use geofabric::GeoFabricSnapshot;
 pub use http::{Request, Response};
 pub use kernel::{Availability, KernelService, KernelSnapshot, ZoneView};
+pub use orb::OrbService;
 pub use snapshot::{DisplaySnapshot, SnapshotSource};
 pub use world::{WorldDataSource, WorldService, WorldSnapshot};
 
@@ -45,6 +48,7 @@ pub struct Observatory {
     /// when `archied` is unreachable this is still true, and that is exactly when an
     /// operator most wants to know whether the machine is thrashing or overheating.
     kernel: KernelService,
+    orb: OrbService,
 }
 
 impl Observatory {
@@ -55,6 +59,7 @@ impl Observatory {
             fixture: None,
             world: WorldService::live(),
             kernel: KernelService::default(),
+            orb: OrbService::default(),
         }
     }
 
@@ -66,6 +71,7 @@ impl Observatory {
             fixture: None,
             world: WorldService::disabled(WorldDataSource::Disabled),
             kernel: KernelService::default(),
+            orb: OrbService::default(),
         }
     }
 
@@ -82,6 +88,7 @@ impl Observatory {
             fixture: Some(snapshot),
             world: WorldService::disabled(WorldDataSource::Fixture),
             kernel: KernelService::default(),
+            orb: OrbService::default(),
         }
     }
 
@@ -109,6 +116,7 @@ impl Observatory {
         let mut cache = self.cache.write().await;
 
         if fresh.daemon_reachable {
+            self.orb.observe_snapshot(&fresh).await;
             *cache = Some(fresh);
             return;
         }
@@ -156,9 +164,30 @@ impl Observatory {
         self.kernel.refresh().await;
     }
 
+    /// Read bounded local runtime facts independently of the control daemon.
+    pub async fn refresh_runtime(&self) {
+        self.orb.observe_runtime().await;
+    }
+
     /// The machine's own telemetry to serve right now.
     pub async fn current_kernel(&self) -> KernelSnapshot {
         self.kernel.current().await
+    }
+
+    /// The semantic orbital frame, made only from source signals and existing machine
+    /// projections. The model cannot issue commands or change policy.
+    pub async fn current_orb(&self) -> archie_orb::OrbFrame {
+        self.orb.current().await
+    }
+
+    /// Accepts local, one-way TFOG signals. The socket is private to the Archie user
+    /// group and carries no Stage command or response path.
+    #[cfg(unix)]
+    pub async fn receive_orb_signals(
+        &self,
+        path: impl AsRef<std::path::Path>,
+    ) -> std::io::Result<()> {
+        self.orb.receive(path).await
     }
 
     /// Dispatch one request.
@@ -195,6 +224,34 @@ impl Observatory {
                         status: 500,
                         content_type: "application/json; charset=utf-8",
                         body: format!(r#"{{"error":"cannot encode kernel snapshot: {e}"}}"#)
+                            .into_bytes(),
+                    },
+                }
+            }
+            "/api/orb/lumen" => {
+                // The same frame, composed as the Lumenfield view asks. Read-only: the
+                // query picks what is folded and where it sits, never what is observed.
+                let frame = self.current_orb().await;
+                let view = archie_orb::lumen::LumenView::from_query(&request.query);
+                let scene = archie_orb::lumen::compose(&frame, &view);
+                match serde_json::to_vec(&scene) {
+                    Ok(body) => Response::json(body),
+                    Err(e) => Response {
+                        status: 500,
+                        content_type: "application/json; charset=utf-8",
+                        body: format!(r#"{{"error":"cannot encode Lumenfield scene: {e}"}}"#)
+                            .into_bytes(),
+                    },
+                }
+            }
+            "/api/orb" => {
+                let frame = self.current_orb().await;
+                match serde_json::to_vec(&frame) {
+                    Ok(body) => Response::json(body),
+                    Err(e) => Response {
+                        status: 500,
+                        content_type: "application/json; charset=utf-8",
+                        body: format!(r#"{{"error":"cannot encode TFOG frame: {e}"}}"#)
                             .into_bytes(),
                     },
                 }
@@ -272,6 +329,7 @@ mod tests {
             .route(Request {
                 method: "GET".into(),
                 path: "/".into(),
+                query: String::new(),
             })
             .await;
         assert_eq!(response.status, 404);
@@ -284,6 +342,7 @@ mod tests {
             .route(Request {
                 method: "GET".into(),
                 path: "/api/snapshot".into(),
+                query: String::new(),
             })
             .await;
         assert_eq!(response.status, 200);
@@ -298,6 +357,7 @@ mod tests {
             .route(Request {
                 method: "GET".into(),
                 path: "/api/world".into(),
+                query: String::new(),
             })
             .await;
         assert_eq!(response.status, 200);
@@ -322,6 +382,7 @@ mod tests {
             .route(Request {
                 method: "GET".into(),
                 path: "/api/geofabric".into(),
+                query: String::new(),
             })
             .await;
         assert_eq!(response.status, 200);
@@ -424,6 +485,7 @@ mod tests {
             .route(Request {
                 method: "GET".into(),
                 path: "/healthz".into(),
+                query: String::new(),
             })
             .await;
         let body = String::from_utf8(response.body).unwrap();
@@ -437,6 +499,7 @@ mod tests {
             .route(Request {
                 method: "GET".into(),
                 path: "/etc/passwd".into(),
+                query: String::new(),
             })
             .await;
         assert_eq!(response.status, 404);
@@ -468,6 +531,7 @@ mod tests {
             .route(Request {
                 method: "GET".into(),
                 path: "/api/kernel".into(),
+                query: String::new(),
             })
             .await;
         assert_eq!(response.status, 200);

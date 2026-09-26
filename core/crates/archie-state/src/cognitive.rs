@@ -4,17 +4,66 @@ use crate::{
 };
 pub use archie_memory::storage::RecordedCognitiveEvent;
 use archie_memory::{
-    cognitive::{CognitiveEvent, FocusRecord},
+    cognitive::{CognitiveEvent, CognitivePayload, FocusRecord},
     execution::ExecutionCheckpoint,
     graph::GraphSnapshot,
     shared_thought::SharedThoughtState,
     storage::*,
     CorrectionTrajectory,
 };
+use archie_orb::{publish, EntityKind, OrbEntity, SignalKind};
 pub use archie_postgres::OutboxEntry;
+use sha2::Digest;
+use std::collections::BTreeMap;
 impl StateStore {
     pub fn record_cognitive_event(&self, e: &CognitiveEvent) -> Result<i64> {
-        Ok(self.cognitive.append_event(e)?)
+        let sequence = self.cognitive.append_event(e)?;
+        if let CognitivePayload::FocusUpdated(record) = &e.payload {
+            let mut scores = BTreeMap::new();
+            if !record.suspended {
+                for activation in &record.activations {
+                    let digest = sha2::Sha256::digest(activation.node_id.as_bytes());
+                    let id = format!(
+                        "cognitive:{}",
+                        digest[..16]
+                            .iter()
+                            .map(|byte| format!("{byte:02x}"))
+                            .collect::<String>()
+                    );
+                    let (kind, label) = match activation.node_id.split_once(':') {
+                        Some(("file" | "path", _)) => (EntityKind::File, "focused file"),
+                        Some(("tool", _)) => (EntityKind::Tool, "focused tool"),
+                        Some(("process", _)) => (EntityKind::Process, "focused process"),
+                        Some(("window", _)) => (EntityKind::Window, "focused window"),
+                        Some(("app", _)) => (EntityKind::App, "focused app"),
+                        _ => (EntityKind::Memory, "focused memory"),
+                    };
+                    let score = activation.strength.clamp(0.0, 1.0) as f32;
+                    scores.insert(id.clone(), score);
+                    publish(&archie_orb::signal(SignalKind::EntityUpsert {
+                        entity: OrbEntity {
+                            id,
+                            parent_id: Some("system:archieos".into()),
+                            related_ids: Vec::new(),
+                            kind,
+                            token: archie_orb::semantic_features(&activation.node_id),
+                            class_probs: BTreeMap::from([("cognitive".into(), 1.0)]),
+                            size_bytes: 0,
+                            activity: score,
+                            importance: score,
+                            uncertainty: 0.2,
+                            runtime: Vec::new(),
+                            label: label.into(),
+                        },
+                    }));
+                }
+            }
+            publish(&archie_orb::signal(SignalKind::Focus {
+                focus_id: record.focus_id.clone(),
+                scores,
+            }));
+        }
+        Ok(sequence)
     }
     pub fn cognitive_high_watermark(&self) -> Result<i64> {
         Ok(self.cognitive.event_watermark()?)

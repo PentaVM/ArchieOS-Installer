@@ -13,6 +13,7 @@ use crate::gate::{stage_resource, StageAdmission, StageGate, StageProposal};
 use crate::policy::StagePolicy;
 use crate::protocol::{ClientError, StageClient, StageEvent, StageSurface, StageWorld};
 use crate::seal::{CommandKey, SealError, Sealer};
+use archie_orb::{SignalKind, StageStatus};
 use archie_policy::{CapabilityRequest, Constraints, PolicyEngine, Principal, Scope};
 use archie_types::{PrivacyGrade, TaskId, Timestamp, TraceId};
 use std::path::Path;
@@ -21,6 +22,21 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 /// How long a sealed command stays valid.
 const COMMAND_TTL_MS: i64 = 5_000;
+
+fn publish_orb_stage(
+    request: &ActRequest,
+    surface: &StageSurface,
+    operation: u64,
+    status: StageStatus,
+) {
+    archie_orb::publish(&archie_orb::signal(SignalKind::Stage {
+        operation_id: operation.to_string(),
+        app_id: request.app_id.clone(),
+        surface: surface.surface,
+        pid: (surface.pid != 0).then_some(surface.pid),
+        status,
+    }));
+}
 
 /// What to do, and on whose behalf.
 #[derive(Debug, Clone)]
@@ -340,57 +356,56 @@ impl Operator {
         let now = Timestamp::now();
         self.sealer.advance_to(now.as_millis().max(1) as u64);
         let sealed = self.sealer.seal(&command, now, COMMAND_TTL_MS)?;
-        client.send(&sealed).await?;
+        publish_orb_stage(request, &surface, operation, StageStatus::Predicted);
+        if let Err(error) = client.send(&sealed).await {
+            publish_orb_stage(request, &surface, operation, StageStatus::Error);
+            return Err(error.into());
+        }
+        publish_orb_stage(request, &surface, operation, StageStatus::Active);
 
         let mut capture = None;
         let deadline = tokio::time::sleep(receipt_timeout);
         tokio::pin!(deadline);
         loop {
             tokio::select! {
-                _ = &mut deadline => return Err(OperateError::NoReceipt(receipt_timeout)),
-                event = client.next_event() => match event? {
-                    Some(StageEvent::Receipt {
-                        seq,
-                        outcome,
-                        finished,
-                        ..
-                    })
-                        if seq == sealed.sequence() || seq == 0 =>
-                    {
-                        // Sequence 0 answers a line the compositor could not verify, and
-                        // it only ever goes back to the connection that sent the line.
-                        return Ok(Performed {
-                            outcome: ActOutcome::Receipt {
-                                sequence: seq,
-                                outcome,
-                                finished,
-                            },
-                            capture,
-                            surface: Some(surface),
-                            sent_at_ms: now.as_millis(),
-                        });
+                _ = &mut deadline => {
+                    publish_orb_stage(request, &surface, operation, StageStatus::Error);
+                    return Err(OperateError::NoReceipt(receipt_timeout));
+                },
+                event = client.next_event() => {
+                    let event = match event {
+                        Err(error) => {
+                            publish_orb_stage(request, &surface, operation, StageStatus::Error);
+                            return Err(error.into());
+                        }
+                        Ok(Some(event)) => event,
+                        Ok(None) => {
+                            publish_orb_stage(request, &surface, operation, StageStatus::Error);
+                            return Err(OperateError::Closed);
+                        }
+                    };
+                    match event {
+                        StageEvent::Receipt { seq, outcome, finished, .. }
+                            if seq == sealed.sequence() || seq == 0 =>
+                        {
+                            // Sequence 0 answers a line the compositor could not verify, and
+                            // it only ever goes back to the connection that sent the line.
+                            publish_orb_stage(request, &surface, operation, if outcome == "executed" {
+                                StageStatus::Active
+                            } else { StageStatus::Error });
+                            return Ok(Performed {
+                                outcome: ActOutcome::Receipt { sequence: seq, outcome, finished },
+                                capture,
+                                surface: Some(surface),
+                                sent_at_ms: now.as_millis(),
+                            });
+                        }
+                        StageEvent::Snapshot { seq, surface: captured, x, y, width, height, sha256, path }
+                            if seq == sealed.sequence() && captured == surface.surface => {
+                                capture = Some(CaptureEvent { x, y, width, height, sha256, path });
+                            }
+                        event => world.apply(&event),
                     }
-                    Some(StageEvent::Snapshot {
-                        seq,
-                        surface: captured,
-                        x,
-                        y,
-                        width,
-                        height,
-                        sha256,
-                        path,
-                    }) if seq == sealed.sequence() && captured == surface.surface => {
-                        capture = Some(CaptureEvent {
-                            x,
-                            y,
-                            width,
-                            height,
-                            sha256,
-                            path,
-                        });
-                    }
-                    Some(event) => world.apply(&event),
-                    None => return Err(OperateError::Closed),
                 },
             }
         }

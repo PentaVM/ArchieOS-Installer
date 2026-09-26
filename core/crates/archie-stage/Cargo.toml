@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 archie-policy.workspace = true
+archie-orb.workspace = true
 archie-types.workspace = true
 hex.workspace = true
 ring.workspace = true

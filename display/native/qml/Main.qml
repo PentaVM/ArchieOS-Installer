@@ -12,14 +12,14 @@ ApplicationWindow {
     color: "#04060a"
     title: "Archie Observatory"
 
-    readonly property color ink: "#e6edf7"
-    readonly property color soft: "#93a2b8"
-    readonly property color dim: "#5b6879"
-    readonly property color edge: "#23303d"
+    readonly property color ink: "#e9edf3"
+    readonly property color soft: "#a4acb9"
+    readonly property color dim: "#687080"
+    readonly property color edge: "#1c222c"
     // The corner-bracket frames want more presence than a hairline divider but less
     // than a highlight — bright enough to read as a deliberate frame against the
     // panel fill, dim enough to stay out of the way of anything real on top of it.
-    readonly property color frame: "#3c5169"
+    readonly property color frame: "transparent"
     readonly property color cyan: "#6fe3f5"
     readonly property color green: "#47d18b"
     readonly property color amber: "#f0b429"
@@ -84,8 +84,21 @@ ApplicationWindow {
         onActivated: {
             root.selection = null
             archieBridge.releaseFocus()
+            lumen.clearSelection()
         }
     }
+    // The orb's keys: Enter opens or closes the selected module, Backspace folds it.
+    Shortcut { sequence: "Return"; enabled: root.scene === "orb" && !!lumen.selection.id; onActivated: lumen.toggleModule(lumen.selection.id) }
+    Shortcut { sequence: "Backspace"; enabled: root.scene === "orb" && !!lumen.selection.id; onActivated: lumen.collapse(lumen.selection.id) }
+
+    // Only the scene on screen does work: the orb fetches and steps while it is shown,
+    // FORGE watches /proc while it is shown, and neither costs anything otherwise.
+    Binding { target: lumen; property: "active"; value: root.scene === "orb" }
+    Binding { target: appCatalog; property: "active"; value: root.scene === "forge" }
+
+    // A real event (a new snapshot, a changed machine condition) flashes the orb's
+    // membrane once. It never loops: nothing moves without something having happened.
+    property real eventFlash: 0
     property var snapshot: archieBridge.snapshot || ({})
     property var status: snapshot.status || ({})
     property var world: archieBridge.world || ({})
@@ -93,6 +106,7 @@ ApplicationWindow {
     property var providers: world.providers || []
     property var provider: providers.length ? providers[0] : ({ condition: "unavailable", authority: "no provider" })
     property var kernel: archieBridge.kernel || ({})
+    property var orb: archieBridge.orb || ({})
     property var pressure: kernel.pressure || null
     property var zones: kernel.zones || []
     // "unavailable" and "idle" must never render the same. One says the machine is quiet,
@@ -246,9 +260,9 @@ ApplicationWindow {
         anchors.fill: parent
         color: "#04060a"
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#07101a" }
-            GradientStop { position: 0.55; color: "#05090f" }
-            GradientStop { position: 1.0; color: "#030509" }
+            GradientStop { position: 0.0; color: "#0b0e14" }
+            GradientStop { position: 0.55; color: "#07090e" }
+            GradientStop { position: 1.0; color: "#050609" }
         }
     }
 
@@ -256,62 +270,86 @@ ApplicationWindow {
         anchors.fill: parent
         spacing: 0
 
-        Rectangle {
+        // The top bar: the name, the three places, and a quiet word on whether Archie is
+        // there. Nothing else competes with what is below it.
+        Item {
             Layout.fillWidth: true
-            Layout.preferredHeight: 58
-            color: "#0b1119"
-            // Corner marks rather than a full border: a fully enclosed bar reads as a
-            // box welded to the screen, four open corners read as a frame around
-            // something being observed. See CornerBrackets, defined below with the
-            // other reusable chrome.
-            CornerBrackets { legLength: 12; tint: root.frame }
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 22
-                anchors.rightMargin: 22
-                spacing: 18
+            Layout.preferredHeight: 64
 
-                Text {
-                    text: "ARCHIE·OS"
-                    color: root.ink
-                    font.pixelSize: 16
-                    font.weight: Font.DemiBold
-                    font.letterSpacing: 4
-                }
-                Rectangle { width: 1; Layout.fillHeight: true; Layout.topMargin: 14; Layout.bottomMargin: 14; color: root.edge }
-                Text { text: root.status.hostname || "NO NODE"; color: root.soft; font.family: "monospace"; font.pixelSize: 12 }
-                Text { text: root.status.node_id ? root.status.node_id.substring(0, 12) : "no identity"; color: root.dim; font.family: "monospace"; font.pixelSize: 11 }
-                Text { text: root.status.profile || "offline"; color: root.dim; font.family: "monospace"; font.pixelSize: 11 }
-                Item { Layout.fillWidth: true }
+            Text {
+                anchors.left: parent.left; anchors.leftMargin: 28
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Archie"
+                color: root.ink
+                font.pixelSize: 19
+                font.weight: Font.DemiBold
+                font.letterSpacing: 0.2
+            }
 
-                Rectangle {
-                    visible: archieBridge.busy
-                    width: 86; height: 24; radius: 3
-                    color: "#10222a"; border.color: root.cyan
-                    Text { anchors.centerIn: parent; text: "READING"; color: root.cyan; font.family: "monospace"; font.pixelSize: 10; font.letterSpacing: 1.5 }
-                }
-                Rectangle {
-                    width: liveText.implicitWidth + 20; height: 26; radius: 3
-                    color: "transparent"
-                    border.color: archieBridge.connected ? root.green : root.red
-                    Text {
-                        id: liveText
-                        anchors.centerIn: parent
-                        text: archieBridge.connected ? "LIVE" : "DISCONNECTED"
-                        color: archieBridge.connected ? root.green : root.red
-                        font.family: "monospace"; font.pixelSize: 11; font.bold: true; font.letterSpacing: 1.5
+            // The places, as one segmented control. The mode is told to the model, not
+            // merely kept here: the model owns the morph between scenes and re-homes the
+            // camera when it changes.
+            Rectangle {
+                anchors.centerIn: parent
+                width: sceneRow.implicitWidth + 8; height: 38; radius: 19
+                color: "#10141b"
+                border.color: "#1d232d"
+                Row {
+                    id: sceneRow
+                    anchors.centerIn: parent
+                    spacing: 2
+                    SceneButton {
+                        label: "World"
+                        selected: root.scene === "world"
+                        onClicked: { root.scene = "world"; root.selection = null; archieBridge.requestMode("watcher") }
+                    }
+                    // The applications this machine can open. It replaced CORE, whose
+                    // nodes repeated what the orb already holds.
+                    SceneButton {
+                        label: "Forge"
+                        selected: root.scene === "forge"
+                        onClicked: { root.scene = "forge"; root.selection = null; archieBridge.requestMode("cerebra") }
+                    }
+                    SceneButton {
+                        label: "Orb"
+                        selected: root.scene === "orb"
+                        onClicked: { root.scene = "orb"; root.selection = null; archieBridge.requestMode("cerebra") }
                     }
                 }
+            }
+
+            Row {
+                anchors.right: parent.right; anchors.rightMargin: 28
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 18
                 Text {
-                    text: snapshot.daemon_reachable ? "ARCHIE READY" : "ARCHIE UNREACHABLE"
-                    color: snapshot.daemon_reachable ? root.green : root.red
-                    font.family: "monospace"; font.pixelSize: 13; font.bold: true; font.letterSpacing: 1.8
+                    visible: archieBridge.busy
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "Leyendo…"; color: root.dim; font.pixelSize: 12
+                }
+                Row {
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 8
+                    Rectangle {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 7; height: 7; radius: 3.5
+                        color: !archieBridge.connected ? "#d9807f" : snapshot.daemon_reachable ? "#8fe3c0" : "#e6c07a"
+                    }
+                    Text {
+                        id: liveText
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: !archieBridge.connected ? "Sin conexión"
+                              : snapshot.daemon_reachable ? "Archie en línea" : "Archie no responde"
+                        color: root.soft
+                        font.pixelSize: 13
+                    }
                 }
             }
             Rectangle {
                 anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
                 height: archieBridge.busy ? 2 : 0
-                color: root.cyan
+                color: "#3aa7ff"
+                opacity: 0.6
                 Behavior on height { NumberAnimation { duration: 120 } }
             }
         }
@@ -322,9 +360,10 @@ ApplicationWindow {
             spacing: 0
 
             Rectangle {
+                visible: root.scene === "world"
                 Layout.preferredWidth: 292
                 Layout.fillHeight: true
-                color: "#080d14"
+                color: "#0a0d13"
                 CornerBrackets { legLength: 14; tint: root.frame }
                 ScrollView {
                     anchors.fill: parent
@@ -402,7 +441,7 @@ ApplicationWindow {
 
                         SectionTitle { text: "HARDWARE" }
                         Fact { label: "CPU"; value: root.status.physical_cores ? root.status.physical_cores + "c / " + root.status.logical_cores + "t" : "—" }
-                        Text { width: parent.width; text: root.status.cpu_model || "no probe"; color: root.dim; wrapMode: Text.Wrap; font.family: "monospace"; font.pixelSize: 10 }
+                        Text { width: parent.width; text: root.status.cpu_model || "no probe"; color: root.dim; wrapMode: Text.Wrap; font.pixelSize: 10 }
                         Fact {
                             label: "memory available"
                             value: root.status.memory_available_bytes !== undefined ? root.gib(root.status.memory_available_bytes) + " / " + root.gib(root.status.memory_total_bytes) : "—"
@@ -429,9 +468,12 @@ ApplicationWindow {
                 View3D {
                     id: view
                     anchors.fill: parent
+                    // FORGE is a list, not a scene; the GPU rests while it is shown.
+                    visible: root.scene !== "forge"
+                    camera: root.scene === "orb" ? lumenScene.camera : camera
                     environment: ExtendedSceneEnvironment {
                         backgroundMode: SceneEnvironment.Color
-                        clearColor: "#04070c"
+                        clearColor: root.scene === "orb" ? lumen.look.background : "#04070c"
                         // The budget is not a caption. Under real memory or CPU pressure
                         // the observatory spends less GPU, because it is the largest
                         // discretionary consumer on a node that has other work to do.
@@ -446,7 +488,10 @@ ApplicationWindow {
                         // so on every machine that was neither idle nor lightly loaded —
                         // which is most of them, most of the time — the quality was never
                         // set at all.
+                        // On the low Orb profile, MSAA doubled the WSLg present cost.
+                        // Higher profiles keep the model's sample budget.
                         antialiasingMode: archieBridge.frame.msaaSamples > 0
+                                          && !(root.scene === "orb" && (!root.orb.profile || root.orb.profile === "low"))
                                           ? SceneEnvironment.MSAA
                                           : SceneEnvironment.NoAA
                         antialiasingQuality: archieBridge.frame.msaaSamples >= 4
@@ -454,19 +499,23 @@ ApplicationWindow {
                                              : (archieBridge.frame.msaaSamples >= 2
                                                 ? SceneEnvironment.High
                                                 : SceneEnvironment.Medium)
-                        tonemapMode: SceneEnvironment.TonemapModeAces
+                        // The orb is lit in linear light and tonemapped as the design is:
+                        // ACES, with the design's exposure.
+                        tonemapMode: root.scene === "orb" ? SceneEnvironment.TonemapModeFilmic : SceneEnvironment.TonemapModeAces
+                        exposure: root.scene === "orb" ? lumen.look.exposure : 1.0
 
                         // Bloom, and only bloom, and only where the image is genuinely
                         // bright: the sunlit limb, a specular glint, a bright marker. The
                         // HDR floor is above 1.0 so nothing in the midtones blooms — a
                         // globe where everything glows is the cyberpunk cliche this is
-                        // meant to avoid. Off entirely under memory pressure, where the
-                        // observatory is not the thing worth spending the GPU on.
-                        glowEnabled: !root.budgetReduced()
-                        glowStrength: 0.85
-                        glowIntensity: 0.28
-                        glowBloom: 0.18
-                        glowHDRMinimumValue: 1.05
+                        // meant to avoid. The orb's bloom is the design's: its strength,
+                        // radius and threshold are the operator's settings, and it goes off
+                        // with the rest of the budget.
+                        glowEnabled: !root.budgetReduced() && (root.scene !== "orb" || lumen.look.bloom)
+                        glowStrength: root.scene === "orb" ? 0.9 + lumen.look.bloomRadius * 0.6 : 0.85
+                        glowIntensity: root.scene === "orb" ? lumen.look.bloomStrength * 1.3 : 0.28
+                        glowBloom: root.scene === "orb" ? lumen.look.bloomRadius * 0.5 : 0.18
+                        glowHDRMinimumValue: root.scene === "orb" ? lumen.look.bloomThreshold : 1.05
                         glowHDRMaximumValue: 8.0
                         glowHDRScale: 2.0
                         glowQualityHigh: archieBridge.frame.msaaSamples >= 4
@@ -523,11 +572,12 @@ ApplicationWindow {
 
                     // The sky. A large sphere drawn from the inside, procedural stars on a
                     // near-black ground, so the planet sits in space rather than on a flat
-                    // fill. Off under memory pressure like the atmosphere.
+                    // fill. Off under memory pressure and in the Orb scene, where
+                    // the reference's black stage keeps the data paths legible.
                     Model {
                         source: "#Sphere"
                         scale: Qt.vector3d(7, 7, 7)
-                        visible: !root.budgetReduced()
+                        visible: root.scene !== "orb" && !root.budgetReduced()
                         materials: CustomMaterial {
                             shadingMode: CustomMaterial.Unshaded
                             cullMode: Material.NoCulling
@@ -649,55 +699,19 @@ ApplicationWindow {
                         }
                     }
 
-                    Node {
-                        id: coreRoot
-                        visible: root.scene === "core"
-                        property real eventScale: 1.0
-
-                        Model {
-                            source: "#Sphere"
-                            scale: Qt.vector3d(0.09 * coreRoot.eventScale, 0.09 * coreRoot.eventScale, 0.09 * coreRoot.eventScale)
-                            materials: PrincipledMaterial {
-                                baseColor: snapshot.daemon_reachable ? root.cyan : root.red
-                                emissiveFactor: snapshot.daemon_reachable ? Qt.vector3d(0.32, 0.85, 0.95) : Qt.vector3d(0.85, 0.12, 0.16)
-                                roughness: 0.2
-                            }
-                        }
-                        Repeater3D {
-                            model: archieBridge.sceneEdges
-                            delegate: Model {
-                                required property var modelData
-                                source: "#Cylinder"
-                                position: modelData.position
-                                rotation: modelData.rotation
-                                scale: Qt.vector3d(0.02, modelData.length / 100.0, 0.02)
-                                materials: PrincipledMaterial { baseColor: modelData.color; opacity: 0.52; lighting: PrincipledMaterial.NoLighting }
-                            }
-                        }
-                        Repeater3D {
-                            model: archieBridge.sceneNodes
-                            delegate: Model {
-                                required property var modelData
-                                property var payload: modelData
-                                property string nodeId: modelData.id
-                                source: "#Sphere"
-                                pickable: true
-                                position: modelData.position
-                                scale: Qt.vector3d(modelData.scale, modelData.scale, modelData.scale)
-                                materials: PrincipledMaterial {
-                                    baseColor: modelData.color
-                                    emissiveFactor: Qt.vector3d(0.16, 0.16, 0.16)
-                                    roughness: 0.28
-                                }
-                            }
-                        }
+                    // The orb: the TFOG graph, composed and drawn the Lumenfield way.
+                    LumenScene {
+                        id: lumenScene
+                        visible: root.scene === "orb"
+                        aspect: view.width / Math.max(1, view.height)
+                        flash: root.eventFlash
                     }
                 }
 
                 SequentialAnimation {
                     id: realEventPulse
-                    NumberAnimation { target: coreRoot; property: "eventScale"; to: 1.18; duration: 130; easing.type: Easing.OutCubic }
-                    NumberAnimation { target: coreRoot; property: "eventScale"; to: 1.0; duration: 340; easing.type: Easing.OutCubic }
+                    NumberAnimation { target: root; property: "eventFlash"; to: 1.0; duration: 130; easing.type: Easing.OutCubic }
+                    NumberAnimation { target: root; property: "eventFlash"; to: 0.0; duration: 340; easing.type: Easing.OutCubic }
                 }
                 Connections {
                     target: archieBridge
@@ -717,6 +731,8 @@ ApplicationWindow {
                 }
 
                 MouseArea {
+                    // The globe's hands. The orb has its own (OrbHud) and FORGE is a list.
+                    enabled: root.scene === "world"
                     anchors.fill: parent
                     property point previous
                     property point origin
@@ -750,42 +766,20 @@ ApplicationWindow {
                     }
                 }
 
-                // A targeting frame around the whole viewport: four corners, inset
-                // from the edge, static. This is the one piece of chrome that exists
-                // purely to say "this is the thing being observed" — it carries no
-                // data of its own, so it is drawn once and never moves.
-                CornerBrackets { legLength: 30; thickness: 1; inset: 14; tint: "#2c4152" }
+                OrbHud {
+                    anchors.fill: parent
+                    visible: root.scene === "orb"
+                    view: view
+                    orbScene: lumenScene
+                }
 
-                Rectangle {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    anchors.top: parent.top
-                    anchors.topMargin: 16
-                    width: sceneRow.implicitWidth + 10; height: 40
-                    color: "#cc080d14"
-                    CornerBrackets { legLength: 9; tint: root.frame }
-                    Row {
-                        id: sceneRow
-                        anchors.centerIn: parent
-                        spacing: 3
-                        // The mode is told to the model, not merely kept here. The model
-                        // owns the morph between scenes and re-homes the camera when it
-                        // changes; a toggle holding its own copy would be a second answer
-                        // to the same question, and the two would disagree the first time
-                        // a mode change was requested during a morph.
-                        SceneButton {
-                            label: "WORLD"
-                            selected: root.scene === "world"
-                            onClicked: { root.scene = "world"; root.selection = null; archieBridge.requestMode("watcher") }
-                        }
-                        SceneButton {
-                            label: "CORE"
-                            selected: root.scene === "core"
-                            onClicked: { root.scene = "core"; root.selection = null; archieBridge.requestMode("cerebra") }
-                        }
-                    }
+                ForgeView {
+                    anchors.fill: parent
+                    visible: root.scene === "forge"
                 }
 
                 Column {
+                    visible: root.scene === "world"
                     anchors.left: parent.left; anchors.leftMargin: 18
                     anchors.bottom: parent.bottom; anchors.bottomMargin: 18
                     spacing: 4
@@ -796,19 +790,13 @@ ApplicationWindow {
                                 return "EARTH · NASA BLUE MARBLE · OFFLINE · " + o
                                        + (o === 1 ? " REAL OBSERVATION" : " REAL OBSERVATIONS")
                             }
-                            // The model's count, not the drawn one. They differ when the
-                            // tier aggregates, and the line beneath says by how much.
-                            var n = archieBridge.frame.totalNodes
-                            return "ARCHIE CORE · DECLARED DEPENDENCIES · " + n
-                                   + (n === 1 ? " REAL NODE" : " REAL NODES")
+                            return ""
                         }
-                        color: root.soft; font.family: "monospace"; font.pixelSize: 10; font.letterSpacing: 1.1
+                        color: root.soft; font.pixelSize: 10; font.letterSpacing: 1.1
                     }
                     Text {
-                        text: root.scene === "world"
-                              ? "marker size = reported magnitude · source = " + (root.provider.authority || "none")
-                              : "position = dependency depth · colour = severity · opacity = freshness"
-                        color: root.dim; font.family: "monospace"; font.pixelSize: 9
+                        text: "marker size = reported magnitude · source = " + (root.provider.authority || "none")
+                        color: root.dim; font.pixelSize: 9
                     }
                     // What the frame says about itself. A scene that is showing less than
                     // it was given has to say so: an operator who is not told a record was
@@ -835,7 +823,7 @@ ApplicationWindow {
                                 parts.push("duplicate ids: " + f.collidingIds.join(", "))
                             return parts.join(" · ")
                         }
-                        color: "#f0b429"; font.family: "monospace"; font.pixelSize: 9
+                        color: "#f0b429"; font.pixelSize: 9
                     }
                     // Why the scene looks the way it does. A display that quietly gets
                     // worse teaches its operator to distrust it.
@@ -847,7 +835,7 @@ ApplicationWindow {
                     Text {
                         readonly property var f: archieBridge.frame
                         text: "render tier " + f.tier + " · " + f.tierReason
-                        color: root.dim; font.family: "monospace"; font.pixelSize: 9
+                        color: root.dim; font.pixelSize: 9
                     }
                     // Ties the camera the operator is actually flying to the GeoFabric
                     // table in the sidebar: this is the row that table highlights right
@@ -857,7 +845,7 @@ ApplicationWindow {
                         readonly property string band: root.nearestBand(root.currentLod())
                         text: band === "" ? "scale not yet known"
                                           : "scale ≈ " + band.toUpperCase() + " (lod " + root.currentLod() + ", approx.)"
-                        color: root.dim; font.family: "monospace"; font.pixelSize: 9
+                        color: root.dim; font.pixelSize: 9
                     }
                     // Provenance, in the one place it answers the question an operator
                     // looking at the globe actually has: who is answerable for this.
@@ -868,7 +856,7 @@ ApplicationWindow {
                     Text {
                         visible: root.scene === "world" && text.length > 0
                         text: root.bandProvenance(root.nearestBand(root.currentLod()))
-                        color: root.dim; font.family: "monospace"; font.pixelSize: 9
+                        color: root.dim; font.pixelSize: 9
                         wrapMode: Text.Wrap
                         width: 460
                     }
@@ -899,7 +887,7 @@ ApplicationWindow {
                             text: root.selection && root.selection.details
                                   ? "M" + Number(root.selection.details.magnitude).toFixed(1) + " · " + root.selection.details.severity
                                   : root.selection ? (root.selection.detail || "") : ""
-                            color: root.soft; wrapMode: Text.Wrap; font.family: "monospace"; font.pixelSize: 10
+                            color: root.soft; wrapMode: Text.Wrap; font.pixelSize: 10
                         }
                         Text {
                             width: parent.width
@@ -907,7 +895,7 @@ ApplicationWindow {
                                   ? root.selection.provenance.authority + " · " + root.selection.provenance.source_record_id
                                   : ""
                             visible: text.length > 0
-                            color: root.dim; wrapMode: Text.Wrap; font.family: "monospace"; font.pixelSize: 9
+                            color: root.dim; wrapMode: Text.Wrap; font.pixelSize: 9
                         }
                     }
                 }
@@ -918,14 +906,15 @@ ApplicationWindow {
                     anchors.bottom: parent.bottom; anchors.bottomMargin: 18
                     width: Math.min(errorText.implicitWidth + 26, parent.width - 50); height: 34; radius: 4
                     color: "#33171319"; border.color: root.red
-                    Text { id: errorText; anchors.centerIn: parent; text: archieBridge.error; color: root.red; font.family: "monospace"; font.pixelSize: 10; elide: Text.ElideRight; width: parent.width - 20 }
+                    Text { id: errorText; anchors.centerIn: parent; text: archieBridge.error; color: root.red; font.pixelSize: 10; elide: Text.ElideRight; width: parent.width - 20 }
                 }
             }
 
             Rectangle {
+                visible: root.scene === "world"
                 Layout.preferredWidth: 338
                 Layout.fillHeight: true
-                color: "#080d14"
+                color: "#0a0d13"
                 CornerBrackets { legLength: 14; tint: root.frame }
                 ScrollView {
                     anchors.fill: parent
@@ -940,16 +929,16 @@ ApplicationWindow {
                             delegate: Rectangle {
                                 required property var modelData
                                 width: parent.width; height: moduleText.implicitHeight + 16; radius: 4
-                                color: "#0c131d"; border.color: root.stateColor(modelData.state)
+                                color: "#10141b"; border.color: root.stateColor(modelData.state)
                                 RowLayout {
                                     anchors.fill: parent; anchors.margins: 8; spacing: 9
                                     Rectangle { width: 7; height: 7; radius: 4; color: root.stateColor(modelData.state) }
                                     ColumnLayout {
                                         Layout.fillWidth: true; spacing: 1
-                                        Text { id: moduleText; text: modelData.id; color: root.ink; font.family: "monospace"; font.pixelSize: 11 }
+                                        Text { id: moduleText; text: modelData.id; color: root.ink; font.pixelSize: 11 }
                                         Text { text: modelData.explanation || modelData.family || ""; color: root.dim; font.pixelSize: 9; visible: text.length > 0; wrapMode: Text.Wrap; Layout.fillWidth: true }
                                     }
-                                    Text { text: String(modelData.state || "").toUpperCase(); color: root.stateColor(modelData.state); font.family: "monospace"; font.pixelSize: 8; font.letterSpacing: 1 }
+                                    Text { text: String(modelData.state || "").toUpperCase(); color: root.stateColor(modelData.state); font.pixelSize: 8; font.letterSpacing: 1 }
                                 }
                             }
                         }
@@ -957,14 +946,19 @@ ApplicationWindow {
                         Text {
                             width: parent.width
                             text: snapshot.models && snapshot.models.length ? snapshot.models.length + " registered" : "no model providers registered"
-                            color: root.dim; font.family: "monospace"; font.pixelSize: 10; wrapMode: Text.Wrap
+                            color: root.dim; font.pixelSize: 10; wrapMode: Text.Wrap
                         }
                         SectionTitle { text: "CONTROL BOUNDARY" }
                         Text {
                             width: parent.width
                             text: "Native read-only projection. This process has no Archie keys, no control socket and no Internet access."
-                            color: root.dim; font.family: "monospace"; font.pixelSize: 10; wrapMode: Text.Wrap
+                            color: root.dim; font.pixelSize: 10; wrapMode: Text.Wrap
                         }
+
+                        Column {
+                            visible: root.scene === "world"
+                            width: parent.width
+                            spacing: 12
 
                         // What GeoFabric's provider-selection logic would choose, at a
                         // handful of named scales. Fetched once from `archied` on
@@ -976,7 +970,7 @@ ApplicationWindow {
                         Text {
                             width: parent.width
                             text: "Selection only — the globe above still draws a fixed texture. This is what a future streamed layer would choose."
-                            color: root.dim; font.family: "monospace"; font.pixelSize: 9; wrapMode: Text.Wrap
+                            color: root.dim; font.pixelSize: 9; wrapMode: Text.Wrap
                         }
                         Repeater {
                             model: archieBridge.geoFabric.selection || []
@@ -994,7 +988,7 @@ ApplicationWindow {
                                 Text {
                                     text: (parent.active ? "▸ " : "  ") + String(modelData.band).toUpperCase() + " · lod " + modelData.lod
                                     color: parent.active ? root.cyan : root.soft
-                                    font.family: "monospace"; font.pixelSize: 9; font.letterSpacing: 1
+                                    font.pixelSize: 9; font.letterSpacing: 1
                                     font.bold: parent.active
                                 }
                                 Text {
@@ -1002,7 +996,7 @@ ApplicationWindow {
                                     text: "terrain " + (modelData.terrain || "—")
                                           + "  ·  buildings " + (modelData.buildings || "—")
                                           + "  ·  surface " + (modelData.photoreal || "—")
-                                    color: root.ink; font.family: "monospace"; font.pixelSize: 9; wrapMode: Text.Wrap
+                                    color: root.ink; font.pixelSize: 9; wrapMode: Text.Wrap
                                 }
                             }
                         }
@@ -1011,7 +1005,7 @@ ApplicationWindow {
                             readonly property var g: archieBridge.geoFabric
                             text: (g.enabled ? g.enabled.length : 0) + " providers enabled"
                                   + (g.free_only === true ? " · nothing here bills" : "")
-                            color: root.dim; font.family: "monospace"; font.pixelSize: 9
+                            color: root.dim; font.pixelSize: 9
                         }
                         // Absent is not the same as unexplained. Google Photorealistic
                         // is in this list, not simply never mentioned — the master
@@ -1023,7 +1017,7 @@ ApplicationWindow {
                             width: parent.width
                             text: (archieBridge.geoFabric.disabled || []).length
                                   + " more known, off by default:"
-                            color: root.dim; font.family: "monospace"; font.pixelSize: 9
+                            color: root.dim; font.pixelSize: 9
                         }
                         Repeater {
                             model: archieBridge.geoFabric.disabled || []
@@ -1040,7 +1034,7 @@ ApplicationWindow {
                                       ? "· " + modelData.authority + " — set " + modelData.reason + " to enable"
                                       : "· " + modelData.authority + " — " + modelData.reason
                                 color: needsAccount ? root.soft : root.dim
-                                font.family: "monospace"; font.pixelSize: 9
+                                font.pixelSize: 9
                                 wrapMode: Text.Wrap
                             }
                         }
@@ -1064,7 +1058,7 @@ ApplicationWindow {
                                      ? b.count + " of " + (b.totalFound !== undefined ? b.totalFound : b.count) + " footprints drawn"
                                      : (b.reason || "no extract configured"))
                             color: b.loading === true ? root.soft : (b.available === true ? root.green : root.dim)
-                            font.family: "monospace"; font.pixelSize: 9; wrapMode: Text.Wrap
+                            font.pixelSize: 9; wrapMode: Text.Wrap
                         }
                         Text {
                             visible: archieBridge.buildings.loading !== true
@@ -1072,14 +1066,15 @@ ApplicationWindow {
                                      && !!archieBridge.buildings.reason
                             width: parent.width
                             text: archieBridge.buildings.reason || ""
-                            color: root.soft; font.family: "monospace"; font.pixelSize: 9; wrapMode: Text.Wrap
+                            color: root.soft; font.pixelSize: 9; wrapMode: Text.Wrap
                         }
                         Text {
                             visible: archieBridge.buildings.loading !== true
                                      && archieBridge.buildings.available === true
                             width: parent.width
                             text: "visible only at street scale — genuinely smaller than a pixel from further out"
-                            color: root.dim; font.family: "monospace"; font.pixelSize: 9; wrapMode: Text.Wrap
+                            color: root.dim; font.pixelSize: 9; wrapMode: Text.Wrap
+                        }
                         }
                     }
                 }
@@ -1087,9 +1082,10 @@ ApplicationWindow {
         }
 
         Rectangle {
+            visible: root.scene === "world"
             Layout.fillWidth: true
             Layout.preferredHeight: 112
-            color: "#070c12"
+            color: "#0a0d13"
             CornerBrackets { legLength: 12; tint: root.frame }
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: 14; spacing: 8
@@ -1101,11 +1097,11 @@ ApplicationWindow {
                         delegate: Rectangle {
                             required property var modelData
                             Layout.fillWidth: true; Layout.fillHeight: true
-                            radius: 3; color: "#0c131d"; border.color: root.stateColor(modelData.status.status)
+                            radius: 3; color: "#10141b"; border.color: root.stateColor(modelData.status.status)
                             Column {
                                 anchors.fill: parent; anchors.margins: 8; spacing: 3
                                 Text { width: parent.width; text: modelData.name; color: root.soft; font.pixelSize: 9; elide: Text.ElideRight }
-                                Text { text: String(modelData.status.status).toUpperCase(); color: root.stateColor(modelData.status.status); font.family: "monospace"; font.pixelSize: 9; font.bold: true }
+                                Text { text: String(modelData.status.status).toUpperCase(); color: root.stateColor(modelData.status.status); font.pixelSize: 9; font.bold: true }
                                 Text { width: parent.width; text: modelData.status.detail || ""; color: root.dim; font.pixelSize: 8; elide: Text.ElideRight; visible: text.length > 0 }
                             }
                         }
@@ -1124,6 +1120,8 @@ ApplicationWindow {
     // stops being restraint and starts being decoration.
     component CornerBrackets: Item {
         id: brackets
+        // Kept for the layout it anchors, drawn no more: the frame read as a HUD.
+        visible: false
         property real legLength: 14
         property real thickness: 1
         property color tint: root.edge
@@ -1146,7 +1144,6 @@ ApplicationWindow {
     component SectionTitle: Text {
         width: parent ? parent.width : implicitWidth
         color: root.dim
-        font.family: "monospace"
         font.pixelSize: 9
         font.letterSpacing: 2
         font.bold: true
@@ -1159,7 +1156,7 @@ ApplicationWindow {
         width: parent ? parent.width : implicitWidth
         spacing: 8
         Text { text: parent.label; color: root.soft; font.pixelSize: 10; Layout.fillWidth: true; elide: Text.ElideRight }
-        Text { text: parent.value; color: parent.valueColor; font.family: "monospace"; font.pixelSize: 10; font.bold: true }
+        Text { text: parent.value; color: parent.valueColor; font.pixelSize: 10; font.bold: true }
     }
 
     // A bar that refuses to draw when there is no scale to draw it against.
@@ -1204,9 +1201,19 @@ ApplicationWindow {
     component SceneButton: Button {
         property string label: ""
         property bool selected: false
-        width: 88; height: 30
+        width: 84; height: 30
         text: label
-        background: Rectangle { radius: 3; color: parent.selected ? "#132832" : "transparent"; border.color: parent.selected ? root.cyan : "transparent" }
-        contentItem: Text { text: parent.text; color: parent.selected ? root.cyan : root.dim; font.family: "monospace"; font.pixelSize: 10; font.bold: parent.selected; font.letterSpacing: 1.6; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+        hoverEnabled: true
+        background: Rectangle {
+            radius: 15
+            color: parent.selected ? "#e9edf3" : (parent.hovered ? "#1a1f28" : "transparent")
+            Behavior on color { ColorAnimation { duration: 160 } }
+        }
+        contentItem: Text {
+            text: parent.text
+            color: parent.selected ? "#0b0e14" : root.soft
+            font.pixelSize: 13; font.weight: parent.selected ? Font.DemiBold : Font.Normal
+            horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+        }
     }
 }

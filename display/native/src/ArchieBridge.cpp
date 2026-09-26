@@ -10,6 +10,7 @@
 #include <QDateTime>
 #include <QFile>
 #include <QFutureWatcher>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkReply>
@@ -22,14 +23,18 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
+#include <tuple>
 #include <vector>
 
 namespace {
 constexpr auto snapshotUrl = "http://127.0.0.1:7666/api/snapshot";
 constexpr auto worldUrl = "http://127.0.0.1:7666/api/world";
 constexpr auto kernelUrl = "http://127.0.0.1:7666/api/kernel";
+constexpr auto orbUrl = "http://127.0.0.1:7666/api/orb";
 constexpr auto geoFabricUrl = "http://127.0.0.1:7666/api/geofabric";
 constexpr int maximumProjectionBytes = 2 * 1024 * 1024;
+constexpr int maximumOrbProjectionBytes = 8 * 1024 * 1024;
 
 /// The model's own world, unaltered.
 ///
@@ -392,6 +397,14 @@ ArchieBridge::ArchieBridge(QObject *parent)
     m_kernelTimer.setTimerType(Qt::CoarseTimer);
     connect(&m_kernelTimer, &QTimer::timeout, this, &ArchieBridge::refreshKernel);
 
+    // Polling changes semantic state as well as geometry. Keep the default responsive,
+    // but let constrained WSL graphics stacks trade update rate for headroom.
+    bool orbPollValid = false;
+    const int orbPollOverride = qEnvironmentVariableIntValue("ARCHIE_ORB_POLL_MS", &orbPollValid);
+    m_orbTimer.setInterval(orbPollValid ? std::clamp(orbPollOverride, 200, 2000) : 500);
+    m_orbTimer.setTimerType(Qt::CoarseTimer);
+    connect(&m_orbTimer, &QTimer::timeout, this, &ArchieBridge::refreshOrb);
+
     m_clockTimer.setInterval(1000);
     m_clockTimer.setTimerType(Qt::CoarseTimer);
     connect(&m_clockTimer, &QTimer::timeout, this, &ArchieBridge::updateEarthAngle);
@@ -399,6 +412,7 @@ ArchieBridge::ArchieBridge(QObject *parent)
     m_snapshotTimer.start();
     m_worldTimer.start();
     m_kernelTimer.start();
+    m_orbTimer.start();
     m_clockTimer.start();
     m_frameTimer.start();
     updateEarthAngle();
@@ -409,6 +423,7 @@ ArchieBridge::ArchieBridge(QObject *parent)
     refreshSnapshot();
     refreshWorld();
     refreshKernel();
+    refreshOrb();
     // No timer for this one. The plan `/api/geofabric` reports is a constant of the
     // daemon's build — it cannot change while the process runs — so one fetch at
     // startup is the whole of the polling this needs, and a repeating timer would only
@@ -431,6 +446,14 @@ void ArchieBridge::refreshWorld()
 void ArchieBridge::refreshKernel()
 {
     request(Projection::Kernel, QUrl(QString::fromLatin1(kernelUrl)));
+}
+
+void ArchieBridge::refreshOrb()
+{
+    if (m_orbRequestPending)
+        return;
+    m_orbRequestPending = true;
+    request(Projection::Orb, QUrl(QString::fromLatin1(orbUrl)));
 }
 
 void ArchieBridge::refreshGeoFabric()
@@ -491,6 +514,8 @@ void ArchieBridge::request(Projection projection, const QUrl &url)
         const auto failure = reply->error();
         const auto message = reply->errorString();
         reply->deleteLater();
+        if (projection == Projection::Orb)
+            m_orbRequestPending = false;
         m_pendingRequests = std::max(0, m_pendingRequests - 1);
         emit busyChanged();
 
@@ -498,8 +523,13 @@ void ArchieBridge::request(Projection projection, const QUrl &url)
             fail(message);
             return;
         }
-        if (body.size() > maximumProjectionBytes) {
-            fail(QStringLiteral("projection exceeded the 2 MiB safety limit"));
+        const qsizetype maximumBytes = projection == Projection::Orb
+                                           ? maximumOrbProjectionBytes
+                                           : maximumProjectionBytes;
+        if (body.size() > maximumBytes) {
+            fail(projection == Projection::Orb
+                     ? QStringLiteral("orb projection exceeded the 8 MiB safety limit")
+                     : QStringLiteral("projection exceeded the 2 MiB safety limit"));
             return;
         }
         accept(projection, body);
@@ -585,6 +615,13 @@ void ArchieBridge::accept(Projection projection, const QByteArray &body)
         // same process, so there is nothing here for a revision counter to be counting.
         m_geoFabric = document.object().toVariantMap();
         emit geoFabricChanged();
+        return;
+    }
+
+    if (projection == Projection::Orb) {
+        m_orb = document.object().toVariantMap();
+        ++m_orbRevision;
+        emit orbChanged();
         return;
     }
 

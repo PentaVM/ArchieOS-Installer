@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Archie Editor
+Comment=Editor de texto que Archie sabe operar
+Exec=foot --app-id archie.editor nano
+TryExec=foot
+Categories=X-Archie;Utility;
+X-Archie-Glyph=✎
+X-Archie-App-Id=archie.editor
