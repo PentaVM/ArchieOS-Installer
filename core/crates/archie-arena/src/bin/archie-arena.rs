@@ -171,7 +171,9 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
     // Ready when the window is there and, for a picture, its white page sits inside the
     // editor's workspace in two captures a second apart: a page still loading is all white,
     // and a run timed from it would be timed from before the editor existed.
-    let ready_by = Instant::now() + Duration::from_secs(120);
+    // The first run after the session starts waits for a cold browser and a first download of
+    // the editor, drawn in software: 120 s was not always enough.
+    let ready_by = Instant::now() + Duration::from_secs(240);
     let mut seen_before: Option<(u32, u32, u32, u32)> = None;
     let (first, page) = loop {
         learn(&mut seat.client, &mut seat.world, Duration::from_millis(500)).await.map_err(|e| e.to_string())?;
