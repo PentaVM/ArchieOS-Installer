@@ -248,8 +248,7 @@ fn curiosity_overlap(known: &curiosity::Known, seen: &eyes::Seen) -> bool {
 
 fn spoken(known: &curiosity::Known) -> String {
     let by = match known.by.as_str() {
-        "web" => "según la búsqueda por imagen",
-        "vision-model" => "según el modelo de visión",
+        "vision-model" => "según el modelo de visión de Nebius, que puede equivocarse",
         _ => "IRIS solo sabe la categoría",
     };
     let mut told = format!("Es {} ({by}).", known.name);

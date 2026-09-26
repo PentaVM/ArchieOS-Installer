@@ -32,9 +32,9 @@
 //!              [--iris http://127.0.0.1:8765] [--curiosity 40] [--always] [--headphones]
 //! ```
 //!
-//! Built with `--features live`. Finding out uses `GOOGLE_VISION_API_KEY` (web detection)
-//! or `NEBIUS_TOKEN_FACTORY_KEY` with `ARCHIE_LIVE_VLM` (a vision model); reading uses
-//! `TAVILY_API_KEY`. Each is optional, and none is printed.
+//! Built with `--features live`. Finding out what an object is uses a vision model on
+//! Nebius, on the conversation's `NEBIUS_TOKEN_FACTORY_KEY` (`ARCHIE_LIVE_VLM` picks the
+//! models); reading about it uses `TAVILY_API_KEY`, which is optional. No key is printed.
 //!
 //! `converse` is the whole thing, spoken: the microphone through Nemotron 3.5 ASR, the
 //! floor deciding whether to answer, Nemotron on Nebius answering and proposing, the hands
@@ -622,7 +622,7 @@ fn live_flags(args: &mut Vec<String>) -> Result<LiveFlags, String> {
         iris: take(args, "--iris").unwrap_or_else(|| "http://127.0.0.1:8765".into()),
         tts_english: take(args, "--tts-english").unwrap_or_else(|| "en-US".into()),
         // Looks closer that curiosity may take on its own in one session: each is a
-        // paid call to web detection or a vision model.
+        // paid call to a vision model on Nebius.
         curiosity: take(args, "--curiosity")
             .map(|n| n.parse::<u32>().map_err(|_| "--curiosity is a number of looks"))
             .transpose()?
