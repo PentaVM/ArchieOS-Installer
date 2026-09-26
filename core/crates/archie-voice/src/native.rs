@@ -215,6 +215,14 @@ mod ffi {
             options: *const AsrRecognitionOptions,
             out: *mut *mut Stream,
         ) -> AsrStatus;
+        pub fn nemo_speech_asr_recognize_f32(
+            recognizer: *mut Recognizer,
+            options: *const AsrRecognitionOptions,
+            samples: *const f32,
+            n_samples: usize,
+            sample_rate: i32,
+            out: *mut *mut AsrResult,
+        ) -> AsrStatus;
         pub fn nemo_speech_asr_stream_push_f32(
             stream: *mut Stream,
             samples: *const f32,
@@ -421,6 +429,69 @@ impl Ears {
             _ears: PhantomData,
         })
     }
+
+    /// Transcribes one whole utterance at once — for an offline model such as Parakeet
+    /// TDT, which hears the utterance end to end and so gets more of it right than a
+    /// streaming model deciding as the words arrive. `language` is a locale, or `None`
+    /// for a model that finds the language itself.
+    pub fn recognize(
+        &self,
+        samples: &[f32],
+        sample_rate: u32,
+        language: Option<&str>,
+    ) -> Result<Heard, NativeError> {
+        let language = language
+            .map(|code| c_string(code, "the language code"))
+            .transpose()?;
+        // SAFETY: returns a fully initialised struct by value.
+        let mut options = unsafe { ffi::nemo_speech_asr_recognition_options_default() };
+        if let Some(language) = &language {
+            options.language_code = language.as_ptr();
+        }
+        options.enable_automatic_punctuation = true;
+        let mut result = ptr::null_mut();
+        // SAFETY: the options and the samples outlive the call; `result` receives a handle
+        // that `read_result` destroys.
+        let status = unsafe {
+            ffi::nemo_speech_asr_recognize_f32(
+                self.recognizer,
+                &options,
+                samples.as_ptr(),
+                samples.len(),
+                sample_rate as i32,
+                &mut result,
+            )
+        };
+        if status != ffi::OK || result.is_null() {
+            return Err(asr_error("transcribing the utterance"));
+        }
+        // SAFETY: a live result handle, owned here.
+        Ok(unsafe { read_result(result) })
+    }
+}
+
+/// Copies what a result says and destroys it.
+///
+/// # Safety
+/// `result` must be a live handle from the runtime, not used afterwards.
+unsafe fn read_result(result: *mut ffi::AsrResult) -> Heard {
+    let alternatives = ffi::nemo_speech_asr_result_alternative_count(result);
+    let text = if alternatives > 0 {
+        owned(ffi::nemo_speech_asr_result_transcript(result, 0))
+    } else {
+        String::new()
+    };
+    let language = (alternatives > 0 && ffi::nemo_speech_asr_result_language_count(result, 0) > 0)
+        .then(|| owned(ffi::nemo_speech_asr_result_language_code(result, 0, 0)))
+        .filter(|code| !code.is_empty());
+    let heard = Heard {
+        text,
+        is_final: ffi::nemo_speech_asr_result_is_final(result),
+        audio_s: ffi::nemo_speech_asr_result_audio_processed(result),
+        language,
+    };
+    ffi::nemo_speech_asr_result_destroy(result);
+    heard
 }
 
 impl Drop for Ears {
@@ -482,29 +553,8 @@ impl Listening<'_> {
         if result.is_null() {
             return Ok(None);
         }
-        // SAFETY: `result` is a live handle until destroyed at the end of this block; the
-        // strings read from it are copied first.
-        let heard = unsafe {
-            let alternatives = ffi::nemo_speech_asr_result_alternative_count(result);
-            let text = if alternatives > 0 {
-                owned(ffi::nemo_speech_asr_result_transcript(result, 0))
-            } else {
-                String::new()
-            };
-            let language = (alternatives > 0
-                && ffi::nemo_speech_asr_result_language_count(result, 0) > 0)
-                .then(|| owned(ffi::nemo_speech_asr_result_language_code(result, 0, 0)))
-                .filter(|code| !code.is_empty());
-            let heard = Heard {
-                text,
-                is_final: ffi::nemo_speech_asr_result_is_final(result),
-                audio_s: ffi::nemo_speech_asr_result_audio_processed(result),
-                language,
-            };
-            ffi::nemo_speech_asr_result_destroy(result);
-            heard
-        };
-        Ok(Some(heard))
+        // SAFETY: a live handle, destroyed by `read_result` after its strings are copied.
+        Ok(Some(unsafe { read_result(result) }))
     }
 
     /// Declares the utterance over now, as when the person has clearly stopped.

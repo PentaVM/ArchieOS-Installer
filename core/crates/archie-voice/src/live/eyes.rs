@@ -16,6 +16,9 @@ pub struct Seen {
     pub score: f32,
     #[serde(rename = "box")]
     pub bbox: [f32; 4],
+    /// IRIS's instance embedding (distilled from DINOv2): close for the same object.
+    #[serde(default, skip_serializing)]
+    pub embedding: Option<Vec<f32>>,
 }
 
 /// The latest reading of the camera.
@@ -75,7 +78,7 @@ impl IrisEyes {
         let answer: IrisAnswer = self
             .http
             .post(format!(
-                "{}/detect?mode=all&threshold={}",
+                "{}/detect?mode=all&embed=1&threshold={}",
                 self.url, self.threshold
             ))
             .body(jpeg.as_ref().clone())
@@ -114,17 +117,9 @@ fn place(scene: &Scene, bbox: &[f32; 4]) -> &'static str {
     }
 }
 
-/// The scene as the model is told it: what, how many, where, and how old the look is.
-pub fn describe(scene: &Scene) -> String {
-    let Some(at) = scene.at else {
-        return "Cámara: todavía no me llega imagen.".into();
-    };
-    if scene.seen.is_empty() {
-        return format!(
-            "Cámara (hace {:.1} s): no reconozco nada con seguridad.",
-            at.elapsed().as_secs_f32()
-        );
-    }
+/// What is in a frame, grouped: "cup (al centro)", "2 × chair", "quizás knife (abajo)".
+/// IRIS below half sure is marked as unsure, so the model does not state it as fact.
+pub fn list(scene: &Scene) -> Vec<String> {
     let mut groups: Vec<(String, usize, f32, &'static str)> = Vec::new();
     for item in &scene.seen {
         match groups.iter_mut().find(|group| group.0 == item.phrase) {
@@ -136,14 +131,31 @@ pub fn describe(scene: &Scene) -> String {
         }
     }
     groups.sort_by(|a, b| b.2.total_cmp(&a.2));
-    let listed: Vec<String> = groups
+    groups
         .iter()
         .take(12)
-        .map(|(phrase, count, _, place)| match count {
-            1 => format!("{phrase} ({place})"),
-            n => format!("{n} × {phrase}"),
+        .map(|(phrase, count, score, place)| {
+            let unsure = if *score < 0.5 { "quizás " } else { "" };
+            match count {
+                1 => format!("{unsure}{phrase} ({place})"),
+                n => format!("{unsure}{n} × {phrase}"),
+            }
         })
-        .collect();
+        .collect()
+}
+
+/// The scene as the model is told it: what, how many, where, and how old the look is.
+pub fn describe(scene: &Scene) -> String {
+    let Some(at) = scene.at else {
+        return "Cámara: todavía no me llega imagen.".into();
+    };
+    if scene.seen.is_empty() {
+        return format!(
+            "Cámara (hace {:.1} s): no reconozco nada con seguridad.",
+            at.elapsed().as_secs_f32()
+        );
+    }
+    let listed = list(scene);
     format!(
         "Cámara (hace {:.1} s, IRIS en modo abierto; son categorías generales, no nombres \
          exactos): {}.",
@@ -244,6 +256,7 @@ mod tests {
                     phrase: phrase.to_string(),
                     score: *score,
                     bbox: *bbox,
+                    embedding: None,
                 })
                 .collect(),
             width: 300,

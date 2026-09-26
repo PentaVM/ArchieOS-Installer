@@ -25,7 +25,7 @@
 #[cfg(feature = "pulse")]
 use crate::audio::{Microphone, Speaker};
 use crate::audio::{loudness, AudioError, VoiceActivity};
-use crate::listen::{after_utterance, over_archie, Utterance};
+use crate::listen::{after_utterance_within, names_archie, over_archie, Utterance};
 use crate::native::Ears;
 use crate::nemotron::{NemotronCognitive, TurnSource};
 use crate::voice::Speaks;
@@ -240,6 +240,8 @@ pub struct Setup {
     pub headphones: bool,
     /// How long a silence after words ends the utterance, when the ears have not.
     pub end_after: Duration,
+    /// How long after Archie spoke a reply needs no name.
+    pub follow_up: Duration,
     /// The most steps one utterance may take through tools.
     pub steps: usize,
     /// Words the ears should favour, and how strongly: the name first of all.
@@ -254,6 +256,7 @@ impl Default for Setup {
             always: false,
             headphones: false,
             end_after: Duration::from_millis(800),
+            follow_up: crate::listen::FOLLOW_UP_WINDOW,
             steps: 6,
             phrases: vec!["Archie".into()],
             phrase_boost: 5.0,
@@ -331,11 +334,15 @@ enum FromVoice {
 /// Runs the conversation until a recording runs out, or `stop` is set.
 ///
 /// `act` carries out one proposal and says what came of it; `context` says what the model
-/// should know right now (the time, the application in front).
+/// should know right now (the time, the application in front). `rehear`, when given, is an
+/// offline model (Parakeet TDT) that transcribes each finished utterance again from its
+/// audio, whole: the streaming ears decide when the person stopped, and the second
+/// hearing decides what they said.
 #[allow(clippy::too_many_arguments)]
 pub fn converse<S: TurnSource>(
     setup: &Setup,
     ears: &Ears,
+    rehear: Option<&Ears>,
     voice: Box<dyn Speaks>,
     mut hearing: Hearing,
     saying: Saying,
@@ -377,6 +384,9 @@ pub fn converse<S: TurnSource>(
     // Audio goes to the ears a model step at a time: asking after every 20 ms frame made
     // the same recogniser three times slower than the runtime's own benchmark.
     let mut pending: Vec<f32> = Vec::new();
+    // The sound of the utterance under way, for the second hearing: a few seconds of what
+    // came before the first word (the streaming ears are late to notice it), then all of it.
+    let mut utterance: Vec<f32> = Vec::new();
 
     let result = (|| -> Result<(), String> {
         while !stop.load(Ordering::Relaxed) {
@@ -422,6 +432,13 @@ pub fn converse<S: TurnSource>(
             // Closed ears while the voice plays through a speaker: otherwise it hears itself.
             if !archie_talking || setup.headphones {
                 pending.extend_from_slice(&frame);
+                if rehear.is_some() {
+                    utterance.extend_from_slice(&frame);
+                    let keep = if partial.is_empty() { 3 } else { 30 } * rate as usize;
+                    if utterance.len() > keep {
+                        utterance.drain(..utterance.len() - keep);
+                    }
+                }
             }
             let step = (rate as usize * 160) / 1000;
             let ready = pending.len() >= step;
@@ -450,7 +467,26 @@ pub fn converse<S: TurnSource>(
                 }
                 if heard.is_final && !partial.is_empty() {
                     let silence_ms = audio_ms.saturating_sub(last_words_ms) as u32;
-                    let said = tidy(&std::mem::take(&mut partial));
+                    let streamed = tidy(&std::mem::take(&mut partial));
+                    let sound = std::mem::take(&mut utterance);
+                    let said = match rehear {
+                        Some(rehear) if sound.len() >= rate as usize / 4 => {
+                            match rehear.recognize(&sound, rate, None) {
+                                Ok(again) if !again.text.trim().is_empty() => {
+                                    if trace {
+                                        eprintln!("[rehear] {:?} (streamed {streamed:?})", again.text);
+                                    }
+                                    tidy(&again.text)
+                                }
+                                Ok(_) => streamed.clone(),
+                                Err(error) => {
+                                    report(Moment::Alert(format!("second hearing: {error}")));
+                                    streamed.clone()
+                                }
+                            }
+                        }
+                        _ => streamed.clone(),
+                    };
                     report(Moment::Heard {
                         text: said.clone(),
                         at_ms: started.elapsed().as_millis(),
@@ -460,14 +496,20 @@ pub fn converse<S: TurnSource>(
                         // Busy answering the last thing: this one is heard, not answered.
                         continue;
                     }
-                    let mut state = after_utterance(
+                    let mut state = after_utterance_within(
                         &Utterance {
                             text: said.clone(),
                             final_by_recogniser: true,
                             silence_ms: silence_ms.max(setup.end_after.as_millis() as u32),
                         },
                         last_spoke.map(|at| at.elapsed()),
+                        setup.follow_up,
                     );
+                    if !names_archie(&said) && names_archie(&streamed) {
+                        // Either hearing of the name is enough: each misses it sometimes.
+                        state.response_utility = archie_speech::Probability::new(0.9);
+                        state.evidence.push(format!("the streaming ears heard the name: «{streamed}»"));
+                    }
                     if setup.always {
                         state.response_utility = archie_speech::Probability::new(0.9);
                         state.evidence.push("answering everything: --always".into());

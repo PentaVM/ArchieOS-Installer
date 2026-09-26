@@ -12,10 +12,17 @@
 //! microphone and the speaker. The floor still decides whether Archie speaks: it answers
 //! what is said to it, and what curiosity found out waits in the buffer until it is asked
 //! for. The page is served on loopback only; reach it through an SSH tunnel.
+//!
+//! What the model is told it sees is only ever what IRIS read, said as IRIS's: what the
+//! camera shows now, how old that image is, what was there before and is not any more
+//! ([`memory`]). It goes beside the utterance it answers, after the past conversation, so
+//! nothing Archie said earlier about the room can pass for what is true now.
 
 pub mod curiosity;
 pub mod eyes;
 pub mod language;
+pub mod memory;
+pub mod style;
 
 use crate::conversation::{Moment, VoiceOut};
 use archie_model_runtime::ToolDefinition;
@@ -26,6 +33,7 @@ use axum::routing::get;
 use axum::Router;
 use curiosity::{Buffer, Identifier, Researcher};
 use eyes::{IrisEyes, Scene};
+use memory::Memory;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
@@ -35,7 +43,11 @@ use tokio::sync::{broadcast, Notify};
 
 /// Who Archie is in a live session.
 pub const PERSONA: &str = "Eres Archie, el asistente de ArchieOS, y ahora tienes ojos: una \
-cámara que tu visión, IRIS, lee en vivo. El contexto te dice lo que IRIS ve. Contesta en el \
+cámara que tu visión, IRIS, lee en vivo. Lo único que ves es lo que el contexto de este \
+momento dice que IRIS ve ahora; IRIS todavía está aprendiendo y se equivoca, así que di \
+«me parece» cuando no es seguro, y nunca afirmes que algo está si ese contexto no lo dice. \
+Lo que se veía antes en la conversación puede haber cambiado: si el contexto dice que algo \
+ya no se ve, o que no hay nadie, dilo así. Si la cámara no manda imagen, di que no ves. Contesta en el \
 idioma en que te hablaron: español de Chile, natural y tuteando (nunca voseo), o inglés. Todo \
 lo que escribes se dice en voz alta: frases cortas, sin markdown, sin listas, sin emojis; los \
 números y las fechas con palabras. IRIS nombra categorías generales, como juguete, auto o \
@@ -86,6 +98,8 @@ pub enum Outgoing {
 /// Everything a live session shares between the page, the eyes and the conversation.
 pub struct Senses {
     pub scene: Mutex<Scene>,
+    /// What IRIS has seen over time, thing by thing.
+    pub memory: Mutex<Memory>,
     pub buffer: Mutex<Buffer>,
     pub identifier: Identifier,
     pub researcher: Option<Researcher>,
@@ -116,6 +130,7 @@ impl Senses {
         let (out, _) = broadcast::channel(512);
         Arc::new(Self {
             scene: Mutex::new(Scene::default()),
+            memory: Mutex::new(Memory::default()),
             buffer: Mutex::new(Buffer::default()),
             identifier,
             researcher,
@@ -141,10 +156,13 @@ impl Senses {
         let _ = self.out.send(Outgoing::Text(value.to_string().into()));
     }
 
-    /// What the model should know this turn: the clock, what the camera shows, and what
-    /// was found out and not yet said.
+    /// What the model should know this turn: the clock, what the camera shows now and
+    /// what it showed before, and what was found out and not yet said.
     pub fn context(&self, clock: &str) -> String {
-        let scene = eyes::describe(&self.scene.lock().expect("scene lock"));
+        let scene = {
+            let scene = self.scene.lock().expect("scene lock");
+            self.memory.lock().expect("memory lock").describe(&scene, Instant::now())
+        };
         let known = self.buffer.lock().expect("buffer lock").describe();
         let heard = self.last_heard.lock().expect("heard lock").clone();
         // Last, where a small model weighs it most, and in the language it asks for.
@@ -375,11 +393,27 @@ async fn see(senses: Arc<Senses>, eyes: IrisEyes) {
         let Some(frame) = senses.frame.lock().expect("frame lock").take() else {
             continue;
         };
+        let asked = Instant::now();
         match eyes.look(frame).await {
             Ok(scene) => {
+                let (seen, recalled) = {
+                    let mut memory = senses.memory.lock().expect("memory lock");
+                    memory.update(&scene);
+                    let seen: Vec<serde_json::Value> = scene
+                        .seen
+                        .iter()
+                        .enumerate()
+                        .map(|(index, item)| json!({
+                            "phrase": item.phrase, "score": item.score, "box": item.bbox,
+                            "id": memory.id_of(index),
+                        }))
+                        .collect();
+                    (seen, memory.recall(Instant::now()))
+                };
                 senses.publish(json!({
-                    "type": "scene", "seen": &scene.seen, "width": scene.width,
+                    "type": "scene", "seen": seen, "width": scene.width,
                     "height": scene.height, "step": scene.step,
+                    "iris_ms": asked.elapsed().as_millis() as u64, "memory": recalled,
                 }));
                 *senses.scene.lock().expect("scene lock") = scene;
             }

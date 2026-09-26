@@ -92,6 +92,12 @@ impl Buffer {
             .take(8)
             .map(|entry| {
                 let mut line = format!("- lo que IRIS ve como «{}» es: {}", entry.seen_as, entry.name);
+                if let Some(at) = entry.at {
+                    line.push_str(&format!(
+                        " (lo miraste hace {}; puede que ya no esté)",
+                        crate::live::memory::ago(at.elapsed())
+                    ));
+                }
                 if !entry.facts.is_empty() {
                     line.push_str(&format!(". Datos: {}", entry.facts));
                 }
@@ -439,7 +445,7 @@ mod tests {
     use std::sync::Arc;
 
     fn seen(phrase: &str, score: f32, bbox: [f32; 4]) -> Seen {
-        Seen { phrase: phrase.into(), score, bbox }
+        Seen { phrase: phrase.into(), score, bbox, embedding: None }
     }
 
     fn scene(items: Vec<Seen>) -> Scene {

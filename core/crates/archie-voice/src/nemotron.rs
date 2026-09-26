@@ -143,6 +143,9 @@ pub struct NemotronCognitive<S: TurnSource> {
     persona: String,
     tools: Vec<ToolDefinition>,
     context: Option<String>,
+    /// The context goes with the utterance it belongs to instead of the instructions, so
+    /// that what the model said earlier never reads as newer than what is true now.
+    context_with_utterance: bool,
     history: Vec<ToolChatMessage>,
     turn: Option<Turn>,
     last_request: Option<ToolChatRequest>,
@@ -171,6 +174,7 @@ impl<S: TurnSource> NemotronCognitive<S> {
             persona: PERSONA_ES.to_string(),
             tools,
             context: None,
+            context_with_utterance: false,
             history: Vec::new(),
             turn: None,
             last_request: None,
@@ -183,6 +187,15 @@ impl<S: TurnSource> NemotronCognitive<S> {
     /// Who the model is told it is. The live session gives it eyes and two languages.
     pub fn set_persona(&mut self, persona: impl Into<String>) {
         self.persona = persona.into();
+    }
+
+    /// Puts the context of this moment right before the utterance it belongs to — after
+    /// the past conversation — rather than in the instructions ahead of it. A model reads
+    /// the history as more recent than the instructions: told once "you have a phone in
+    /// your hand", it said so again with the camera showing an empty room. Only the
+    /// utterance being answered carries it; the history keeps what was said, bare.
+    pub fn put_context_beside_utterance(&mut self) {
+        self.context_with_utterance = true;
     }
 
     /// Tools beyond the ones it was built with (seeing and searching, in a live session).
@@ -291,13 +304,25 @@ impl<S: TurnSource> NemotronCognitive<S> {
             _ => "Responde con lo que haga falta, y breve.",
         };
         let mut system = format!("{}\n\n{length}", self.persona);
-        if let Some(context) = &self.context {
+        let beside = self.context_with_utterance;
+        if let (Some(context), false) = (&self.context, beside) {
             system.push_str("\n\nContexto de este momento, que puedes usar como cierto:\n");
             system.push_str(context);
         }
         let mut messages = vec![ToolChatMessage::System(system)];
         messages.extend(self.history.iter().cloned());
-        messages.extend(self.chain.iter().cloned());
+        let mut chain = self.chain.iter().cloned();
+        if let (Some(context), true) = (&self.context, beside) {
+            match chain.next() {
+                Some(ToolChatMessage::User(said)) => messages.push(ToolChatMessage::User(format!(
+                    "[Contexto de este momento, que no dijo la persona y vale más que lo \
+                     dicho antes en la conversación:\n{context}]\n\n{said}"
+                ))),
+                Some(other) => messages.push(other),
+                None => {}
+            }
+        }
+        messages.extend(chain);
         ToolChatRequest {
             model: self.provider_model.clone(),
             messages,
@@ -677,6 +702,30 @@ mod tests {
         assert!(
             cognitive.last_request().is_none(),
             "none of that left the machine"
+        );
+    }
+
+    #[test]
+    fn the_context_of_this_moment_comes_after_what_was_said_before() {
+        let mut cognitive = adapter(TEXT);
+        cognitive.put_context_beside_utterance();
+        cognitive.remember("¿qué tengo en la mano?", "Tienes un celular en la mano.");
+        cognitive.set_context("Ahora mismo no se ve a ninguna persona.");
+        cognitive
+            .begin(ask("t9", "¿y ahora?", SpeechBudget::Full))
+            .unwrap();
+        let sent = cognitive.last_request().unwrap();
+        assert!(
+            matches!(&sent.messages[0], ToolChatMessage::System(text) if !text.contains("ninguna persona")),
+            "the moment is not in the instructions, ahead of the history"
+        );
+        assert!(matches!(&sent.messages[3], ToolChatMessage::User(text)
+            if text.contains("ninguna persona") && text.ends_with("¿y ahora?")));
+        cognitive.cancel("t9", CancelReason::Interrupted);
+        cognitive.remember("¿y ahora?", "No veo a nadie.");
+        assert!(
+            matches!(&cognitive.history[2], ToolChatMessage::User(text) if text == "¿y ahora?"),
+            "the history keeps what was said, without the context of that moment"
         );
     }
 

@@ -16,13 +16,15 @@ button{padding:8px 12px;border-radius:6px;border:0;background:var(--accent);colo
 button.secondary{background:#2a303c;color:var(--text)}
 #log{height:300px;overflow:auto;font-size:14px}#log p{margin:4px 0}
 .you{color:var(--you)}.archie{color:var(--archie)}.tool{color:var(--muted);font-size:12px}
-#known li{margin:4px 0;font-size:14px}ul{padding-left:18px;margin:0}
+#known li,#memory li{margin:4px 0;font-size:14px}ul{padding-left:18px;margin:0}
+#memory .gone{color:var(--muted)}#iris{font-size:12px;color:var(--muted);margin-top:6px}
 .meter{height:6px;background:#232733;border-radius:3px;overflow:hidden}.meter div{height:100%;width:0;background:var(--accent)}
 label{font-size:13px;color:var(--muted)}
 </style></head><body>
 <header><h1>Archie en vivo</h1><span class="muted" id="status">conectando…</span></header>
 <main>
-<div class="stage"><video id="video" autoplay playsinline muted></video><canvas class="overlay" id="overlay"></canvas></div>
+<div><div class="stage"><video id="video" autoplay playsinline muted></video><canvas class="overlay" id="overlay"></canvas></div>
+<div id="iris">IRIS: esperando la cámara…</div></div>
 <aside>
 <div class="card">
  <div style="display:flex;gap:8px;flex-wrap:wrap"><button id="start">Empezar</button><button id="mute" class="secondary">Silenciar micrófono</button></div>
@@ -31,6 +33,7 @@ label{font-size:13px;color:var(--muted)}
  <label><input type="checkbox" id="tags" checked> Etiquetas en las cajas</label>
 </div>
 <div class="card"><strong>Conversación</strong><div id="log"></div></div>
+<div class="card"><strong>Lo que IRIS ve y recuerda</strong><ul id="memory"><li class="muted">nada todavía</li></ul></div>
 <div class="card"><strong>Lo que sabe (y no ha dicho)</strong><ul id="known"><li class="muted">nada todavía</li></ul></div>
 </aside></main>
 <script>
@@ -56,11 +59,19 @@ function event(m){
   case 'hush':hush();break;
   case 'alert':log('tool','⚠ '+m.text);break;
   case 'level':$('level').style.width=Math.min(100,m.level*600)+'%';$('level').style.background=m.voiced?'#78dc5a':'#4cc2ff';break;
-  case 'scene':scene=m;draw();break;
+  case 'scene':scene=m;draw();memory(m);break;
   case 'known':known(m.known);break;
   case 'microphone_owner':if(page&&m.page!==page){$('status').textContent='Otra pestaña tomó el micrófono: esta ya no se escucha. Cierra esta pestaña.';log('tool','⚠ otra pestaña tomó el micrófono');}break;
   case 'mic':log('tool',`micrófono llega a ${m.samples_per_s} muestras/s (debe ser ~16000), pico ${m.peak.toFixed(3)}`);break;
  }
+}
+function memory(m){
+ $('iris').textContent=`IRIS paso ${m.step??'?'} · ${m.seen.length} cosas · ${m.iris_ms} ms por imagen`;
+ const list=$('memory');list.innerHTML='';
+ for(const r of (m.memory||[]).slice(0,20)){const li=document.createElement('li');
+  li.textContent=r.present?`#${r.id} ${r.phrase} — ahora`:`#${r.id} ${r.phrase} — ya no se ve (hace ${Math.round(r.gone_for_s)} s)`;
+  if(!r.present)li.className='gone';list.appendChild(li);}
+ if(!list.firstChild)list.innerHTML='<li class="muted">nada todavía</li>';
 }
 function known(k){
  const list=$('known');if(list.firstChild&&list.firstChild.classList&&list.firstChild.classList.contains('muted'))list.innerHTML='';
@@ -77,9 +88,18 @@ function voice(buffer){
 function hush(){for(const s of playing){try{s.stop();}catch(e){}}playing=[];playAt=0;}
 // The microphone at the device's own rate, resampled here to the 16 kHz the ears want:
 // Firefox will not connect a microphone to an AudioContext of another rate.
+// A windowed-sinc low-pass at 7 kHz comes first: without it, what is above 8 kHz folds
+// back into the voice the ears read.
 const TAP=`class Tap extends AudioWorkletProcessor{
- constructor(){super();this.step=sampleRate/16000;this.t=0;this.prev=0;}
- process(i){const c=i[0][0];if(!c||!c.length)return true;const out=[];let t=this.t;
+ constructor(){super();this.step=sampleRate/16000;this.t=0;this.prev=0;
+  const n=63,fc=7000/sampleRate;this.taps=new Float32Array(n);let sum=0;
+  for(let i=0;i<n;i++){const m=i-(n-1)/2;const sinc=m===0?2*fc:Math.sin(2*Math.PI*fc*m)/(Math.PI*m);
+   const w=0.42-0.5*Math.cos(2*Math.PI*i/(n-1))+0.08*Math.cos(4*Math.PI*i/(n-1));this.taps[i]=sinc*w;sum+=this.taps[i];}
+  for(let i=0;i<n;i++)this.taps[i]/=sum;this.hist=new Float32Array(n-1);}
+ filter(c){const n=this.taps.length,all=new Float32Array(this.hist.length+c.length);all.set(this.hist);all.set(c,this.hist.length);
+  const y=new Float32Array(c.length);for(let j=0;j<c.length;j++){let acc=0;for(let k=0;k<n;k++)acc+=this.taps[k]*all[j+k];y[j]=acc;}
+  this.hist=all.slice(all.length-(n-1));return y;}
+ process(i){const raw=i[0][0];if(!raw||!raw.length)return true;const c=this.step>1.01?this.filter(raw):raw;const out=[];let t=this.t;
   while(t<=c.length-1){const k=Math.floor(t),f=t-k;const a=k<0?this.prev:c[k];const b=k+1<c.length?c[k+1]:a;
    out.push(a+(b-a)*f);t+=this.step;}
   this.t=t-c.length;this.prev=c[c.length-1];if(out.length)this.port.postMessage(Float32Array.from(out));return true;}}
@@ -90,7 +110,7 @@ $('start').onclick=async()=>{
 };
 async function begin(){
  const stream=await navigator.mediaDevices.getUserMedia({
-  audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1},
+  audio:{echoCancellation:true,noiseSuppression:false,autoGainControl:true,channelCount:1},
   video:{width:{ideal:1280},height:{ideal:720}}});
  video.srcObject=new MediaStream(stream.getVideoTracks());await video.play();
  playCtx=new AudioContext();await playCtx.resume();
@@ -114,8 +134,9 @@ function draw(){
  const k=overlay.width/scene.width;ctx.clearRect(0,0,overlay.width,overlay.height);ctx.lineWidth=3;ctx.font='15px system-ui';
  for(const d of scene.seen){const c=colours[d.phrase]||(colours[d.phrase]=palette[Object.keys(colours).length%palette.length]);
   const [x0,y0,x1,y1]=d.box.map(v=>v*k);ctx.strokeStyle=c;ctx.strokeRect(x0,y0,x1-x0,y1-y0);
-  if($('tags').checked){const t=`${d.phrase} ${(d.score*100).toFixed(0)}%`,tw=ctx.measureText(t).width+8;
+  if($('tags').checked){const t=`${d.id?'#'+d.id+' ':''}${d.phrase} ${(d.score*100).toFixed(0)}%`,tw=ctx.measureText(t).width+8;
    ctx.fillStyle=c;ctx.fillRect(x0,Math.max(0,y0-20),tw,20);ctx.fillStyle='#04121c';ctx.fillText(t,x0+4,Math.max(14,y0-5));}}
 }
+window.addEventListener('resize',draw);
 connect();
 </script></body></html>

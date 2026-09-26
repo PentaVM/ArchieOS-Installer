@@ -606,6 +606,11 @@ struct LiveFlags {
     iris: String,
     tts_english: String,
     curiosity: u32,
+    /// An offline ASR model (Parakeet TDT) that hears each finished utterance again, whole.
+    rehear_model: Option<String>,
+    voice_style: String,
+    /// Seconds after Archie spoke that a reply needs no name.
+    follow_up_s: u64,
 }
 
 fn live_flags(args: &mut Vec<String>) -> Result<LiveFlags, String> {
@@ -622,6 +627,12 @@ fn live_flags(args: &mut Vec<String>) -> Result<LiveFlags, String> {
             .map(|n| n.parse::<u32>().map_err(|_| "--curiosity is a number of looks"))
             .transpose()?
             .unwrap_or(40),
+        rehear_model: take(args, "--rehear-model"),
+        voice_style: take(args, "--voice-style").unwrap_or_else(|| "plain".into()),
+        follow_up_s: take(args, "--follow-up-s")
+            .map(|n| n.parse::<u64>().map_err(|_| "--follow-up-s is a number of seconds"))
+            .transpose()?
+            .unwrap_or(15),
     })
 }
 
@@ -651,6 +662,16 @@ fn live(asking: Asking, speech: SpeechFlags, flags: LiveFlags) -> Result<ExitCod
     let ears = Ears::load_on(Path::new(&speech.asr_model), Some(speech.lookahead), speech.asr_gpu)
         .map_err(|e| e.to_string())?;
     println!("ears ready in {} ms", at.elapsed().as_millis());
+    let rehear = match &flags.rehear_model {
+        Some(model) => {
+            let at = Instant::now();
+            let second = Ears::load_on(Path::new(model), None, speech.asr_gpu).map_err(|e| e.to_string())?;
+            println!("second hearing ready in {} ms", at.elapsed().as_millis());
+            Some(second)
+        }
+        None => None,
+    };
+    let style = live::style::Style::parse(&flags.voice_style)?;
     let needed = |value: &Option<String>, flag: &str| value.clone().ok_or(format!("live needs {flag}"));
     let (magpie, codec, tokenizer) = (
         needed(&speech.tts_model, "--tts-model")?,
@@ -669,7 +690,10 @@ fn live(asking: Asking, speech: SpeechFlags, flags: LiveFlags) -> Result<ExitCod
         speech.threads,
     )
     .map_err(|e| e.to_string())?;
-    let voice = language::FollowingVoice::new(voice, &speech.tts_language, &flags.tts_english);
+    let voice = live::style::StyledVoice::new(
+        language::FollowingVoice::new(voice, &speech.tts_language, &flags.tts_english),
+        style,
+    );
     let rate = archie_voice::voice::Speaks::sample_rate(&voice);
     println!("voice ready in {} ms, {rate} Hz", at.elapsed().as_millis());
 
@@ -725,6 +749,7 @@ fn live(asking: Asking, speech: SpeechFlags, flags: LiveFlags) -> Result<ExitCod
     } = asking;
     cognitive.set_persona(live::PERSONA);
     cognitive.add_tools(live::tools());
+    cognitive.put_context_beside_utterance();
     let mut session =
         SpeechSession::new(plan, FloorPolicy::default(), cognitive).map_err(|e| e.to_string())?;
     let mut act = |intent: &archie_speech::SpeechToolIntentCandidate| -> String {
@@ -756,13 +781,23 @@ fn live(asking: Asking, speech: SpeechFlags, flags: LiveFlags) -> Result<ExitCod
         always: speech.always,
         headphones: speech.headphones,
         end_after: Duration::from_millis(speech.end_after_ms),
+        follow_up: Duration::from_secs(flags.follow_up_s),
         steps: 4,
-        phrases: vec!["Archie".into()],
+        phrases: vec!["Archie".into(), "Archi".into()],
         phrase_boost: speech.name_boost,
     };
+    println!(
+        "{}",
+        if speech.always {
+            "answering everything (--always)"
+        } else {
+            "answering when named, or within the follow-up window"
+        }
+    );
     conversation::converse(
         &setup,
         &ears,
+        rehear.as_ref(),
         Box::new(voice),
         Hearing::Stream(audio),
         Saying::Stream(StreamedVoice::new(voice_out, rate)),
@@ -960,6 +995,7 @@ fn converse(
         always: speech.always,
         headphones: speech.headphones,
         end_after: Duration::from_millis(speech.end_after_ms),
+        follow_up: archie_voice::listen::FOLLOW_UP_WINDOW,
         steps,
         phrases: vec!["Archie".into()],
         phrase_boost: speech.name_boost,
@@ -981,6 +1017,7 @@ fn converse(
     conversation::converse(
         &setup,
         &ears,
+        None,
         voice,
         hearing,
         saying,
