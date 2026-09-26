@@ -180,6 +180,16 @@ impl<S: TurnSource> NemotronCognitive<S> {
         }
     }
 
+    /// Who the model is told it is. The live session gives it eyes and two languages.
+    pub fn set_persona(&mut self, persona: impl Into<String>) {
+        self.persona = persona.into();
+    }
+
+    /// Tools beyond the ones it was built with (seeing and searching, in a live session).
+    pub fn add_tools(&mut self, tools: impl IntoIterator<Item = ToolDefinition>) {
+        self.tools.extend(tools);
+    }
+
     /// Carries an utterance one step further, once the tools its last step asked for
     /// have been decided on.
     ///

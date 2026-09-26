@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Archie en vivo</title>
+<style>
+:root{--bg:#0b0d12;--panel:#151922;--text:#e8eaf0;--muted:#8a93a6;--accent:#4cc2ff;--you:#ffd166;--archie:#78dc5a}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,sans-serif}
+header{padding:12px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+header h1{font-size:17px;margin:0}.muted{color:var(--muted);font-size:13px}
+main{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:12px;padding:0 16px 16px}
+@media (max-width:900px){main{grid-template-columns:1fr}}
+.stage{position:relative;background:#000;border-radius:10px;overflow:hidden}
+video,canvas.overlay{width:100%;display:block}canvas.overlay{position:absolute;inset:0;height:100%}
+aside{display:flex;flex-direction:column;gap:10px}
+.card{background:var(--panel);border-radius:10px;padding:12px}
+button{padding:8px 12px;border-radius:6px;border:0;background:var(--accent);color:#04121c;font-weight:600;cursor:pointer}
+button.secondary{background:#2a303c;color:var(--text)}
+#log{height:300px;overflow:auto;font-size:14px}#log p{margin:4px 0}
+.you{color:var(--you)}.archie{color:var(--archie)}.tool{color:var(--muted);font-size:12px}
+#known li{margin:4px 0;font-size:14px}ul{padding-left:18px;margin:0}
+.meter{height:6px;background:#232733;border-radius:3px;overflow:hidden}.meter div{height:100%;width:0;background:var(--accent)}
+label{font-size:13px;color:var(--muted)}
+</style></head><body>
+<header><h1>Archie en vivo</h1><span class="muted" id="status">conectando…</span></header>
+<main>
+<div class="stage"><video id="video" autoplay playsinline muted></video><canvas class="overlay" id="overlay"></canvas></div>
+<aside>
+<div class="card">
+ <div style="display:flex;gap:8px;flex-wrap:wrap"><button id="start">Empezar</button><button id="mute" class="secondary">Silenciar micrófono</button></div>
+ <p class="muted" style="margin:8px 0 4px">Dile «Archie» para hablarle. Contesta en el idioma en que le hables.</p>
+ <div class="meter"><div id="level"></div></div>
+ <label><input type="checkbox" id="tags" checked> Etiquetas en las cajas</label>
+</div>
+<div class="card"><strong>Conversación</strong><div id="log"></div></div>
+<div class="card"><strong>Lo que sabe (y no ha dicho)</strong><ul id="known"><li class="muted">nada todavía</li></ul></div>
+</aside></main>
+<script>
+const $=id=>document.getElementById(id);
+const video=$('video'),overlay=$('overlay'),ctx=overlay.getContext('2d');
+let ws=null,voiceRate=22050,muted=false,scene=null,micCtx=null,playCtx=null,playAt=0,playing=[],started=false;
+const palette=['#4cc2ff','#ffaa00','#78dc5a','#ff5a78','#be78ff','#ffe650','#5affd2','#ff8c3c'],colours={};
+function log(cls,text){const p=document.createElement('p');p.className=cls;p.textContent=text;$('log').appendChild(p);$('log').scrollTop=1e9;}
+function connect(){
+ ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws`);ws.binaryType='arraybuffer';
+ ws.onopen=()=>$('status').textContent='conectado';
+ ws.onclose=()=>{$('status').textContent='desconectado, reintentando…';setTimeout(connect,1500);};
+ ws.onmessage=e=>{if(typeof e.data==='string')event(JSON.parse(e.data));else voice(e.data);};
+}
+function event(m){
+ switch(m.type){
+  case 'hello':voiceRate=m.voice_rate;$('status').textContent=`conectado · voz ${m.voice_rate} Hz · identificar: ${m.identify.length?m.identify.join(' + '):'solo IRIS'} · búsqueda: ${m.search?'Tavily':'no'}`;break;
+  case 'heard':log('you','Tú: '+m.text);break;
+  case 'said':log('archie','Archie: '+m.text+(m.stopped?' (interrumpido)':''));break;
+  case 'tool':log('tool',`→ ${m.tool} ${m.arguments}`);break;
+  case 'did':log('tool','← '+m.report);break;
+  case 'interrupted':hush();log('tool','(me interrumpiste)');break;
+  case 'hush':hush();break;
+  case 'alert':log('tool','⚠ '+m.text);break;
+  case 'level':$('level').style.width=Math.min(100,m.level*600)+'%';$('level').style.background=m.voiced?'#78dc5a':'#4cc2ff';break;
+  case 'scene':scene=m;draw();break;
+  case 'known':known(m.known);break;
+ }
+}
+function known(k){
+ const list=$('known');if(list.firstChild&&list.firstChild.classList&&list.firstChild.classList.contains('muted'))list.innerHTML='';
+ const li=document.createElement('li');li.textContent=`${k.seen_as} → ${k.name}${k.facts?' — '+k.facts.slice(0,160):''} (${k.by})`;list.prepend(li);
+}
+function voice(buffer){
+ const bytes=new Uint8Array(buffer);if(bytes[0]!==1||!playCtx)return;
+ const pcm=new Int16Array(buffer.slice(1));const f=new Float32Array(pcm.length);for(let i=0;i<pcm.length;i++)f[i]=pcm[i]/32768;
+ const audio=playCtx.createBuffer(1,f.length,voiceRate);audio.copyToChannel(f,0);
+ const src=playCtx.createBufferSource();src.buffer=audio;src.connect(playCtx.destination);
+ playAt=Math.max(playAt,playCtx.currentTime+0.05);src.start(playAt);playAt+=audio.duration;playing.push(src);
+ src.onended=()=>{playing=playing.filter(s=>s!==src);};
+}
+function hush(){for(const s of playing){try{s.stop();}catch(e){}}playing=[];playAt=0;}
+const TAP=`class Tap extends AudioWorkletProcessor{process(i){const c=i[0][0];if(c)this.port.postMessage(c.slice(0));return true;}}registerProcessor('tap',Tap);`;
+$('start').onclick=async()=>{
+ if(started)return;started=true;$('start').textContent='Escuchando';
+ const stream=await navigator.mediaDevices.getUserMedia({
+  audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1},
+  video:{width:{ideal:1280},height:{ideal:720}}});
+ video.srcObject=new MediaStream(stream.getVideoTracks());await video.play();
+ playCtx=new AudioContext();
+ micCtx=new AudioContext({sampleRate:16000});
+ await micCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([TAP],{type:'application/javascript'})));
+ const tap=new AudioWorkletNode(micCtx,'tap');micCtx.createMediaStreamSource(stream).connect(tap);
+ let pending=[],count=0;
+ tap.port.onmessage=e=>{if(muted||!ws||ws.readyState!==1)return;pending.push(e.data);count+=e.data.length;
+  if(count>=1600){const out=new Float32Array(count);let o=0;for(const p of pending){out.set(p,o);o+=p.length;}
+   const msg=new Uint8Array(1+out.byteLength);msg[0]=1;msg.set(new Uint8Array(out.buffer),1);ws.send(msg);pending=[];count=0;}};
+ const grab=document.createElement('canvas');
+ setInterval(()=>{const w=video.videoWidth,h=video.videoHeight;if(!w||!ws||ws.readyState!==1||ws.bufferedAmount>300000)return;
+  const scale=Math.min(1,512/w);grab.width=Math.round(w*scale);grab.height=Math.round(h*scale);
+  grab.getContext('2d').drawImage(video,0,0,grab.width,grab.height);
+  grab.toBlob(b=>b&&b.arrayBuffer().then(a=>{const msg=new Uint8Array(1+a.byteLength);msg[0]=2;msg.set(new Uint8Array(a),1);ws.send(msg);}),'image/jpeg',0.75);},350);
+};
+$('mute').onclick=()=>{muted=!muted;$('mute').textContent=muted?'Activar micrófono':'Silenciar micrófono';};
+function draw(){
+ if(!scene||!video.videoWidth)return;overlay.width=video.clientWidth;overlay.height=video.clientHeight;
+ const k=overlay.width/scene.width;ctx.clearRect(0,0,overlay.width,overlay.height);ctx.lineWidth=3;ctx.font='15px system-ui';
+ for(const d of scene.seen){const c=colours[d.phrase]||(colours[d.phrase]=palette[Object.keys(colours).length%palette.length]);
+  const [x0,y0,x1,y1]=d.box.map(v=>v*k);ctx.strokeStyle=c;ctx.strokeRect(x0,y0,x1-x0,y1-y0);
+  if($('tags').checked){const t=`${d.phrase} ${(d.score*100).toFixed(0)}%`,tw=ctx.measureText(t).width+8;
+   ctx.fillStyle=c;ctx.fillRect(x0,Math.max(0,y0-20),tw,20);ctx.fillStyle='#04121c';ctx.fillText(t,x0+4,Math.max(14,y0-5));}}
+}
+connect();
+</script></body></html>

@@ -22,7 +22,9 @@
 //!   is dropped, the turn is cancelled as an interruption, and what was not said stays in
 //!   the commit log, unsaid.
 
-use crate::audio::{loudness, AudioError, Microphone, Speaker, VoiceActivity};
+#[cfg(feature = "pulse")]
+use crate::audio::{Microphone, Speaker};
+use crate::audio::{loudness, AudioError, VoiceActivity};
 use crate::listen::{after_utterance, over_archie, Utterance};
 use crate::native::Ears;
 use crate::nemotron::{NemotronCognitive, TurnSource};
@@ -39,7 +41,11 @@ use std::time::{Duration, Instant};
 
 /// Where the sound comes from.
 pub enum Hearing {
+    #[cfg(feature = "pulse")]
     Microphone(Microphone),
+    /// Sound streamed from elsewhere — a browser page — as 16 kHz mono frames. The
+    /// conversation ends when the sender is dropped.
+    Stream(Receiver<Vec<f32>>),
     /// A recording, played in as if it were the room, then silence long enough for the
     /// conversation that follows it to finish.
     Recording {
@@ -69,10 +75,18 @@ impl Hearing {
     /// The next 20 ms of sound and its rate, or `None` when a recording has run out.
     fn frame(&mut self) -> Result<Option<(Vec<f32>, u32)>, AudioError> {
         match self {
+            #[cfg(feature = "pulse")]
             Self::Microphone(microphone) => Ok(Some((
                 microphone.frame()?.to_vec(),
                 crate::audio::CAPTURE_RATE,
             ))),
+            // A network stalls; the loop must not. An empty frame keeps the voice and the
+            // turn moving while no sound arrives, and advances no audio time.
+            Self::Stream(frames) => match frames.recv_timeout(Duration::from_millis(40)) {
+                Ok(frame) => Ok(Some((frame, crate::audio::CAPTURE_RATE))),
+                Err(mpsc::RecvTimeoutError::Timeout) => Ok(Some((Vec::new(), crate::audio::CAPTURE_RATE))),
+                Err(mpsc::RecvTimeoutError::Disconnected) => Ok(None),
+            },
             Self::Recording {
                 samples,
                 rate,
@@ -97,13 +111,75 @@ impl Hearing {
     }
 
     fn is_live(&self) -> bool {
-        matches!(self, Self::Microphone(_))
+        !matches!(self, Self::Recording { .. })
+    }
+}
+
+/// What a streamed voice sends: audio to play, or "drop everything queued".
+#[derive(Debug, Clone, PartialEq)]
+pub enum VoiceOut {
+    Audio(Vec<i16>),
+    Hush,
+}
+
+/// A voice sent over a stream, paced like a speaker: synthesis may run at most a quarter
+/// of a second ahead of what has been heard, so the loop knows when Archie is still
+/// talking and the floor can hand the turn back at the right moment.
+pub struct StreamedVoice {
+    out: Sender<VoiceOut>,
+    rate: u32,
+    since: Option<Instant>,
+    sent: u64,
+}
+
+impl StreamedVoice {
+    pub fn new(out: Sender<VoiceOut>, rate: u32) -> Self {
+        Self {
+            out,
+            rate: rate.max(1),
+            since: None,
+            sent: 0,
+        }
+    }
+
+    fn ahead(&self) -> Duration {
+        let Some(since) = self.since else {
+            return Duration::ZERO;
+        };
+        Duration::from_secs_f64(self.sent as f64 / self.rate as f64).saturating_sub(since.elapsed())
+    }
+
+    fn play(&mut self, pcm: &[i16]) -> Result<(), AudioError> {
+        self.since.get_or_insert_with(Instant::now);
+        self.out
+            .send(VoiceOut::Audio(pcm.to_vec()))
+            .map_err(|_| AudioError::new("playing the voice", "the listener is gone"))?;
+        self.sent += pcm.len() as u64;
+        let ahead = self.ahead();
+        if ahead > Duration::from_millis(250) {
+            std::thread::sleep(ahead - Duration::from_millis(250));
+        }
+        Ok(())
+    }
+
+    fn settle(&mut self) {
+        std::thread::sleep(self.ahead());
+        self.since = None;
+        self.sent = 0;
+    }
+
+    fn hush(&mut self) {
+        let _ = self.out.send(VoiceOut::Hush);
+        self.since = None;
+        self.sent = 0;
     }
 }
 
 /// Where the voice goes.
 pub enum Saying {
+    #[cfg(feature = "pulse")]
     Speaker(Speaker),
+    Stream(StreamedVoice),
     Recording {
         path: PathBuf,
         samples: Vec<i16>,
@@ -114,7 +190,9 @@ pub enum Saying {
 impl Saying {
     fn play(&mut self, pcm: &[i16]) -> Result<(), AudioError> {
         match self {
+            #[cfg(feature = "pulse")]
             Self::Speaker(speaker) => speaker.play(pcm),
+            Self::Stream(voice) => voice.play(pcm),
             Self::Recording { samples, .. } => {
                 samples.extend_from_slice(pcm);
                 Ok(())
@@ -124,9 +202,11 @@ impl Saying {
 
     fn settle(&mut self) {
         match self {
+            #[cfg(feature = "pulse")]
             Self::Speaker(speaker) => {
                 let _ = speaker.drain();
             }
+            Self::Stream(voice) => voice.settle(),
             Self::Recording {
                 path,
                 samples,
@@ -138,8 +218,13 @@ impl Saying {
     }
 
     fn hush(&mut self) {
-        if let Self::Speaker(speaker) = self {
-            let _ = speaker.stop();
+        match self {
+            #[cfg(feature = "pulse")]
+            Self::Speaker(speaker) => {
+                let _ = speaker.stop();
+            }
+            Self::Stream(voice) => voice.hush(),
+            Self::Recording { .. } => {}
         }
     }
 }
@@ -317,7 +402,8 @@ pub fn converse<S: TurnSource>(
             };
             audio_ms += (frame.len() as u64 * 1000) / rate.max(1) as u64;
             let level = loudness(&frame);
-            let voiced = activity.hear(level);
+            // An empty frame is a stream that has sent nothing yet, not a quiet room.
+            let voiced = !frame.is_empty() && activity.hear(level);
             frames += 1;
             if frames % 5 == 0 {
                 report(Moment::Level { level, voiced });

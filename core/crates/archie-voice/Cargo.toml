@@ -15,6 +15,12 @@ nemo = []
 pulse = ["dep:libpulse-binding", "dep:libpulse-simple-binding"]
 # A spoken conversation: both of the above.
 speech = ["nemo", "pulse"]
+# A live session reached from a browser: its microphone, speaker and camera over a
+# WebSocket, IRIS for eyes, and curiosity (identify and search) for what is in front.
+live = [
+    "nemo", "dep:axum", "dep:reqwest", "dep:futures-util", "dep:serde", "dep:base64", "dep:png",
+    "dep:jpeg-decoder", "dep:archie-search", "dep:archie-vault", "dep:ring", "dep:zeroize",
+]
 
 [dependencies]
 archie-types.workspace = true
@@ -31,6 +37,17 @@ thiserror.workspace = true
 tokio.workspace = true
 # The clock the model is given, read before any thread starts so the local offset is known.
 time = { workspace = true, features = ["local-offset"] }
+axum = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+futures-util = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
+png = { workspace = true, optional = true }
+jpeg-decoder = { workspace = true, optional = true }
+archie-search = { workspace = true, optional = true }
+archie-vault = { workspace = true, optional = true }
+ring = { workspace = true, optional = true }
+zeroize = { workspace = true, optional = true }
 libpulse-binding = { version = "2", optional = true }
 libpulse-simple-binding = { version = "2", optional = true }
 

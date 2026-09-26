@@ -22,10 +22,11 @@
 //! the others noticing.
 
 pub mod act;
-#[cfg(feature = "pulse")]
 pub mod audio;
-#[cfg(all(feature = "nemo", feature = "pulse"))]
+#[cfg(feature = "nemo")]
 pub mod conversation;
+#[cfg(feature = "live")]
+pub mod live;
 pub mod hands;
 pub mod listen;
 #[cfg(feature = "nemo")]

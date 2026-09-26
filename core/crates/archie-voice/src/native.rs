@@ -331,10 +331,16 @@ impl Ears {
     /// costs more per second of audio: on a Ryzen 5 4500U only 13 kept up with speech
     /// (real-time factor 1.41 at 13, 0.95 at 6, 0.74 at 3, 0.47 at 1).
     pub fn load(model: &Path, right_context: Option<i32>) -> Result<Self, NativeError> {
+        Self::load_on(model, right_context, -1)
+    }
+
+    /// As [`Self::load`], on GPU `gpu` (a CUDA device index), or the CPU when it is -1. On
+    /// a GPU the ears keep up with far less lookahead, so they answer sooner.
+    pub fn load_on(model: &Path, right_context: Option<i32>, gpu: i32) -> Result<Self, NativeError> {
         let path = c_path(model, "the ASR model path")?;
         let backend = ffi::AsrBackendConfig {
             size: size_of::<ffi::AsrBackendConfig>(),
-            gpu: -1,
+            gpu,
         };
         let model = ffi::AsrModelConfig {
             size: size_of::<ffi::AsrModelConfig>(),
@@ -595,6 +601,13 @@ impl Voice {
     pub fn sample_rate(&self) -> u32 {
         // SAFETY: a live synthesizer.
         unsafe { ffi::nemo_speech_tts_sample_rate(self.synthesizer) }.max(0) as u32
+    }
+
+    /// The language the next sentences are said in (a locale such as `es-US` or `en-US`):
+    /// the model is multilingual, and a person may switch languages between turns.
+    pub fn set_language(&mut self, language: &str) -> Result<(), NativeError> {
+        self.language = c_string(language, "the language code")?;
+        Ok(())
     }
 
     /// The voices this model has, by name.
