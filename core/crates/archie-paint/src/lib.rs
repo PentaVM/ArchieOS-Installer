@@ -10,6 +10,7 @@
 //! dark, crossed at a different angle where it is darker still. One pen, four passes, and
 //! tone comes out of how much of the paper is left white.
 
+pub mod bench;
 mod image;
 mod flow;
 mod paper;
