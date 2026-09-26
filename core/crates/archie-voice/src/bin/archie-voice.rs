@@ -611,6 +611,12 @@ struct LiveFlags {
     voice_style: String,
     /// Seconds after Archie spoke that a reply needs no name.
     follow_up_s: u64,
+    /// An RVC voice exported to ONNX (its `<name>.json`): every sentence is converted into it.
+    rvc_voice: Option<String>,
+    rvc_key: f32,
+    rvc_index_rate: f32,
+    /// ONNX Runtime's shared library; `ORT_DYLIB_PATH` if not given.
+    ort_library: Option<String>,
 }
 
 fn live_flags(args: &mut Vec<String>) -> Result<LiveFlags, String> {
@@ -633,7 +639,49 @@ fn live_flags(args: &mut Vec<String>) -> Result<LiveFlags, String> {
             .map(|n| n.parse::<u64>().map_err(|_| "--follow-up-s is a number of seconds"))
             .transpose()?
             .unwrap_or(15),
+        rvc_voice: take(args, "--rvc-voice"),
+        rvc_key: take(args, "--rvc-key")
+            .map(|n| n.parse::<f32>().map_err(|_| "--rvc-key is a number of semitones"))
+            .transpose()?
+            .unwrap_or(0.0),
+        rvc_index_rate: take(args, "--rvc-index-rate")
+            .map(|n| n.parse::<f32>().map_err(|_| "--rvc-index-rate is between 0 and 1"))
+            .transpose()?
+            .unwrap_or(0.75),
+        ort_library: take(args, "--ort-library").or_else(|| std::env::var("ORT_DYLIB_PATH").ok()),
     })
+}
+
+/// The Magpie voice converted, sentence by sentence, into an RVC voice.
+#[cfg(all(unix, feature = "live", feature = "rvc"))]
+fn converted_voice(
+    voice: archie_voice::live::language::FollowingVoice,
+    manifest: &str,
+    flags: &LiveFlags,
+) -> Result<Box<dyn archie_voice::voice::Speaks>, String> {
+    use archie_voice::rvc::{init_runtime, ConvertedVoice, RvcVoice, Tuning};
+    let library = flags
+        .ort_library
+        .as_deref()
+        .ok_or("--rvc-voice needs ONNX Runtime: give --ort-library or set ORT_DYLIB_PATH")?;
+    init_runtime(std::path::Path::new(library))?;
+    let at = Instant::now();
+    let rvc = RvcVoice::load(
+        std::path::Path::new(manifest),
+        Tuning { key: flags.rvc_key, index_rate: flags.rvc_index_rate },
+        4,
+    )?;
+    println!("converted voice {manifest} ready in {} ms", at.elapsed().as_millis());
+    Ok(Box::new(ConvertedVoice::new(voice, rvc)))
+}
+
+#[cfg(all(unix, feature = "live", not(feature = "rvc")))]
+fn converted_voice(
+    _voice: archie_voice::live::language::FollowingVoice,
+    _manifest: &str,
+    _flags: &LiveFlags,
+) -> Result<Box<dyn archie_voice::voice::Speaks>, String> {
+    Err("this build has no converted voices: build archie-voice with --features live,rvc".into())
 }
 
 #[cfg(not(all(unix, feature = "live")))]
@@ -690,11 +738,12 @@ fn live(asking: Asking, speech: SpeechFlags, flags: LiveFlags) -> Result<ExitCod
         speech.threads,
     )
     .map_err(|e| e.to_string())?;
-    let voice = live::style::StyledVoice::new(
-        language::FollowingVoice::new(voice, &speech.tts_language, &flags.tts_english),
-        style,
-    );
-    let rate = archie_voice::voice::Speaks::sample_rate(&voice);
+    let following = language::FollowingVoice::new(voice, &speech.tts_language, &flags.tts_english);
+    let voice: Box<dyn archie_voice::voice::Speaks> = match &flags.rvc_voice {
+        Some(manifest) => converted_voice(following, manifest, &flags)?,
+        None => Box::new(live::style::StyledVoice::new(following, style)),
+    };
+    let rate = voice.sample_rate();
     println!("voice ready in {} ms, {rate} Hz", at.elapsed().as_millis());
 
     let (audio_in, audio) = mpsc::channel::<Vec<f32>>();
@@ -798,7 +847,7 @@ fn live(asking: Asking, speech: SpeechFlags, flags: LiveFlags) -> Result<ExitCod
         &setup,
         &ears,
         rehear.as_ref(),
-        Box::new(voice),
+        voice,
         Hearing::Stream(audio),
         Saying::Stream(StreamedVoice::new(voice_out, rate)),
         &mut session,

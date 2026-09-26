@@ -104,6 +104,9 @@ jpeg-decoder = "0.3"
 png = "0.18"
 # Archie's live page: the browser's microphone, speaker and camera over a WebSocket.
 axum = { version = "0.7", default-features = false, features = ["http1", "tokio", "ws"] }
+# ONNX Runtime, loaded at run time from the official shared library (ORT_DYLIB_PATH): no
+# binaries are downloaded while building.
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "load-dynamic", "api-22"] }
 clap = { version = "4", features = ["derive"] }
 ed25519-dalek = { version = "2", features = ["rand_core", "pkcs8", "pem"] }
 flate2 = "1"
