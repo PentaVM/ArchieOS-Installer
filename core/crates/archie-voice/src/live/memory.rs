@@ -114,9 +114,11 @@ impl Memory {
                     // The same object: it looks the same (IRIS may call it by a near
                     // category from one frame to the next), or it is the same kind of thing
                     // where that kind of thing just was.
+                    // Measured on IRIS step 4000: the same object moved in the frame
+                    // scored 0.83 to 0.98, different objects in one frame about 0.6 to 0.76.
                     let score = match likeness {
-                        Some(like) if same_phrase && like >= 0.7 => like + overlap,
-                        Some(like) if like >= 0.9 => like + overlap,
+                        Some(like) if same_phrase && like >= 0.85 => like + overlap,
+                        Some(like) if like >= 0.93 => like + overlap,
                         _ if same_phrase && recent && overlap >= 0.3 => overlap,
                         _ => return None,
                     };
