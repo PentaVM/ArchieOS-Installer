@@ -1,0 +1,395 @@
+#include "AppCatalog.h"
+
+#include <QDir>
+#include <QDirIterator>
+#include <QFile>
+#include <QFileInfo>
+#include <QGuiApplication>
+#include <QProcess>
+#include <QRegularExpression>
+#include <QStandardPaths>
+#include <QTextStream>
+#include <QUrl>
+
+#include <algorithm>
+
+namespace {
+
+/// The `[Desktop Entry]` group of a desktop file, with localized keys resolved to Spanish
+/// where the entry offers it.
+QHash<QString, QString> readEntry(const QString &path)
+{
+    QHash<QString, QString> values;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text) || file.size() > 256 * 1024)
+        return values;
+    QTextStream in(&file);
+    bool inEntry = false;
+    QHash<QString, QString> localized;
+    while (!in.atEnd()) {
+        const QString line = in.readLine().trimmed();
+        if (line.isEmpty() || line.startsWith(QLatin1Char('#')))
+            continue;
+        if (line.startsWith(QLatin1Char('['))) {
+            inEntry = line == QLatin1String("[Desktop Entry]");
+            continue;
+        }
+        if (!inEntry)
+            continue;
+        const qsizetype equals = line.indexOf(QLatin1Char('='));
+        if (equals <= 0)
+            continue;
+        const QString key = line.left(equals).trimmed();
+        const QString value = line.mid(equals + 1).trimmed();
+        if (key.endsWith(QLatin1String("[es]")))
+            localized.insert(key.left(key.size() - 4), value);
+        else if (!key.contains(QLatin1Char('[')))
+            values.insert(key, value);
+    }
+    for (auto it = localized.begin(); it != localized.end(); ++it)
+        values.insert(it.key(), it.value());
+    return values;
+}
+
+QString groupOf(const QString &categories)
+{
+    const QStringList list = categories.split(QLatin1Char(';'), Qt::SkipEmptyParts);
+    const auto has = [&list](const char *name) { return list.contains(QLatin1String(name)); };
+    if (has("X-Archie")) return QStringLiteral("Archie");
+    if (has("Electronics") || has("Engineering") || has("Science")) return QStringLiteral("Ingeniería");
+    if (has("Development") || has("IDE")) return QStringLiteral("Desarrollo");
+    if (has("Graphics") || has("3DGraphics")) return QStringLiteral("Gráficos");
+    if (has("AudioVideo") || has("Video") || has("Audio")) return QStringLiteral("Multimedia");
+    if (has("Network") || has("WebBrowser")) return QStringLiteral("Internet");
+    if (has("Office")) return QStringLiteral("Oficina");
+    if (has("Game")) return QStringLiteral("Juegos");
+    if (has("System") || has("Settings") || has("TerminalEmulator")) return QStringLiteral("Sistema");
+    if (has("Utility")) return QStringLiteral("Utilidades");
+    return QStringLiteral("Otras");
+}
+
+/// Exec without its field codes, split into a program and arguments.
+QStringList commandOf(const QString &exec)
+{
+    QString text = exec;
+    text.replace(QRegularExpression(QStringLiteral("%[fFuUdDnNickvm]")), QString());
+    text.replace(QStringLiteral("%%"), QStringLiteral("%"));
+    return QProcess::splitCommand(text.simplified());
+}
+
+QString binaryOf(const QStringList &command)
+{
+    // `env VAR=value program ...` names its program after the assignments.
+    qsizetype at = 0;
+    if (!command.isEmpty() && QFileInfo(command.first()).fileName() == QLatin1String("env")) {
+        at = 1;
+        while (at < command.size() && command.at(at).contains(QLatin1Char('=')))
+            ++at;
+    }
+    return at < command.size() ? command.at(at) : QString();
+}
+
+QString expandShare(QString text)
+{
+    const QString share = qEnvironmentVariableIsEmpty("ARCHIE_SHARE")
+                              ? QStringLiteral("/usr/share/archie")
+                              : qEnvironmentVariable("ARCHIE_SHARE");
+    text.replace(QStringLiteral("@ARCHIE_SHARE@"), share);
+    return text;
+}
+
+struct Suggestion {
+    const char *id;
+    const char *name;
+    const char *comment;
+    const char *group;
+    const char *package;
+    const char *glyph;
+};
+
+// Tools an operator of this machine is likely to want, shown when they are missing so the
+// gap is visible. Installing is the operator's call and needs root; this only names the
+// package.
+constexpr Suggestion suggestions[] = {
+    {"org.kicad.kicad", "KiCad", "Diseño de circuitos y placas", "Ingeniería", "kicad", "K"},
+    {"firefox", "Firefox", "Navegador web", "Internet", "firefox", "F"},
+    {"org.kde.kdenlive", "Kdenlive", "Edición de video (el motor de Archie Cut)", "Multimedia", "kdenlive", "V"},
+    {"org.freecad.FreeCAD", "FreeCAD", "Modelado CAD paramétrico", "Ingeniería", "freecad", "C"},
+    {"blender", "Blender", "Modelado, animación y render 3D", "Gráficos", "blender", "B"},
+    {"org.inkscape.Inkscape", "Inkscape", "Gráficos vectoriales", "Gráficos", "inkscape", "I"},
+    {"gimp", "GIMP", "Edición de imágenes", "Gráficos", "gimp", "G"},
+    {"com.obsproject.Studio", "OBS Studio", "Grabar y transmitir la pantalla", "Multimedia", "obs-studio", "O"},
+    {"libreoffice-startcenter", "LibreOffice", "Documentos, hojas y presentaciones", "Oficina", "libreoffice-fresh", "L"},
+};
+
+}  // namespace
+
+AppCatalog::AppCatalog(QObject *parent) : QObject(parent)
+{
+    const QString platform = QGuiApplication::platformName();
+    m_canLaunch = platform == QLatin1String("wayland") || platform == QLatin1String("xcb");
+    m_launchNote = m_canLaunch
+                       ? QStringLiteral("Se abren en esta sesión, como el usuario que corre el observatorio.")
+                       : QStringLiteral("El observatorio corre sin escritorio (%1): aquí no hay dónde abrir una ventana. "
+                                        "En la imagen, las aplicaciones se abren en el Stage.")
+                             .arg(platform);
+    m_runningTimer.setInterval(3000);
+    m_runningTimer.setTimerType(Qt::CoarseTimer);
+    connect(&m_runningTimer, &QTimer::timeout, this, [this] {
+        countRunning();
+        publish();
+    });
+    refresh();
+}
+
+void AppCatalog::setActive(bool active)
+{
+    if (m_active == active)
+        return;
+    m_active = active;
+    if (active) {
+        refresh();
+        m_runningTimer.start();
+    } else {
+        m_runningTimer.stop();
+    }
+    emit activeChanged();
+}
+
+void AppCatalog::refresh()
+{
+    scan();
+    readPolicy();
+    countRunning();
+    publish();
+}
+
+QString AppCatalog::resolveIcon(const QString &name) const
+{
+    if (name.isEmpty())
+        return {};
+    if (QFileInfo(name).isAbsolute())
+        return QFileInfo::exists(name) ? QUrl::fromLocalFile(name).toString() : QString();
+    static const char *sizes[] = {"scalable", "256x256", "128x128", "96x96", "64x64", "48x48"};
+    QStringList bases = QStandardPaths::standardLocations(QStandardPaths::GenericDataLocation);
+    for (const QString &base : std::as_const(bases)) {
+        for (const char *size : sizes) {
+            for (const char *extension : {".svg", ".png"}) {
+                const QString path = base + QStringLiteral("/icons/hicolor/") + QLatin1String(size)
+                                     + QStringLiteral("/apps/") + name + QLatin1String(extension);
+                if (QFileInfo::exists(path))
+                    return QUrl::fromLocalFile(path).toString();
+            }
+        }
+        for (const char *extension : {".png", ".svg"}) {
+            const QString path = base + QStringLiteral("/pixmaps/") + name + QLatin1String(extension);
+            if (QFileInfo::exists(path))
+                return QUrl::fromLocalFile(path).toString();
+        }
+    }
+    return {};
+}
+
+void AppCatalog::scan()
+{
+    m_apps.clear();
+    QSet<QString> seen;
+    const auto add = [this, &seen](const QString &id, const QHash<QString, QString> &entry, const QString &section) {
+        if (seen.contains(id) || entry.value(QStringLiteral("Type")) != QLatin1String("Application"))
+            return;
+        if (entry.value(QStringLiteral("NoDisplay")) == QLatin1String("true")
+            || entry.value(QStringLiteral("Hidden")) == QLatin1String("true"))
+            return;
+        App app;
+        app.id = id;
+        app.section = section;
+        app.name = entry.value(QStringLiteral("Name"), id);
+        app.comment = entry.value(QStringLiteral("Comment"), entry.value(QStringLiteral("GenericName")));
+        app.exec = expandShare(entry.value(QStringLiteral("Exec")));
+        app.terminal = entry.value(QStringLiteral("Terminal")) == QLatin1String("true");
+        app.binary = binaryOf(commandOf(app.exec));
+        app.group = groupOf(entry.value(QStringLiteral("Categories")));
+        app.icon = resolveIcon(entry.value(QStringLiteral("Icon")));
+        app.glyph = entry.value(QStringLiteral("X-Archie-Glyph"), app.name.left(1).toUpper());
+        app.appId = entry.value(QStringLiteral("X-Archie-App-Id"), id);
+        app.wmClass = entry.value(QStringLiteral("StartupWMClass"));
+        const QString tryExec = expandShare(entry.value(QStringLiteral("TryExec"), app.binary));
+        const bool found = !tryExec.isEmpty()
+                           && (QFileInfo(tryExec).isAbsolute() ? QFileInfo(tryExec).isExecutable()
+                                                               : !QStandardPaths::findExecutable(tryExec).isEmpty());
+        if (!found)
+            app.missing = QStringLiteral("falta ") + (tryExec.isEmpty() ? QStringLiteral("el ejecutable") : tryExec);
+        const QString needsFile = expandShare(entry.value(QStringLiteral("X-Archie-Requires-File")));
+        if (app.missing.isEmpty() && !needsFile.isEmpty() && !QFileInfo::exists(needsFile))
+            app.missing = QStringLiteral("falta ") + needsFile;
+        const QString needsEnv = entry.value(QStringLiteral("X-Archie-Requires-Env"));
+        if (app.missing.isEmpty() && !needsEnv.isEmpty() && qEnvironmentVariableIsEmpty(needsEnv.toLatin1().constData()))
+            app.missing = QStringLiteral("necesita ") + needsEnv + QStringLiteral(" en el entorno");
+        app.available = app.missing.isEmpty();
+        for (const auto &s : suggestions)
+            if (id == QLatin1String(s.id))
+                app.featured = true;
+        seen.insert(id);
+        m_apps.push_back(app);
+    };
+
+    // Archie's own, shipped inside the observatory.
+    QDirIterator own(QStringLiteral(":/archie/apps"), {QStringLiteral("*.desktop")}, QDir::Files);
+    while (own.hasNext()) {
+        const QString path = own.next();
+        add(QFileInfo(path).completeBaseName(), readEntry(path), QStringLiteral("archie"));
+    }
+    // Everything installed, as any application menu lists it. Earlier directories win,
+    // as the XDG specification orders them.
+    const QStringList roots = QStandardPaths::standardLocations(QStandardPaths::ApplicationsLocation);
+    for (const QString &root : roots) {
+        QDirIterator it(root, {QStringLiteral("*.desktop")}, QDir::Files, QDirIterator::Subdirectories);
+        int budget = 4000;
+        while (it.hasNext() && budget-- > 0) {
+            const QString path = it.next();
+            QString id = QDir(root).relativeFilePath(path);
+            id.chop(8);
+            id.replace(QLatin1Char('/'), QLatin1Char('-'));
+            add(id, readEntry(path), QStringLiteral("installed"));
+        }
+    }
+    for (const auto &s : suggestions) {
+        const QString id = QString::fromLatin1(s.id);
+        if (seen.contains(id))
+            continue;
+        App app;
+        app.id = id;
+        app.name = QString::fromUtf8(s.name);
+        app.comment = QString::fromUtf8(s.comment);
+        app.group = QString::fromUtf8(s.group);
+        app.package = QString::fromLatin1(s.package);
+        app.glyph = QString::fromUtf8(s.glyph);
+        app.section = QStringLiteral("suggested");
+        app.missing = QStringLiteral("no instalada · pacman -S ") + app.package;
+        app.appId = id;
+        m_apps.push_back(app);
+    }
+}
+
+void AppCatalog::readPolicy()
+{
+    m_policyApps.clear();
+    m_policyPath.clear();
+    QStringList candidates;
+    if (!qEnvironmentVariableIsEmpty("ARCHIE_STAGE_POLICY"))
+        candidates << qEnvironmentVariable("ARCHIE_STAGE_POLICY");
+    candidates << QStringLiteral("/etc/archie/stage/apps.toml") << expandShare(QStringLiteral("@ARCHIE_SHARE@/stage/apps.toml"));
+    for (const QString &path : std::as_const(candidates)) {
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+            continue;
+        m_policyPath = path;
+        static const QRegularExpression appId(QStringLiteral("^\\s*app_id\\s*=\\s*\"([^\"]+)\""));
+        QTextStream in(&file);
+        while (!in.atEnd()) {
+            const auto match = appId.match(in.readLine());
+            if (match.hasMatch())
+                m_policyApps.insert(match.captured(1));
+        }
+        break;
+    }
+    for (App &app : m_apps) {
+        const QString binary = QFileInfo(app.binary).fileName();
+        app.operable = m_policyApps.contains(app.appId) || m_policyApps.contains(app.id)
+                       || (!app.wmClass.isEmpty() && m_policyApps.contains(app.wmClass))
+                       || (!binary.isEmpty() && m_policyApps.contains(binary));
+    }
+}
+
+void AppCatalog::countRunning()
+{
+    QHash<QString, int> counts;
+    const QDir proc(QStringLiteral("/proc"));
+    const QStringList pids = proc.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QString &pid : pids) {
+        bool numeric = false;
+        pid.toInt(&numeric);
+        if (!numeric)
+            continue;
+        QFile comm(QStringLiteral("/proc/") + pid + QStringLiteral("/comm"));
+        if (comm.open(QIODevice::ReadOnly))
+            counts[QString::fromUtf8(comm.readAll()).trimmed()] += 1;
+    }
+    for (App &app : m_apps) {
+        // The kernel keeps 15 characters of a process name.
+        const QString name = QFileInfo(app.binary).fileName().left(15);
+        app.running = name.isEmpty() ? 0 : counts.value(name, 0);
+    }
+}
+
+void AppCatalog::publish()
+{
+    std::stable_sort(m_apps.begin(), m_apps.end(), [](const App &a, const App &b) {
+        const auto rank = [](const App &x) {
+            return x.section == QLatin1String("archie") ? 0 : x.section == QLatin1String("installed") ? 1 : 2;
+        };
+        if (rank(a) != rank(b))
+            return rank(a) < rank(b);
+        if (a.featured != b.featured)
+            return a.featured;
+        return a.name.localeAwareCompare(b.name) < 0;
+    });
+    QVariantList rows;
+    for (const App &app : std::as_const(m_apps)) {
+        rows.push_back(QVariantMap{
+            {QStringLiteral("id"), app.id},
+            {QStringLiteral("name"), app.name},
+            {QStringLiteral("comment"), app.comment},
+            {QStringLiteral("group"), app.group},
+            {QStringLiteral("section"), app.section},
+            {QStringLiteral("icon"), app.icon},
+            {QStringLiteral("glyph"), app.glyph},
+            {QStringLiteral("available"), app.available},
+            {QStringLiteral("missing"), app.missing},
+            {QStringLiteral("running"), app.running},
+            {QStringLiteral("operable"), app.operable},
+            {QStringLiteral("featured"), app.featured},
+            {QStringLiteral("package"), app.package},
+        });
+    }
+    m_rows = rows;
+    emit appsChanged();
+}
+
+bool AppCatalog::launch(const QString &id)
+{
+    const auto found = std::find_if(m_apps.cbegin(), m_apps.cend(), [&id](const App &app) { return app.id == id; });
+    if (found == m_apps.cend()) {
+        emit launched(id, false, QStringLiteral("no está en el catálogo"));
+        return false;
+    }
+    if (!m_canLaunch) {
+        emit launched(id, false, m_launchNote);
+        return false;
+    }
+    if (!found->available) {
+        emit launched(id, false, found->missing);
+        return false;
+    }
+    QStringList command = commandOf(found->exec);
+    if (command.isEmpty()) {
+        emit launched(id, false, QStringLiteral("la entrada no dice qué ejecutar"));
+        return false;
+    }
+    if (found->terminal) {
+        const QString terminal = QStandardPaths::findExecutable(QStringLiteral("foot"));
+        if (terminal.isEmpty()) {
+            emit launched(id, false, QStringLiteral("es de terminal y no hay terminal instalada"));
+            return false;
+        }
+        command.prepend(terminal);
+    }
+    const QString program = command.takeFirst();
+    const bool ok = QProcess::startDetached(program, command);
+    emit launched(id, ok, ok ? QStringLiteral("abierta") : QStringLiteral("no se pudo iniciar ") + program);
+    QTimer::singleShot(1500, this, [this] {
+        countRunning();
+        publish();
+    });
+    return ok;
+}

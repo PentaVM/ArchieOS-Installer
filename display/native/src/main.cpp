@@ -1,4 +1,6 @@
+#include "AppCatalog.h"
 #include "ArchieBridge.h"
+#include "LumenField.h"
 
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
@@ -24,11 +26,17 @@ int main(int argc, char *argv[])
     arguments.addHelpOption();
     arguments.addOption(QCommandLineOption(QStringLiteral("render-check"),QStringLiteral("Write one real Qt frame to a new PNG and exit."),QStringLiteral("path")));
     arguments.addOption(QCommandLineOption(QStringLiteral("screen"), QStringLiteral("Full-screen display number (one-based)."), QStringLiteral("number"), QStringLiteral("1")));
-    arguments.addOption(QCommandLineOption(QStringLiteral("scene"), QStringLiteral("Initial observatory scene: world, core, or orb."), QStringLiteral("name"), QStringLiteral("world")));
+    arguments.addOption(QCommandLineOption(QStringLiteral("scene"), QStringLiteral("Initial observatory scene: world, forge, or orb."), QStringLiteral("name"), QStringLiteral("world")));
+    arguments.addOption(QCommandLineOption(QStringLiteral("lens"), QStringLiteral("Initial orb lens: architecture, folders, or entities."), QStringLiteral("name"), QStringLiteral("architecture")));
     arguments.process(app);
     ArchieBridge bridge;
+    LumenField lumen;
+    AppCatalog appCatalog;
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("archieBridge"), &bridge);
+    engine.rootContext()->setContextProperty(QStringLiteral("lumen"), &lumen);
+    engine.rootContext()->setContextProperty(QStringLiteral("appCatalog"), &appCatalog);
+    lumen.setLens(arguments.value(QStringLiteral("lens")));
     engine.loadFromModule(QStringLiteral("Archie.Observatory"), QStringLiteral("Main"));
     if (engine.rootObjects().isEmpty())
         return EXIT_FAILURE;
@@ -37,8 +45,9 @@ int main(int argc, char *argv[])
     if (scene == QStringLiteral("orb")) {
         engine.rootObjects().front()->setProperty("scene", QStringLiteral("orb"));
         bridge.requestMode(QStringLiteral("cerebra"));
-    } else if (scene == QStringLiteral("core")) {
-        engine.rootObjects().front()->setProperty("scene", QStringLiteral("core"));
+    } else if (scene == QStringLiteral("forge") || scene == QStringLiteral("core")) {
+        // CORE became FORGE; the old name still opens it.
+        engine.rootObjects().front()->setProperty("scene", QStringLiteral("forge"));
         bridge.requestMode(QStringLiteral("cerebra"));
     } else if (scene != QStringLiteral("world")) {
         qWarning("archie-display: unknown initial scene %s; using WORLD", qPrintable(scene));

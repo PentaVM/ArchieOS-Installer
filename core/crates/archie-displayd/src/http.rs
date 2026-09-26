@@ -25,6 +25,9 @@ const MAX_REQUEST_BYTES: usize = 8 * 1024;
 pub struct Request {
     pub method: String,
     pub path: String,
+    /// What followed `?` in the target, still percent-encoded. Only `/api/orb/lumen`
+    /// reads it: the view it asks for is presentation, never a command.
+    pub query: String,
 }
 
 impl Request {
@@ -34,8 +37,8 @@ impl Request {
         let mut parts = line.split_whitespace();
         let method = parts.next()?.to_string();
         let target = parts.next()?;
-        // Strip any query string; no route uses one.
-        let path = target.split('?').next().unwrap_or(target).to_string();
+        let (path, query) = target.split_once('?').unwrap_or((target, ""));
+        let (path, query) = (path.to_string(), query.chars().take(4096).collect());
         // Require a real HTTP version token. Checking only that a third field exists
         // would let arbitrary whitespace-separated text ("not http at all") parse as a
         // request line and reach the router.
@@ -43,7 +46,11 @@ impl Request {
         if !version.starts_with("HTTP/") {
             return None;
         }
-        Some(Self { method, path })
+        Some(Self {
+            method,
+            path,
+            query,
+        })
     }
 }
 
@@ -221,6 +228,7 @@ mod tests {
     fn strips_a_query_string() {
         let request = Request::parse("GET /api/snapshot?t=1 HTTP/1.1\r\n\r\n").unwrap();
         assert_eq!(request.path, "/api/snapshot");
+        assert_eq!(request.query, "t=1");
     }
 
     #[test]

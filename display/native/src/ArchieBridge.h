@@ -40,19 +40,9 @@ class ArchieBridge final : public QObject
     // configured: the honest state is an empty list, not an invented building.
     Q_PROPERTY(QVariantMap buildings READ buildings NOTIFY buildingsChanged)
     Q_PROPERTY(QVariantList buildingMeshes READ buildingMeshes NOTIFY buildingsChanged)
-    // Read-only semantic Orb frame and its renderer-ready, bounded mesh/node/edge data.
+    // The read-only TFOG frame as it arrived. The orb is drawn by LumenField from the
+    // composed Lumenfield scene; this frame is what search looks through.
     Q_PROPERTY(QVariantMap orb READ orb NOTIFY orbChanged)
-    Q_PROPERTY(QVariantMap orbField READ orbField NOTIFY orbChanged)
-    Q_PROPERTY(QVariantMap orbFilaments READ orbFilaments NOTIFY orbChanged)
-    Q_PROPERTY(QVariantMap orbHalo READ orbHalo NOTIFY orbChanged)
-    Q_PROPERTY(QVariantMap orbGlints READ orbGlints NOTIFY orbChanged)
-    Q_PROPERTY(QVariantMap orbGlintHalo READ orbGlintHalo NOTIFY orbChanged)
-    Q_PROPERTY(QVariantMap orbNodeDots READ orbNodeDots NOTIFY orbChanged)
-    Q_PROPERTY(QVariantMap orbIris READ orbIris NOTIFY orbChanged)
-    Q_PROPERTY(QVariantMap orbIrisHalo READ orbIrisHalo NOTIFY orbChanged)
-    Q_PROPERTY(QVariantMap orbLinks READ orbLinks NOTIFY orbChanged)
-    Q_PROPERTY(QVariantList orbNodes READ orbNodes NOTIFY orbChanged)
-    Q_PROPERTY(QVariantList orbEdges READ orbEdges NOTIFY orbChanged)
     Q_PROPERTY(int orbRevision READ orbRevision NOTIFY orbChanged)
 
     // Everything below comes out of `archie::visual::Observatory` rather than from this
@@ -86,17 +76,6 @@ public:
     QVariantMap buildings() const { return m_buildings; }
     QVariantList buildingMeshes() const { return m_buildingMeshes; }
     QVariantMap orb() const { return m_orb; }
-    QVariantMap orbField() const { return m_orbField; }
-    QVariantMap orbFilaments() const { return m_orbFilaments; }
-    QVariantMap orbHalo() const { return m_orbHalo; }
-    QVariantMap orbGlints() const { return m_orbGlints; }
-    QVariantMap orbGlintHalo() const { return m_orbGlintHalo; }
-    QVariantMap orbNodeDots() const { return m_orbNodeDots; }
-    QVariantMap orbIris() const { return m_orbIris; }
-    QVariantMap orbIrisHalo() const { return m_orbIrisHalo; }
-    QVariantMap orbLinks() const { return m_orbLinks; }
-    QVariantList orbNodes() const { return m_orbNodes; }
-    QVariantList orbEdges() const { return m_orbEdges; }
     int orbRevision() const { return m_orbRevision; }
 
     Q_INVOKABLE void refreshSnapshot();
@@ -175,17 +154,6 @@ private:
     QVariantMap m_buildings;
     QVariantList m_buildingMeshes;
     QVariantMap m_orb;
-    QVariantMap m_orbField;
-    QVariantMap m_orbFilaments;
-    QVariantMap m_orbHalo;
-    QVariantMap m_orbGlints;
-    QVariantMap m_orbGlintHalo;
-    QVariantMap m_orbNodeDots;
-    QVariantMap m_orbIris;
-    QVariantMap m_orbIrisHalo;
-    QVariantMap m_orbLinks;
-    QVariantList m_orbNodes;
-    QVariantList m_orbEdges;
     /// Bumped on every `loadBuildings` call and captured by the background task; a result
     /// that arrives for an older generation is discarded rather than applied, which is
     /// what keeps a stale parse from overwriting a fresher one if `loadBuildings` is ever

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Archie Stage
+Comment=El escenario donde Archie trabaja: cada acción pasa por la política
+Exec=archie-stage --windowed --width 1280 --height 800
+TryExec=archie-stage
+Categories=X-Archie;System;
+X-Archie-Glyph=◈
+X-Archie-App-Id=archie-stage

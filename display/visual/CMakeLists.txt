@@ -38,6 +38,7 @@ add_library(archie-visual STATIC
     src/graph.cpp
     src/history.cpp
     src/lod.cpp
+    src/lumen.cpp
     src/scene.cpp
     src/stage.cpp
     src/value.cpp
@@ -144,6 +145,7 @@ if(ARCHIE_VISUAL_BUILD_TESTS)
         test_geo
         test_mesh
         test_world
+        test_lumen
     )
 
     foreach(test_name IN LISTS ARCHIE_VISUAL_TESTS)

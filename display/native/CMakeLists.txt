@@ -24,6 +24,12 @@ qt_add_executable(archie-display
     src/MeshGeometry.h
     src/Payload.cpp
     src/Payload.h
+    src/LumenField.cpp
+    src/LumenField.h
+    src/LumenGeometry.cpp
+    src/LumenGeometry.h
+    src/AppCatalog.cpp
+    src/AppCatalog.h
 )
 
 qt_add_qml_module(archie-display
@@ -31,6 +37,11 @@ qt_add_qml_module(archie-display
     VERSION 1.0
     QML_FILES
         qml/Main.qml
+        qml/LumenScene.qml
+        qml/LumenRail.qml
+        qml/LumenInspector.qml
+        qml/LumenOverlay.qml
+        qml/ForgeView.qml
 )
 
 qt_add_resources(archie-display "archie-native-assets"
@@ -43,8 +54,20 @@ qt_add_resources(archie-display "archie-native-assets"
         shaders/atmosphere.frag
         shaders/star.vert
         shaders/star.frag
-        shaders/orb_light.vert
-        shaders/orb_light.frag
+        shaders/lumen_orb.vert
+        shaders/lumen_orb.frag
+        shaders/lumen_sprite.vert
+        shaders/lumen_sprite.frag
+        shaders/lumen_shell.vert
+        shaders/lumen_shell.frag
+        shaders/lumen_line.vert
+        shaders/lumen_line.frag
+        shaders/lumen_ring.vert
+        shaders/lumen_ring.frag
+        apps/archie-stage.desktop
+        apps/archie-voice.desktop
+        apps/archie-editor.desktop
+        apps/archie-lienzo.desktop
 )
 
 target_link_libraries(archie-display PRIVATE

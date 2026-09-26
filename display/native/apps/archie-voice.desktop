@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Archie Voz
+Comment=Habla con Archie: escucha, piensa con Nemotron y actúa en el Stage
+Exec=run-archie.sh public
+TryExec=run-archie.sh
+Categories=X-Archie;AudioVideo;
+X-Archie-Glyph=◉
+X-Archie-Requires-Env=NEBIUS_TOKEN_FACTORY_KEY

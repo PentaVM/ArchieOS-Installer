@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Archie Lienzo
+Comment=El lienzo donde Archie pinta trazo a trazo
+Exec=/usr/lib/qt6/bin/qml @ARCHIE_SHARE@/stage/demo/paint.qml
+TryExec=/usr/lib/qt6/bin/qml
+Categories=X-Archie;Graphics;
+X-Archie-Glyph=✦
+X-Archie-Requires-File=@ARCHIE_SHARE@/stage/demo/paint.qml
+X-Archie-App-Id=org.qt-project.qml

@@ -84,8 +84,23 @@ ApplicationWindow {
         onActivated: {
             root.selection = null
             archieBridge.releaseFocus()
+            lumen.clearSelection()
         }
     }
+    // The orb's keys, as the design has them: "/" searches, Enter opens or closes the
+    // selected module, Backspace folds it again.
+    Shortcut { sequence: "/"; enabled: root.scene === "orb"; onActivated: lumenRail.focusSearch() }
+    Shortcut { sequence: "Return"; enabled: root.scene === "orb" && !!lumen.selection.id; onActivated: lumen.toggleModule(lumen.selection.id) }
+    Shortcut { sequence: "Backspace"; enabled: root.scene === "orb" && !!lumen.selection.id; onActivated: lumen.collapse(lumen.selection.id) }
+
+    // Only the scene on screen does work: the orb fetches and steps while it is shown,
+    // FORGE watches /proc while it is shown, and neither costs anything otherwise.
+    Binding { target: lumen; property: "active"; value: root.scene === "orb" }
+    Binding { target: appCatalog; property: "active"; value: root.scene === "forge" }
+
+    // A real event (a new snapshot, a changed machine condition) flashes the orb's
+    // membrane once. It never loops: nothing moves without something having happened.
+    property real eventFlash: 0
     property var snapshot: archieBridge.snapshot || ({})
     property var status: snapshot.status || ({})
     property var world: archieBridge.world || ({})
@@ -322,7 +337,15 @@ ApplicationWindow {
             Layout.fillHeight: true
             spacing: 0
 
+            LumenRail {
+                id: lumenRail
+                visible: root.scene === "orb"
+                Layout.preferredWidth: 260
+                Layout.fillHeight: true
+            }
+
             Rectangle {
+                visible: root.scene !== "orb"
                 Layout.preferredWidth: 292
                 Layout.fillHeight: true
                 color: "#080d14"
@@ -430,9 +453,12 @@ ApplicationWindow {
                 View3D {
                     id: view
                     anchors.fill: parent
+                    // FORGE is a list, not a scene; the GPU rests while it is shown.
+                    visible: root.scene !== "forge"
+                    camera: root.scene === "orb" ? lumenScene.camera : camera
                     environment: ExtendedSceneEnvironment {
                         backgroundMode: SceneEnvironment.Color
-                        clearColor: "#04070c"
+                        clearColor: root.scene === "orb" ? lumen.look.background : "#04070c"
                         // The budget is not a caption. Under real memory or CPU pressure
                         // the observatory spends less GPU, because it is the largest
                         // discretionary consumer on a node that has other work to do.
@@ -449,9 +475,8 @@ ApplicationWindow {
                         // set at all.
                         // On the low Orb profile, MSAA doubled the WSLg present cost.
                         // Higher profiles keep the model's sample budget.
-                        antialiasingMode: root.scene === "orb" && (!root.orb.profile || root.orb.profile === "low")
-                                          ? SceneEnvironment.NoAA
-                                          : archieBridge.frame.msaaSamples > 0
+                        antialiasingMode: archieBridge.frame.msaaSamples > 0
+                                          && !(root.scene === "orb" && (!root.orb.profile || root.orb.profile === "low"))
                                           ? SceneEnvironment.MSAA
                                           : SceneEnvironment.NoAA
                         antialiasingQuality: archieBridge.frame.msaaSamples >= 4
@@ -459,23 +484,23 @@ ApplicationWindow {
                                              : (archieBridge.frame.msaaSamples >= 2
                                                 ? SceneEnvironment.High
                                                 : SceneEnvironment.Medium)
-                        // The Orb's unshaded additive light is already display-ready.
-                        // Linear tonemapping crushed its gold paths on WSLg/DZN.
-                        tonemapMode: root.scene === "orb"
-                                     ? SceneEnvironment.TonemapModeNone
-                                     : SceneEnvironment.TonemapModeAces
+                        // The orb is lit in linear light and tonemapped as the design is:
+                        // ACES, with the design's exposure.
+                        tonemapMode: SceneEnvironment.TonemapModeAces
+                        exposure: root.scene === "orb" ? lumen.look.exposure : 1.0
 
                         // Bloom, and only bloom, and only where the image is genuinely
                         // bright: the sunlit limb, a specular glint, a bright marker. The
                         // HDR floor is above 1.0 so nothing in the midtones blooms — a
                         // globe where everything glows is the cyberpunk cliche this is
-                        // meant to avoid. The orb uses its bounded field light pass;
-                        // this HDR effect remains for the world and core scenes.
-                        glowEnabled: root.scene !== "orb" && !root.budgetReduced()
-                        glowStrength: 0.85
-                        glowIntensity: 0.28
-                        glowBloom: 0.18
-                        glowHDRMinimumValue: 1.05
+                        // meant to avoid. The orb's bloom is the design's: its strength,
+                        // radius and threshold are the operator's settings, and it goes off
+                        // with the rest of the budget.
+                        glowEnabled: !root.budgetReduced() && (root.scene !== "orb" || lumen.look.bloom)
+                        glowStrength: root.scene === "orb" ? 0.9 + lumen.look.bloomRadius * 0.6 : 0.85
+                        glowIntensity: root.scene === "orb" ? lumen.look.bloomStrength * 1.3 : 0.28
+                        glowBloom: root.scene === "orb" ? lumen.look.bloomRadius * 0.5 : 0.18
+                        glowHDRMinimumValue: root.scene === "orb" ? lumen.look.bloomThreshold : 1.05
                         glowHDRMaximumValue: 8.0
                         glowHDRScale: 2.0
                         glowQualityHigh: archieBridge.frame.msaaSamples >= 4
@@ -659,258 +684,19 @@ ApplicationWindow {
                         }
                     }
 
-                    Node {
-                        id: coreRoot
-                        visible: root.scene === "core"
-                        property real eventScale: 1.0
-
-                        Model {
-                            source: "#Sphere"
-                            scale: Qt.vector3d(0.09 * coreRoot.eventScale, 0.09 * coreRoot.eventScale, 0.09 * coreRoot.eventScale)
-                            materials: PrincipledMaterial {
-                                baseColor: snapshot.daemon_reachable ? root.cyan : root.red
-                                emissiveFactor: snapshot.daemon_reachable ? Qt.vector3d(0.32, 0.85, 0.95) : Qt.vector3d(0.85, 0.12, 0.16)
-                                roughness: 0.2
-                            }
-                        }
-                        Repeater3D {
-                            model: archieBridge.sceneEdges
-                            delegate: Model {
-                                required property var modelData
-                                source: "#Cylinder"
-                                position: modelData.position
-                                rotation: modelData.rotation
-                                scale: Qt.vector3d(0.02, modelData.length / 100.0, 0.02)
-                                materials: PrincipledMaterial { baseColor: modelData.color; opacity: 0.52; lighting: PrincipledMaterial.NoLighting }
-                            }
-                        }
-                        Repeater3D {
-                            model: archieBridge.sceneNodes
-                            delegate: Model {
-                                required property var modelData
-                                property var payload: modelData
-                                property string nodeId: modelData.id
-                                source: "#Sphere"
-                                pickable: true
-                                position: modelData.position
-                                scale: Qt.vector3d(modelData.scale, modelData.scale, modelData.scale)
-                                materials: PrincipledMaterial {
-                                    baseColor: modelData.color
-                                    emissiveFactor: Qt.vector3d(0.16, 0.16, 0.16)
-                                    roughness: 0.28
-                                }
-                            }
-                        }
-                    }
-
-                    Node {
-                        id: orbRoot
+                    // The orb: the TFOG graph, composed and drawn the Lumenfield way.
+                    LumenScene {
+                        id: lumenScene
                         visible: root.scene === "orb"
-                        scale: Qt.vector3d(16.2, 16.2, 16.2)
-                        property real spin: 0
-                        eulerRotation: Qt.vector3d(0, spin, 0)
-                        Timer {
-                            interval: 100
-                            repeat: true
-                            running: orbRoot.visible
-                            onTriggered: orbRoot.spin = (orbRoot.spin + 0.9) % 360
-                        }
-                        Model {
-                            visible: false // The opaque field surface would hide interior eye paths.
-                            geometry: MeshGeometry {
-                                vertices: archieBridge.orbField.packedVertices || ""
-                                triangleIndices: archieBridge.orbField.packedIndices || ""
-                            }
-                            materials: PrincipledMaterial {
-                                baseColor: "#9e4c0b"
-                                emissiveFactor: Qt.vector3d(0.38, 0.16, 0.015)
-                                opacity: 0.02
-                                cullMode: Material.NoCulling
-                                lighting: PrincipledMaterial.FragmentLighting
-                            }
-                        }
-                        Model {
-                            geometry: MeshGeometry {
-                                vertices: archieBridge.orbHalo.packedVertices || ""
-                                triangleIndices: archieBridge.orbHalo.packedIndices || ""
-                            }
-                            materials: CustomMaterial {
-                                shadingMode: CustomMaterial.Unshaded
-                                sourceBlend: CustomMaterial.One
-                                destinationBlend: CustomMaterial.One
-                                cullMode: Material.NoCulling
-                                depthDrawMode: Material.NeverDepthDraw
-                                property color tint: "#bc4b12"
-                                property real intensity: 0.18
-                                property real phase: orbRoot.spin * 0.0174533
-                                property real backStrength: 0.32
-                                vertexShader: "qrc:/archie/shaders/orb_light.vert"
-                                fragmentShader: "qrc:/archie/shaders/orb_light.frag"
-                            }
-                        }
-                        Model {
-                            geometry: MeshGeometry {
-                                vertices: archieBridge.orbFilaments.packedVertices || ""
-                                triangleIndices: archieBridge.orbFilaments.packedIndices || ""
-                            }
-                            materials: CustomMaterial {
-                                shadingMode: CustomMaterial.Unshaded
-                                sourceBlend: CustomMaterial.One
-                                destinationBlend: CustomMaterial.One
-                                cullMode: Material.NoCulling
-                                depthDrawMode: Material.NeverDepthDraw
-                                property color tint: "#ffc364"
-                                property real intensity: 1.8
-                                property real phase: orbRoot.spin * 0.0174533
-                                property real backStrength: 0.42
-                                vertexShader: "qrc:/archie/shaders/orb_light.vert"
-                                fragmentShader: "qrc:/archie/shaders/orb_light.frag"
-                            }
-                        }
-                        Model {
-                            geometry: MeshGeometry {
-                                vertices: archieBridge.orbLinks.packedVertices || ""
-                                triangleIndices: archieBridge.orbLinks.packedIndices || ""
-                            }
-                            materials: PrincipledMaterial {
-                                baseColor: "#ad6421"
-                                emissiveFactor: Qt.vector3d(1.6, 0.52, 0.055)
-                                opacity: 0.36
-                                cullMode: Material.NoCulling
-                                lighting: PrincipledMaterial.FragmentLighting
-                            }
-                        }
-                        Model {
-                            visible: !root.budgetReduced()
-                            geometry: MeshGeometry {
-                                vertices: archieBridge.orbGlintHalo.packedVertices || ""
-                                triangleIndices: archieBridge.orbGlintHalo.packedIndices || ""
-                            }
-                            materials: CustomMaterial {
-                                shadingMode: CustomMaterial.Unshaded
-                                sourceBlend: CustomMaterial.One
-                                destinationBlend: CustomMaterial.One
-                                cullMode: Material.NoCulling
-                                depthDrawMode: Material.NeverDepthDraw
-                                property color tint: "#dd7424"
-                                property real intensity: 0.14
-                                property real phase: orbRoot.spin * 0.0174533
-                                property real backStrength: 0.5
-                                vertexShader: "qrc:/archie/shaders/orb_light.vert"
-                                fragmentShader: "qrc:/archie/shaders/orb_light.frag"
-                            }
-                        }
-                        Model {
-                            geometry: MeshGeometry {
-                                vertices: archieBridge.orbGlints.packedVertices || ""
-                                triangleIndices: archieBridge.orbGlints.packedIndices || ""
-                            }
-                            materials: CustomMaterial {
-                                shadingMode: CustomMaterial.Unshaded
-                                sourceBlend: CustomMaterial.One
-                                destinationBlend: CustomMaterial.One
-                                cullMode: Material.NoCulling
-                                depthDrawMode: Material.NeverDepthDraw
-                                property color tint: "#fff2bf"
-                                property real intensity: 2.0
-                                property real phase: orbRoot.spin * 0.0174533
-                                property real backStrength: 0.45
-                                vertexShader: "qrc:/archie/shaders/orb_light.vert"
-                                fragmentShader: "qrc:/archie/shaders/orb_light.frag"
-                            }
-                        }
-                        // All visible real nodes are one batched point mesh. The most
-                        // relevant 96 also get pickable models and status colours below.
-                        Model {
-                            geometry: MeshGeometry {
-                                vertices: archieBridge.orbNodeDots.packedVertices || ""
-                                triangleIndices: archieBridge.orbNodeDots.packedIndices || ""
-                            }
-                            materials: CustomMaterial {
-                                shadingMode: CustomMaterial.Unshaded
-                                sourceBlend: CustomMaterial.One
-                                destinationBlend: CustomMaterial.One
-                                cullMode: Material.NoCulling
-                                depthDrawMode: Material.NeverDepthDraw
-                                property color tint: "#ffd38d"
-                                property real intensity: 1.8
-                                property real phase: orbRoot.spin * 0.0174533
-                                property real backStrength: 0.45
-                                vertexShader: "qrc:/archie/shaders/orb_light.vert"
-                                fragmentShader: "qrc:/archie/shaders/orb_light.frag"
-                            }
-                        }
-                        Repeater3D {
-                            model: archieBridge.orbNodes
-                            delegate: Model {
-                                required property var modelData
-                                property string nodeId: modelData.id
-                                property var payload: modelData
-                                source: "#Sphere"
-                                pickable: true
-                                position: modelData.position
-                                readonly property real pulse: modelData.radius
-                                    + modelData.focus * 0.035
-                                    + modelData.voice * Number(root.orb.state ? root.orb.state.audio_envelope : 0) * 0.045
-                                scale: Qt.vector3d(pulse, pulse, pulse)
-                                materials: PrincipledMaterial {
-                                    baseColor: root.selection && root.selection.id === modelData.id ? "#ffffff" : modelData.color
-                                    emissiveFactor: Qt.vector3d(0.9,
-                                                                0.46 + modelData.focus * 0.4,
-                                                                0.12 + modelData.voice * 0.7)
-                                    roughness: 0.24
-                                }
-                            }
-                        }
-                        // The eye holds its gaze while the architectural shell turns.
-                        Node {
-                            eulerRotation: Qt.vector3d(0, -orbRoot.spin, 0)
-                            Model {
-                                geometry: MeshGeometry {
-                                    vertices: archieBridge.orbIrisHalo.packedVertices || ""
-                                    triangleIndices: archieBridge.orbIrisHalo.packedIndices || ""
-                                }
-                                materials: CustomMaterial {
-                                    shadingMode: CustomMaterial.Unshaded
-                                    sourceBlend: CustomMaterial.One
-                                    destinationBlend: CustomMaterial.One
-                                    cullMode: Material.NoCulling
-                                    depthDrawMode: Material.NeverDepthDraw
-                                    property color tint: "#d66b16"
-                                    property real intensity: 0.28
-                                    property real phase: orbRoot.spin * 0.0174533
-                                    property real backStrength: 1.0
-                                    vertexShader: "qrc:/archie/shaders/orb_light.vert"
-                                    fragmentShader: "qrc:/archie/shaders/orb_light.frag"
-                                }
-                            }
-                            Model {
-                                geometry: MeshGeometry {
-                                    vertices: archieBridge.orbIris.packedVertices || ""
-                                    triangleIndices: archieBridge.orbIris.packedIndices || ""
-                                }
-                                materials: CustomMaterial {
-                                    shadingMode: CustomMaterial.Unshaded
-                                    sourceBlend: CustomMaterial.One
-                                    destinationBlend: CustomMaterial.One
-                                    cullMode: Material.NoCulling
-                                    depthDrawMode: Material.NeverDepthDraw
-                                    property color tint: "#ffe4a0"
-                                    property real intensity: 2.2
-                                    property real phase: orbRoot.spin * 0.0174533
-                                    property real backStrength: 1.0
-                                    vertexShader: "qrc:/archie/shaders/orb_light.vert"
-                                    fragmentShader: "qrc:/archie/shaders/orb_light.frag"
-                                }
-                            }
-                        }
+                        aspect: view.width / Math.max(1, view.height)
+                        flash: root.eventFlash
                     }
                 }
 
                 SequentialAnimation {
                     id: realEventPulse
-                    NumberAnimation { target: coreRoot; property: "eventScale"; to: 1.18; duration: 130; easing.type: Easing.OutCubic }
-                    NumberAnimation { target: coreRoot; property: "eventScale"; to: 1.0; duration: 340; easing.type: Easing.OutCubic }
+                    NumberAnimation { target: root; property: "eventFlash"; to: 1.0; duration: 130; easing.type: Easing.OutCubic }
+                    NumberAnimation { target: root; property: "eventFlash"; to: 0.0; duration: 340; easing.type: Easing.OutCubic }
                 }
                 Connections {
                     target: archieBridge
@@ -930,6 +716,8 @@ ApplicationWindow {
                 }
 
                 MouseArea {
+                    // The globe's hands. The orb has its own (LumenOverlay) and FORGE is a list.
+                    enabled: root.scene === "world"
                     anchors.fill: parent
                     property point previous
                     property point origin
@@ -963,6 +751,19 @@ ApplicationWindow {
                     }
                 }
 
+                LumenOverlay {
+                    id: lumenOverlay
+                    anchors.fill: parent
+                    visible: root.scene === "orb"
+                    view: view
+                    lumenScene: lumenScene
+                }
+
+                ForgeView {
+                    anchors.fill: parent
+                    visible: root.scene === "forge"
+                }
+
                 // A targeting frame around the whole viewport: four corners, inset
                 // from the edge, static. This is the one piece of chrome that exists
                 // purely to say "this is the thing being observed" — it carries no
@@ -990,10 +791,12 @@ ApplicationWindow {
                             selected: root.scene === "world"
                             onClicked: { root.scene = "world"; root.selection = null; archieBridge.requestMode("watcher") }
                         }
+                        // The applications this machine can open. It replaced CORE, whose
+                        // nodes repeated what the orb already holds.
                         SceneButton {
-                            label: "CORE"
-                            selected: root.scene === "core"
-                            onClicked: { root.scene = "core"; root.selection = null; archieBridge.requestMode("cerebra") }
+                            label: "FORGE"
+                            selected: root.scene === "forge"
+                            onClicked: { root.scene = "forge"; root.selection = null; archieBridge.requestMode("cerebra") }
                         }
                         SceneButton {
                             label: "ORB"
@@ -1004,6 +807,7 @@ ApplicationWindow {
                 }
 
                 Column {
+                    visible: root.scene === "world"
                     anchors.left: parent.left; anchors.leftMargin: 18
                     anchors.bottom: parent.bottom; anchors.bottomMargin: 18
                     spacing: 4
@@ -1014,27 +818,12 @@ ApplicationWindow {
                                 return "EARTH · NASA BLUE MARBLE · OFFLINE · " + o
                                        + (o === 1 ? " REAL OBSERVATION" : " REAL OBSERVATIONS")
                             }
-                            // The model's count, not the drawn one. They differ when the
-                            // tier aggregates, and the line beneath says by how much.
-                            if (root.scene === "orb") {
-                                var state = root.orb.state || ({})
-                                var activity = state.listen > 0.05 ? "LISTEN" : state.think > 0.05 ? "THINK" : state.speak > 0.05 ? "SPEAK" : "IDLE"
-                                return "TFOG ORB · " + (root.orb.entity_count || 0) + " REGISTERED · "
-                                       + ((root.orb.nodes || []).length) + " VISIBLE · "
-                                       + (root.orb.profile || "waiting") + " · " + activity
-                            }
-                            var n = archieBridge.frame.totalNodes
-                            return "ARCHIE CORE · DECLARED DEPENDENCIES · " + n
-                                   + (n === 1 ? " REAL NODE" : " REAL NODES")
+                            return ""
                         }
                         color: root.soft; font.family: "monospace"; font.pixelSize: 10; font.letterSpacing: 1.1
                     }
                     Text {
-                        text: root.scene === "world"
-                              ? "marker size = reported magnitude · source = " + (root.provider.authority || "none")
-                              : root.scene === "orb"
-                                ? "field samples are not entities · focus, speech, Stage and workflow are observed"
-                                : "position = dependency depth · colour = severity · opacity = freshness"
+                        text: "marker size = reported magnitude · source = " + (root.provider.authority || "none")
                         color: root.dim; font.family: "monospace"; font.pixelSize: 9
                     }
                     // What the frame says about itself. A scene that is showing less than
@@ -1149,7 +938,14 @@ ApplicationWindow {
                 }
             }
 
+            LumenInspector {
+                visible: root.scene === "orb" && lumenOverlay.inspectorOpen
+                Layout.preferredWidth: 314
+                Layout.fillHeight: true
+            }
+
             Rectangle {
+                visible: root.scene === "world"
                 Layout.preferredWidth: 338
                 Layout.fillHeight: true
                 color: "#080d14"
@@ -1194,54 +990,7 @@ ApplicationWindow {
                         }
 
                         Column {
-                            visible: root.scene === "orb"
-                            width: parent.width
-                            spacing: 11
-                            SectionTitle { text: "TFOG · ARCHIE ORB" }
-                            Text {
-                                width: parent.width
-                                text: (root.orb.entity_count || 0) + " registered · "
-                                      + ((root.orb.nodes || []).length) + " visible · "
-                                      + (root.orb.profile || "waiting") + " profile"
-                                color: "#ffd27b"; font.family: "monospace"; font.pixelSize: 11
-                            }
-                            Text {
-                                width: parent.width
-                                text: "Gold paths follow observed architecture. Bright points are entities; curved tunnels follow structural relations."
-                                color: root.dim; font.family: "monospace"; font.pixelSize: 10; wrapMode: Text.Wrap
-                            }
-                            SectionTitle { text: "WORKFLOWS · OBSERVED" }
-                            Repeater {
-                                model: root.orb.workflows || []
-                                delegate: Column {
-                                    required property var modelData
-                                    width: parent ? parent.width : implicitWidth
-                                    spacing: 2
-                                    Text {
-                                        text: modelData.component.toUpperCase() + "  ·  "
-                                              + (modelData.active ? "ACTIVE" : modelData.observed ? "RECENT" : "WAITING")
-                                        color: modelData.active ? "#ffd27b" : "#82909c"
-                                        font.family: "monospace"; font.pixelSize: 11; font.bold: true
-                                    }
-                                    Text {
-                                        width: parent.width
-                                        text: {
-                                            var purpose = ({wanda: "consent / hypotheses", cortex: "evidence / graph",
-                                                            vision: "capture / grounding", iris: "scene / reflex / verify"})[modelData.component]
-                                            return (purpose || "observing") + " · "
-                                                   + (modelData.observed
-                                                      ? modelData.phase + " · " + Math.floor(modelData.age_ms / 1000) + "s"
-                                                      : "no event")
-                                        }
-                                        color: root.dim; font.family: "monospace"; font.pixelSize: 9
-                                        wrapMode: Text.Wrap
-                                    }
-                                }
-                            }
-                        }
-
-                        Column {
-                            visible: root.scene !== "orb"
+                            visible: root.scene === "world"
                             width: parent.width
                             spacing: 12
 
@@ -1367,6 +1116,7 @@ ApplicationWindow {
         }
 
         Rectangle {
+            visible: root.scene === "world"
             Layout.fillWidth: true
             Layout.preferredHeight: 112
             color: "#070c12"
