@@ -7,6 +7,7 @@
 #   archie-session.sh up      start everything (idempotent)
 #   archie-session.sh down    stop everything
 #   archie-session.sh status  what is running
+#   archie-session.sh show stage|orb   what the viewer sees: the Stage or the Observatory
 #
 # From the laptop:  ssh -L 6080:127.0.0.1:6080 <host>   then  http://localhost:6080 (the gate)
 #
@@ -36,11 +37,18 @@ start() { # name, then the command; logs to $RUN/<name>.log
 
 up() {
   mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$RUN" "$XDG_RUNTIME_DIR"
+  # The Stage has workspace 1 to itself and the Observatory workspace 2: a window covered by
+  # another gets no frame callbacks, and a Firefox inside a covered Stage stopped drawing —
+  # Photopea never appeared and every Arena run timed out. Mod4+1/2 (or `show`) switch.
   cat > "$RUN/sway.conf" <<EOF
 output HEADLESS-1 resolution $SIZE
 default_border none
 focus_follows_mouse no
 workspace 1 output HEADLESS-1
+assign [app_id="org.archieos.Stage"] workspace 1
+assign [app_id="archie-display"] workspace 2
+bindsym Mod4+1 workspace 1
+bindsym Mod4+2 workspace 2
 EOF
   # Software rendering: the container's NVIDIA driver has no GBM for a compositor, and
   # clients draw with Mesa's llvmpipe into shared memory, which pixman composes.
@@ -92,9 +100,21 @@ status() {
   done
 }
 
+show() { # stage | orb: which workspace the VNC viewer sees
+  local sock
+  sock=$(ls "$XDG_RUNTIME_DIR"/sway-ipc.*.sock 2>/dev/null | head -1)
+  [ -n "$sock" ] || { echo "the session is down" >&2; return 1; }
+  case "${1:-stage}" in
+    stage) SWAYSOCK=$sock swaymsg workspace 1 >/dev/null ;;
+    orb|observatory) SWAYSOCK=$sock swaymsg workspace 2 >/dev/null ;;
+    *) echo "show stage|orb" >&2; return 64 ;;
+  esac
+}
+
 case "${1:-status}" in
   up) up ;;
+  show) show "${2:-stage}" ;;
   down) down ;;
   status) status ;;
-  *) echo "usage: archie-session.sh up|down|status" >&2; exit 64 ;;
+  *) echo "usage: archie-session.sh up|down|status|show stage|orb" >&2; exit 64 ;;
 esac

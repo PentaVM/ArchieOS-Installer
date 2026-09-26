@@ -133,18 +133,25 @@ async fn index(State(gate): State<Arc<Gate>>) -> Html<String> {
          <form method=post action=/session/up><button>Encender sesión</button></form>\
          <form method=post action=/session/down><button>Apagar sesión</button></form>\
          <form method=post action=/suite><button>Correr benchmarks</button></form>\
-         {}</div><pre>{}</pre><div class=grid>{}</div></main></html>",
+         {}{}</div><pre>{}</pre><div class=grid>{}</div></main></html>",
         if up { "encendida" } else { "apagada (solo entrena IRIS)" },
         if suite_running { " · <b>benchmarks corriendo</b>" } else { "" },
         if up { "<a class=button href=\"/vnc.html?autoconnect=1&resize=scale&path=websockify\">Ver escritorio</a>" } else { "" },
+        if up { "<form method=post action=/session/stage><button>Mostrar Stage</button></form><form method=post action=/session/orb><button>Mostrar orbe</button></form>" } else { "" },
         escape(status.trim()),
         if cards.is_empty() { "<p>Todavía no hay corridas.</p>".to_string() } else { cards },
     ))
 }
 
 async fn session(State(gate): State<Arc<Gate>>, UrlPath(what): UrlPath<String>) -> Redirect {
-    if what == "up" || what == "down" {
-        let _ = run(&gate.session, &what).await;
+    match what.as_str() {
+        "up" | "down" => {
+            let _ = run(&gate.session, &what).await;
+        }
+        "stage" | "orb" => {
+            let _ = tokio::process::Command::new(&gate.session).arg("show").arg(&what).output().await;
+        }
+        _ => {}
     }
     Redirect::to("/")
 }
