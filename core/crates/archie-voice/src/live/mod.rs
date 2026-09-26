@@ -141,11 +141,12 @@ impl Senses {
         let scene = eyes::describe(&self.scene.lock().expect("scene lock"));
         let known = self.buffer.lock().expect("buffer lock").describe();
         let heard = self.last_heard.lock().expect("heard lock").clone();
+        // Last, where a small model weighs it most, and in the language it asks for.
         let answer_in = match language::spoken_language(&heard) {
-            "en" => "The person just spoke English: answer in English.",
+            "en" => "IMPORTANT: the person just spoke English. Reply only in English, even though these instructions are in Spanish.",
             _ => "La persona te habló en español: responde en español.",
         };
-        [clock.to_string(), answer_in.to_string(), scene, known]
+        [clock.to_string(), scene, known, answer_in.to_string()]
             .into_iter()
             .filter(|part| !part.is_empty())
             .collect::<Vec<_>>()
