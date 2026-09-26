@@ -47,6 +47,7 @@ focus_follows_mouse no
 workspace 1 output HEADLESS-1
 assign [app_id="org.archieos.Stage"] workspace 1
 assign [app_id="archie-display"] workspace 2
+for_window [app_id="archie-display"] move container to workspace 2
 bindsym Mod4+1 workspace 1
 bindsym Mod4+2 workspace 2
 EOF
@@ -82,7 +83,23 @@ EOF
   LIBGL_ALWAYS_SOFTWARE=1 QT_QPA_PLATFORM=wayland \
     start stage "$BUILD/stage/archie-stage" --socket-name archie-stage --control "$RUN/control.sock" \
       --key-file "$RUN/key" --tempo "${TEMPO:-agent}" --stroke-speed "${STROKE_SPEED:-4000}"
+  arrange
   status
+}
+
+arrange() { # the Observatory to workspace 2 once both windows exist; the Stage in view
+  # Qt names its window after mapping it, so sway's `assign` never matches: move it here.
+  local SWAYSOCK
+  SWAYSOCK=$(ls "$XDG_RUNTIME_DIR"/sway-ipc.*.sock 2>/dev/null | head -1)
+  export SWAYSOCK
+  for _ in $(seq 1 100); do
+    swaymsg -t get_tree 2>/dev/null | grep -q '"app_id": "archie-display"' &&
+      swaymsg -t get_tree 2>/dev/null | grep -q '"app_id": "org.archieos.Stage"' && break
+    sleep 0.2
+  done
+  swaymsg '[app_id="archie-display"] move container to workspace 2' >/dev/null 2>&1 || true
+  swaymsg workspace 1 >/dev/null 2>&1 || true
+  swaymsg '[app_id="org.archieos.Stage"] focus' >/dev/null 2>&1 || true
 }
 
 down() {
