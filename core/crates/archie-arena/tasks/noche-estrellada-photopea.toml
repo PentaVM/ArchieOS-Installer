@@ -7,5 +7,6 @@ app_id = "firefox"
 reference = "noche.png"
 reset = "display/session/arena-reset-photopea.sh 768 608"
 judge = "picture"
+ends_early = false
 tiers = [15, 60, 300]
 prompt = """Photopea, a Photoshop-like image editor, is open with a new white document. Paint a copy of the reference picture on that white document, as close to it as you can: same composition, shapes and colours. Use Photopea's tools as a painter would: pick the brush, change its size, change the colour as often as the picture needs, and paint with strokes. Paint only inside the white document."""

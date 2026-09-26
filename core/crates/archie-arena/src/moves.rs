@@ -123,8 +123,13 @@ pub fn stage_actions(step: &Move, frame: Frame) -> Result<Vec<StageAction>, Stri
 pub fn decision_of(text: &str) -> Result<Decision, String> {
     let start = text.find('{').ok_or("no JSON object in the answer")?;
     let end = text.rfind('}').ok_or("no JSON object in the answer")?;
-    let value: serde_json::Value =
-        serde_json::from_str(&text[start..=end]).map_err(|e| format!("the answer is not JSON: {e}"))?;
+    let value: serde_json::Value = match serde_json::from_str(&text[start..=end]) {
+        Ok(value) => value,
+        // Kimi-K3 now and then drops a bracket in a long list of paths, and a whole batch
+        // of strokes was lost to one missing `]`: close what it left open and try again.
+        Err(e) => serde_json::from_str(&balanced(&text[start..]))
+            .map_err(|_| format!("the answer is not JSON: {e}"))?,
+    };
     // Moves that do not parse are dropped one by one, not the whole decision.
     let thought = value["thought"].as_str().unwrap_or("").to_string();
     let actions = value["actions"]
@@ -132,6 +137,52 @@ pub fn decision_of(text: &str) -> Result<Decision, String> {
         .map(|items| items.iter().filter_map(|item| serde_json::from_value::<Move>(item.clone()).ok()).collect())
         .unwrap_or_default();
     Ok(Decision { thought, actions })
+}
+
+/// The JSON text with the brackets it forgot: a closer that does not match the innermost
+/// open bracket first closes those left open inside it, and whatever is open at the end is
+/// closed there. Strings are left alone.
+fn balanced(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 8);
+    let mut open: Vec<char> = Vec::new();
+    let (mut in_string, mut escaped) = (false, false);
+    for c in text.chars() {
+        if in_string {
+            out.push(c);
+            match (escaped, c) {
+                (true, _) => escaped = false,
+                (false, '\\') => escaped = true,
+                (false, '"') => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '{' => open.push('}'),
+            '[' => open.push(']'),
+            '}' | ']' => {
+                if !open.contains(&c) {
+                    continue; // a closer with nothing to close
+                }
+                while let Some(closer) = open.pop() {
+                    if closer == c {
+                        break;
+                    }
+                    out.push(closer);
+                }
+            }
+            _ => {}
+        }
+        out.push(c);
+        if open.is_empty() && (c == '}' || c == ']') {
+            return out;
+        }
+    }
+    while let Some(closer) = open.pop() {
+        out.push(closer);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -155,6 +206,16 @@ mod tests {
         assert_eq!(actions.len(), 2, "64 lines, then 36");
         let dot = stage_actions(&Move::Strokes { paths: vec![vec![[5.0, 5.0]]] }, FRAME).unwrap();
         assert!(matches!(&dot[0], StageAction::Strokes { paths, .. } if paths[0].len() == 2));
+    }
+
+    #[test]
+    fn a_bracket_the_model_forgot_is_put_back() {
+        let answer = r#"{"thought": "fill [the] gaps", "actions": [{"do": "strokes", "paths": [[[315, 225], [560, 225]], [[315, 275], [560, 275]]}]}"#;
+        let decision = decision_of(answer).unwrap();
+        assert_eq!(decision.thought, "fill [the] gaps");
+        assert!(matches!(&decision.actions[..], [Move::Strokes { paths }] if paths.len() == 2));
+        let cut_short = r#"{"thought": "t", "actions": [{"do": "key", "keys": "b"}"#;
+        assert_eq!(decision_of(&format!("{cut_short} }}")).unwrap().actions.len(), 1);
     }
 
     #[test]

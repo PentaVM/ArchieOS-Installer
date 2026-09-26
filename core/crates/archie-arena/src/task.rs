@@ -25,12 +25,21 @@ pub struct Task {
     /// (run from the repository root), when the arena is not given one.
     #[serde(default)]
     pub reset: Option<String>,
+    /// Whether Archie's "done" ends the run. A picture is judged at the end of its time, so a
+    /// painting task says no: a done with 40 s left is only a belief, and the time is still
+    /// there to use.
+    #[serde(default = "ends_early")]
+    pub ends_early: bool,
     /// Models that decide the actions, tried in order.
     #[serde(default = "default_actors")]
     pub actors: Vec<String>,
     /// Models that judge and reflect, tried in order.
     #[serde(default = "default_critics")]
     pub critics: Vec<String>,
+}
+
+fn ends_early() -> bool {
+    true
 }
 
 /// Kimi K3 first: in the first runs it worked Photopea's tools (brush key, colour dialog, hex,

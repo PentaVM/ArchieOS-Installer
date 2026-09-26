@@ -210,7 +210,7 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         None => String::new(),
     };
     let mut memory = memory_path.as_ref().map(|p| Memory::load(p)).unwrap_or_default();
-    let lessons = memory.lessons();
+    let lessons = memory.lessons(&task.id, tier);
 
     // The clock: from here on, looking and deciding count as much as acting.
     let started = Instant::now();
@@ -240,6 +240,9 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         );
         if reference_url.is_some() {
             text.push_str(" The FIRST image is the reference picture; the SECOND is the screenshot.");
+        }
+        if !task.ends_early {
+            text.push_str(" The run lasts the whole time and \"done\" does not end it: use every second left to make the result better.");
         }
         if !docs.is_empty() {
             text.push_str(&format!("\n\nDOCUMENTATION:\n{}", docs.chars().take(6000).collect::<String>()));
@@ -282,7 +285,11 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
                 break 'run;
             }
             match step {
-                Move::Done => break 'run,
+                Move::Done if task.ends_early => break 'run,
+                Move::Done => {
+                    last_actions.push_str("- done: noted, but the run goes on until the time is up
+");
+                }
                 Move::Note { text } => notes.push(text.clone()),
                 Move::Wait { ms } => {
                     let left = deadline.saturating_duration_since(Instant::now());
@@ -385,7 +392,7 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         result["critic"] = verdict;
     }
     result["score"] = json!((score * 10.0).round() / 10.0);
-    result["best_before"] = json!(memory.best(tier));
+    result["best_before"] = json!(memory.best(&task.id, tier));
 
     // Reflection: the run, turned into lessons for the next.
     let log = std::fs::read_to_string(&trajectory).unwrap_or_default();
@@ -398,7 +405,7 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
          held, correct the ones that were wrong.",
         task.prompt,
         score,
-        memory.best(tier).map_or("none".into(), |b| format!("{b:.1}")),
+        memory.best(&task.id, tier).map_or("none".into(), |b| format!("{b:.1}")),
         result["critic"],
         notes.join(" | "),
         lessons.join(" | "),
@@ -418,7 +425,7 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
     let mut kept = learned.clone();
     kept.extend(notes.iter().take(4).cloned());
     result["lessons_learned"] = json!(learned);
-    memory.runs.push(Remembered { run: stamp.clone(), tier, score, lessons: kept });
+    memory.runs.push(Remembered { run: stamp.clone(), task: task.id.clone(), tier, score, lessons: kept });
     if let Some(path) = &memory_path {
         memory.save(path)?;
     }

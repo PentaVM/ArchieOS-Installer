@@ -107,6 +107,12 @@ down() {
     if running "$name"; then kill "$(cat "$RUN/$name.pid")" 2>/dev/null || true; fi
     rm -f "$RUN/$name.pid"
   done
+  # Firefox's content processes outlive the parent's pid file: whatever still runs from
+  # this session's profile goes too, so that nothing of a benchmark stays beside training.
+  pkill -TERM -f -- "--profile $RUN/ff" 2>/dev/null || true
+  pkill -TERM -f -- "$RUN/ff" 2>/dev/null || true
+  sleep 1
+  pkill -KILL -f -- "$RUN/ff" 2>/dev/null || true
   pg_ctlcluster 18 archie stop 2>/dev/null || true
   status
 }

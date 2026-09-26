@@ -17,6 +17,9 @@ pub struct Memory {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Remembered {
     pub run: String,
+    /// The task it was a run of ("" for runs remembered before tasks were told apart).
+    #[serde(default)]
+    pub task: String,
     pub tier: u32,
     pub score: f32,
     pub lessons: Vec<String>,
@@ -43,15 +46,25 @@ impl Memory {
         std::fs::rename(&temporary, path).map_err(|e| e.to_string())
     }
 
-    /// The lessons for the next run of `tier`: the best-scoring runs of any tier first (what
-    /// is known to work transfers across time limits), then the latest run's, without
-    /// repeats, at most [`MOST_LESSONS`].
-    pub fn lessons(&self) -> Vec<String> {
-        let mut ranked: Vec<&Remembered> = self.runs.iter().collect();
-        ranked.sort_by(|a, b| b.score.total_cmp(&a.score));
+    /// The lessons for the next run of `task` at `tier`. One memory serves every task in an
+    /// application, and a lesson is often about one picture ("the face is at 370,450") or one
+    /// time limit ("one decision, no second round" is right at 15 s and ruinous at 60 s). So
+    /// the same task at the same tier comes first — its two best runs and its latest — then
+    /// the best run of the same task at another tier, then the best run of any other task,
+    /// for what it learnt about the application itself. No repeats, at most [`MOST_LESSONS`].
+    pub fn lessons(&self, task: &str, tier: u32) -> Vec<String> {
+        let best = |keep: &dyn Fn(&Remembered) -> bool, n: usize| {
+            let mut ranked: Vec<&Remembered> = self.runs.iter().filter(|r| keep(r)).collect();
+            ranked.sort_by(|a, b| b.score.total_cmp(&a.score));
+            ranked.truncate(n);
+            ranked
+        };
+        let mut chosen = best(&|r| r.task == task && r.tier == tier, 2);
+        chosen.extend(self.runs.iter().rev().find(|r| r.task == task && r.tier == tier));
+        chosen.extend(best(&|r| r.task == task && r.tier != tier, 1));
+        chosen.extend(best(&|r| r.task != task, 1));
         let mut out: Vec<String> = Vec::new();
-        let latest = self.runs.last();
-        for run in ranked.iter().take(3).copied().chain(latest) {
+        for run in chosen {
             for lesson in &run.lessons {
                 let plain = lesson.trim();
                 if !plain.is_empty() && !out.iter().any(|l| l.eq_ignore_ascii_case(plain)) {
@@ -63,34 +76,47 @@ impl Memory {
         out
     }
 
-    /// The best score so far at `tier`, if it was ever run.
-    pub fn best(&self, tier: u32) -> Option<f32> {
-        self.runs.iter().filter(|r| r.tier == tier).map(|r| r.score).max_by(f32::total_cmp)
+    /// The best score so far of `task` at `tier`, if it was ever run.
+    pub fn best(&self, task: &str, tier: u32) -> Option<f32> {
+        self.runs.iter().filter(|r| r.task == task && r.tier == tier).map(|r| r.score).max_by(f32::total_cmp)
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn run(name: &str, tier: u32, score: f32, lessons: &[&str]) -> Remembered {
-        Remembered { run: name.into(), tier, score, lessons: lessons.iter().map(|l| l.to_string()).collect() }
+    fn run(name: &str, task: &str, tier: u32, score: f32, lessons: &[&str]) -> Remembered {
+        Remembered {
+            run: name.into(),
+            task: task.into(),
+            tier,
+            score,
+            lessons: lessons.iter().map(|l| l.to_string()).collect(),
+        }
     }
 
     #[test]
-    fn the_best_runs_lessons_come_first_then_the_latest_without_repeats() {
+    fn a_task_learns_first_from_itself_at_its_own_time_limit() {
         let memory = Memory {
             runs: vec![
-                run("a", 15, 30.0, &["brush is B"]),
-                run("b", 60, 55.0, &["colour: click the foreground swatch", "brush is B"]),
-                run("c", 15, 20.0, &["zooming wastes time"]),
+                run("a", "mona", 15, 30.0, &["one decision, no second round"]),
+                run("b", "dama", 60, 55.0, &["the face is at 370,450", "brush is B"]),
+                run("c", "mona", 60, 20.0, &["paint the face early"]),
+                run("d", "mona", 60, 10.0, &["brush is B", "close the colour dialog"]),
+                run("e", "noche", 60, 5.0, &["swirls"]),
             ],
         };
         assert_eq!(
-            memory.lessons(),
-            vec!["colour: click the foreground swatch", "brush is B", "zooming wastes time"]
+            memory.lessons("mona", 60),
+            vec![
+                "paint the face early",
+                "brush is B",
+                "close the colour dialog",
+                "one decision, no second round",
+                "the face is at 370,450",
+            ]
         );
-        assert_eq!(memory.best(15), Some(30.0));
-        assert_eq!(memory.best(300), None);
+        assert_eq!(memory.best("mona", 15), Some(30.0));
+        assert_eq!(memory.best("dama", 15), None);
     }
 }
