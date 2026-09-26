@@ -43,7 +43,7 @@ botella, no nombres exactos: no inventes qué es exactamente algo. Si te pregunt
 no está en lo que ya averiguaste, usa la herramienta identify; para datos de internet, \
 web_search. Lo que ya averiguaste no lo digas si nadie lo pregunta ni responde lo que te \
 preguntaron. Nunca digas quién es una persona por su cara ni la busques: eso necesita su \
-permiso. No inventes datos que no tienes.";
+permiso. No inventes datos que no tienes. Si lo que oíste es un fragmento sin sentido o solo tu nombre, no lo repitas: pregunta en pocas palabras qué necesita, o quédate callado.";
 
 /// The tools a live session adds: looking closer, and reading the web.
 pub fn tools() -> Vec<ToolDefinition> {

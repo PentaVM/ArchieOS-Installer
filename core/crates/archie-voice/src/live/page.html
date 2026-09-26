@@ -73,15 +73,26 @@ function voice(buffer){
  src.onended=()=>{playing=playing.filter(s=>s!==src);};
 }
 function hush(){for(const s of playing){try{s.stop();}catch(e){}}playing=[];playAt=0;}
-const TAP=`class Tap extends AudioWorkletProcessor{process(i){const c=i[0][0];if(c)this.port.postMessage(c.slice(0));return true;}}registerProcessor('tap',Tap);`;
+// The microphone at the device's own rate, resampled here to the 16 kHz the ears want:
+// Firefox will not connect a microphone to an AudioContext of another rate.
+const TAP=`class Tap extends AudioWorkletProcessor{
+ constructor(){super();this.step=sampleRate/16000;this.t=0;this.prev=0;}
+ process(i){const c=i[0][0];if(!c||!c.length)return true;const out=[];let t=this.t;
+  while(t<=c.length-1){const k=Math.floor(t),f=t-k;const a=k<0?this.prev:c[k];const b=k+1<c.length?c[k+1]:a;
+   out.push(a+(b-a)*f);t+=this.step;}
+  this.t=t-c.length;this.prev=c[c.length-1];if(out.length)this.port.postMessage(Float32Array.from(out));return true;}}
+registerProcessor('tap',Tap);`;
 $('start').onclick=async()=>{
  if(started)return;started=true;$('start').textContent='Escuchando';
+ try{await begin();}catch(e){started=false;$('start').textContent='Empezar';$('status').textContent='No pude empezar: '+e;log('tool','⚠ '+e);}
+};
+async function begin(){
  const stream=await navigator.mediaDevices.getUserMedia({
   audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1},
   video:{width:{ideal:1280},height:{ideal:720}}});
  video.srcObject=new MediaStream(stream.getVideoTracks());await video.play();
- playCtx=new AudioContext();
- micCtx=new AudioContext({sampleRate:16000});
+ playCtx=new AudioContext();await playCtx.resume();
+ micCtx=new AudioContext();await micCtx.resume();
  await micCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([TAP],{type:'application/javascript'})));
  const tap=new AudioWorkletNode(micCtx,'tap');micCtx.createMediaStreamSource(stream).connect(tap);
  let pending=[],count=0;
@@ -93,7 +104,8 @@ $('start').onclick=async()=>{
   const scale=Math.min(1,512/w);grab.width=Math.round(w*scale);grab.height=Math.round(h*scale);
   grab.getContext('2d').drawImage(video,0,0,grab.width,grab.height);
   grab.toBlob(b=>b&&b.arrayBuffer().then(a=>{const msg=new Uint8Array(1+a.byteLength);msg[0]=2;msg.set(new Uint8Array(a),1);ws.send(msg);}),'image/jpeg',0.75);},350);
-};
+ log('tool',`micrófono a ${micCtx.sampleRate} Hz → 16 kHz; voz a ${voiceRate} Hz`);
+}
 $('mute').onclick=()=>{muted=!muted;$('mute').textContent=muted?'Activar micrófono':'Silenciar micrófono';};
 function draw(){
  if(!scene||!video.videoWidth)return;overlay.width=video.clientWidth;overlay.height=video.clientHeight;
