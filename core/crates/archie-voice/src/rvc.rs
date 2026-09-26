@@ -449,6 +449,25 @@ mod tests {
         assert!((rms(&voice[8000..24000]) - 0.3536).abs() < 0.01);
     }
 
+    /// ARCHIE_RVC_VOICE (a `<name>.json`), ORT_DYLIB_PATH, ARCHIE_RVC_WAV in, ARCHIE_RVC_OUT out.
+    #[test]
+    #[ignore = "needs an exported voice and ONNX Runtime"]
+    fn a_recording_is_converted_into_the_voice() {
+        let env = |name: &str| std::env::var(name).unwrap_or_else(|_| panic!("{name} is not set"));
+        init_runtime(Path::new(&env("ORT_DYLIB_PATH"))).unwrap();
+        let mut voice = RvcVoice::load(Path::new(&env("ARCHIE_RVC_VOICE")), Tuning::default(), 4).unwrap();
+        let (audio, rate) = crate::wav::read_wav(Path::new(&env("ARCHIE_RVC_WAV"))).unwrap();
+        let started = Instant::now();
+        let converted = voice.convert(&audio, rate).unwrap();
+        let seconds_in = audio.len() as f32 / rate as f32;
+        let seconds_out = converted.len() as f32 / voice.sample_rate() as f32;
+        eprintln!("{seconds_in:.2} s in, {seconds_out:.2} s out, in {:.2} s", started.elapsed().as_secs_f32());
+        assert!((seconds_in - seconds_out).abs() < 0.05);
+        assert!(converted.iter().all(|s| s.is_finite()) && rms(&converted) > 0.01);
+        let pcm: Vec<i16> = converted.iter().map(|s| (s * 32767.0) as i16).collect();
+        crate::wav::write_wav(Path::new(&env("ARCHIE_RVC_OUT")), &pcm, voice.sample_rate()).unwrap();
+    }
+
     #[test]
     fn reflect_padding_mirrors_like_numpy() {
         assert_eq!(reflect_pad(&[1.0, 2.0, 3.0], 2), vec![3.0, 2.0, 1.0, 2.0, 3.0, 2.0, 1.0]);
