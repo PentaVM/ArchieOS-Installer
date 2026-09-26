@@ -6,14 +6,11 @@
 //! as known and unsaid: Archie brings it up when asked, or when it answers what was asked.
 //! It never volunteers it into silence; the floor decides whether Archie speaks at all.
 //!
-//! Finding out what an object is, in order of preference:
-//!
-//! 1. **Web detection** (`GOOGLE_VISION_API_KEY`): Google Cloud Vision's `WEB_DETECTION`,
-//!    the engine behind Lens. It returns a best guess ("froakie plush") and matching pages.
-//!    It is a search, not a generative model, so it does not invent an answer.
-//! 2. **A vision model on Nebius** (`NEBIUS_TOKEN_FACTORY_KEY` and `ARCHIE_LIVE_VLM`),
-//!    asked only when web detection has no confident guess or is not configured.
-//! 3. Neither: IRIS's own category, said as a category.
+//! Finding out what an object is goes to a vision model on Nebius Token Factory, on the
+//! same key as the conversation (`NEBIUS_TOKEN_FACTORY_KEY`): Kimi K3, then MiniCPM-V 4.5
+//! if Kimi cannot tell (`ARCHIE_LIVE_VLM` overrides the list). It names the thing and gives
+//! a fact or two, marked as the model's; with `TAVILY_API_KEY`, a search reads more. With
+//! no key, IRIS's own category is all there is, said as a category.
 //!
 //! What leaves the host is a crop of the object with faces blacked out, and never a crop
 //! of a person. The query sent to Tavily is only the object's name.
@@ -125,107 +122,81 @@ fn iou(a: &[f32; 4], b: &[f32; 4]) -> f32 {
 pub struct Identified {
     pub name: String,
     pub by: &'static str,
+    /// What the vision model itself knows of it, which may be wrong.
+    pub facts: String,
     pub pages: Vec<String>,
+    /// The model that answered.
+    pub model: String,
 }
 
-/// Finds out what an object is from its crop.
+/// Finds out what an object is from its crop, with a vision model on Nebius Token Factory
+/// — the same account and key the conversation uses.
 pub struct Identifier {
     http: reqwest::Client,
-    google: Option<Zeroizing<String>>,
-    nebius: Option<(Zeroizing<String>, String)>,
+    key: Option<Zeroizing<String>>,
+    /// Tried in order: the first that names the object answers.
+    models: Vec<String>,
 }
 
+/// Kimi K3 knows characters and products best of the vision models on Nebius, and reasons
+/// before it answers; MiniCPM-V 4.5 answers at once, and is asked when Kimi will not say.
+/// Measured on 2026-09-26: all five of Nebius's vision models named the Eiffel Tower, and
+/// the three that reason returned nothing when held to 40 tokens.
+pub const DEFAULT_VISION_MODELS: &[&str] = &["moonshotai/Kimi-K3", "openbmb/MiniCPM-V-4_5"];
+
+/// Room for a reasoning model to think before it answers.
+const VISION_MAX_TOKENS: u32 = 2048;
+
 impl Identifier {
-    /// Reads the keys from the environment; any may be missing.
+    /// Reads the key from `NEBIUS_TOKEN_FACTORY_KEY`, and the models from `ARCHIE_LIVE_VLM`
+    /// (comma-separated, in order) or [`DEFAULT_VISION_MODELS`].
     pub fn from_environment() -> Result<Self, String> {
-        let key = |name: &str| {
-            std::env::var(name)
-                .ok()
-                .map(|value| Zeroizing::new(value.trim().to_string()))
-                .filter(|value| !value.is_empty())
-        };
-        let nebius = match (key("NEBIUS_TOKEN_FACTORY_KEY"), std::env::var("ARCHIE_LIVE_VLM").ok()) {
-            (Some(key), Some(model)) if !model.trim().is_empty() => Some((key, model.trim().to_string())),
-            _ => None,
+        let key = std::env::var("NEBIUS_TOKEN_FACTORY_KEY")
+            .ok()
+            .map(|value| Zeroizing::new(value.trim().to_string()))
+            .filter(|value| !value.is_empty());
+        let models = match std::env::var("ARCHIE_LIVE_VLM") {
+            Ok(list) if !list.trim().is_empty() => list
+                .split(',')
+                .map(|model| model.trim().to_string())
+                .filter(|model| !model.is_empty())
+                .collect(),
+            _ => DEFAULT_VISION_MODELS.iter().map(|model| model.to_string()).collect(),
         };
         Ok(Self {
             http: reqwest::Client::builder()
-                .timeout(Duration::from_secs(20))
+                .timeout(Duration::from_secs(90))
                 .build()
                 .map_err(|e| e.to_string())?,
-            google: key("GOOGLE_VISION_API_KEY"),
-            nebius,
+            key,
+            models,
         })
     }
 
     /// Which ways of finding out are configured, for the page and the log.
-    pub fn means(&self) -> Vec<&'static str> {
-        let mut means = Vec::new();
-        if self.google.is_some() {
-            means.push("web");
+    pub fn means(&self) -> Vec<String> {
+        match &self.key {
+            Some(_) => self.models.iter().map(|model| format!("nebius:{model}")).collect(),
+            None => Vec::new(),
         }
-        if self.nebius.is_some() {
-            means.push("vision-model");
-        }
-        means
     }
 
     pub async fn identify(&self, png: &[u8], category: &str) -> Result<Option<Identified>, String> {
-        if let Some(key) = &self.google {
-            match self.web_detection(key, png).await {
+        let Some(key) = &self.key else {
+            return Ok(None);
+        };
+        let mut last_error = None;
+        for model in &self.models {
+            match self.vision_model(key, model, png, category).await {
                 Ok(Some(found)) => return Ok(Some(found)),
                 Ok(None) => {}
-                Err(error) if self.nebius.is_none() => return Err(error),
-                Err(_) => {}
+                Err(error) => last_error = Some(error),
             }
         }
-        if let Some((key, model)) = &self.nebius {
-            return self.vision_model(key, model, png, category).await;
+        match last_error {
+            Some(error) => Err(error),
+            None => Ok(None),
         }
-        Ok(None)
-    }
-
-    async fn web_detection(&self, key: &str, png: &[u8]) -> Result<Option<Identified>, String> {
-        let body = serde_json::json!({"requests": [{
-            "image": {"content": base64::engine::general_purpose::STANDARD.encode(png)},
-            "features": [{"type": "WEB_DETECTION", "maxResults": 8}],
-        }]});
-        let answer: serde_json::Value = self
-            .http
-            .post("https://vision.googleapis.com/v1/images:annotate")
-            // In a header, so the key never appears in a URL or a proxy's log.
-            .header("x-goog-api-key", key)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| format!("web detection: {e}"))?
-            .error_for_status()
-            .map_err(|e| format!("web detection: {}", e.status().map_or("failed".into(), |s| s.to_string())))?
-            .json()
-            .await
-            .map_err(|e| format!("web detection answer: {e}"))?;
-        let web = &answer["responses"][0]["webDetection"];
-        let guess = web["bestGuessLabels"][0]["label"].as_str().map(str::to_string);
-        let entity = web["webEntities"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|entity| entity["score"].as_f64().unwrap_or(0.0) >= 0.6)
-            .find_map(|entity| entity["description"].as_str().map(str::to_string));
-        let pages = web["pagesWithMatchingImages"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|page| page["url"].as_str().map(str::to_string))
-            .take(3)
-            .collect();
-        Ok(match (guess, entity) {
-            (Some(guess), Some(entity)) if !guess.to_lowercase().contains(&entity.to_lowercase()) => {
-                Some(Identified { name: format!("{guess} ({entity})"), by: "web", pages })
-            }
-            (Some(name), _) | (None, Some(name)) => Some(Identified { name, by: "web", pages }),
-            (None, None) => None,
-        })
     }
 
     async fn vision_model(
@@ -242,12 +213,9 @@ impl Identifier {
         let body = serde_json::json!({
             "model": model,
             "temperature": 0.0,
-            "max_tokens": 40,
+            "max_tokens": VISION_MAX_TOKENS,
             "messages": [{"role": "user", "content": [
-                {"type": "text", "text": format!(
-                    "A detector labelled this object \"{category}\". What exactly is it? Answer \
-                     with only its specific name (brand and model, character, species, product), \
-                     in at most eight words. If you cannot tell, answer exactly: unknown")},
+                {"type": "text", "text": vision_question(category)},
                 {"type": "image_url", "image_url": {"url": image}},
             ]}],
         });
@@ -258,24 +226,50 @@ impl Identifier {
             .json(&body)
             .send()
             .await
-            .map_err(|e| format!("vision model: {e}"))?
+            .map_err(|e| format!("{model}: {e}"))?
             .error_for_status()
-            .map_err(|e| format!("vision model: {}", e.status().map_or("failed".into(), |s| s.to_string())))?
+            .map_err(|e| format!("{model}: {}", e.status().map_or("failed".into(), |s| s.to_string())))?
             .json()
             .await
-            .map_err(|e| format!("vision model answer: {e}"))?;
-        let text = answer["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or("")
-            .trim()
-            .trim_matches(|c: char| c == '.' || c == '"')
-            .to_string();
-        Ok((!text.is_empty() && !text.eq_ignore_ascii_case("unknown")).then(|| Identified {
-            name: text,
+            .map_err(|e| format!("{model} answer: {e}"))?;
+        let text = answer["choices"][0]["message"]["content"].as_str().unwrap_or("");
+        Ok(parse_identification(text).map(|(name, facts)| Identified {
+            name,
             by: "vision-model",
+            facts,
             pages: Vec::new(),
+            model: model.to_string(),
         }))
     }
+}
+
+fn vision_question(category: &str) -> String {
+    format!(
+        "A detector labelled this object \"{category}\". What exactly is it? Reply with one \
+         line of JSON and nothing else: {{\"name\": \"its specific name — brand and model, \
+         character, species, product or landmark — in at most eight words\", \"facts\": \"one \
+         or two short, well-known facts about it, or an empty string\"}}. If you cannot tell \
+         what it is, reply {{\"name\": \"unknown\", \"facts\": \"\"}}. Never name a person."
+    )
+}
+
+/// The name and facts from a vision model's reply: its JSON, or failing that, its first
+/// line as the name. `None` when it could not tell.
+fn parse_identification(text: &str) -> Option<(String, String)> {
+    let text = text.trim();
+    let json = text
+        .find('{')
+        .zip(text.rfind('}'))
+        .and_then(|(start, end)| serde_json::from_str::<serde_json::Value>(&text[start..=end]).ok());
+    let (name, facts) = match json {
+        Some(value) => (
+            value["name"].as_str().unwrap_or("").to_string(),
+            value["facts"].as_str().unwrap_or("").trim().to_string(),
+        ),
+        None => (text.lines().next().unwrap_or("").to_string(), String::new()),
+    };
+    let name = name.trim().trim_matches(|c: char| c == '.' || c == '"').trim().to_string();
+    (!name.is_empty() && !name.eq_ignore_ascii_case("unknown")).then_some((name, facts))
 }
 
 /// Reads about a named thing through Archie's search gate (Tavily).
@@ -396,15 +390,18 @@ pub async fn look_closer(
     }
     let crop = eyes::crop_png(&scene.frame, seen.bbox, &eyes::faces(scene))?;
     let identified = identifier.identify(&crop, &seen.phrase).await?;
-    let (name, by, mut sources) = match identified {
-        Some(found) => (found.name, found.by.to_string(), found.pages),
-        None => (seen.phrase.clone(), "iris".to_string(), Vec::new()),
+    let (name, by, mut facts, mut sources) = match identified {
+        Some(found) => (found.name, found.by.to_string(), found.facts, vec![format!("nebius:{}", found.model)]),
+        None => (seen.phrase.clone(), "iris".to_string(), String::new(), Vec::new()),
     };
-    let mut facts = String::new();
     if by != "iris" {
         if let Some(researcher) = researcher {
             if let Ok(results) = researcher.search(&name).await {
-                facts = facts_from(&results);
+                let read = facts_from(&results);
+                if !read.is_empty() {
+                    // What the web says goes first; the model's own recollection after it.
+                    facts = if facts.is_empty() { read } else { format!("{read} (Y según el modelo de visión: {facts})") };
+                }
                 sources.extend(results.into_iter().map(|(_, url, _)| url).take(2));
             }
         }
@@ -443,6 +440,18 @@ pub fn next_to_look_at<'a>(scene: &'a Scene, buffer: &Buffer) -> Option<&'a Seen
 mod tests {
     use super::*;
     use std::sync::Arc;
+
+    #[test]
+    fn a_vision_answer_is_read_as_json_or_as_its_first_line() {
+        assert_eq!(
+            parse_identification("```json\n{\"name\": \"Froakie plush\", \"facts\": \"A Water-type Pokémon.\"}\n```"),
+            Some(("Froakie plush".into(), "A Water-type Pokémon.".into()))
+        );
+        assert_eq!(parse_identification("Eiffel Tower."), Some(("Eiffel Tower".into(), String::new())));
+        assert_eq!(parse_identification("{\"name\": \"unknown\", \"facts\": \"\"}"), None);
+        assert_eq!(parse_identification(""), None);
+        assert!(vision_question("toy").contains("Never name a person"));
+    }
 
     fn seen(phrase: &str, score: f32, bbox: [f32; 4]) -> Seen {
         Seen { phrase: phrase.into(), score, bbox, embedding: None }
