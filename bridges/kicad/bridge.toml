@@ -1,0 +1,38 @@
+# KiCad: schematics and printed circuit boards.
+id = "kicad"
+title = "KiCad"
+summary = "Read schematics and boards, run KiCad's ERC and DRC, set part fields, export fabrication files and render boards."
+programs = ["kicad-cli"]
+workspace = "A folder of KiCad projects: .kicad_pro with their .kicad_sch sheets and .kicad_pcb board."
+e2e = "ARCHIE_BRIDGE_E2E=kicad cargo test -p archie-bridges --test kicad_e2e"
+
+[app]
+name = "KiCad"
+homepage = "https://www.kicad.org"
+license = "GPL-3.0-or-later"
+versions = "10.x (kicad-cli since 7; pcb render since 9)"
+
+[[surfaces]]
+kind = "file-format"
+name = "KiCad S-expression files"
+doc = "https://dev-docs.kicad.org/en/file-formats/"
+
+[[surfaces]]
+kind = "cli"
+name = "kicad-cli"
+doc = "https://docs.kicad.org/10.0/en/cli/cli.html"
+
+[[surfaces]]
+kind = "ipc"
+name = "KiCad IPC API (protobuf over NNG), for live edits in an open board"
+doc = "https://dev-docs.kicad.org/en/apis-and-binding/ipc-api/"
+status = "planned"
+
+[install]
+arch = "pacman -S kicad kicad-library"
+ubuntu = "add-apt-repository ppa:kicad/kicad-10.0-releases && apt install kicad"
+windows = "winget install KiCad.KiCad"
+
+[vision]
+app_ids = ["kicad", "eeschema", "pcbnew", "org.kicad.kicad"]
+when = "Drawing new circuitry, interactive routing, placing footprints, Update PCB from Schematic (F8), and any dialog; check the result with kicad_erc, kicad_drc and kicad_render."

@@ -4,10 +4,11 @@
 //! lines from stdin and writes its replies to stdout.
 
 use crate::toolbox::{Clearance, Effect, ToolSpec, Toolbox};
+use base64::Engine as _;
 use serde_json::{json, Map, Value};
 
 /// Protocol revisions this server speaks, newest first. The tools it uses — `tools/list`
-/// and `tools/call` with text content — mean the same in all of them.
+/// and `tools/call` with text and image content — mean the same in all of them.
 pub const SUPPORTED_VERSIONS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
 /// The largest message read. Anything longer is refused rather than parsed.
@@ -16,6 +17,9 @@ pub const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 /// The largest tool result returned. A bigger one is an error, not a truncation: cut
 /// JSON is a different document.
 pub const MAX_RESULT_BYTES: usize = 512 * 1024;
+
+/// The most image bytes one result carries, before base64.
+pub const MAX_IMAGE_BYTES: usize = 768 * 1024;
 
 const PARSE_ERROR: i64 = -32700;
 const INVALID_REQUEST: i64 = -32600;
@@ -168,15 +172,22 @@ impl<T: Toolbox> McpServer<T> {
             return Err((INVALID_PARAMS, "unknown tool"));
         }
         let outcome = self.toolbox.call(&name, arguments).await;
-        let (text, is_error) = if outcome.text.len() > MAX_RESULT_BYTES {
-            (
-                "the result was larger than this server returns".to_string(),
-                true,
-            )
-        } else {
-            (outcome.text, outcome.is_error)
-        };
-        Ok(json!({"content": [{"type": "text", "text": text}], "isError": is_error}))
+        let image_bytes: usize = outcome.images.iter().map(|i| i.data.len()).sum();
+        if outcome.text.len() > MAX_RESULT_BYTES || image_bytes > MAX_IMAGE_BYTES {
+            return Ok(json!({
+                "content": [{"type": "text", "text": "the result was larger than this server returns"}],
+                "isError": true,
+            }));
+        }
+        let mut content = vec![json!({"type": "text", "text": outcome.text})];
+        for image in &outcome.images {
+            content.push(json!({
+                "type": "image",
+                "mimeType": image.mime,
+                "data": base64::engine::general_purpose::STANDARD.encode(&image.data),
+            }));
+        }
+        Ok(json!({"content": content, "isError": outcome.is_error}))
     }
 }
 

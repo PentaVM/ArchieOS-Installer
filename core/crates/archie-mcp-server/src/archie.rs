@@ -1,7 +1,7 @@
 //! The tools: the node's state through archied's control socket, and the Archie Stage.
 
-use crate::toolbox::{Effect, ToolOutcome, ToolSpec, Toolbox};
-use crate::video::VideoTools;
+use crate::toolbox::{Effect, ToolImage, ToolOutcome, ToolSpec, Toolbox};
+use archie_bridges::Bridge;
 use archie_core::control::{request_over, ControlRequest, ControlResponse};
 use archie_core::endpoint;
 use archie_policy::Principal;
@@ -10,6 +10,7 @@ use archie_state::StatePaths;
 use archie_types::{AgentId, PrivacyGrade};
 use serde_json::{json, Map, Value};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 const DAEMON_TIMEOUT: Duration = Duration::from_secs(10);
@@ -51,8 +52,8 @@ pub struct ArchieToolbox {
     /// The IDE agent as the node's policy sees it: an agent of its own, never a person.
     #[cfg_attr(not(unix), allow(dead_code))]
     principal: Principal,
-    /// Present only when the operator named a media folder.
-    video: Option<VideoTools>,
+    /// The bridges the operator served, each confined to the folder it was given.
+    bridges: Vec<Arc<dyn Bridge>>,
 }
 
 impl ArchieToolbox {
@@ -68,14 +69,52 @@ impl ArchieToolbox {
             principal: Principal::Agent {
                 agent: AgentId::new(),
             },
-            video: None,
+            bridges: Vec::new(),
         }
     }
 
-    /// Offers the video tools, working in `video.media`.
-    pub fn with_video(mut self, video: VideoTools) -> Self {
-        self.video = Some(video);
-        self
+    /// Offers a bridge's tools. Two bridges with the same id are one too many: the second
+    /// is refused.
+    pub fn with_bridge(mut self, bridge: Box<dyn Bridge>) -> Result<Self, String> {
+        let id = bridge.manifest().id.clone();
+        if self.bridges.iter().any(|b| b.manifest().id == id) {
+            return Err(format!("the {id} bridge is given twice"));
+        }
+        self.bridges.push(Arc::from(bridge));
+        Ok(self)
+    }
+
+    fn bridge_of(&self, tool: &str) -> Option<Arc<dyn Bridge>> {
+        self.bridges
+            .iter()
+            .find(|bridge| bridge.tools().iter().any(|t| t.name == tool))
+            .cloned()
+    }
+
+    fn bridge_guide(&self, arguments: &Map<String, Value>) -> ToolOutcome {
+        match arguments.get("bridge").and_then(Value::as_str) {
+            Some(id) => match self.bridges.iter().find(|b| b.manifest().id == id) {
+                Some(bridge) => ToolOutcome {
+                    text: bridge.guide().to_string(),
+                    is_error: false,
+                    images: Vec::new(),
+                },
+                None => ToolOutcome::error(format!(
+                    "no bridge {id} is served here; archie_bridge_guide without arguments lists them"
+                )),
+            },
+            None => ToolOutcome::json(&serde_json::json!({
+                "bridges": self.bridges.iter().map(|bridge| {
+                    let m = bridge.manifest();
+                    serde_json::json!({
+                        "id": m.id,
+                        "application": m.app.name,
+                        "summary": m.summary,
+                        "use_the_gui_for": m.vision.when,
+                    })
+                }).collect::<Vec<_>>(),
+            })),
+        }
     }
 
     async fn daemon(&self, request: ControlRequest) -> Result<ControlResponse, String> {
@@ -419,22 +458,65 @@ impl Toolbox for ArchieToolbox {
                 });
             }
         }
-        if self.video.is_some() {
-            tools.extend(VideoTools::specs());
+        if !self.bridges.is_empty() {
+            tools.push(ToolSpec {
+                name: "archie_bridge_guide",
+                title: "How to use a bridge",
+                description: "The guide to one of this server's bridges — the tools that drive an \
+                              application such as KiCad — with the order that works, the traps and when \
+                              to use the application's window instead. Read it before a bridge's first \
+                              tool. Without a bridge, lists the bridges served here.",
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {"bridge": {"type": "string", "description": "A bridge id, such as kicad."}},
+                    "additionalProperties": false
+                }),
+                grade: PrivacyGrade::Public,
+                effect: Effect::ReadOnly,
+            });
+        }
+        for bridge in &self.bridges {
+            tools.extend(bridge.tools().into_iter().map(|tool| ToolSpec {
+                name: tool.name,
+                title: tool.title,
+                description: tool.description,
+                input_schema: tool.input_schema,
+                grade: tool.grade,
+                effect: match tool.effect {
+                    archie_bridges::Effect::ReadOnly => Effect::ReadOnly,
+                    archie_bridges::Effect::Writes => Effect::Acts,
+                },
+            }));
         }
         tools
     }
 
     async fn call(&mut self, name: &str, arguments: Map<String, Value>) -> ToolOutcome {
+        if let Some(bridge) = self.bridge_of(name) {
+            let tool = name.to_string();
+            // A bridge runs the application's programs and waits: off the protocol's thread.
+            return match tokio::task::spawn_blocking(move || bridge.call(&tool, &arguments)).await {
+                Ok(outcome) => ToolOutcome {
+                    text: outcome.text,
+                    is_error: outcome.is_error,
+                    images: outcome
+                        .images
+                        .into_iter()
+                        .map(|image| ToolImage {
+                            mime: image.mime,
+                            data: image.data,
+                        })
+                        .collect(),
+                },
+                Err(_) => ToolOutcome::error("the tool stopped unexpectedly"),
+            };
+        }
         match name {
             #[cfg(unix)]
             "stage_surfaces" => self.stage_surfaces().await,
             #[cfg(unix)]
             "stage_act" => self.stage_act(&arguments).await,
-            video if video.starts_with("video_") => match &self.video {
-                Some(tools) => tools.call(video, arguments).await,
-                None => ToolOutcome::error("no media folder was given to this server"),
-            },
+            "archie_bridge_guide" => self.bridge_guide(&arguments),
             _ => {
                 if !arguments.is_empty() {
                     return ToolOutcome::error("this tool takes no arguments");

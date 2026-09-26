@@ -1,0 +1,19 @@
+[package]
+name = "archie-bridges"
+description = "Archie's bridges: one maintained plugin per open-source application, over that application's own free automation surface, with a guide any planner can read."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+archie-cut.workspace = true
+archie-types.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+
+[[bin]]
+name = "archie-bridges"
+path = "src/bin/archie-bridges.rs"

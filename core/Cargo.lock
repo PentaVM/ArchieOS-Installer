@@ -104,6 +104,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "archie-bridges"
+version = "0.1.0"
+dependencies = [
+ "archie-cut",
+ "archie-types",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "toml",
+]
+
+[[package]]
 name = "archie-cerebra"
 version = "0.1.0"
 dependencies = [
@@ -310,12 +322,13 @@ dependencies = [
 name = "archie-mcp-server"
 version = "0.1.0"
 dependencies = [
+ "archie-bridges",
  "archie-core",
- "archie-cut",
  "archie-policy",
  "archie-stage",
  "archie-state",
  "archie-types",
+ "base64",
  "serde_json",
  "tokio",
 ]

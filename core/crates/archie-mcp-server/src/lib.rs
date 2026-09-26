@@ -27,15 +27,21 @@
 //! include a person's takeover, which no tool can clear. The IDE agent is a principal of
 //! its own and is never taken for a person at the machine, so nothing the policy holds
 //! for approval runs from here.
+//!
+//! # Bridges
+//!
+//! `--bridge <id>=<folder>` serves one of [`archie_bridges`]' plugins: KiCad, video and
+//! the others, each confined to the folder it is given. `archie_bridge_guide` hands a
+//! client the guide to each before its first call.
 
 #![forbid(unsafe_code)]
 
 pub mod archie;
 pub mod server;
 pub mod toolbox;
-pub mod video;
 
 pub use archie::ArchieToolbox;
-pub use server::{McpServer, MAX_MESSAGE_BYTES, MAX_RESULT_BYTES, SUPPORTED_VERSIONS};
-pub use toolbox::{Clearance, Effect, ToolOutcome, ToolSpec, Toolbox};
-pub use video::VideoTools;
+pub use server::{
+    McpServer, MAX_IMAGE_BYTES, MAX_MESSAGE_BYTES, MAX_RESULT_BYTES, SUPPORTED_VERSIONS,
+};
+pub use toolbox::{Clearance, Effect, ToolImage, ToolOutcome, ToolSpec, Toolbox};

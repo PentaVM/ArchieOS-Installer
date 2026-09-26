@@ -4,12 +4,14 @@
 //! archie-mcp-server [--clearance public|internal] [--root DIR]
 //!                   [--stage-socket PATH]
 //!                   [--allow-stage-actions --stage-key FILE [--stage-policy FILE]]
+//!                   [--bridge ID=DIR]... [--program NAME=PATH]...
 //!                   [--video-media DIR [--melt PATH] [--ffprobe PATH]]
 //! ```
 //!
 //! Standard output carries protocol messages and nothing else; diagnostics go to standard
 //! error, where IDEs show a server's log.
 
+use archie_bridges::Programs;
 use archie_mcp_server::{ArchieToolbox, Clearance, McpServer, MAX_MESSAGE_BYTES};
 use archie_policy::PolicyEngine;
 use archie_stage::{CommandKey, Operator, StagePolicy};
@@ -21,6 +23,7 @@ use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
 const USAGE: &str = "usage: archie-mcp-server [--clearance public|internal] [--root DIR]
                          [--stage-socket PATH]
                          [--allow-stage-actions --stage-key FILE [--stage-policy FILE]]
+                         [--bridge ID=DIR]... [--program NAME=PATH]...
                          [--video-media DIR [--melt PATH] [--ffprobe PATH]]
 
   --clearance            the most sensitive data a tool may return (default: public).
@@ -31,10 +34,13 @@ const USAGE: &str = "usage: archie-mcp-server [--clearance public|internal] [--r
   --allow-stage-actions  offer stage_act, which operates applications. Needs --stage-key.
   --stage-key            the stage command key file (64 hex characters, mode 0600).
   --stage-policy         the stage policy (default: /etc/archie/stage/apps.toml).
-  --video-media          offer video_sources, video_probe and video_render, working only
-                         inside this folder; renders go to its renders/ folder. The tools
-                         carry file names, so they need --clearance internal.
-  --melt, --ffprobe      the MLT renderer and ffprobe (default: from PATH).";
+  --bridge ID=DIR        serve a bridge (kicad, video, ...) working only inside DIR; repeat
+                         for more. Bridge tools carry file names, so they need
+                         --clearance internal. archie-bridges list names the bridges.
+  --program NAME=PATH    where a program a bridge runs is (default: from PATH), e.g.
+                         --program kicad-cli=/opt/kicad/bin/kicad-cli.
+  --video-media DIR      the same as --bridge video=DIR.
+  --melt, --ffprobe      the same as --program melt=PATH, --program ffprobe=PATH.";
 
 struct Config {
     clearance: Clearance,
@@ -43,9 +49,8 @@ struct Config {
     allow_stage_actions: bool,
     stage_key: Option<PathBuf>,
     stage_policy: PathBuf,
-    video_media: Option<PathBuf>,
-    melt: PathBuf,
-    ffprobe: PathBuf,
+    bridges: Vec<(String, PathBuf)>,
+    programs: Programs,
 }
 
 fn parse(args: Vec<String>) -> Result<Option<Config>, String> {
@@ -56,9 +61,8 @@ fn parse(args: Vec<String>) -> Result<Option<Config>, String> {
         allow_stage_actions: false,
         stage_key: None,
         stage_policy: PathBuf::from("/etc/archie/stage/apps.toml"),
-        video_media: None,
-        melt: PathBuf::from("melt"),
-        ffprobe: PathBuf::from("ffprobe"),
+        bridges: Vec::new(),
+        programs: Programs::default(),
     };
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
@@ -74,9 +78,21 @@ fn parse(args: Vec<String>) -> Result<Option<Config>, String> {
             "--stage-key" => config.stage_key = Some(PathBuf::from(value("--stage-key")?)),
             "--stage-policy" => config.stage_policy = PathBuf::from(value("--stage-policy")?),
             "--allow-stage-actions" => config.allow_stage_actions = true,
-            "--video-media" => config.video_media = Some(PathBuf::from(value("--video-media")?)),
-            "--melt" => config.melt = PathBuf::from(value("--melt")?),
-            "--ffprobe" => config.ffprobe = PathBuf::from(value("--ffprobe")?),
+            "--bridge" => {
+                let pair = value("--bridge")?;
+                let (id, dir) = pair.split_once('=').ok_or("--bridge is ID=DIR")?;
+                config.bridges.push((id.to_string(), PathBuf::from(dir)));
+            }
+            "--program" => {
+                let pair = value("--program")?;
+                let (name, path) = pair.split_once('=').ok_or("--program is NAME=PATH")?;
+                config.programs.set(name, path);
+            }
+            "--video-media" => config
+                .bridges
+                .push(("video".into(), PathBuf::from(value("--video-media")?))),
+            "--melt" => config.programs.set("melt", value("--melt")?),
+            "--ffprobe" => config.programs.set("ffprobe", value("--ffprobe")?),
             "--help" | "-h" => return Ok(None),
             other => return Err(format!("unknown argument {other:?}")),
         }
@@ -209,29 +225,46 @@ async fn main() -> ExitCode {
         None => StatePaths::from_env(),
     };
     let mut toolbox = ArchieToolbox::new(paths, config.stage_socket.clone(), operator);
-    if let Some(media) = &config.video_media {
-        if !media.is_dir() {
+    for (id, dir) in &config.bridges {
+        let bridge = match archie_bridges::open(id, dir, &config.programs) {
+            Ok(bridge) => bridge,
+            Err(error) => {
+                eprintln!(
+                    "archie-mcp-server: --bridge {id}={}: {error}",
+                    dir.display()
+                );
+                return ExitCode::from(2);
+            }
+        };
+        if config.clearance == Clearance::Public {
             eprintln!(
-                "archie-mcp-server: --video-media {} is not a folder",
-                media.display()
+                "archie-mcp-server: the {id} bridge's tools carry file names and are hidden at \
+                 clearance public; start with --clearance internal to offer them"
             );
-            return ExitCode::from(2);
         }
-        toolbox = toolbox.with_video(archie_mcp_server::VideoTools {
-            media: media.clone(),
-            melt: config.melt.clone(),
-            ffprobe: config.ffprobe.clone(),
-        });
+        toolbox = match toolbox.with_bridge(bridge) {
+            Ok(toolbox) => toolbox,
+            Err(message) => {
+                eprintln!("archie-mcp-server: {message}");
+                return ExitCode::from(2);
+            }
+        };
     }
     let mut server = McpServer::new(toolbox, config.clearance);
     eprintln!(
-        "archie-mcp-server: ready, clearance {:?}, stage actions {}",
+        "archie-mcp-server: ready, clearance {:?}, stage actions {}, bridges [{}]",
         config.clearance,
         if config.allow_stage_actions {
             "on"
         } else {
             "off"
-        }
+        },
+        config
+            .bridges
+            .iter()
+            .map(|(id, _)| id.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
     );
 
     let mut reader = BufReader::with_capacity(64 * 1024, tokio::io::stdin());
