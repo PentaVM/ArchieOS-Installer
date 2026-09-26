@@ -15,6 +15,8 @@ nemo = []
 pulse = ["dep:libpulse-binding", "dep:libpulse-simple-binding"]
 # A spoken conversation: both of the above.
 speech = ["nemo", "pulse"]
+# A voice converted into another (an RVC v2 voice exported to ONNX), run by ONNX Runtime.
+rvc = ["dep:ort", "dep:serde"]
 # A live session reached from a browser: its microphone, speaker and camera over a
 # WebSocket, IRIS for eyes, and curiosity (identify and search) for what is in front.
 live = [
@@ -39,6 +41,7 @@ tokio.workspace = true
 # The clock the model is given, read before any thread starts so the local offset is known.
 time = { workspace = true, features = ["local-offset"] }
 axum = { workspace = true, optional = true }
+ort = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 futures-util = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }

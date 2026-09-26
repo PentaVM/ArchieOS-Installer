@@ -1,0 +1,19 @@
+# Applications Archie may operate in Archie Arena, the computer-use benchmark.
+#
+# Separate from the node's own policy (core/crates/archie-stage/policy/apps.toml), which
+# stays as it is: a benchmark needs strokes, drags and captures in a painting program,
+# which a person's everyday Firefox should not grant.
+#
+# Photopea is a Photoshop-like editor in the browser. The launch opens it with a new white
+# document already made (its URL hash runs a script), so every run starts from the same
+# empty canvas; everything after that — tools, brush size, colours, strokes — is Archie's.
+
+[[app]]
+app_id = "firefox"
+display_name = "Photopea"
+allow = ["move", "click", "double_click", "drag", "scroll", "stroke", "text", "key", "focus", "snapshot"]
+max_text_grade = "public"
+max_text_chars = 64
+allow_modified_keys = true
+launch = ["firefox", "--new-window", "https://www.photopea.com/#%7B%22script%22%3A%22app.documents.add(768%2C1144%2C72%2C'Archie'%2CNewDocumentMode.RGB%2CDocumentFill.WHITE)%22%7D"]
+aliases = ["photopea", "photoshop", "programa de dibujo"]

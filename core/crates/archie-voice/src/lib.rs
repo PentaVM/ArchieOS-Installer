@@ -33,6 +33,8 @@ pub mod listen;
 pub mod native;
 pub mod nemotron;
 pub mod piper;
+#[cfg(feature = "rvc")]
+pub mod rvc;
 pub mod segment;
 pub mod tools;
 pub mod voice;
