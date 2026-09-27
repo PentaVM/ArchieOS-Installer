@@ -8,6 +8,7 @@
 pub mod acp;
 pub mod cortex;
 pub mod damage;
+pub mod dossier;
 pub mod foundry;
 pub mod geometry;
 pub mod locate_anything;
@@ -28,6 +29,7 @@ pub use cortex::{
     VisualCortex,
 };
 pub use damage::{DamageConfig, DamageRegion, EphemeralFrame, PixelFormat, SemanticRoi};
+pub use dossier::{Dossier, DossierBounds, DossierBuffer, DossierError, DossierState, Fact, More};
 pub use foundry::FoundryReflexModel;
 pub use geometry::{Affine2D, Point, Rect};
 pub use locate_anything::{GroundingProposal, LocateAnythingClient, LocateAnythingError};
@@ -53,6 +55,6 @@ pub use specialist::{
     VisualRequest,
 };
 pub use working_memory::{
-    DurablePromotionCandidate, MemoryBounds, SceneDeltaRecord, SemanticEpisode, WorkingMemoryError,
-    WorkingSceneMemory,
+    DurablePromotionCandidate, MemoryBounds, NodeSnapshot, RelationQuery, RelationSpan,
+    SceneDeltaRecord, SemanticEpisode, WorkingMemoryError, WorkingSceneMemory,
 };
