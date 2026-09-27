@@ -12,6 +12,8 @@
 //!   words or carried out through the stage gate, with what came of it told to the model.
 //! - [`listen`] — what the ears heard, turned into the floor state the speech plane decides
 //!   on: was it said to Archie, was it only "ya", does the thought sound finished.
+//! - [`addressee`] — whether it was said to Archie when nobody named it: alone or among
+//!   others, looking at Archie or away, a friend answering, a call.
 //! - With `--features speech`: `native` (Nemotron 3.5 ASR and Magpie TTS through NVIDIA
 //!   NeMo-Speech.cpp's C ABI), `audio` (microphone and speaker through PulseAudio) and
 //!   `conversation`, the loop that joins them.
@@ -22,6 +24,7 @@
 //! the others noticing.
 
 pub mod act;
+pub mod addressee;
 pub mod audio;
 #[cfg(feature = "nemo")]
 pub mod conversation;
