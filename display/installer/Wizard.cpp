@@ -175,12 +175,15 @@ void Wizard::refreshCatalog() {
             return;
         }
         const auto document=QJsonDocument::fromJson(bytes);
-        if(!document.isObject() || document.object().value("schema_version").toInt()!=1) {
+        const auto index=document.object();
+        if(!document.isObject() || index.value("schema_version").toInt()!=1 ||
+           index.value("schema_url").toString()!="/registry/v1/schema.json" ||
+           !index.value("policy").toObject().value("install_only_verified").toBool()) {
             message("Versión o formato del Hub no compatible. Conservamos la copia local.");
             reply->deleteLater();
             return;
         }
-        const auto catalogs=document.object().value("catalogs").toObject();
+        const auto catalogs=index.value("catalogs").toObject();
         const QStringList kinds={"apps","models","packages","releases"};
         for(const auto &kind:kinds) {
             const QString expected="/registry/v1/"+kind+".json";

@@ -151,9 +151,10 @@ async fn load_catalog(args: &mut Args) -> Result<Catalog, String> {
         return Err("choose either --catalog or --catalog-url, not both".into());
     }
     let keys_path = args.take("--keys").unwrap_or_else(|| DEFAULT_KEYS.into());
-    let keys_text = std::fs::read_to_string(&keys_path).map_err(|e| format!("{keys_path}: {e}"))?;
-    let keys = TrustedKeys::parse(&keys_text).map_err(|e| format!("{keys_path}: {e}"))?;
     if let Some(url) = remote_url {
+        let keys_text =
+            std::fs::read_to_string(&keys_path).map_err(|e| format!("{keys_path}: {e}"))?;
+        let keys = TrustedKeys::parse(&keys_text).map_err(|e| format!("{keys_path}: {e}"))?;
         return load_remote_catalog(&url, &keys).await;
     }
     let path = PathBuf::from(local_path.unwrap_or_else(|| DEFAULT_CATALOG.into()));
@@ -166,6 +167,8 @@ async fn load_catalog(args: &mut Args) -> Result<Catalog, String> {
     ));
     let signature = std::fs::read_to_string(&signature_path)
         .map_err(|e| format!("{}: {e}", signature_path.display()))?;
+    let keys_text = std::fs::read_to_string(&keys_path).map_err(|e| format!("{keys_path}: {e}"))?;
+    let keys = TrustedKeys::parse(&keys_text).map_err(|e| format!("{keys_path}: {e}"))?;
     open_catalog(&bytes, &signature, &keys).map_err(|e| format!("{}: {e}", path.display()))
 }
 
