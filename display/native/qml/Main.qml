@@ -24,8 +24,30 @@ ApplicationWindow {
     readonly property color green: "#47d18b"
     readonly property color amber: "#f0b429"
     readonly property color red: "#f2626b"
-    property string scene: "world"
+    property string scene: "orb"
+    property bool orbHudVisible: true
     property var selection: null
+
+    function changeScene(next) {
+        if (next !== "orb" && next !== "forge" && next !== "world") return
+        root.scene = next
+        root.selection = null
+        archieBridge.requestMode(next === "world" ? "watcher" : "cerebra")
+    }
+
+    Connections {
+        target: displayControl
+        function onCommandReceived(action, value, enabled) {
+            if (action === "scene") root.changeScene(value)
+            else if (action === "cinematic") {
+                root.changeScene("orb")
+                lumen.applyProfile(value)
+            } else if (action === "overlay") {
+                if (value === "hud") root.orbHudVisible = enabled
+                else lumen.setSetting(value, enabled)
+            }
+        }
+    }
 
     // Where the sun is, in the Earth's own frame, right now.
     //
@@ -299,21 +321,21 @@ ApplicationWindow {
                     anchors.centerIn: parent
                     spacing: 2
                     SceneButton {
-                        label: "World"
-                        selected: root.scene === "world"
-                        onClicked: { root.scene = "world"; root.selection = null; archieBridge.requestMode("watcher") }
+                        label: "Orb"
+                        selected: root.scene === "orb"
+                        onClicked: root.changeScene("orb")
                     }
                     // The applications this machine can open. It replaced CORE, whose
                     // nodes repeated what the orb already holds.
                     SceneButton {
                         label: "Forge"
                         selected: root.scene === "forge"
-                        onClicked: { root.scene = "forge"; root.selection = null; archieBridge.requestMode("cerebra") }
+                        onClicked: root.changeScene("forge")
                     }
                     SceneButton {
-                        label: "Orb"
-                        selected: root.scene === "orb"
-                        onClicked: { root.scene = "orb"; root.selection = null; archieBridge.requestMode("cerebra") }
+                        label: "World"
+                        selected: root.scene === "world"
+                        onClicked: root.changeScene("world")
                     }
                 }
             }
@@ -769,6 +791,7 @@ ApplicationWindow {
                 OrbHud {
                     anchors.fill: parent
                     visible: root.scene === "orb"
+                    labelsVisible: root.orbHudVisible
                     view: view
                     orbScene: lumenScene
                 }
