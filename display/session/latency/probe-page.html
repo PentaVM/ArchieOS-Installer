@@ -1,0 +1,12 @@
+<!doctype html>
+<!-- The browser twin of probe-window.qml: every key and pointer press, with the wall clock in
+     ms, on the console (Firefox prints it to stdout with devtools.console.stdout.content). -->
+<html><head><meta charset="utf-8"><title>archie seat probe</title></head>
+<body style="margin:0;height:100vh;background:#fff">
+<textarea id="t" style="width:90vw;height:40vh" autofocus></textarea>
+<script>
+const log = (e, extra) => console.log(JSON.stringify(Object.assign({t: Date.now(), e}, extra)));
+addEventListener("keydown", ev => { if (!ev.repeat) log("key_down", {key: ev.key}); }, true);
+addEventListener("keyup", ev => log("key_up", {key: ev.key}), true);
+addEventListener("mousedown", ev => log("button_down", {x: ev.clientX, y: ev.clientY}), true);
+</script></body></html>
