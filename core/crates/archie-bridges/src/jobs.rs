@@ -125,7 +125,11 @@ pub fn start(
     let id = format!("{}-{}-{}", spec.bridge, spec.kind, now_ms());
     let dir = jobs.join(&id);
     std::fs::create_dir_all(&dir).map_err(io)?;
-    std::fs::write(dir.join("spec.json"), serde_json::to_vec_pretty(spec).map_err(io)?).map_err(io)?;
+    std::fs::write(
+        dir.join("spec.json"),
+        serde_json::to_vec_pretty(spec).map_err(io)?,
+    )
+    .map_err(io)?;
     let status = Status {
         id: id.clone(),
         bridge: spec.bridge.clone(),
@@ -179,7 +183,8 @@ impl Runner {
     pub fn open(workspace: &Workspace, id: &str) -> Result<(Self, Spec), JobError> {
         let dir = folder(workspace, id)?;
         let spec: Spec =
-            serde_json::from_str(&std::fs::read_to_string(dir.join("spec.json")).map_err(io)?).map_err(io)?;
+            serde_json::from_str(&std::fs::read_to_string(dir.join("spec.json")).map_err(io)?)
+                .map_err(io)?;
         let mut status = read_status(workspace, id)?;
         status.state = State::Running;
         status.updated_ms = now_ms();
@@ -231,8 +236,16 @@ mod tests {
         // Written by hand as start() would, without spawning the binary.
         let job_dir = workspace.scratch("jobs").unwrap().join("freecad-sweep-1");
         std::fs::create_dir_all(&job_dir).unwrap();
-        let spec = Spec { bridge: "freecad".into(), kind: "sweep".into(), arguments: serde_json::json!({}) };
-        std::fs::write(job_dir.join("spec.json"), serde_json::to_vec(&spec).unwrap()).unwrap();
+        let spec = Spec {
+            bridge: "freecad".into(),
+            kind: "sweep".into(),
+            arguments: serde_json::json!({}),
+        };
+        std::fs::write(
+            job_dir.join("spec.json"),
+            serde_json::to_vec(&spec).unwrap(),
+        )
+        .unwrap();
         write_status(
             &job_dir,
             &Status {

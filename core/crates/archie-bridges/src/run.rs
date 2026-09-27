@@ -70,6 +70,7 @@ pub struct Run {
     args: Vec<std::ffi::OsString>,
     cwd: Option<PathBuf>,
     env: Vec<(String, std::ffi::OsString)>,
+    input: Option<Vec<u8>>,
     limit: Duration,
 }
 
@@ -80,6 +81,7 @@ impl Run {
             args: Vec::new(),
             cwd: None,
             env: Vec::new(),
+            input: None,
             limit: Duration::from_secs(120),
         }
     }
@@ -110,6 +112,12 @@ impl Run {
         self
     }
 
+    /// Bytes written to the program's standard input, which is closed after them.
+    pub fn input(mut self, bytes: Vec<u8>) -> Self {
+        self.input = Some(bytes);
+        self
+    }
+
     pub fn limit(mut self, limit: Duration) -> Self {
         self.limit = limit;
         self
@@ -121,7 +129,11 @@ impl Run {
         command
             .args(&self.args)
             .env_clear()
-            .stdin(Stdio::null())
+            .stdin(if self.input.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         for key in PASSED {
@@ -155,6 +167,14 @@ impl Run {
             program: name.clone(),
             detail: e.to_string(),
         })?;
+        if let (Some(bytes), Some(mut stdin)) = (self.input, child.stdin.take()) {
+            // Written from its own thread, so a program that answers before reading all of
+            // its input cannot deadlock against us.
+            std::thread::spawn(move || {
+                use std::io::Write;
+                let _ = stdin.write_all(&bytes);
+            });
+        }
         // Both pipes are drained as the program runs, so a chatty one cannot stall.
         let drain = |pipe: Option<Box<dyn Read + Send>>| {
             std::thread::spawn(move || {

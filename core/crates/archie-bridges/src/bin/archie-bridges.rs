@@ -167,7 +167,10 @@ fn run_job(args: Vec<String>) -> Result<ExitCode, String> {
     let workspace = archie_bridges::Workspace::open(&folder).map_err(|e| e.to_string())?;
     let (mut runner, spec) = jobs::Runner::open(&workspace, &id).map_err(|e| e.to_string())?;
     let bridge = open(&spec.bridge, &folder, &programs).map_err(|e| e.to_string())?;
-    eprintln!("archie-bridges: job {id} ({} {}) started", spec.bridge, spec.kind);
+    eprintln!(
+        "archie-bridges: job {id} ({} {}) started",
+        spec.bridge, spec.kind
+    );
     let result = bridge.run_job(&spec, &mut runner);
     let cancelled = runner.cancelled();
     let (state, error) = match result {
@@ -175,10 +178,17 @@ fn run_job(args: Vec<String>) -> Result<ExitCode, String> {
         Ok(()) => (jobs::State::Done, None),
         Err(why) => (jobs::State::Failed, Some(why)),
     };
-    eprintln!("archie-bridges: job {id} ended: {state:?} {}", error.as_deref().unwrap_or(""));
+    eprintln!(
+        "archie-bridges: job {id} ended: {state:?} {}",
+        error.as_deref().unwrap_or("")
+    );
     let failed = state == jobs::State::Failed;
     runner.finish(state, error).map_err(|e| e.to_string())?;
-    Ok(if failed { ExitCode::FAILURE } else { ExitCode::SUCCESS })
+    Ok(if failed {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    })
 }
 
 const MANIFEST_TEMPLATE: &str = r#"# The bridge's manifest. docs/BRIDGES.md explains every field.

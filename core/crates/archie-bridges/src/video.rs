@@ -162,12 +162,23 @@ impl Bridge for Video {
                     None => return Outcome::error("video_render needs timeline"),
                 };
                 match render(&timeline, media, output, &self.melt, RENDER_LIMIT) {
-                    Ok(made) => Outcome::json(&json!({
-                        "video": self.workspace.relative(&made.video),
-                        "project": self.workspace.relative(&made.project),
-                        "seconds": made.seconds,
-                        "render_seconds": made.elapsed_s,
-                    })),
+                    Ok(made) => {
+                        // The cut list beside the video, for Premiere, Resolve or Avid.
+                        let edl = made.video.with_extension("edl");
+                        let title = made
+                            .video
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("archie");
+                        let _ = std::fs::write(&edl, cut_list(title, &timeline));
+                        Outcome::json(&json!({
+                            "video": self.workspace.relative(&made.video),
+                            "project": self.workspace.relative(&made.project),
+                            "edl": self.workspace.relative(&edl),
+                            "seconds": made.seconds,
+                            "render_seconds": made.elapsed_s,
+                        }))
+                    }
                     Err(error) => Outcome::error(error.to_string()),
                 }
             }
@@ -176,10 +187,67 @@ impl Bridge for Video {
     }
 }
 
+/// `seconds` as SMPTE timecode at `fps`, non-drop.
+fn timecode(seconds: f64, fps: u32) -> String {
+    let fps = fps.max(1) as u64;
+    let frames = (seconds.max(0.0) * fps as f64).round() as u64;
+    let (s, f) = (frames / fps, frames % fps);
+    format!(
+        "{:02}:{:02}:{:02}:{:02}",
+        s / 3600,
+        (s / 60) % 60,
+        s % 60,
+        f
+    )
+}
+
+/// A CMX 3600 edit decision list of the timeline's clips, which Premiere, DaVinci Resolve,
+/// Avid and Final Cut import to rebuild the cut against the original sources.
+pub fn cut_list(title: &str, timeline: &Timeline) -> String {
+    let mut out = format!(
+        "TITLE: {}\nFCM: NON-DROP FRAME\n\n",
+        title.replace(['\n', '\r'], " ")
+    );
+    let mut record = 0.0;
+    for (i, clip) in timeline.clips.iter().enumerate() {
+        let length = clip.out_s - clip.in_s;
+        let reel = format!("AX{:02}", (i + 1) % 100);
+        out.push_str(&format!(
+            "{:03}  {reel:<8} B     C        {} {} {} {}\n* FROM CLIP NAME: {}\n\n",
+            i + 1,
+            timecode(clip.in_s, timeline.fps),
+            timecode(clip.out_s, timeline.fps),
+            timecode(record, timeline.fps),
+            timecode(record + length, timeline.fps),
+            clip.source.replace(['\n', '\r'], " "),
+        ));
+        record += length;
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use archie_cut::RENDERS;
+
+    #[test]
+    fn the_cut_list_places_each_clip_after_the_last() {
+        let timeline: Timeline = serde_json::from_value(json!({
+            "fps": 25,
+            "clips": [{"source": "a.mp4", "in_s": 1.0, "out_s": 3.4}, {"source": "b.mp4", "out_s": 2.0}]
+        }))
+        .unwrap();
+        let edl = cut_list("cut", &timeline);
+        assert!(edl.starts_with("TITLE: cut\nFCM: NON-DROP FRAME"));
+        assert!(edl.contains(
+            "001  AX01     B     C        00:00:01:00 00:00:03:10 00:00:00:00 00:00:02:10"
+        ));
+        assert!(edl.contains(
+            "002  AX02     B     C        00:00:00:00 00:00:02:00 00:00:02:10 00:00:04:10"
+        ));
+        assert!(edl.contains("* FROM CLIP NAME: b.mp4"));
+    }
 
     fn video(name: &str) -> (Video, PathBuf) {
         let media =

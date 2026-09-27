@@ -117,9 +117,12 @@ pub fn read_stl(bytes: &[u8]) -> Result<Vec<[Vec3; 3]>, PreviewError> {
             return Ok(triangles);
         }
     }
-    let text = std::str::from_utf8(bytes).map_err(|_| PreviewError::Mesh("neither binary nor text".into()))?;
+    let text = std::str::from_utf8(bytes)
+        .map_err(|_| PreviewError::Mesh("neither binary nor text".into()))?;
     if !text.trim_start().starts_with("solid") {
-        return Err(PreviewError::Mesh("text that does not start with solid".into()));
+        return Err(PreviewError::Mesh(
+            "text that does not start with solid".into(),
+        ));
     }
     let mut vertices = Vec::new();
     for line in text.lines() {
@@ -168,13 +171,22 @@ pub fn render_png(
     let (w, h) = (width as usize * SUPERSAMPLE, height as usize * SUPERSAMPLE);
     let (right, up, toward) = view.axes();
     let [lo, hi] = bounds(triangles).ok_or(PreviewError::Empty)?;
-    let centre = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0, (lo[2] + hi[2]) / 2.0];
+    let centre = [
+        (lo[0] + hi[0]) / 2.0,
+        (lo[1] + hi[1]) / 2.0,
+        (lo[2] + hi[2]) / 2.0,
+    ];
     // Fit the projected box with a margin.
     let mut extent = [f64::MAX, f64::MIN, f64::MAX, f64::MIN];
     for p in triangles.iter().flatten() {
         let d = sub(*p, centre);
         let (x, y) = (dot(d, right), dot(d, up));
-        extent = [extent[0].min(x), extent[1].max(x), extent[2].min(y), extent[3].max(y)];
+        extent = [
+            extent[0].min(x),
+            extent[1].max(x),
+            extent[2].min(y),
+            extent[3].max(y),
+        ];
     }
     let span_x = (extent[1] - extent[0]).max(1e-9);
     let span_y = (extent[3] - extent[2]).max(1e-9);
@@ -201,13 +213,19 @@ pub fn render_png(
     let key = normalize([0.4, 0.7, 1.0]);
     let fill = normalize([-0.8, -0.2, 0.4]);
     for triangle in triangles {
-        let normal = normalize(cross(sub(triangle[1], triangle[0]), sub(triangle[2], triangle[0])));
+        let normal = normalize(cross(
+            sub(triangle[1], triangle[0]),
+            sub(triangle[2], triangle[0]),
+        ));
         // Light in camera space, so every view is lit the same way; both faces shade, so
         // a mesh with flipped normals still reads.
         let n = [dot(normal, right), dot(normal, up), dot(normal, toward)];
         let n = if n[2] < 0.0 { [-n[0], -n[1], -n[2]] } else { n };
         let light = 0.28 + 0.62 * dot(n, key).max(0.0) + 0.18 * dot(n, fill).max(0.0);
-        let specular = dot(n, normalize([key[0], key[1], key[2] + 1.0])).max(0.0).powi(24) * 0.25;
+        let specular = dot(n, normalize([key[0], key[1], key[2] + 1.0]))
+            .max(0.0)
+            .powi(24)
+            * 0.25;
         let shade = [
             (PART[0] * light + specular).min(1.0),
             (PART[1] * light + specular).min(1.0),
@@ -241,7 +259,10 @@ pub fn render_png(
         }
     }
     // Outline where depth jumps: silhouettes and creases read at a glance.
-    let range = (hi[0] - lo[0]).max(hi[1] - lo[1]).max(hi[2] - lo[2]).max(1e-9);
+    let range = (hi[0] - lo[0])
+        .max(hi[1] - lo[1])
+        .max(hi[2] - lo[2])
+        .max(1e-9);
     let jump = range * 0.02;
     let mut outlined = colour.clone();
     for y in 1..h - 1 {
@@ -295,7 +316,8 @@ pub fn render_png(
 /// A binary STL of `triangles`, for tests and for bridges that build meshes themselves.
 pub fn write_stl(triangles: &[[Vec3; 3]]) -> Vec<u8> {
     let mut out = vec![0u8; 80];
-    out.write_all(&(triangles.len() as u32).to_le_bytes()).unwrap();
+    out.write_all(&(triangles.len() as u32).to_le_bytes())
+        .unwrap();
     for t in triangles {
         let n = normalize(cross(sub(t[1], t[0]), sub(t[2], t[0])));
         for v in std::iter::once(n).chain(t.iter().copied()) {
@@ -316,12 +338,28 @@ mod tests {
     pub fn cuboid() -> Vec<[Vec3; 3]> {
         let (x, y, z) = (20.0, 10.0, 5.0);
         let p = [
-            [0.0, 0.0, 0.0], [x, 0.0, 0.0], [x, y, 0.0], [0.0, y, 0.0],
-            [0.0, 0.0, z], [x, 0.0, z], [x, y, z], [0.0, y, z],
+            [0.0, 0.0, 0.0],
+            [x, 0.0, 0.0],
+            [x, y, 0.0],
+            [0.0, y, 0.0],
+            [0.0, 0.0, z],
+            [x, 0.0, z],
+            [x, y, z],
+            [0.0, y, z],
         ];
         let faces = [
-            [0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4],
-            [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7],
+            [0, 2, 1],
+            [0, 3, 2],
+            [4, 5, 6],
+            [4, 6, 7],
+            [0, 1, 5],
+            [0, 5, 4],
+            [1, 2, 6],
+            [1, 6, 5],
+            [2, 3, 7],
+            [2, 7, 6],
+            [3, 0, 4],
+            [3, 4, 7],
         ];
         faces.iter().map(|f| [p[f[0]], p[f[1]], p[f[2]]]).collect()
     }

@@ -127,17 +127,33 @@ when every step is done.
 - An application that changes its automation surface keeps the bridge's tool names and
   answers where it can. A planner that learned the old names should not notice.
 
-## The queue
+## Long jobs and delivery
 
-KiCad and video exist. Next, in this mode:
+Work that takes hours runs as a job, not as one tool call:
 
-| Application | Surface | Notes |
+- The job is a detached `archie-bridges run-job` process ([`jobs`](../core/crates/archie-bridges/src/jobs.rs)).
+- It survives the conversation that started it.
+- It writes its progress to `.archie/jobs/<id>/`.
+- It stops cleanly between iterations when `archie_job_cancel` asks.
+
+A bridge whose job makes stages (`freecad_sweep`, `blender_animation`) delivers each one
+to the person's desk as it finishes. [DELIVERY.md](DELIVERY.md) covers the desk, the
+tunnel, and which formats each bridge sends for which software.
+
+## Where each bridge stands
+
+| Bridge | Surface | Planned next |
 |---|---|---|
-| FreeCAD | `FreeCADCmd` + script | `archie-workstation` already drives it; move it into a bridge |
-| LibreOffice | `soffice --headless --convert-to`, ODF files | writes and converts documents, sheets, slides |
-| Inkscape | `inkscape --actions`, SVG | the CLI covers export and most edits |
-| GIMP | `gimp-console` batch + script | |
-| Blender | `blender --background --python` + script | |
-| QGIS | `qgis_process` | the processing CLI, no script needed |
-| OBS Studio | obs-websocket (JSON over WebSocket) | |
-| Audacity | mod-script-pipe | |
+| kicad | S-expression files, `kicad-cli` | the IPC API, for live edits in an open board |
+| freecad | `FreeCADCmd` + a constant script | TechDraw drawings, assemblies |
+| blender | `blender --background` + a constant script | material presets |
+| office | flat ODF written in Rust, `soffice --headless` | charts in spreadsheets |
+| inkscape | `inkscape --actions`, `--export-type`, SVG | |
+| gimp | `gimp-console` batch + a constant script | layer-level operations |
+| qgis | `qgis_process --no-python`, GDAL | styled maps from a QGIS project |
+| video | MLT `melt`, `ffprobe`, EDL | |
+| audio | FFmpeg filters | Audacity mod-script-pipe for open projects |
+| obs | obs-websocket 5 | |
+
+Each one's unit tests run everywhere. Its end-to-end tests run where the application is
+installed.

@@ -10,7 +10,7 @@ e2e = "ARCHIE_BRIDGE_E2E=kicad cargo test -p archie-bridges --test kicad_e2e"
 name = "KiCad"
 homepage = "https://www.kicad.org"
 license = "GPL-3.0-or-later"
-versions = "10.x (kicad-cli since 7; pcb render since 9)"
+versions = "10.x (kicad-cli since 7; pcb render and ODB++ since 9)"
 
 [[surfaces]]
 kind = "file-format"

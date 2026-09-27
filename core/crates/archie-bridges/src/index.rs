@@ -30,6 +30,12 @@ pub fn render() -> String {
          From a shell, without MCP: `archie-bridges call kicad kicad_projects '{{}}' --workspace DIR`.\n\n\
          `--clearance internal` is needed because these tools carry file names; use it only with a \
          model whose provider's retention you have checked, or a local one.\n\n\
+         ## Results on the person's computer\n\n\
+         With `--deliver-key`, `archie_deliver` sends a bridge's files to the person's workstation, \
+         where `archie-desk` files them by project and stage and their own software opens them: a \
+         STEP in Fusion 360, a PSD in Photoshop, a DOCX in Word. Long jobs (`freecad_sweep`, \
+         `blender_animation`) run on after the conversation, report through `archie_job_status` and \
+         deliver each stage as it finishes. See [`docs/DELIVERY.md`](../DELIVERY.md).\n\n\
          ## Tools first, eyes second\n\n\
          Use the tools for what they cover: they are exact and cheap. Operate the application's \
          window on the Archie Stage for the rest, and check that work with the bridge's reads and \

@@ -17,6 +17,10 @@ From a shell, without MCP: `archie-bridges call kicad kicad_projects '{}' --work
 
 `--clearance internal` is needed because these tools carry file names; use it only with a model whose provider's retention you have checked, or a local one.
 
+## Results on the person's computer
+
+With `--deliver-key`, `archie_deliver` sends a bridge's files to the person's workstation, where `archie-desk` files them by project and stage and their own software opens them: a STEP in Fusion 360, a PSD in Photoshop, a DOCX in Word. Long jobs (`freecad_sweep`, `blender_animation`) run on after the conversation, report through `archie_job_status` and deliver each stage as it finishes. See [`docs/DELIVERY.md`](../DELIVERY.md).
+
 ## Tools first, eyes second
 
 Use the tools for what they cover: they are exact and cheap. Operate the application's window on the Archie Stage for the rest, and check that work with the bridge's reads and renders instead of by looking. Each bridge says below when the GUI is the way.
@@ -25,9 +29,16 @@ Use the tools for what they cover: they are exact and cheap. Operate the applica
 
 | Bridge | Application | What it does | Programs |
 |---|---|---|---|
-| [`kicad`](#kicad) | [KiCad](https://www.kicad.org) 10.x (kicad-cli since 7; pcb render since 9) | Read schematics and boards, run KiCad's ERC and DRC, set part fields, export fabrication files and render boards. | `kicad-cli` |
+| [`kicad`](#kicad) | [KiCad](https://www.kicad.org) 10.x (kicad-cli since 7; pcb render and ODB++ since 9) | Read schematics and boards, run KiCad's ERC and DRC, set part fields, export fabrication files and render boards. | `kicad-cli` |
 | [`freecad`](#freecad) | [FreeCAD](https://www.freecad.org) 1.0 and 1.1 | Build parametric parts, make and sweep variants for hours, check solids and export STEP/IGES/STL/3MF for Fusion 360, SolidWorks, COMSOL or a printer, with pictures drawn without a display. | `freecadcmd`, `archie-bridges` |
+| [`blender`](#blender) | [Blender](https://www.blender.org) 4.2 LTS to 4.5 | Inspect and assemble 3D scenes, render stills and turntables with a studio set up for bare models, and export FBX, glTF, USD or OBJ for Maya, Unreal, Unity or the web. | `blender`, `ffmpeg`, `archie-bridges` |
+| [`office`](#office) | [LibreOffice](https://www.libreoffice.org) 7.6 to 25.x | Write well-set documents, spreadsheets and decks as DOCX, XLSX, PPTX or PDF; read, convert and picture existing ones, Word and Excel files included. | `soffice` |
+| [`inkscape`](#inkscape) | [Inkscape](https://inkscape.org) 1.3 and 1.4 | Write and edit vector drawings, and export them as PDF, EPS, EMF, DXF or PNG for Illustrator, CorelDRAW, print shops and laser cutters. | `inkscape` |
+| [`gimp`](#gimp) | [GIMP](https://www.gimp.org) 3.0 and 3.2 | Inspect layered images, retouch them (resize, crop, levels, colour, sharpen, text) and export PSD for Photoshop, TIFF for print, or PNG, JPEG and WebP. | `gimp-console` |
+| [`qgis`](#qgis) | [QGIS](https://qgis.org) 3.34 LTR to 3.44 | Read GIS layers, run any of QGIS's native, GDAL and PDAL processing algorithms, convert to Shapefile, KML, GeoPackage or GeoTIFF for ArcGIS or Google Earth, and draw maps. | `qgis_process`, `gdalinfo`, `ogrinfo`, `gdal_translate` |
 | [`video`](#video) | [MLT (Kdenlive, Shotcut)](https://www.mltframework.org) MLT 7.x | List and probe media, then render a timeline of cut clips, titles, music and fades to MP4, with a Kdenlive-openable project beside it. | `melt`, `ffprobe` |
+| [`audio`](#audio) | [FFmpeg (Audacity for the GUI)](https://ffmpeg.org) FFmpeg 6 and 7 | Measure loudness, denoise, trim, fade, level to a LUFS target, mix tracks and convert recordings, with waveform pictures; WAV and FLAC for Audition, Pro Tools or Audacity. | `ffmpeg`, `ffprobe` |
+| [`obs`](#obs) | [OBS Studio](https://obsproject.com) 30 and 31 (obs-websocket 5.3 and later) | Read and switch scenes, add and update text and picture overlays, record into the workspace and see what is on air; going live stays a click of the person's. | `obs-websocket`, `obs-password` |
 
 ### kicad
 
@@ -78,6 +89,116 @@ Build parametric parts, make and sweep variants for hours, check solids and expo
 | `freecad_render` | yes | Picture of a design |
 | `freecad_sweep` | yes | Try many variants, for hours |
 
+### blender
+
+Inspect and assemble 3D scenes, render stills and turntables with a studio set up for bare models, and export FBX, glTF, USD or OBJ for Maya, Unreal, Unity or the web.
+
+- Works in: A folder of .blend scenes and 3D models. Renders go to renders/, videos to animations/, exports to exports/.
+- Install on ArchieOS: `pacman -S blender`
+- Install on Ubuntu: `snap install blender --classic`
+- Install on Windows: `winget install BlenderFoundation.Blender`
+- Through: [blender --background with its embedded Python (the script is a constant in the bridge)](https://docs.blender.org/api/current/info_quickstart.html), [blender command line](https://docs.blender.org/manual/en/latest/advanced/command_line/arguments.html)
+- GUI on the Stage (`blender`): Modelling, sculpting, UV and material work by eye, and animation by hand: do it in Blender on the Stage and check it with blender_render.
+- Guide: [`bridges/blender/SKILL.md`](../../bridges/blender/SKILL.md)
+- End-to-end tests: `ARCHIE_BRIDGE_E2E=blender cargo test -p archie-bridges --test blender_e2e`
+
+| Tool | Changes files | What it does |
+|---|---|---|
+| `blender_scenes` | no | Scenes and models |
+| `blender_inspect` | no | What a scene holds |
+| `blender_assemble` | yes | Build a scene from models |
+| `blender_render` | yes | Render a picture |
+| `blender_export` | yes | Export for other 3D software |
+| `blender_animation` | yes | Render a turntable or animation |
+
+### office
+
+Write well-set documents, spreadsheets and decks as DOCX, XLSX, PPTX or PDF; read, convert and picture existing ones, Word and Excel files included.
+
+- Works in: A folder of documents. New ones go to documents/, conversions to exports/, pictures to renders/.
+- Install on ArchieOS: `pacman -S libreoffice-fresh`
+- Install on Ubuntu: `apt install libreoffice-writer libreoffice-calc libreoffice-impress`
+- Install on Windows: `winget install TheDocumentFoundation.LibreOffice`
+- Through: [soffice --headless --convert-to](https://help.libreoffice.org/latest/en-US/text/shared/guide/start_parameters.html), [OpenDocument flat XML (fodt, fods, fodp)](https://docs.oasis-open.org/office/OpenDocument/v1.3/OpenDocument-v1.3-part3-schema.html)
+- GUI on the Stage (`libreoffice-writer`, `libreoffice-calc`, `libreoffice-impress`, `soffice`): Fine layout by eye, charts, tracked changes and comments: open the document in LibreOffice on the Stage, then check it with office_preview.
+- Guide: [`bridges/office/SKILL.md`](../../bridges/office/SKILL.md)
+- End-to-end tests: `ARCHIE_BRIDGE_E2E=office cargo test -p archie-bridges --test office_e2e`
+
+| Tool | Changes files | What it does |
+|---|---|---|
+| `office_documents` | no | Documents |
+| `office_text` | no | Read a document |
+| `office_convert` | yes | Convert a document |
+| `office_preview` | yes | Picture of the first page |
+| `office_write_document` | yes | Write a document |
+| `office_write_spreadsheet` | yes | Write a spreadsheet |
+| `office_write_presentation` | yes | Write a presentation |
+
+### inkscape
+
+Write and edit vector drawings, and export them as PDF, EPS, EMF, DXF or PNG for Illustrator, CorelDRAW, print shops and laser cutters.
+
+- Works in: A folder of drawings. New ones go to drawings/, edits to edits/, exports to exports/.
+- Install on ArchieOS: `pacman -S inkscape`
+- Install on Ubuntu: `add-apt-repository ppa:inkscape.dev/stable && apt install inkscape`
+- Install on Windows: `winget install Inkscape.Inkscape`
+- Through: [inkscape --actions, --export-type, --query-all](https://inkscape.org/doc/inkscape-man.html), [SVG 1.1](https://www.w3.org/TR/SVG11/)
+- GUI on the Stage (`org.inkscape.Inkscape`, `inkscape`): Freehand drawing, node editing by eye and anything visual that is easier to point at than to name; check it with inkscape_render.
+- Guide: [`bridges/inkscape/SKILL.md`](../../bridges/inkscape/SKILL.md)
+- End-to-end tests: `ARCHIE_BRIDGE_E2E=inkscape cargo test -p archie-bridges --test inkscape_e2e`
+
+| Tool | Changes files | What it does |
+|---|---|---|
+| `inkscape_drawings` | no | Drawings |
+| `inkscape_inspect` | no | What a drawing holds |
+| `inkscape_write_svg` | yes | Write a drawing |
+| `inkscape_edit` | yes | Edit a drawing |
+| `inkscape_export` | yes | Export for other software |
+| `inkscape_render` | yes | Picture of a drawing |
+
+### gimp
+
+Inspect layered images, retouch them (resize, crop, levels, colour, sharpen, text) and export PSD for Photoshop, TIFF for print, or PNG, JPEG and WebP.
+
+- Works in: A folder of images. Edits go to edits/, exports to exports/.
+- Install on ArchieOS: `pacman -S gimp`
+- Install on Ubuntu: `flatpak install flathub org.gimp.GIMP`
+- Install on Windows: `winget install GIMP.GIMP.3`
+- Through: [gimp-console batch mode with its embedded Python (the script is a constant in the bridge)](https://developer.gimp.org/resource/writing-a-plug-in/)
+- GUI on the Stage (`gimp`, `org.gimp.GIMP`): Painting, selections by eye, healing and cloning, masks: do them in GIMP on the Stage and check the result with gimp_inspect.
+- Guide: [`bridges/gimp/SKILL.md`](../../bridges/gimp/SKILL.md)
+- End-to-end tests: `ARCHIE_BRIDGE_E2E=gimp cargo test -p archie-bridges --test gimp_e2e`
+
+| Tool | Changes files | What it does |
+|---|---|---|
+| `gimp_images` | no | Images |
+| `gimp_inspect` | no | What an image holds |
+| `gimp_edit` | yes | Retouch an image |
+| `gimp_export` | yes | Export for other software |
+
+### qgis
+
+Read GIS layers, run any of QGIS's native, GDAL and PDAL processing algorithms, convert to Shapefile, KML, GeoPackage or GeoTIFF for ArcGIS or Google Earth, and draw maps.
+
+- Works in: A folder of geographic data: GeoPackage, Shapefile, GeoJSON, KML, CSV, GeoTIFF, LAS. Results go to exports/.
+- Install on ArchieOS: `pacman -S qgis gdal`
+- Install on Ubuntu: `apt install qgis qgis-plugin-grass gdal-bin`
+- Install on Windows: `winget install OSGeo.QGIS`
+- Through: [qgis_process --no-python (processing framework, JSON in and out)](https://docs.qgis.org/latest/en/docs/user_manual/processing/standalone.html), [GDAL gdalinfo, ogrinfo, gdal_translate](https://gdal.org/programs/index.html)
+- GUI on the Stage (`org.qgis.qgis`, `qgis`): Styling, labelling and print layouts: open the project in QGIS on the Stage; check the data with qgis_info and the look with qgis_map.
+- Guide: [`bridges/qgis/SKILL.md`](../../bridges/qgis/SKILL.md)
+- End-to-end tests: `ARCHIE_BRIDGE_E2E=qgis cargo test -p archie-bridges --test qgis_e2e`
+
+| Tool | Changes files | What it does |
+|---|---|---|
+| `qgis_layers` | no | Geographic data |
+| `qgis_info` | no | What a layer holds |
+| `qgis_algorithms` | no | Find an algorithm |
+| `qgis_algorithm_help` | no | An algorithm's parameters |
+| `qgis_run` | yes | Run an algorithm |
+| `qgis_convert` | yes | Convert a layer |
+| `qgis_map` | yes | Draw a map |
+
 ### video
 
 List and probe media, then render a timeline of cut clips, titles, music and fades to MP4, with a Kdenlive-openable project beside it.
@@ -96,6 +217,53 @@ List and probe media, then render a timeline of cut clips, titles, music and fad
 | `video_sources` | no | Media files |
 | `video_probe` | no | What a media file holds |
 | `video_render` | yes | Render a video |
+
+### audio
+
+Measure loudness, denoise, trim, fade, level to a LUFS target, mix tracks and convert recordings, with waveform pictures; WAV and FLAC for Audition, Pro Tools or Audacity.
+
+- Works in: A folder of recordings. Edits go to edits/, mixes to mixes/, conversions to exports/.
+- Install on ArchieOS: `pacman -S ffmpeg audacity`
+- Install on Ubuntu: `apt install ffmpeg audacity`
+- Install on Windows: `winget install Gyan.FFmpeg Audacity.Audacity`
+- Through: [ffmpeg audio filters (loudnorm, afftdn, ebur128, showwavespic)](https://ffmpeg.org/ffmpeg-filters.html), [ffprobe](https://ffmpeg.org/ffprobe.html), [Audacity mod-script-pipe, for projects open in Audacity](https://manual.audacityteam.org/man/scripting.html) (planned)
+- GUI on the Stage (`audacity`, `org.audacityteam.Audacity`): Editing by ear at a particular moment, spectral repair and multitrack projects already in Audacity: open them in Audacity on the Stage and check the result with audio_inspect.
+- Guide: [`bridges/audio/SKILL.md`](../../bridges/audio/SKILL.md)
+- End-to-end tests: `ARCHIE_BRIDGE_E2E=audio cargo test -p archie-bridges --test audio_e2e`
+
+| Tool | Changes files | What it does |
+|---|---|---|
+| `audio_files` | no | Recordings |
+| `audio_inspect` | no | What a recording is |
+| `audio_process` | yes | Clean and level a recording |
+| `audio_mix` | yes | Mix tracks |
+| `audio_convert` | yes | Convert a recording |
+| `audio_waveform` | yes | Picture of a recording |
+
+### obs
+
+Read and switch scenes, add and update text and picture overlays, record into the workspace and see what is on air; going live stays a click of the person's.
+
+- Works in: A folder for overlay pictures; recordings go to its recordings/ folder, screenshots to renders/.
+- Install on ArchieOS: `pacman -S obs-studio`
+- Install on Ubuntu: `add-apt-repository ppa:obsproject/obs-studio && apt install obs-studio`
+- Install on Windows: `winget install OBSProject.OBSStudio`
+- Through: [obs-websocket 5 (JSON over a loopback WebSocket)](https://github.com/obsproject/obs-websocket/blob/master/docs/generated/protocol.md)
+- GUI on the Stage (`com.obsproject.Studio`, `obs`): Starting or stopping a live stream, stream keys and account settings, filters and audio mixing: those are the person's, in OBS's window.
+- Guide: [`bridges/obs/SKILL.md`](../../bridges/obs/SKILL.md)
+- End-to-end tests: `ARCHIE_BRIDGE_E2E=obs cargo test -p archie-bridges --test obs_e2e`
+
+| Tool | Changes files | What it does |
+|---|---|---|
+| `obs_status` | no | Is OBS recording? |
+| `obs_scenes` | no | Scenes and sources |
+| `obs_switch_scene` | yes | Switch scene |
+| `obs_show` | yes | Show or hide a source |
+| `obs_set_text` | yes | Change an overlay's text |
+| `obs_set_image` | yes | Change an overlay's picture |
+| `obs_add_overlay` | yes | Add an overlay |
+| `obs_record` | yes | Record |
+| `obs_screenshot` | yes | What is on air |
 
 ## Adding a bridge
 

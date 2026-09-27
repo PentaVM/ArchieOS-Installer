@@ -17,6 +17,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
 toml.workspace = true
+tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
 
 [[bin]]
 name = "archie-bridges"

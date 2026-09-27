@@ -61,7 +61,9 @@ folder, with one subfolder per kind, and never replaces anything.
 | gerbers | board | every copper layer, paste, silkscreen, mask, outline |
 | drill | board | Excellon drill files in mm, with a PDF map |
 | positions | board | pick-and-place CSV in mm, both sides |
-| step | board | 3D model |
+| step | board | 3D model for Fusion 360, SolidWorks, enclosure design |
+| odb | board | ODB++ package: one file a fab, or Altium, Cadence or Mentor, reads |
+| ipc2581 | board | IPC-2581 in mm, the open alternative to ODB++ |
 | bom | schematic | BOM CSV: Reference, Value, Footprint, quantity, DNP |
 | netlist | schematic | KiCad netlist |
 | schematic_pdf | schematic | the sheets as PDF |

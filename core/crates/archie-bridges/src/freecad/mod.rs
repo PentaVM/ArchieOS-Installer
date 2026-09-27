@@ -29,7 +29,9 @@ const JOB: Script = Script {
 const READ_LIMIT: Duration = Duration::from_secs(180);
 const WORK_LIMIT: Duration = Duration::from_secs(900);
 const FORMATS: [&str; 8] = ["step", "iges", "brep", "stl", "obj", "3mf", "ply", "fcstd"];
-const READS: [&str; 10] = ["fcstd", "step", "stp", "iges", "igs", "brep", "stl", "obj", "3mf", "ply"];
+const READS: [&str; 10] = [
+    "fcstd", "step", "stp", "iges", "igs", "brep", "stl", "obj", "3mf", "ply",
+];
 /// The most variants one sweep may make.
 const MAX_SWEEP: u64 = 100_000;
 const MAX_IMAGE: usize = 700 * 1024;
@@ -63,7 +65,10 @@ impl Freecad {
         if let Some(error) = answer.value.get("error").and_then(Value::as_str) {
             let trace = answer.value["trace"].as_str().unwrap_or("");
             let last = trace.lines().rev().take(4).collect::<Vec<_>>();
-            return Err(format!("FreeCAD: {error}\n{}", last.into_iter().rev().collect::<Vec<_>>().join("\n")));
+            return Err(format!(
+                "FreeCAD: {error}\n{}",
+                last.into_iter().rev().collect::<Vec<_>>().join("\n")
+            ));
         }
         Ok(self.relative_paths(answer.value))
     }
@@ -74,8 +79,14 @@ impl Freecad {
             Value::String(text) if Path::new(&text).is_absolute() => {
                 Value::String(self.workspace.relative(Path::new(&text)))
             }
-            Value::Array(items) => Value::Array(items.into_iter().map(|v| self.relative_paths(v)).collect()),
-            Value::Object(map) => Value::Object(map.into_iter().map(|(k, v)| (k, self.relative_paths(v))).collect()),
+            Value::Array(items) => {
+                Value::Array(items.into_iter().map(|v| self.relative_paths(v)).collect())
+            }
+            Value::Object(map) => Value::Object(
+                map.into_iter()
+                    .map(|(k, v)| (k, self.relative_paths(v)))
+                    .collect(),
+            ),
             other => other,
         }
     }
@@ -92,7 +103,9 @@ impl Freecad {
             .map(str::to_ascii_lowercase)
             .unwrap_or_default();
         if !READS.contains(&extension.as_str()) {
-            return Err(format!("{file} is not a kind FreeCAD reads here: {READS:?}"));
+            return Err(format!(
+                "{file} is not a kind FreeCAD reads here: {READS:?}"
+            ));
         }
         Ok(path)
     }
@@ -102,8 +115,17 @@ impl Freecad {
     }
 
     /// A shaded picture of `file` from `view`, written to `png`. Returns its bytes.
-    fn picture(&self, file: &Path, view: View, png: &Path, size: (u32, u32)) -> Result<Vec<u8>, String> {
-        let scratch = self.workspace.scratch("freecad").map_err(|e| e.to_string())?;
+    fn picture(
+        &self,
+        file: &Path,
+        view: View,
+        png: &Path,
+        size: (u32, u32),
+    ) -> Result<Vec<u8>, String> {
+        let scratch = self
+            .workspace
+            .scratch("freecad")
+            .map_err(|e| e.to_string())?;
         let stem = "preview";
         let mesh = scratch.join(format!("{stem}.stl"));
         let _ = std::fs::remove_file(&mesh);
@@ -111,7 +133,8 @@ impl Freecad {
             json!({"action": "export", "file": file, "formats": ["stl"], "folder": scratch, "stem": stem}),
             WORK_LIMIT,
         )?;
-        let triangles = read_stl(&std::fs::read(&mesh).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        let triangles = read_stl(&std::fs::read(&mesh).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
         let bytes = render_png(&triangles, view, size.0, size.1).map_err(|e| e.to_string())?;
         std::fs::write(png, &bytes).map_err(|e| e.to_string())?;
         Ok(bytes)
@@ -125,7 +148,10 @@ impl Freecad {
                 answer["preview"] = json!(self.workspace.relative(&png));
                 let outcome = Outcome::json(&answer);
                 if bytes.len() <= MAX_IMAGE {
-                    outcome.with_image(Image { mime: "image/png", data: bytes })
+                    outcome.with_image(Image {
+                        mime: "image/png",
+                        data: bytes,
+                    })
                 } else {
                     outcome
                 }
@@ -158,7 +184,11 @@ impl Freecad {
         let Some(name) = arguments.get("name").and_then(Value::as_str) else {
             return Outcome::error("freecad_build needs name, which names the new .FCStd");
         };
-        let Some(parts) = arguments.get("parts").and_then(Value::as_array).filter(|p| !p.is_empty()) else {
+        let Some(parts) = arguments
+            .get("parts")
+            .and_then(Value::as_array)
+            .filter(|p| !p.is_empty())
+        else {
             return Outcome::error("freecad_build needs parts");
         };
         let stem = crate::delivery::to_name(name);
@@ -167,7 +197,10 @@ impl Freecad {
             Err(e) => return Outcome::error(e.to_string()),
         };
         let spec = json!({"parameters": arguments.get("parameters").cloned().unwrap_or(json!({})), "parts": parts});
-        match self.run(json!({"action": "build", "spec": spec, "output": output, "document": "Part"}), WORK_LIMIT) {
+        match self.run(
+            json!({"action": "build", "spec": spec, "output": output, "document": "Part"}),
+            WORK_LIMIT,
+        ) {
             Ok(mut report) => {
                 report["file"] = json!(self.workspace.relative(&output));
                 let png = output.with_extension("png");
@@ -185,10 +218,17 @@ impl Freecad {
             Ok(path) => path,
             Err(why) => return Outcome::error(why),
         };
-        let Some(parameters) = arguments.get("parameters").and_then(Value::as_object).filter(|p| !p.is_empty()) else {
+        let Some(parameters) = arguments
+            .get("parameters")
+            .and_then(Value::as_object)
+            .filter(|p| !p.is_empty())
+        else {
             return Outcome::error("parameters is an object of spreadsheet alias to value, such as {\"wall\": \"3 mm\"}");
         };
-        let output = match self.workspace.fresh_file("variants", &Self::stem(&path), "FCStd") {
+        let output = match self
+            .workspace
+            .fresh_file("variants", &Self::stem(&path), "FCStd")
+        {
             Ok(output) => output,
             Err(e) => return Outcome::error(e.to_string()),
         };
@@ -258,25 +298,43 @@ impl Freecad {
             Ok(path) => path,
             Err(why) => return Outcome::error(why),
         };
-        let view_name = arguments.get("view").and_then(Value::as_str).unwrap_or("iso");
+        let view_name = arguments
+            .get("view")
+            .and_then(Value::as_str)
+            .unwrap_or("iso");
         let Some(view) = View::parse(view_name) else {
             return Outcome::error(format!("view is one of {:?}", View::NAMES));
         };
         let size = |key: &str, default: u64| {
-            arguments.get(key).and_then(Value::as_u64).unwrap_or(default).clamp(200, 2400) as u32
+            arguments
+                .get(key)
+                .and_then(Value::as_u64)
+                .unwrap_or(default)
+                .clamp(200, 2400) as u32
         };
-        let png = match self
-            .workspace
-            .fresh_file("renders", &format!("{}-{view_name}", Self::stem(&path)), "png")
-        {
+        let png = match self.workspace.fresh_file(
+            "renders",
+            &format!("{}-{view_name}", Self::stem(&path)),
+            "png",
+        ) {
             Ok(png) => png,
             Err(e) => return Outcome::error(e.to_string()),
         };
-        match self.picture(&path, view, &png, (size("width", 1200), size("height", 900))) {
+        match self.picture(
+            &path,
+            view,
+            &png,
+            (size("width", 1200), size("height", 900)),
+        ) {
             Ok(bytes) => {
-                let outcome = Outcome::json(&json!({"image": self.workspace.relative(&png), "view": view_name}));
+                let outcome = Outcome::json(
+                    &json!({"image": self.workspace.relative(&png), "view": view_name}),
+                );
                 if bytes.len() <= MAX_IMAGE {
-                    outcome.with_image(Image { mime: "image/png", data: bytes })
+                    outcome.with_image(Image {
+                        mime: "image/png",
+                        data: bytes,
+                    })
                 } else {
                     outcome
                 }
@@ -290,8 +348,14 @@ impl Freecad {
             Ok(path) => path,
             Err(why) => return Outcome::error(why),
         };
-        let Some(grid) = arguments.get("parameters").and_then(Value::as_object).filter(|g| !g.is_empty()) else {
-            return Outcome::error("parameters maps each spreadsheet alias to the list of values to try");
+        let Some(grid) = arguments
+            .get("parameters")
+            .and_then(Value::as_object)
+            .filter(|g| !g.is_empty())
+        else {
+            return Outcome::error(
+                "parameters maps each spreadsheet alias to the list of values to try",
+            );
         };
         let mut total: u64 = 1;
         for (alias, values) in grid {
@@ -302,15 +366,22 @@ impl Freecad {
             total = total.saturating_mul(count);
         }
         if total > MAX_SWEEP {
-            return Outcome::error(format!("{total} variants is more than {MAX_SWEEP}; narrow the lists"));
+            return Outcome::error(format!(
+                "{total} variants is more than {MAX_SWEEP}; narrow the lists"
+            ));
         }
         let formats = match Self::formats(arguments) {
             Ok(formats) => formats,
             Err(why) => return Outcome::error(why),
         };
-        let deliver = arguments.get("deliver_to_project").and_then(Value::as_str).map(str::to_string);
+        let deliver = arguments
+            .get("deliver_to_project")
+            .and_then(Value::as_str)
+            .map(str::to_string);
         if deliver.is_some() && self.programs.delivery.is_none() {
-            return Outcome::error("deliver_to_project needs a paired desk: start the server with --deliver-key");
+            return Outcome::error(
+                "deliver_to_project needs a paired desk: start the server with --deliver-key",
+            );
         }
         let spec = Spec {
             bridge: "freecad".into(),
@@ -356,7 +427,13 @@ impl Freecad {
             .map_err(|e| e.to_string())?;
         let total: usize = grid.iter().map(|(_, v)| v.len()).product();
         let mut summary = String::from("variant,");
-        summary.push_str(&grid.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>().join(","));
+        summary.push_str(
+            &grid
+                .iter()
+                .map(|(k, _)| k.as_str())
+                .collect::<Vec<_>>()
+                .join(","),
+        );
         summary.push_str(",valid,volume_mm3,size_x_mm,size_y_mm,size_z_mm,error\n");
         for index in 0..total {
             if runner.cancelled() {
@@ -389,7 +466,10 @@ impl Freecad {
                 Ok(report) => {
                     let mesh = variant.join(format!("{stem}-{label}.stl"));
                     let png = variant.join(format!("{stem}-{label}-iso.png"));
-                    if let Ok(triangles) = std::fs::read(&mesh).map_err(|e| e.to_string()).and_then(|b| read_stl(&b).map_err(|e| e.to_string())) {
+                    if let Ok(triangles) = std::fs::read(&mesh)
+                        .map_err(|e| e.to_string())
+                        .and_then(|b| read_stl(&b).map_err(|e| e.to_string()))
+                    {
                         if let Ok(bytes) = render_png(&triangles, View::Iso, 1200, 900) {
                             let _ = std::fs::write(&png, bytes);
                         }
@@ -412,18 +492,36 @@ impl Freecad {
                         files.sort();
                         let note = format!(
                             "{} · volume {} mm³ · {}",
-                            chosen.iter().map(|(k, v)| format!("{k}={}", v.to_string().trim_matches('"'))).collect::<Vec<_>>().join(", "),
+                            chosen
+                                .iter()
+                                .map(|(k, v)| format!("{k}={}", v.to_string().trim_matches('"')))
+                                .collect::<Vec<_>>()
+                                .join(", "),
                             report["volume_mm3"],
-                            if report["valid"] == json!(true) { "valid" } else { "INVALID" }
+                            if report["valid"] == json!(true) {
+                                "valid"
+                            } else {
+                                "INVALID"
+                            }
                         );
-                        if let Err(e) = deliverer.deliver(&self.workspace, &files, project, &format!("variant-{label}"), &note, false) {
+                        if let Err(e) = deliverer.deliver(
+                            &self.workspace,
+                            &files,
+                            project,
+                            &format!("variant-{label}"),
+                            &note,
+                            false,
+                        ) {
                             eprintln!("delivery: {e}");
                         }
                     }
                     runner.record(result).map_err(|e| e.to_string())?;
                 }
                 Err(why) => {
-                    summary.push_str(&format!("{label},{values},false,,,,,\"{}\"\n", why.lines().next().unwrap_or("").replace('"', "'")));
+                    summary.push_str(&format!(
+                        "{label},{values},false,,,,,\"{}\"\n",
+                        why.lines().next().unwrap_or("").replace('"', "'")
+                    ));
                     runner
                         .record(json!({"variant": label, "parameters": chosen, "error": why}))
                         .map_err(|e| e.to_string())?;
@@ -433,7 +531,14 @@ impl Freecad {
         }
         if let (Some(deliverer), Some(project)) = (&deliverer, &project) {
             let summary = self.workspace.relative(&folder.join("summary.csv"));
-            if let Err(e) = deliverer.deliver(&self.workspace, &[summary], project, "summary", "every variant, one row each", false) {
+            if let Err(e) = deliverer.deliver(
+                &self.workspace,
+                &[summary],
+                project,
+                "summary",
+                "every variant, one row each",
+                false,
+            ) {
                 eprintln!("delivery: {e}");
             }
         }
@@ -611,7 +716,8 @@ mod tests {
     use super::*;
 
     fn freecad(name: &str) -> (Freecad, PathBuf) {
-        let dir = std::env::temp_dir().join(format!("archie-freecad-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("archie-freecad-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("bracket.FCStd"), b"PK").unwrap();
@@ -631,9 +737,19 @@ mod tests {
     #[test]
     fn inputs_and_formats_are_checked_before_freecad_runs() {
         let (bridge, dir) = freecad("inputs");
-        assert!(bridge.call("freecad_inspect", &args(json!({"file": "notes.txt"}))).text.contains("not a kind"));
-        assert!(bridge.call("freecad_inspect", &args(json!({"file": "../x.FCStd"}))).is_error);
-        let bad = bridge.call("freecad_export", &args(json!({"file": "bracket.FCStd", "formats": ["dwg"]})));
+        assert!(bridge
+            .call("freecad_inspect", &args(json!({"file": "notes.txt"})))
+            .text
+            .contains("not a kind"));
+        assert!(
+            bridge
+                .call("freecad_inspect", &args(json!({"file": "../x.FCStd"})))
+                .is_error
+        );
+        let bad = bridge.call(
+            "freecad_export",
+            &args(json!({"file": "bracket.FCStd", "formats": ["dwg"]})),
+        );
         assert!(bad.text.contains("not one of"), "{}", bad.text);
         let huge = bridge.call(
             "freecad_sweep",
@@ -644,7 +760,11 @@ mod tests {
             "freecad_sweep",
             &args(json!({"file": "bracket.FCStd", "parameters": {"a": [1, 2]}, "deliver_to_project": "p"})),
         );
-        assert!(undelivered.text.contains("--deliver-key"), "{}", undelivered.text);
+        assert!(
+            undelivered.text.contains("--deliver-key"),
+            "{}",
+            undelivered.text
+        );
         assert!(!dir.join("exports").exists() && !dir.join("sweeps").exists());
         let _ = std::fs::remove_dir_all(dir);
     }

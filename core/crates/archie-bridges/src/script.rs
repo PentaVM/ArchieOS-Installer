@@ -87,6 +87,7 @@ impl Script {
         let ran = Run::new(program)
             .args(argv(&script))
             .cwd(workspace.root())
+            .env("ARCHIE_JOB_SCRIPT", &script)
             .env("ARCHIE_JOB_ARGS", &args)
             .env("ARCHIE_JOB_RESULT", &result)
             .env("ARCHIE_WORKSPACE", workspace.root())

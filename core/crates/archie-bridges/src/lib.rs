@@ -33,13 +33,20 @@
 
 #![forbid(unsafe_code)]
 
+pub mod audio;
+pub mod blender;
 pub mod delivery;
 pub mod freecad;
+pub mod gimp;
 pub mod index;
+pub mod inkscape;
 pub mod jobs;
 pub mod kicad;
 pub mod manifest;
+pub mod obs;
+pub mod office;
 pub mod preview;
+pub mod qgis;
 pub mod run;
 pub mod script;
 pub mod sexpr;
@@ -134,7 +141,11 @@ pub trait Bridge: Send + Sync {
 
     /// Runs a long job one of its tools started, inside `archie-bridges run-job`.
     fn run_job(&self, spec: &jobs::Spec, _runner: &mut jobs::Runner) -> Result<(), String> {
-        Err(format!("the {} bridge runs no {} jobs", self.manifest().id, spec.kind))
+        Err(format!(
+            "the {} bridge runs no {} jobs",
+            self.manifest().id,
+            spec.kind
+        ))
     }
 }
 
@@ -162,7 +173,13 @@ impl Programs {
             let beside = std::env::current_exe()
                 .ok()
                 .and_then(|exe| exe.parent().map(|dir| dir.join(name)))
-                .map(|p| if cfg!(windows) { p.with_extension("exe") } else { p });
+                .map(|p| {
+                    if cfg!(windows) {
+                        p.with_extension("exe")
+                    } else {
+                        p
+                    }
+                });
             if let Some(beside) = beside.filter(|p| p.is_file()) {
                 return beside;
             }
@@ -223,11 +240,67 @@ pub const BUILTIN: &[Builtin] = &[
         },
     },
     Builtin {
+        id: "blender",
+        manifest: blender::MANIFEST,
+        guide: blender::GUIDE,
+        open: |manifest, workspace, programs| {
+            Box::new(blender::Blender::new(manifest, workspace, programs))
+        },
+    },
+    Builtin {
+        id: "office",
+        manifest: office::MANIFEST,
+        guide: office::GUIDE,
+        open: |manifest, workspace, programs| {
+            Box::new(office::Office::new(manifest, workspace, programs))
+        },
+    },
+    Builtin {
+        id: "inkscape",
+        manifest: inkscape::MANIFEST,
+        guide: inkscape::GUIDE,
+        open: |manifest, workspace, programs| {
+            Box::new(inkscape::Inkscape::new(manifest, workspace, programs))
+        },
+    },
+    Builtin {
+        id: "gimp",
+        manifest: gimp::MANIFEST,
+        guide: gimp::GUIDE,
+        open: |manifest, workspace, programs| {
+            Box::new(gimp::Gimp::new(manifest, workspace, programs))
+        },
+    },
+    Builtin {
+        id: "qgis",
+        manifest: qgis::MANIFEST,
+        guide: qgis::GUIDE,
+        open: |manifest, workspace, programs| {
+            Box::new(qgis::Qgis::new(manifest, workspace, programs))
+        },
+    },
+    Builtin {
         id: "video",
         manifest: video::MANIFEST,
         guide: video::GUIDE,
         open: |manifest, workspace, programs| {
             Box::new(video::Video::new(manifest, workspace, programs))
+        },
+    },
+    Builtin {
+        id: "audio",
+        manifest: audio::MANIFEST,
+        guide: audio::GUIDE,
+        open: |manifest, workspace, programs| {
+            Box::new(audio::Audio::new(manifest, workspace, programs))
+        },
+    },
+    Builtin {
+        id: "obs",
+        manifest: obs::MANIFEST,
+        guide: obs::GUIDE,
+        open: |manifest, workspace, programs| {
+            Box::new(obs::Obs::new(manifest, workspace, programs))
         },
     },
 ];

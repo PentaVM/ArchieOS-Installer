@@ -35,11 +35,13 @@ const MAX_IMAGE: usize = 700 * 1024;
 /// The largest design file read.
 const MAX_FILE: u64 = 64 * 1024 * 1024;
 
-const EXPORTS: [&str; 8] = [
+const EXPORTS: [&str; 10] = [
     "gerbers",
     "drill",
     "positions",
     "step",
+    "odb",
+    "ipc2581",
     "bom",
     "netlist",
     "schematic_pdf",
@@ -357,7 +359,10 @@ impl Kicad {
             None => None,
         };
         for kind in &kinds {
-            let needs_board = matches!(*kind, "gerbers" | "drill" | "positions" | "step");
+            let needs_board = matches!(
+                *kind,
+                "gerbers" | "drill" | "positions" | "step" | "odb" | "ipc2581"
+            );
             if needs_board && board.is_none() {
                 return Outcome::error(format!("{kind} is made from a board: pass board"));
             }
@@ -445,6 +450,22 @@ impl Kicad {
                     os(
                         ["pcb", "export", "step", "--output"],
                         dir.join(format!("{stem}.step")).as_os_str(),
+                    ),
+                    board.as_ref().unwrap().0.as_path(),
+                ),
+                // Whole-board manufacturing packages, which fabs and Altium, Cadence and
+                // Mentor tools read in one file.
+                "odb" => (
+                    os(
+                        ["pcb", "export", "odb", "--output"],
+                        dir.join(format!("{stem}-odb.zip")).as_os_str(),
+                    ),
+                    board.as_ref().unwrap().0.as_path(),
+                ),
+                "ipc2581" => (
+                    os(
+                        ["pcb", "export", "ipc2581", "--units", "mm", "--output"],
+                        dir.join(format!("{stem}.xml")).as_os_str(),
                     ),
                     board.as_ref().unwrap().0.as_path(),
                 ),
@@ -838,8 +859,9 @@ impl Bridge for Kicad {
                 title: "Export manufacturing and documentation files",
                 description: "Runs KiCad's exporters into a new folder exports/<design>-<n>/, one \
                               subfolder per kind: gerbers (every copper layer, paste, silkscreen, mask, \
-                              outline), drill (Excellon, mm), positions (CSV, mm, both sides), step, bom \
-                              (CSV), netlist, schematic_pdf, schematic_svg. Board kinds need board; \
+                              outline), drill (Excellon, mm), positions (CSV, mm, both sides), step \
+                              (Fusion 360, SolidWorks), odb (ODB++) and ipc2581 (for fabs and Altium or \
+                              Cadence), bom (CSV), netlist, schematic_pdf, schematic_svg. Board kinds need board; \
                               schematic kinds need schematic. Never replaces a file.",
                 input_schema: json!({
                     "type": "object",

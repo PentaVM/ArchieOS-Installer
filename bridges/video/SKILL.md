@@ -25,7 +25,7 @@ The bridge works in one media folder. Sources are files in it; renders go to its
    - `width`, `height` and `fps` default to 1920, 1080 and 30. Set them to the sources'
      when those differ.
 
-The answer names the video and an `.mlt` project beside it.
+The answer names the video, an `.mlt` project beside it (Kdenlive, Shotcut) and an `.edl` cut list (Premiere, DaVinci Resolve, Avid, Final Cut import it and relink to the same sources).
 
 ## Traps
 

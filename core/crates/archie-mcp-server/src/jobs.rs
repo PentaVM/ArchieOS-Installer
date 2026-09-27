@@ -46,7 +46,10 @@ pub fn specs() -> Vec<ToolSpec> {
     ]
 }
 
-fn bridge<'a>(bridges: &'a [Arc<dyn Bridge>], arguments: &Map<String, Value>) -> Result<&'a Arc<dyn Bridge>, String> {
+fn bridge<'a>(
+    bridges: &'a [Arc<dyn Bridge>],
+    arguments: &Map<String, Value>,
+) -> Result<&'a Arc<dyn Bridge>, String> {
     let id = arguments
         .get("bridge")
         .and_then(Value::as_str)
@@ -57,7 +60,11 @@ fn bridge<'a>(bridges: &'a [Arc<dyn Bridge>], arguments: &Map<String, Value>) ->
         .ok_or_else(|| format!("no bridge {id} is served here"))
 }
 
-pub fn call(bridges: &[Arc<dyn Bridge>], name: &str, arguments: &Map<String, Value>) -> ToolOutcome {
+pub fn call(
+    bridges: &[Arc<dyn Bridge>],
+    name: &str,
+    arguments: &Map<String, Value>,
+) -> ToolOutcome {
     let job = arguments.get("job").and_then(Value::as_str);
     match name {
         "archie_jobs" => {

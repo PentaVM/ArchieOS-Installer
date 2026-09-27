@@ -242,7 +242,10 @@ async fn main() -> ExitCode {
     };
     let mut toolbox = ArchieToolbox::new(paths, config.stage_socket.clone(), operator);
     // A long job a bridge starts delivers to the same desk as this server.
-    config.programs.delivery = config.deliver_key.clone().map(|key| (key, config.deliver_to));
+    config.programs.delivery = config
+        .deliver_key
+        .clone()
+        .map(|key| (key, config.deliver_to));
     for (id, dir) in &config.bridges {
         let bridge = match archie_bridges::open(id, dir, &config.programs) {
             Ok(bridge) => bridge,

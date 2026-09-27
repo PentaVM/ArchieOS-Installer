@@ -1,0 +1,27 @@
+# OBS Studio: live scenes, overlays and recording.
+id = "obs"
+title = "OBS Studio"
+summary = "Read and switch scenes, add and update text and picture overlays, record into the workspace and see what is on air; going live stays a click of the person's."
+programs = ["obs-websocket", "obs-password"]
+workspace = "A folder for overlay pictures; recordings go to its recordings/ folder, screenshots to renders/."
+e2e = "ARCHIE_BRIDGE_E2E=obs cargo test -p archie-bridges --test obs_e2e"
+
+[app]
+name = "OBS Studio"
+homepage = "https://obsproject.com"
+license = "GPL-2.0-or-later"
+versions = "30 and 31 (obs-websocket 5.3 and later)"
+
+[[surfaces]]
+kind = "ipc"
+name = "obs-websocket 5 (JSON over a loopback WebSocket)"
+doc = "https://github.com/obsproject/obs-websocket/blob/master/docs/generated/protocol.md"
+
+[install]
+arch = "pacman -S obs-studio"
+ubuntu = "add-apt-repository ppa:obsproject/obs-studio && apt install obs-studio"
+windows = "winget install OBSProject.OBSStudio"
+
+[vision]
+app_ids = ["com.obsproject.Studio", "obs"]
+when = "Starting or stopping a live stream, stream keys and account settings, filters and audio mixing: those are the person's, in OBS's window."

@@ -1,0 +1,38 @@
+# Audio: recordings cleaned, levelled, mixed and converted.
+id = "audio"
+title = "Audio"
+summary = "Measure loudness, denoise, trim, fade, level to a LUFS target, mix tracks and convert recordings, with waveform pictures; WAV and FLAC for Audition, Pro Tools or Audacity."
+programs = ["ffmpeg", "ffprobe"]
+workspace = "A folder of recordings. Edits go to edits/, mixes to mixes/, conversions to exports/."
+e2e = "ARCHIE_BRIDGE_E2E=audio cargo test -p archie-bridges --test audio_e2e"
+
+[app]
+name = "FFmpeg (Audacity for the GUI)"
+homepage = "https://ffmpeg.org"
+license = "LGPL-2.1-or-later"
+versions = "FFmpeg 6 and 7"
+
+[[surfaces]]
+kind = "cli"
+name = "ffmpeg audio filters (loudnorm, afftdn, ebur128, showwavespic)"
+doc = "https://ffmpeg.org/ffmpeg-filters.html"
+
+[[surfaces]]
+kind = "cli"
+name = "ffprobe"
+doc = "https://ffmpeg.org/ffprobe.html"
+
+[[surfaces]]
+kind = "ipc"
+name = "Audacity mod-script-pipe, for projects open in Audacity"
+doc = "https://manual.audacityteam.org/man/scripting.html"
+status = "planned"
+
+[install]
+arch = "pacman -S ffmpeg audacity"
+ubuntu = "apt install ffmpeg audacity"
+windows = "winget install Gyan.FFmpeg Audacity.Audacity"
+
+[vision]
+app_ids = ["audacity", "org.audacityteam.Audacity"]
+when = "Editing by ear at a particular moment, spectral repair and multitrack projects already in Audacity: open them in Audacity on the Stage and check the result with audio_inspect."
