@@ -69,7 +69,9 @@ The conversation model can classify a heard item through `remember`. A small loc
 rule also recognizes common durable statements such as a reported death, so one important
 utterance can survive even if the model does not call the tool. One-off wants such as
 “quiero comer lasagna” remain short-lived. These rules mark what was said; they do not
-verify it. Persistent facts retain the speaker attribution.
+verify it. `remember` can only reclassify the exact text of an utterance recorded in the
+previous five minutes; it cannot create a user-attributed statement on its own. Persistent
+facts retain the speaker attribution.
 
 At the moment, retention runs on startup and at most hourly. Storage is bounded at 10,000
 events, 128 MiB of evidence crops, 2 MiB per crop, 8 MiB for the in-memory frame window,

@@ -67,6 +67,18 @@ struct Event {
     visual_hypothesis: Option<String>,
 }
 
+struct EventInput<'a> {
+    at_ms: i64,
+    kind: Kind,
+    tier: Tier,
+    subject: &'a str,
+    relation: &'a str,
+    object: &'a str,
+    source: &'a str,
+    confidence_permille: u16,
+    durable: bool,
+}
+
 impl Event {
     fn valid(&self) -> bool {
         self.at_ms >= 0
@@ -154,9 +166,7 @@ impl PersistentMemory {
     }
 
     pub fn compact_now(&mut self) -> Result<(), String> {
-        self.compact(now_ms())?;
-        self.prune_orphan_clips();
-        Ok(())
+        self.compact(now_ms())
     }
 
     fn open(dir: PathBuf) -> Result<Self, String> {
@@ -202,13 +212,12 @@ impl PersistentMemory {
             last_compacted_at_ms: 0,
         };
         memory.compact(now)?;
-        memory.prune_orphan_clips();
         Ok(memory)
     }
 
     /// Record a detected hand/object relation with an optional face-masked crop.
     pub fn record_held(&mut self, held: &HeldEvent, scene: &eyes::Scene) -> Result<(), String> {
-        self.record_held_frames(held, &[scene.clone()])
+        self.record_held_frames(held, std::slice::from_ref(scene))
     }
 
     /// Store up to three face-masked object crops sampled around the held event.
@@ -217,21 +226,22 @@ impl PersistentMemory {
         held: &HeldEvent,
         scenes: &[eyes::Scene],
     ) -> Result<(), String> {
-        let mut event = self.new_event(
-            held.observed_at_ms,
-            Kind::VisionHeld,
-            Tier::T4,
-            "hand",
-            "held",
-            held.phrase.trim(),
-            &format!(
-                "IRIS step {:?}, track {}; anonymous hand/object overlap",
-                scenes.last().and_then(|sample| sample.step),
-                held.track_id
-            ),
-            (held.confidence.clamp(0.0, 1.0) * 1_000.0).round() as u16,
-            false,
-        )?;
+        let source = format!(
+            "IRIS step {:?}, track {}; anonymous hand/object overlap",
+            scenes.last().and_then(|sample| sample.step),
+            held.track_id
+        );
+        let mut event = self.new_event(EventInput {
+            at_ms: held.observed_at_ms,
+            kind: Kind::VisionHeld,
+            tier: Tier::T4,
+            subject: "hand",
+            relation: "held",
+            object: held.phrase.trim(),
+            source: &source,
+            confidence_permille: (held.confidence.clamp(0.0, 1.0) * 1_000.0).round() as u16,
+            durable: false,
+        })?;
         let mut crops = Vec::new();
         for scene in scenes.iter().rev().take(3) {
             if scene.frame.is_empty() {
@@ -287,17 +297,17 @@ impl PersistentMemory {
         }
         let durable = is_durable_statement(text);
         let tier = if durable { Tier::T1 } else { Tier::T4 };
-        let mut event = self.new_event(
+        let mut event = self.new_event(EventInput {
             at_ms,
-            Kind::Utterance,
+            kind: Kind::Utterance,
             tier,
-            "speaker",
-            "said",
-            text,
-            "live voice; user-reported statement",
-            1_000,
+            subject: "speaker",
+            relation: "said",
+            object: text,
+            source: "live voice; user-reported statement",
+            confidence_permille: 1_000,
             durable,
-        )?;
+        })?;
         event.short_lived = is_short_lived_statement(text) && !durable;
         self.insert(event)
     }
@@ -321,17 +331,17 @@ impl PersistentMemory {
         {
             return Ok(());
         }
-        let event = self.new_event(
+        let event = self.new_event(EventInput {
             at_ms,
-            Kind::ExternalText,
-            if durable { Tier::T1 } else { Tier::T4 },
+            kind: Kind::ExternalText,
+            tier: if durable { Tier::T1 } else { Tier::T4 },
+            subject: source,
+            relation: "contained_text",
+            object: text,
             source,
-            "contained_text",
-            text,
-            source,
-            1_000,
+            confidence_permille: 1_000,
             durable,
-        )?;
+        })?;
         self.insert(event)
     }
 
@@ -345,6 +355,7 @@ impl PersistentMemory {
         if let Some(event) = self.events.iter_mut().rev().find(|event| {
             event.kind == Kind::Utterance
                 && event.object == text
+                && event.at_ms <= at_ms
                 && at_ms.saturating_sub(event.at_ms) <= 5 * 60_000
         }) {
             event.at_ms = at_ms;
@@ -355,19 +366,7 @@ impl PersistentMemory {
             self.rewrite()?;
             return Ok(());
         }
-        let mut event = self.new_event(
-            at_ms,
-            Kind::Utterance,
-            tier,
-            "speaker",
-            "said",
-            text,
-            "live voice; classified by conversation model; user-reported",
-            1_000,
-            tier == Tier::T1,
-        )?;
-        event.short_lived = tier == Tier::T4;
-        self.insert(event)
+        Err("the person did not say that exact sentence recently".into())
     }
 
     /// A concise, time-filtered slice to put beside the current scene in the model context.
@@ -471,23 +470,33 @@ impl PersistentMemory {
         if event.kind != Kind::VisionHeld {
             return Err("memory event is not visual".into());
         }
-        event.source = format!("{}; identification hypothesis from {model}", event.source);
+        const IDENTIFICATION_SOURCE: &str = "; identification hypothesis from ";
+        let original_source = event
+            .source
+            .split(IDENTIFICATION_SOURCE)
+            .next()
+            .unwrap_or_default();
+        let source = format!("{original_source}{IDENTIFICATION_SOURCE}{model}");
+        if source.len() > 256 {
+            return Err("visual memory source is too long".into());
+        }
+        event.source = source;
         event.visual_hypothesis = Some(name.to_owned());
         self.rewrite()
     }
 
-    fn new_event(
-        &mut self,
-        at_ms: i64,
-        kind: Kind,
-        tier: Tier,
-        subject: &str,
-        relation: &str,
-        object: &str,
-        source: &str,
-        confidence_permille: u16,
-        durable: bool,
-    ) -> Result<Event, String> {
+    fn new_event(&mut self, input: EventInput<'_>) -> Result<Event, String> {
+        let EventInput {
+            at_ms,
+            kind,
+            tier,
+            subject,
+            relation,
+            object,
+            source,
+            confidence_permille,
+            durable,
+        } = input;
         if at_ms < 0 || object.trim().is_empty() || object.len() > MAX_EVENT_BYTES {
             return Err("memory event is invalid".into());
         }
@@ -560,11 +569,11 @@ impl PersistentMemory {
             if event.durable {
                 event.tier = Tier::T1;
                 // Long-term graph facts retain their compact fact and provenance, not images.
-                self.remove_evidence(&event);
                 event.evidence = None;
+                event.evidence_frames.clear();
                 retained.push_back(event);
             } else if event.short_lived && age >= 3 * DAY_MS {
-                self.remove_evidence(&event);
+                continue;
             } else if age < DAY_MS {
                 event.tier = Tier::T4;
                 retained.push_back(event);
@@ -573,16 +582,16 @@ impl PersistentMemory {
                 retained.push_back(event);
             } else if age < 30 * DAY_MS {
                 event.tier = Tier::T2;
-                self.remove_evidence(&event);
                 event.evidence = None;
+                event.evidence_frames.clear();
                 retained.push_back(event);
-            } else {
-                self.remove_evidence(&event);
             }
         }
         self.events = compact_monthly_events(retained);
         self.last_compacted_at_ms = now;
-        self.rewrite()
+        self.rewrite()?;
+        self.prune_orphan_clips();
+        Ok(())
     }
 
     fn rewrite(&self) -> Result<(), String> {
@@ -642,20 +651,31 @@ impl PersistentMemory {
     }
 
     fn trim_clip_quota(&mut self, needed: u64) -> Result<(), String> {
-        let mut changed = false;
-        while self.clip_bytes().saturating_add(needed) > MAX_CLIP_TOTAL_BYTES {
+        let mut remaining = self.clip_bytes();
+        let mut removed = Vec::new();
+        while remaining.saturating_add(needed) > MAX_CLIP_TOTAL_BYTES {
             let victim = self.events.iter().position(|event| {
                 !event.durable && (event.evidence.is_some() || !event.evidence_frames.is_empty())
             });
             let Some(index) = victim else { break };
             let old = self.events[index].clone();
+            let bytes = old
+                .evidence
+                .iter()
+                .chain(old.evidence_frames.iter())
+                .filter_map(|relative| fs::metadata(self.dir.join(relative)).ok())
+                .map(|metadata| metadata.len())
+                .sum::<u64>();
             self.events[index].evidence = None;
             self.events[index].evidence_frames.clear();
-            self.remove_evidence(&old);
-            changed = true;
+            remaining = remaining.saturating_sub(bytes);
+            removed.push(old);
         }
-        if changed {
+        if !removed.is_empty() {
             self.rewrite()?;
+            for event in &removed {
+                self.remove_evidence(event);
+            }
         }
         Ok(())
     }
@@ -947,4 +967,175 @@ fn visual_query_matches(query: &str, object: &str) -> bool {
     let phone_object = ["cell phone", "mobile phone", "phone", "smartphone"];
     phone_query.iter().any(|word| query.contains(word))
         && phone_object.iter().any(|word| object.contains(word))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TestDir(PathBuf);
+
+    impl TestDir {
+        fn new() -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("test clock")
+                .as_nanos();
+            Self(std::env::temp_dir().join(format!(
+                "archie-memory-test-{}-{unique}",
+                std::process::id()
+            )))
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn visual_event(memory: &mut PersistentMemory, at_ms: i64) -> Event {
+        memory
+            .new_event(EventInput {
+                at_ms,
+                kind: Kind::VisionHeld,
+                tier: Tier::T4,
+                subject: "hand",
+                relation: "held",
+                object: "cell phone",
+                source: "IRIS",
+                confidence_permille: 900,
+                durable: false,
+            })
+            .expect("visual event")
+    }
+
+    #[test]
+    fn visual_event_survives_restart_after_crops_expire() {
+        let dir = TestDir::new();
+        let mut memory = PersistentMemory::open(dir.0.clone()).expect("open memory");
+        let at_ms = now_ms() - 8 * DAY_MS;
+        let mut event = visual_event(&mut memory, at_ms);
+        event.evidence = Some("clips/0000000000000001-0.png".into());
+        event
+            .evidence_frames
+            .push("clips/0000000000000001-1.png".into());
+        create_private_dir(&dir.0.join("clips")).expect("clips directory");
+        fs::write(dir.0.join("clips/0000000000000001-0.png"), b"crop one").expect("first crop");
+        fs::write(dir.0.join("clips/0000000000000001-1.png"), b"crop two").expect("second crop");
+        memory.insert(event).expect("store event");
+
+        memory.compact_now().expect("expire crops");
+        drop(memory);
+
+        let reopened = PersistentMemory::open(dir.0.clone()).expect("reopen memory");
+        assert_eq!(reopened.events.len(), 1);
+        let event = &reopened.events[0];
+        assert_eq!(event.object, "cell phone");
+        assert_eq!(event.tier, Tier::T2);
+        assert!(event.evidence.is_none());
+        assert!(event.evidence_frames.is_empty());
+    }
+
+    #[test]
+    fn remember_rejects_a_sentence_the_person_did_not_say() {
+        let dir = TestDir::new();
+        let mut memory = PersistentMemory::open(dir.0.clone()).expect("open memory");
+        let at_ms = now_ms();
+        memory
+            .record_utterance("Hoy fui al parque", at_ms)
+            .expect("record speech");
+
+        assert!(memory
+            .classify_utterance("Tengo diabetes", Tier::T1, at_ms + 1)
+            .is_err());
+        assert_eq!(memory.events.len(), 1);
+    }
+
+    #[test]
+    fn remember_promotes_the_exact_recent_utterance() {
+        let dir = TestDir::new();
+        let mut memory = PersistentMemory::open(dir.0.clone()).expect("open memory");
+        let at_ms = now_ms();
+        memory
+            .record_utterance("Mi perro se llama Coco", at_ms)
+            .expect("record speech");
+
+        memory
+            .classify_utterance("Mi perro se llama Coco", Tier::T1, at_ms + 1)
+            .expect("classify speech");
+        assert_eq!(memory.events.len(), 1);
+        assert_eq!(memory.events[0].tier, Tier::T1);
+    }
+
+    #[test]
+    fn repeated_visual_refinement_keeps_one_valid_source() {
+        let dir = TestDir::new();
+        let mut memory = PersistentMemory::open(dir.0.clone()).expect("open memory");
+        let event = visual_event(&mut memory, now_ms());
+        let id = event.id;
+        memory.insert(event).expect("store event");
+
+        for _ in 0..12 {
+            memory
+                .refine_visual(id, "possibly a phone", "vision-model")
+                .expect("refine visual event");
+        }
+        drop(memory);
+
+        let reopened = PersistentMemory::open(dir.0.clone()).expect("reopen memory");
+        assert_eq!(reopened.events.len(), 1);
+        assert_eq!(
+            reopened.events[0].visual_hypothesis.as_deref(),
+            Some("possibly a phone")
+        );
+        assert_eq!(
+            reopened.events[0]
+                .source
+                .matches("identification hypothesis from")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn failed_compaction_preserves_evidence_referenced_by_the_journal() {
+        let dir = TestDir::new();
+        let mut memory = PersistentMemory::open(dir.0.clone()).expect("open memory");
+        let at_ms = now_ms() - 8 * DAY_MS;
+        let mut event = visual_event(&mut memory, at_ms);
+        event.evidence = Some("clips/0000000000000001-0.png".into());
+        create_private_dir(&dir.0.join("clips")).expect("clips directory");
+        let crop = dir.0.join("clips/0000000000000001-0.png");
+        fs::write(&crop, b"crop one").expect("crop");
+        memory.insert(event).expect("store event");
+        fs::create_dir(dir.0.join("events.jsonl.tmp")).expect("block journal replacement");
+
+        assert!(memory.compact_now().is_err());
+        assert!(
+            crop.is_file(),
+            "the original journal still references this crop"
+        );
+    }
+
+    #[test]
+    fn failed_quota_trim_preserves_evidence_referenced_by_the_journal() {
+        let dir = TestDir::new();
+        let mut memory = PersistentMemory::open(dir.0.clone()).expect("open memory");
+        let mut event = visual_event(&mut memory, now_ms());
+        event.evidence = Some("clips/0000000000000001-0.png".into());
+        create_private_dir(&dir.0.join("clips")).expect("clips directory");
+        let crop = dir.0.join("clips/0000000000000001-0.png");
+        let file = File::create(&crop).expect("crop");
+        file.set_len(MAX_CLIP_TOTAL_BYTES)
+            .expect("fill evidence quota");
+        memory.insert(event).expect("store event");
+        fs::create_dir(dir.0.join("events.jsonl.tmp")).expect("block journal replacement");
+
+        assert!(memory.trim_clip_quota(1).is_err());
+        assert!(
+            crop.is_file(),
+            "the original journal still references this crop"
+        );
+    }
 }
