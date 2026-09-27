@@ -1,0 +1,10 @@
+# Applications IRIS may operate live in Archie Arena. Games hold keys and mouse buttons ("hold");
+# nothing here types text or draws. Separate from the node's own policy and from arena-apps.toml.
+
+[[app]]
+app_id = "firefox"
+display_name = "car-soccer"
+allow = ["move", "click", "key", "hold", "focus", "snapshot"]
+max_text_grade = "public"
+max_text_chars = 8
+aliases = ["car soccer", "rocket league"]

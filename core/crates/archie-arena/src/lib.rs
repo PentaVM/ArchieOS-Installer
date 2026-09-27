@@ -20,6 +20,7 @@
 //! ```
 
 pub mod image;
+pub mod live;
 pub mod memory;
 pub mod model;
 pub mod moves;

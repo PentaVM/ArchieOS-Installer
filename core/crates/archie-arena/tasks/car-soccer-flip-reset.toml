@@ -1,0 +1,12 @@
+# Rocket League's flip reset, in car-soccer.com (a browser car-football game with the same
+# physics ideas): in the air, touch the ball with all four wheels, which gives the car its flip
+# back, then use it. The game shows a teal "RESET!" by the car when it happens; the judge counts
+# those. What it measures: a planner saying what to do, and IRIS doing it in real time with the
+# keyboard and the mouse buttons (W A S D drive, left mouse boost, right mouse jump, Q/E roll).
+id = "car-soccer-flip-reset"
+app_id = "firefox"
+reset = "display/session/arena-reset-car-soccer.sh"
+judge = "flip_reset"
+ends_early = false
+tiers = [60, 180]
+prompt = """car-soccer.com is open in free play: your car and the ball in an empty arena. Do a flip reset: get the car into the air, touch the ball with all four wheels (the game shows a teal RESET! next to the car when it counts), then use the flip. Do as many as you can in the time. Driving is W A S D, boost is the left mouse button, jump is the right mouse button, air roll left and right are Q and E."""
