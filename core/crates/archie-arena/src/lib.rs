@@ -23,4 +23,6 @@ pub mod image;
 pub mod memory;
 pub mod model;
 pub mod moves;
+pub mod practice;
+pub mod seat;
 pub mod task;
