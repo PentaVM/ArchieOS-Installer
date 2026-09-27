@@ -1,4 +1,4 @@
-use crate::{NodeId, SceneGraph, SceneNode, SourceId};
+use crate::{NodeId, NodeKind, Relation, RelationKind, SceneGraph, SceneNode, SourceId, TrackId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, VecDeque};
 use thiserror::Error;
@@ -13,6 +13,10 @@ pub struct MemoryBounds {
     pub max_reflex_nodes: usize,
     pub max_episodes: usize,
     pub max_deltas: usize,
+    /// How long a relation may go unseen before it counts as ended. A hand hides a phone
+    /// for a frame or two; that is not letting go of it.
+    pub relation_grace_ms: i64,
+    pub max_relation_spans: usize,
 }
 
 impl Default for MemoryBounds {
@@ -23,6 +27,8 @@ impl Default for MemoryBounds {
             max_reflex_nodes: 4_096,
             max_episodes: 1_024,
             max_deltas: 2_048,
+            relation_grace_ms: 1_500,
+            max_relation_spans: 1_024,
         }
     }
 }
@@ -37,6 +43,9 @@ impl MemoryBounds {
             || self.max_episodes > 16_384
             || self.max_deltas == 0
             || self.max_deltas > 65_536
+            || self.relation_grace_ms < 0
+            || self.max_relation_spans == 0
+            || self.max_relation_spans > 16_384
         {
             return Err(WorkingMemoryError::InvalidBounds);
         }
@@ -78,6 +87,76 @@ pub struct SceneDeltaRecord {
     pub observed_at_ms: i64,
 }
 
+/// What a node was while a relation held: enough to answer after the node itself expired.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NodeSnapshot {
+    pub id: NodeId,
+    pub kind: NodeKind,
+    /// Local semantic state, as on [`SceneNode::label`]. It never leaves this memory in a trace.
+    pub label: Option<String>,
+    pub track_id: Option<TrackId>,
+}
+
+impl NodeSnapshot {
+    fn of(node: &SceneNode) -> Self {
+        Self {
+            id: node.id.clone(),
+            kind: node.kind,
+            label: node.label.clone(),
+            track_id: node.track_id.clone(),
+        }
+    }
+}
+
+/// One stretch of time during which a relation held, such as the owner holding a phone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RelationSpan {
+    pub kind: RelationKind,
+    pub source: SourceId,
+    pub subject: NodeSnapshot,
+    pub object: NodeSnapshot,
+    pub started_at_ms: i64,
+    pub last_seen_ms: i64,
+    /// `None` while it still holds. Once ended, this is when it was last seen.
+    pub ended_at_ms: Option<i64>,
+}
+
+impl RelationSpan {
+    pub fn is_open(&self) -> bool {
+        self.ended_at_ms.is_none()
+    }
+
+    fn matches(&self, relation: &Relation) -> bool {
+        self.kind == relation.kind
+            && self.subject.id == relation.from
+            && self.object.id == relation.to
+    }
+}
+
+/// "What did I have in my hand a moment ago?" is `kind: Holding, subject: owner, since: now - 60 s`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelationQuery {
+    pub kind: RelationKind,
+    pub subject: Option<NodeId>,
+    /// Spans that ended before this are left out; open spans always count.
+    pub since_ms: i64,
+    pub limit: usize,
+}
+
+/// Relations about the physical scene that are worth remembering. Layout relations of a
+/// window, and `Near`, change every frame and would push the rest out of the ring.
+fn remembered(kind: RelationKind) -> bool {
+    matches!(
+        kind,
+        RelationKind::Holding
+            | RelationKind::LookingAt
+            | RelationKind::Speaking
+            | RelationKind::InteractingWith
+            | RelationKind::On
+            | RelationKind::Inside
+    )
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DurablePromotionCandidate {
     pub episode_code: String,
@@ -105,6 +184,7 @@ pub struct WorkingSceneMemory {
     reflex: BTreeMap<NodeId, SceneNode>,
     episodes: VecDeque<SemanticEpisode>,
     deltas: VecDeque<SceneDeltaRecord>,
+    spans: VecDeque<RelationSpan>,
 }
 
 impl WorkingSceneMemory {
@@ -114,6 +194,7 @@ impl WorkingSceneMemory {
             reflex: BTreeMap::new(),
             episodes: VecDeque::new(),
             deltas: VecDeque::new(),
+            spans: VecDeque::new(),
         })
     }
 
@@ -182,6 +263,97 @@ impl WorkingSceneMemory {
         self.expire(now_ms)
     }
 
+    /// Opens a span for each remembered relation the scene now holds, keeps the open ones it
+    /// still holds, and ends those unseen for longer than the grace period. The snapshot keeps
+    /// the newest label, so an object named after it was picked up is recalled by that name.
+    pub fn observe_relations(
+        &mut self,
+        scene: &SceneGraph,
+        now_ms: i64,
+    ) -> Result<(), WorkingMemoryError> {
+        if now_ms < 0 {
+            return Err(WorkingMemoryError::InvalidTime);
+        }
+        for relation in scene
+            .relations()
+            .filter(|relation| remembered(relation.kind))
+        {
+            let (Some(subject), Some(object)) =
+                (scene.node(&relation.from), scene.node(&relation.to))
+            else {
+                continue;
+            };
+            match self
+                .spans
+                .iter_mut()
+                .find(|span| span.is_open() && span.matches(relation))
+            {
+                Some(span) => {
+                    span.last_seen_ms = span.last_seen_ms.max(now_ms);
+                    span.subject = NodeSnapshot::of(subject);
+                    if object.label.is_some() || span.object.label.is_none() {
+                        span.object = NodeSnapshot::of(object);
+                    }
+                }
+                None => self.spans.push_back(RelationSpan {
+                    kind: relation.kind,
+                    source: object.source.clone(),
+                    subject: NodeSnapshot::of(subject),
+                    object: NodeSnapshot::of(object),
+                    started_at_ms: now_ms,
+                    last_seen_ms: now_ms,
+                    ended_at_ms: None,
+                }),
+            }
+        }
+        let grace = self.bounds.relation_grace_ms;
+        for span in self.spans.iter_mut().filter(|span| span.is_open()) {
+            if now_ms.saturating_sub(span.last_seen_ms) > grace {
+                span.ended_at_ms = Some(span.last_seen_ms);
+            }
+        }
+        while self.spans.len() > self.bounds.max_relation_spans {
+            // The oldest ended span goes first; an open one only when nothing has ended.
+            let index = self
+                .spans
+                .iter()
+                .position(|span| !span.is_open())
+                .unwrap_or(0);
+            self.spans.remove(index);
+        }
+        self.expire(now_ms)
+    }
+
+    /// Matching spans, the ones still holding first, then the most recently ended.
+    pub fn recall(&self, query: &RelationQuery) -> Vec<&RelationSpan> {
+        let mut found: Vec<&RelationSpan> = self
+            .spans
+            .iter()
+            .filter(|span| span.kind == query.kind)
+            .filter(|span| {
+                query
+                    .subject
+                    .as_ref()
+                    .is_none_or(|subject| span.subject.id == *subject)
+            })
+            .filter(|span| span.ended_at_ms.is_none_or(|ended| ended >= query.since_ms))
+            .collect();
+        found.sort_by_key(|span| {
+            (
+                span.is_open(),
+                span.ended_at_ms.unwrap_or(span.last_seen_ms),
+                span.started_at_ms,
+            )
+        });
+        found.reverse();
+        found.truncate(query.limit);
+        found
+    }
+
+    pub fn relation_spans(&self) -> impl Iterator<Item = &RelationSpan> {
+        self.spans.iter()
+    }
+
     pub fn expire(&mut self, now_ms: i64) -> Result<(), WorkingMemoryError> {
         if now_ms < 0 {
             return Err(WorkingMemoryError::InvalidTime);
@@ -194,6 +366,9 @@ impl WorkingSceneMemory {
         self.deltas.retain(|delta| {
             delta.observed_at_ms >= now_ms.saturating_sub(self.bounds.episodic_ttl_ms)
         });
+        let span_cutoff = now_ms.saturating_sub(self.bounds.episodic_ttl_ms);
+        self.spans
+            .retain(|span| span.ended_at_ms.is_none_or(|ended| ended >= span_cutoff));
         Ok(())
     }
 
@@ -227,7 +402,7 @@ impl WorkingSceneMemory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{NodeKind, Rect, SceneEvent, TrackId};
+    use crate::{Rect, SceneEvent};
 
     fn graph(last_seen_ms: i64) -> SceneGraph {
         let source = SourceId::new("camera:0").unwrap();
@@ -290,6 +465,205 @@ mod tests {
         let candidate = memory.promotion_candidate(0, 7).unwrap();
         assert_eq!(candidate.episode_code, "door_opened");
         assert_eq!(candidate.scene_revision, 7);
+    }
+
+    fn node(id: &str, kind: NodeKind, label: Option<&str>, last_seen_ms: i64) -> SceneNode {
+        SceneNode {
+            id: NodeId::new(id).unwrap(),
+            source: SourceId::new("camera:0").unwrap(),
+            kind,
+            bbox: Some(Rect::new(0, 0, 10, 10).unwrap()),
+            parent: None,
+            track_id: Some(TrackId::new(format!("track:{id}")).unwrap()),
+            confidence_permille: 900,
+            uncertainty_permille: 100,
+            last_seen_ms,
+            label: label.map(str::to_owned),
+            revision: 0,
+        }
+    }
+
+    fn holding(object: &str) -> Relation {
+        Relation {
+            from: NodeId::new("person:owner").unwrap(),
+            kind: RelationKind::Holding,
+            to: NodeId::new(object).unwrap(),
+        }
+    }
+
+    fn held_by_owner(since_ms: i64) -> RelationQuery {
+        RelationQuery {
+            kind: RelationKind::Holding,
+            subject: Some(NodeId::new("person:owner").unwrap()),
+            since_ms,
+            limit: 4,
+        }
+    }
+
+    #[test]
+    fn a_phone_put_down_is_recalled_by_name_after_its_node_is_gone() {
+        let mut memory = WorkingSceneMemory::new(MemoryBounds::default()).unwrap();
+        let mut scene = SceneGraph::default();
+        scene
+            .apply(
+                0,
+                &[
+                    SceneEvent::Upsert(node("person:owner", NodeKind::Person, None, 1_000)),
+                    SceneEvent::Upsert(node(
+                        "object:7",
+                        NodeKind::UnknownObject,
+                        Some("phone"),
+                        1_000,
+                    )),
+                    SceneEvent::Relate(holding("object:7")),
+                ],
+            )
+            .unwrap();
+        memory.observe_relations(&scene, 1_000).unwrap();
+        memory.observe_relations(&scene, 9_000).unwrap();
+        scene
+            .apply(
+                1,
+                &[
+                    SceneEvent::Unrelate(holding("object:7")),
+                    SceneEvent::Delete(NodeId::new("object:7").unwrap()),
+                ],
+            )
+            .unwrap();
+        memory.observe_relations(&scene, 9_500).unwrap();
+        assert!(
+            memory.recall(&held_by_owner(0))[0].is_open(),
+            "within the grace period it still holds"
+        );
+        memory.observe_relations(&scene, 20_000).unwrap();
+
+        let recalled = memory.recall(&held_by_owner(0));
+        assert_eq!(recalled.len(), 1);
+        let span = recalled[0];
+        assert_eq!(span.object.label.as_deref(), Some("phone"));
+        assert_eq!((span.started_at_ms, span.ended_at_ms), (1_000, Some(9_000)));
+        assert!(
+            memory.recall(&held_by_owner(10_000)).is_empty(),
+            "it ended before the question's window"
+        );
+    }
+
+    #[test]
+    fn a_flicker_shorter_than_the_grace_is_one_span_and_a_name_learned_later_is_kept() {
+        let mut memory = WorkingSceneMemory::new(MemoryBounds::default()).unwrap();
+        let mut scene = SceneGraph::default();
+        scene
+            .apply(
+                0,
+                &[
+                    SceneEvent::Upsert(node("person:owner", NodeKind::Person, None, 0)),
+                    SceneEvent::Upsert(node("object:3", NodeKind::UnknownObject, None, 0)),
+                    SceneEvent::Relate(holding("object:3")),
+                ],
+            )
+            .unwrap();
+        memory.observe_relations(&scene, 0).unwrap();
+        scene
+            .apply(1, &[SceneEvent::Unrelate(holding("object:3"))])
+            .unwrap();
+        memory.observe_relations(&scene, 800).unwrap();
+        scene
+            .apply(
+                2,
+                &[
+                    SceneEvent::Upsert(node(
+                        "object:3",
+                        NodeKind::UnknownObject,
+                        Some("plush toy"),
+                        1_200,
+                    )),
+                    SceneEvent::Relate(holding("object:3")),
+                ],
+            )
+            .unwrap();
+        memory.observe_relations(&scene, 1_200).unwrap();
+        assert_eq!(memory.relation_spans().count(), 1);
+        assert_eq!(
+            memory
+                .relation_spans()
+                .next()
+                .unwrap()
+                .object
+                .label
+                .as_deref(),
+            Some("plush toy")
+        );
+    }
+
+    #[test]
+    fn open_spans_come_first_then_the_most_recently_ended_and_old_ones_expire() {
+        let mut memory = WorkingSceneMemory::new(MemoryBounds {
+            episodic_ttl_ms: 60_000,
+            ..MemoryBounds::default()
+        })
+        .unwrap();
+        let mut scene = SceneGraph::default();
+        let mut revision = scene
+            .apply(
+                0,
+                &[
+                    SceneEvent::Upsert(node("person:owner", NodeKind::Person, None, 0)),
+                    SceneEvent::Upsert(node("object:1", NodeKind::Tool, Some("screwdriver"), 0)),
+                    SceneEvent::Upsert(node("object:2", NodeKind::UnknownObject, Some("phone"), 0)),
+                    SceneEvent::Relate(holding("object:1")),
+                ],
+            )
+            .unwrap();
+        memory.observe_relations(&scene, 0).unwrap();
+        revision = scene
+            .apply(
+                revision,
+                &[
+                    SceneEvent::Unrelate(holding("object:1")),
+                    SceneEvent::Relate(holding("object:2")),
+                ],
+            )
+            .unwrap();
+        memory.observe_relations(&scene, 5_000).unwrap();
+        memory.observe_relations(&scene, 30_000).unwrap();
+        let labels: Vec<_> = memory
+            .recall(&held_by_owner(0))
+            .iter()
+            .map(|span| span.object.label.clone().unwrap())
+            .collect();
+        assert_eq!(labels, ["phone", "screwdriver"]);
+        scene
+            .apply(revision, &[SceneEvent::Unrelate(holding("object:2"))])
+            .unwrap();
+        memory.observe_relations(&scene, 70_000).unwrap();
+        let labels: Vec<_> = memory
+            .recall(&held_by_owner(0))
+            .iter()
+            .map(|span| span.object.label.clone().unwrap())
+            .collect();
+        assert_eq!(labels, ["phone"], "the screwdriver ended over a minute ago");
+    }
+
+    #[test]
+    fn layout_relations_are_not_remembered() {
+        let mut memory = WorkingSceneMemory::new(MemoryBounds::default()).unwrap();
+        let mut scene = SceneGraph::default();
+        scene
+            .apply(
+                0,
+                &[
+                    SceneEvent::Upsert(node("window:1", NodeKind::Window, None, 0)),
+                    SceneEvent::Upsert(node("button:1", NodeKind::Button, None, 0)),
+                    SceneEvent::Relate(Relation {
+                        from: NodeId::new("window:1").unwrap(),
+                        kind: RelationKind::Contains,
+                        to: NodeId::new("button:1").unwrap(),
+                    }),
+                ],
+            )
+            .unwrap();
+        memory.observe_relations(&scene, 0).unwrap();
+        assert_eq!(memory.relation_spans().count(), 0);
     }
 
     #[test]
