@@ -30,6 +30,8 @@ pub struct Scene {
     /// The JPEG IRIS read, kept only until the next frame.
     pub frame: Arc<Vec<u8>>,
     pub at: Option<Instant>,
+    /// Wall-clock time the uploaded frame entered IRIS; `Instant` is only process-local.
+    pub observed_at_ms: Option<i64>,
     /// The IRIS training step whose weights read it.
     pub step: Option<u64>,
 }
@@ -75,6 +77,10 @@ impl IrisEyes {
 
     /// Reads one JPEG frame in IRIS's open mode (its whole everyday vocabulary).
     pub async fn look(&self, jpeg: Arc<Vec<u8>>) -> Result<Scene, String> {
+        let observed_at_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis().min(i64::MAX as u128) as i64)
+            .unwrap_or(0);
         let answer: IrisAnswer = self
             .http
             .post(format!(
@@ -96,6 +102,7 @@ impl IrisEyes {
             height: answer.image_size[1],
             frame: jpeg,
             at: Some(Instant::now()),
+            observed_at_ms: Some(observed_at_ms),
             step: answer.step,
         })
     }
@@ -263,6 +270,7 @@ mod tests {
             height: 300,
             frame: Arc::new(Vec::new()),
             at: Some(Instant::now()),
+            observed_at_ms: Some(0),
             step: Some(1),
         }
     }

@@ -66,12 +66,23 @@ pub struct Recalled {
     pub held_ago_s: Option<f32>,
 }
 
+/// A newly observed hand/object relation. The hand remains anonymous.
+#[derive(Debug, Clone)]
+pub struct HeldEvent {
+    pub track_id: u32,
+    pub phrase: String,
+    pub bbox: [f32; 4],
+    pub confidence: f32,
+    pub observed_at_ms: i64,
+}
+
 #[derive(Default)]
 pub struct Memory {
     things: Vec<Thing>,
     next_id: u32,
     /// The ids seen in the latest frame, in the order of its detections.
     present: Vec<u32>,
+    held_events: Vec<HeldEvent>,
 }
 
 fn cosine(a: &[f32], b: &[f32]) -> f32 {
@@ -199,18 +210,32 @@ impl Memory {
         }
         let hands: Vec<[f32; 4]> =
             scene.seen.iter().filter(|item| is_hand(&item.phrase)).map(|item| item.bbox).collect();
+        let mut held_events = Vec::new();
         for thing in self.things.iter_mut() {
             let here = thing.last_seen == now && !is_person(&thing.phrase);
             if here && hands.iter().any(|hand| overlap_of_smaller(hand, &thing.bbox) >= TOUCH) {
+                let was_held = thing.touched_frames >= HELD_AFTER_FRAMES;
                 thing.touched_frames += 1;
                 if thing.touched_frames >= HELD_AFTER_FRAMES {
                     thing.held_first.get_or_insert(now);
                     thing.last_held = Some(now);
+                    if !was_held {
+                        if let Some(observed_at_ms) = scene.observed_at_ms {
+                            held_events.push(HeldEvent {
+                                track_id: thing.id,
+                                phrase: thing.phrase.clone(),
+                                bbox: thing.bbox,
+                                confidence: thing.best_score,
+                                observed_at_ms,
+                            });
+                        }
+                    }
                 }
             } else if here || now.duration_since(thing.last_seen) >= GONE_AFTER {
                 thing.touched_frames = 0;
             }
         }
+        self.held_events.extend(held_events);
         self.things
             .retain(|thing| now.duration_since(thing.last_seen) < FORGET_AFTER && (thing.sightings > 1 || now.duration_since(thing.last_seen) < Duration::from_secs(60)));
         if self.things.len() > CAPACITY {
@@ -222,6 +247,10 @@ impl Memory {
     /// The track of the `index`-th detection of the latest frame.
     pub fn id_of(&self, index: usize) -> Option<u32> {
         self.present.get(index).copied()
+    }
+
+    pub fn take_held_events(&mut self) -> Vec<HeldEvent> {
+        std::mem::take(&mut self.held_events)
     }
 
     fn gone(&self, now: Instant) -> Vec<&Thing> {
@@ -366,6 +395,7 @@ mod tests {
             height: 300,
             frame: Arc::new(Vec::new()),
             at: Some(at),
+            observed_at_ms: Some(0),
             step: Some(1),
         }
     }
