@@ -9,6 +9,7 @@
 #include <QStorageInfo>
 #include <QNetworkInterface>
 #include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QProcess>
 #include <QMediaDevices>
 #include <QAudioDevice>
@@ -28,9 +29,26 @@ static QString cacheDirectory() {
     const auto dir=QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     QDir().mkpath(dir); return dir;
 }
+
+static const QUrl hubIndexUrl(QStringLiteral("https://archieos-hub.vercel.app/registry/v1/index.json"));
+static constexpr qint64 hubIndexLimit=65536;
+static constexpr qint64 categoryLimit=524288;
+static constexpr qint64 geofabrikLimit=8000000;
+
+static QNetworkRequest boundedRequest(const QUrl &url, qint64 limit) {
+    QNetworkRequest request(url);
+    request.setTransferTimeout(30000);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,QNetworkRequest::ManualRedirectPolicy);
+    request.setRawHeader("Accept","application/json");
+    request.setMaximumRedirectsAllowed(0);
+    Q_UNUSED(limit);
+    return request;
+}
+
 Wizard::Wizard(QObject *parent):QObject(parent) {
     QFile cached(cacheDirectory()+"/regions.json");
-    if(cached.open(QIODevice::ReadOnly) && cached.size()<=8000000) readCatalog(cached.readAll());
+    if(cached.open(QIODevice::ReadOnly) && cached.size()<=geofabrikLimit) readCatalog(cached.readAll());
+    loadCachedCategoryCatalogs();
     inspectMachine();
 }
 bool Wizard::live() const {
@@ -57,9 +75,9 @@ void Wizard::inspectMachine() {
     }
     message(live()?"Entorno live detectado. Revisa el disco antes de instalar.":"Preparación en este equipo. La instalación se ejecuta desde el USB de ArchieOS.");
 }
-void Wizard::readCatalog(const QByteArray &bytes) {
+bool Wizard::readCatalog(const QByteArray &bytes) {
     const auto doc=QJsonDocument::fromJson(bytes);
-    if(!doc.isObject()) return;
+    if(!doc.isObject()) return false;
     QVariantList result;
     for(const auto &entry:doc.object().value("features").toArray()) {
         const auto p=entry.toObject().value("properties").toObject();
@@ -67,20 +85,154 @@ void Wizard::readCatalog(const QByteArray &bytes) {
         if(!url.startsWith("https://download.geofabrik.de/") || !url.endsWith(".osm.pbf")) continue;
         result.push_back(QVariantMap{{"name",p.value("name").toString()},{"id",p.value("id").toString()},{"url",url}});
     }
-    if(!result.isEmpty()) {m_regions=result;emit changed();}
+    if(result.isEmpty()) return false;
+    m_regions=result;emit changed();
+    return true;
 }
-void Wizard::refreshCatalog() {
-    QNetworkRequest request(QUrl("https://download.geofabrik.de/index-v1-nogeom.json"));
-    request.setTransferTimeout(30000);
-    auto reply=m_network.get(request);
-    connect(reply,&QNetworkReply::readyRead,this,[reply]{if(reply->bytesAvailable()>8000000) reply->abort();});
-    message("Actualizando regiones desde Geofabrik…");
+
+bool Wizard::readCategoryCatalog(const QString &kind, const QByteArray &bytes, bool cache) {
+    const auto document=QJsonDocument::fromJson(bytes);
+    if(!document.isObject()) return false;
+    const auto object=document.object();
+    const auto items=object.value("items").toArray();
+    if(object.value("schema_version").toInt()!=1 || object.value("kind").toString()!=kind || items.size()>1000) return false;
+    QVariantList parsed;
+    for(const auto &entry:items) {
+        if(!entry.isObject()) return false;
+        const auto item=entry.toObject();
+        const QString id=item.value("id").toString();
+        const QString title=item.value("title").toString();
+        const QString description=item.value("description").toString();
+        if(id.isEmpty() || title.isEmpty() || description.isEmpty() || !item.value("installable").isBool()) return false;
+        parsed.push_back(QVariantMap{
+            {"kind",kind},
+            {"id",id},
+            {"title",title},
+            {"description",description},
+            {"version",item.value("version").toString()},
+            {"status",item.value("statusLabel").toString(item.value("status").toString())},
+            {"installable",item.value("installable").toBool()},
+            {"install_note",item.value("installable").toBool()?"La instalación requiere validación del cliente":"Solo información; no se instala desde este catálogo"}
+        });
+    }
+    QVariantList combined;
+    for(const auto &item:m_catalogCategories) {
+        if(item.toMap().value("kind").toString()!=kind) combined.push_back(item);
+    }
+    for(const auto &item:parsed) combined.push_back(item);
+    m_catalogCategories=combined;
+    if(cache) {
+        QSaveFile file(cacheDirectory()+"/registry-"+kind+".json");
+        if(file.open(QIODevice::WriteOnly)) {file.write(bytes);file.commit();}
+    }
+    emit changed();
+    return true;
+}
+
+void Wizard::loadCachedCategoryCatalogs() {
+    const QStringList kinds={"apps","models","packages","releases"};
+    for(const auto &kind:kinds) {
+        QFile file(cacheDirectory()+"/registry-"+kind+".json");
+        if(file.open(QIODevice::ReadOnly) && file.size()<=categoryLimit) readCategoryCatalog(kind,file.readAll(),false);
+    }
+}
+
+void Wizard::fetchGeofabrikIndex(const QUrl &url) {
+    if(url!=QUrl("https://download.geofabrik.de/index-v1-nogeom.json")) {
+        message("El índice de mapas no es una fuente Geofabrik permitida. Conservamos la copia local.");
+        return;
+    }
+    auto reply=m_network.get(boundedRequest(url,geofabrikLimit));
+    reply->setReadBufferSize(geofabrikLimit+1);
+    connect(reply,&QNetworkReply::readyRead,this,[reply]{if(reply->bytesAvailable()>geofabrikLimit) reply->abort();});
     connect(reply,&QNetworkReply::finished,this,[this,reply]{
         const auto bytes=reply->readAll();
-        if(reply->error()!=QNetworkReply::NoError || bytes.size()>8000000) message("Catálogo no disponible. Conservamos la copia local; puedes continuar sin descargar.");
-        else {readCatalog(bytes);QSaveFile file(cacheDirectory()+"/regions.json");
-            if(!m_regions.isEmpty() && file.open(QIODevice::WriteOnly)){file.write(bytes);file.commit();}
-            message(QString("Catálogo local: %1 regiones. La descarga se verifica durante la instalación.").arg(m_regions.size()));}
+        const int status=reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if(reply->error()!=QNetworkReply::NoError || status<200 || status>=300 || bytes.size()>geofabrikLimit)
+            message("Catálogo no disponible. Conservamos la copia local; puedes continuar sin descargar.");
+        else if(!readCatalog(bytes))
+            message("El catálogo de mapas no es válido. Conservamos la copia local; puedes continuar sin descargar.");
+        else {
+            QSaveFile file(cacheDirectory()+"/regions.json");
+            if(file.open(QIODevice::WriteOnly)){file.write(bytes);file.commit();}
+            message(QString("Catálogo local: %1 regiones. La descarga se verifica durante la instalación.").arg(m_regions.size()));
+        }
+        reply->deleteLater();
+    });
+}
+
+void Wizard::refreshCatalog() {
+    auto reply=m_network.get(boundedRequest(hubIndexUrl,hubIndexLimit));
+    reply->setReadBufferSize(hubIndexLimit+1);
+    connect(reply,&QNetworkReply::readyRead,this,[reply]{if(reply->bytesAvailable()>hubIndexLimit) reply->abort();});
+    message("Consultando el índice de ArchieOS Hub…");
+    connect(reply,&QNetworkReply::finished,this,[this,reply]{
+        const auto bytes=reply->readAll();
+        const int status=reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if(reply->error()!=QNetworkReply::NoError || status<200 || status>=300 || bytes.size()>hubIndexLimit) {
+            message("Hub no disponible. Conservamos los catálogos locales; puedes continuar sin descargar mapas.");
+            reply->deleteLater();
+            return;
+        }
+        const auto document=QJsonDocument::fromJson(bytes);
+        if(!document.isObject() || document.object().value("schema_version").toInt()!=1) {
+            message("Versión o formato del Hub no compatible. Conservamos la copia local.");
+            reply->deleteLater();
+            return;
+        }
+        const auto catalogs=document.object().value("catalogs").toObject();
+        const QStringList kinds={"apps","models","packages","releases"};
+        for(const auto &kind:kinds) {
+            const QString expected="/registry/v1/"+kind+".json";
+            if(catalogs.value(kind).toString()!=expected) {
+                message("El índice del Hub contiene una ruta de catálogo inesperada.");
+                reply->deleteLater();
+                return;
+            }
+            QUrl categoryUrl(hubIndexUrl);
+            categoryUrl.setPath(expected);
+            auto categoryReply=m_network.get(boundedRequest(categoryUrl,categoryLimit));
+            categoryReply->setReadBufferSize(categoryLimit+1);
+            connect(categoryReply,&QNetworkReply::readyRead,this,[categoryReply]{if(categoryReply->bytesAvailable()>categoryLimit) categoryReply->abort();});
+            connect(categoryReply,&QNetworkReply::finished,this,[this,categoryReply,kind]{
+                const auto categoryBytes=categoryReply->readAll();
+                const int code=categoryReply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                if(categoryReply->error()==QNetworkReply::NoError && code>=200 && code<300 && categoryBytes.size()<=categoryLimit)
+                    readCategoryCatalog(kind,categoryBytes,true);
+                categoryReply->deleteLater();
+            });
+        }
+        const QString mapsPath=catalogs.value("maps").toString();
+        if(mapsPath!="/registry/v1/maps.json") {
+            message("El índice del Hub contiene una ruta de mapas inesperada. Conservamos la copia local.");
+            reply->deleteLater();
+            return;
+        }
+        QUrl mapsUrl(hubIndexUrl);
+        mapsUrl.setPath(mapsPath);
+        auto mapsReply=m_network.get(boundedRequest(mapsUrl,categoryLimit));
+        mapsReply->setReadBufferSize(categoryLimit+1);
+        connect(mapsReply,&QNetworkReply::readyRead,this,[mapsReply]{if(mapsReply->bytesAvailable()>categoryLimit) mapsReply->abort();});
+        connect(mapsReply,&QNetworkReply::finished,this,[this,mapsReply]{
+            const auto mapsBytes=mapsReply->readAll();
+            const int code=mapsReply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const auto mapDocument=QJsonDocument::fromJson(mapsBytes);
+            const auto mapItems=mapDocument.object().value("items").toArray();
+            QUrl geofabrik;
+            if(mapsReply->error()==QNetworkReply::NoError && code>=200 && code<300 && mapsBytes.size()<=categoryLimit &&
+               mapDocument.object().value("schema_version").toInt()==1 && mapDocument.object().value("kind").toString()=="maps") {
+                for(const auto &item:mapItems) {
+                    const QUrl candidate(item.toObject().value("source_url").toString());
+                    if(candidate==QUrl("https://download.geofabrik.de/index-v1-nogeom.json")) {geofabrik=candidate;break;}
+                }
+            }
+            mapsReply->deleteLater();
+            if(geofabrik.isEmpty()) {
+                message("No se pudo validar la fuente Geofabrik del Hub. Conservamos la copia local; puedes omitir mapas.");
+                return;
+            }
+            fetchGeofabrikIndex(geofabrik);
+        });
         reply->deleteLater();
     });
 }
