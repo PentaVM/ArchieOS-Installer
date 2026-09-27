@@ -21,3 +21,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "io-util", "process"] }
 toml.workspace = true
+
+[[bin]]
+name = "archie-practice"
+path = "src/bin/archie-practice.rs"
