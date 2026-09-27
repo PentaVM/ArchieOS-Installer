@@ -4,6 +4,10 @@
 # training for the minute it takes. Everything it starts is stopped at the end.
 #
 #   stage-latency.sh [count]     prints the gate round trip and the delivery to the window
+#
+# SEATS=shared starts the Stage with a seat for the agent beside the person's. HUMAN=1 (with
+# SEATS=shared) also plays a person through VNC while the agent works: mouse moves and typed
+# letters, which must reach the window without taking anything from the agent.
 set -uo pipefail
 QT_DIR=${QT_DIR:-/opt/Qt/6.11.2/gcc_64}
 BUILD=${BUILD:-/workspace/build}
@@ -24,7 +28,7 @@ for _ in $(seq 1 50); do ls "$XDG_RUNTIME_DIR"/wayland-? >/dev/null 2>&1 && brea
 export WAYLAND_DISPLAY=$(basename "$(ls "$XDG_RUNTIME_DIR"/wayland-? | head -1)")
 "$CORE/archie-stage-cli" keygen "$RUN/key" >/dev/null
 LIBGL_ALWAYS_SOFTWARE=1 QT_QPA_PLATFORM=wayland guest "$BUILD/stage/archie-stage" --socket-name archie-stage \
-  --control "$RUN/control.sock" --key-file "$RUN/key" --tempo agent > "$RUN/stage.log" 2>&1
+  --control "$RUN/control.sock" --key-file "$RUN/key" --tempo agent --seats "${SEATS:-exclusive}" > "$RUN/stage.log" 2>&1
 for _ in $(seq 1 50); do [ -S "$RUN/control.sock" ] && [ -S "$XDG_RUNTIME_DIR/archie-stage" ] && break; sleep 0.2; done
 WAYLAND_DISPLAY=archie-stage QT_QPA_PLATFORM=wayland LIBGL_ALWAYS_SOFTWARE=1 \
   guest "$QT_DIR/bin/qml" "$HERE/probe-window.qml" > "$RUN/window.log" 2>&1
@@ -42,8 +46,26 @@ allow = ["move", "click", "key", "hold", "focus"]
 max_text_grade = "public"
 max_text_chars = 8
 P
+if [ "${HUMAN:-0}" = 1 ]; then
+  # The person, through the same VNC a person uses: sway's output, which the Stage window fills.
+  guest wayvnc 127.0.0.1 5909 > "$RUN/wayvnc.log" 2>&1
+  [ -x /tmp/vncvenv/bin/vncdo ] || { python3 -m venv /tmp/vncvenv && /tmp/vncvenv/bin/pip -q install vncdotool; } >/dev/null 2>&1
+  sleep 1
+  # A person clicks into the window first (their own seat's focus), then types while moving.
+  ( /tmp/vncvenv/bin/vncdo -s 127.0.0.1::5909 move 420 320 click 1 >> "$RUN/person.log" 2>&1
+    for i in $(seq 1 30); do /tmp/vncvenv/bin/vncdo -s 127.0.0.1::5909 move $((300 + i * 10)) 300 type h pause 0.1 >> "$RUN/person.log" 2>&1; done ) &
+  pids+=($!)
+fi
 "$CORE/archie-stage-latency" --socket "$RUN/control.sock" --key-file "$RUN/key" --policy "$RUN/policy.toml" \
   --app "$APP" --count "$COUNT" --out "$RUN/sent.jsonl"
+if [ "${HUMAN:-0}" = 1 ]; then
+  sleep 3
+  echo "letters in the window: person h=$(grep -c '"key":72' "$RUN/window.log"), agent w=$(grep -c '"key":87' "$RUN/window.log")"
+  echo "authority lines in the stage log: $(grep -c 'authority' "$RUN/stage.log")"
+  grep -m3 -i -e 'seat' -e 'authority' "$RUN/stage.log"
+  echo "person's button presses in the window: $(grep -c '"e":"button_down"' "$RUN/window.log")"
+  tail -3 "$RUN/person.log" 2>/dev/null; tail -2 "$RUN/wayvnc.log" 2>/dev/null
+fi
 sleep 1
 # Delivery: for every executed action, the first matching event in the window's log after it was sent.
 python3 - "$RUN/sent.jsonl" "$RUN/window.log" <<'PY'

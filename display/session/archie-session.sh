@@ -13,7 +13,8 @@
 #
 # Environment: QT_DIR (default /opt/Qt/6.11.2/gcc_64), BUILD (default /workspace/build),
 # CORE (default /workspace/archieos/core/target/release), RUN (default /tmp/archie-session),
-# SIZE (default 1920x1080).
+# SIZE (default 1920x1080), SEATS (exclusive, or shared: Archie gets its own pointer and
+# keyboard beside the person's, and a person's input no longer takes the stage from it).
 set -euo pipefail
 QT_DIR=${QT_DIR:-/opt/Qt/6.11.2/gcc_64}
 BUILD=${BUILD:-/workspace/build}
@@ -82,7 +83,7 @@ EOF
   if ! running stage; then rm -f "$RUN/control.sock" "$XDG_RUNTIME_DIR/archie-stage"; fi
   LIBGL_ALWAYS_SOFTWARE=1 QT_QPA_PLATFORM=wayland \
     start stage "$BUILD/stage/archie-stage" --socket-name archie-stage --control "$RUN/control.sock" \
-      --key-file "$RUN/key" --tempo "${TEMPO:-agent}" --stroke-speed "${STROKE_SPEED:-4000}"
+      --key-file "$RUN/key" --tempo "${TEMPO:-agent}" --stroke-speed "${STROKE_SPEED:-4000}"       --seats "${SEATS:-exclusive}"
   arrange
   status
 }

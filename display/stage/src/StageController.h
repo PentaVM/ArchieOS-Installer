@@ -83,6 +83,12 @@ public:
         /// How fast the agent's input plays: a person's tempo, to be watched, or
         /// `PlaybackPolicy::agent_tempo()`, to work at the agent's own speed.
         archie::visual::PlaybackPolicy playback{};
+        /// Two seats: the agent gets a pointer and a keyboard of its own, with their own
+        /// focus, and a person's mouse and keyboard stay theirs. A person's input then always
+        /// reaches their applications and never takes the agent's seat away; the pause chord
+        /// (Pause, or Ctrl+Alt+Esc) still stops the agent. False: one shared seat, and a
+        /// person's input takes the stage from the agent.
+        bool shared_seats = false;
     };
 
     explicit StageController(Options options, QObject *parent = nullptr);
@@ -116,7 +122,9 @@ public:
     QString banner() const { return m_banner; }
     qreal bannerOpacity() const { return m_frame.banner_opacity; }
     QString authority() const;
-    bool physicalInput() const { return m_authority.forwards_physical_input(); }
+    /// Whether a person's input reaches applications through the scene. With two seats it
+    /// always does: the person has a seat of their own and the agent keeps working beside them.
+    bool physicalInput() const { return m_sharedSeats || m_authority.forwards_physical_input(); }
     int surfaceCount() const { return static_cast<int>(m_items.size()); }
     QObject *focusedItem() const { return m_focusedItem; }
     QString controlSocket() const { return m_options.control_socket; }
@@ -192,6 +200,9 @@ private:
     Options m_options;
     QPointer<QWaylandCompositor> m_compositor;
     QPointer<QWaylandSeat> m_watchedSeat;
+    /// The agent's own seat when `Options::shared_seats`; the compositor's default seat is the person's.
+    QPointer<QWaylandSeat> m_agentSeat;
+    bool m_sharedSeats = false;
     std::unique_ptr<KeyTyper> m_typer;
     QPointer<QQuickWindow> m_window;
     QPointer<QObject> m_desk;

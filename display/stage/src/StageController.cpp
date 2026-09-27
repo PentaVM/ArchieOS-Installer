@@ -140,6 +140,7 @@ StageController::StageController(Options options, QObject *parent)
     policy.reduced_motion = m_options.reduced_motion;
     m_director = StageDirector(policy);
     m_playbackPolicy = m_options.playback;
+    m_sharedSeats = m_options.shared_seats;
 
     m_clock.start();
     m_timer.setSingleShot(true);
@@ -199,6 +200,13 @@ void StageController::setCompositor(QWaylandCompositor *compositor)
     }
     m_compositor = compositor;
     if (m_compositor) {
+        if (m_sharedSeats && !m_agentSeat) {
+            // The agent's own pointer and keyboard. Applications see a second wl_seat and keep
+            // a focus for each: the agent can type in one window while a person types in another.
+            m_agentSeat = new QWaylandSeat(m_compositor, QWaylandSeat::Pointer | QWaylandSeat::Keyboard);
+            m_agentSeat->initialize();
+            qInfo("archie-stage: two seats: the agent has its own pointer and keyboard");
+        }
         connect(m_compositor, &QWaylandCompositor::defaultSeatChanged, this, &StageController::watchSeat);
         watchSeat();
     }
@@ -265,8 +273,11 @@ void StageController::setWindow(QQuickWindow *window)
     m_window = window;
     if (m_window) {
         m_window->installEventFilter(this);
-        // The agent's is the only pointer on screen while it holds the stage.
-        m_window->setCursor(Qt::BlankCursor);
+        // One seat: the agent's is the only pointer on screen while it holds the stage. Two
+        // seats: the person keeps their own cursor, and the agent's is drawn beside it.
+        if (!m_sharedSeats) {
+            m_window->setCursor(Qt::BlankCursor);
+        }
     }
     emit windowChanged();
     tick();
@@ -283,6 +294,11 @@ void StageController::setDesk(QObject *desk)
 
 QWaylandSeat *StageController::seat() const
 {
+    // The seat the agent's input goes through. With two seats the default one is the person's,
+    // and Qt delivers their physical input through it without passing here.
+    if (m_sharedSeats) {
+        return m_agentSeat.data();
+    }
     return m_compositor ? m_compositor->defaultSeat() : nullptr;
 }
 
@@ -1013,7 +1029,7 @@ void StageController::noteAuthority(AuthorityMode before)
         // key down that they did not press.
         releaseHeldKeys("preempted_by_operator");
     }
-    if (m_window) {
+    if (m_window && !m_sharedSeats) {
         if (mode == AuthorityMode::Autonomous) {
             m_window->setCursor(Qt::BlankCursor);
         } else {
@@ -1035,6 +1051,29 @@ bool StageController::eventFilter(QObject *watched, QEvent *event)
     const auto now = monotonic();
     const AuthorityMode before = m_authority.mode();
     bool input = false;
+
+    if (m_sharedSeats) {
+        // Two seats: a person's input is theirs. It goes to their applications through their
+        // own seat and takes nothing from the agent's; only the pause chord stops the agent.
+        if (event->type() == QEvent::KeyPress) {
+            const auto *key = static_cast<QKeyEvent *>(event);
+            const Qt::KeyboardModifiers modifiers = key->modifiers();
+            const bool ctrl_alt = modifiers.testFlag(Qt::ControlModifier) && modifiers.testFlag(Qt::AltModifier);
+            if (key->key() == Qt::Key_Pause || (ctrl_alt && key->key() == Qt::Key_Escape)) {
+                m_authority.pause_chord(now);
+                noteAuthority(before);
+                tick();
+                return true;
+            }
+            if (ctrl_alt && (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter)) {
+                m_authority.resume(now);
+                noteAuthority(before);
+                tick();
+                return true;
+            }
+        }
+        return QObject::eventFilter(watched, event);
+    }
 
     switch (event->type()) {
     case QEvent::MouseMove: {
