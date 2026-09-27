@@ -12,6 +12,10 @@
 //! where its box is when there is no embedding. People are followed by place only: no
 //! embedding of a person is kept, because telling one person from another is
 //! identification, which needs their consent.
+//!
+//! A thing a hand touches for a few frames is held, and the memory keeps when it last was,
+//! so "what did I have in my hand a moment ago?" is answered from it after the thing was
+//! put down or left the frame. Whose hand is not known: hands are not identified either.
 
 use crate::live::eyes::{is_person, Scene};
 use serde::Serialize;
@@ -22,6 +26,12 @@ pub const GONE_AFTER: Duration = Duration::from_secs(3);
 /// And one not seen for this long is forgotten.
 const FORGET_AFTER: Duration = Duration::from_secs(30 * 60);
 const CAPACITY: usize = 200;
+/// Frames a hand must touch a thing before it counts as held: one is a hand passing by.
+const HELD_AFTER_FRAMES: u32 = 2;
+/// How much of the smaller of a hand's and a thing's boxes must overlap to count as touching.
+const TOUCH: f32 = 0.15;
+/// A thing held within this long is told as held.
+const HELD_TOLD_FOR: Duration = Duration::from_secs(10 * 60);
 
 /// One thing followed across frames.
 #[derive(Debug, Clone)]
@@ -36,6 +46,11 @@ pub struct Thing {
     /// and is not remembered as having been there.
     pub sightings: u32,
     pub best_score: f32,
+    /// Consecutive frames a hand touched it; once that reaches [`HELD_AFTER_FRAMES`], when
+    /// it was first and last held.
+    touched_frames: u32,
+    pub held_first: Option<Instant>,
+    pub last_held: Option<Instant>,
 }
 
 /// What the page is shown of the memory.
@@ -46,6 +61,9 @@ pub struct Recalled {
     pub present: bool,
     pub seen_for_s: f32,
     pub gone_for_s: f32,
+    pub in_hand: bool,
+    /// Seconds since it was last held, when it was.
+    pub held_ago_s: Option<f32>,
 }
 
 #[derive(Default)]
@@ -63,6 +81,18 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
     let dot: f32 = a.iter().zip(b).map(|(x, y)| x * y).sum();
     let norm = |v: &[f32]| v.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-6);
     dot / (norm(a) * norm(b))
+}
+
+/// The overlap as a share of the smaller box: 1 when one box is inside the other.
+fn overlap_of_smaller(a: &[f32; 4], b: &[f32; 4]) -> f32 {
+    let w = (a[2].min(b[2]) - a[0].max(b[0])).max(0.0);
+    let h = (a[3].min(b[3]) - a[1].max(b[1])).max(0.0);
+    let area = |r: &[f32; 4]| (r[2] - r[0]).max(0.0) * (r[3] - r[1]).max(0.0);
+    w * h / area(a).min(area(b)).max(1e-6)
+}
+
+fn is_hand(phrase: &str) -> bool {
+    matches!(phrase, "hand" | "finger")
 }
 
 pub fn iou(a: &[f32; 4], b: &[f32; 4]) -> f32 {
@@ -157,12 +187,29 @@ impl Memory {
                         last_seen: now,
                         sightings: 1,
                         best_score: seen.score,
+                        touched_frames: 0,
+                        held_first: None,
+                        last_held: None,
                     });
                     self.next_id
                 }
             };
             matched.push(id);
             self.present.push(id);
+        }
+        let hands: Vec<[f32; 4]> =
+            scene.seen.iter().filter(|item| is_hand(&item.phrase)).map(|item| item.bbox).collect();
+        for thing in self.things.iter_mut() {
+            let here = thing.last_seen == now && !is_person(&thing.phrase);
+            if here && hands.iter().any(|hand| overlap_of_smaller(hand, &thing.bbox) >= TOUCH) {
+                thing.touched_frames += 1;
+                if thing.touched_frames >= HELD_AFTER_FRAMES {
+                    thing.held_first.get_or_insert(now);
+                    thing.last_held = Some(now);
+                }
+            } else if here || now.duration_since(thing.last_seen) >= GONE_AFTER {
+                thing.touched_frames = 0;
+            }
         }
         self.things
             .retain(|thing| now.duration_since(thing.last_seen) < FORGET_AFTER && (thing.sightings > 1 || now.duration_since(thing.last_seen) < Duration::from_secs(60)));
@@ -187,6 +234,41 @@ impl Memory {
         gone
     }
 
+    /// What is in a hand now, and what was and is not any more, newest first.
+    fn held(&self, scene: &Scene, now: Instant) -> Vec<String> {
+        let fresh = scene.at.is_some_and(|at| now.saturating_duration_since(at) <= Duration::from_secs(4));
+        let latest = scene.at;
+        let mut holding: Vec<&Thing> = self
+            .things
+            .iter()
+            .filter(|thing| thing.last_held.is_some_and(|at| now.saturating_duration_since(at) <= HELD_TOLD_FOR))
+            .collect();
+        holding.sort_by(|a, b| b.last_held.cmp(&a.last_held));
+        let (now_held, before): (Vec<&Thing>, Vec<&Thing>) =
+            holding.into_iter().partition(|thing| fresh && thing.last_held == latest);
+        let mut lines = Vec::new();
+        if !now_held.is_empty() {
+            let names: Vec<&str> = now_held.iter().map(|thing| thing.phrase.as_str()).collect();
+            lines.push(format!("En una mano ahora (IRIS): {}.", names.join(", ")));
+        }
+        let before: Vec<String> = before
+            .into_iter()
+            .take(6)
+            .map(|thing| {
+                let held_ago = ago(now.saturating_duration_since(thing.last_held.unwrap_or(now)));
+                let still = if fresh && Some(thing.last_seen) == latest { "sigue a la vista" } else { "ya no se ve" };
+                format!("{} (hasta hace {held_ago}; {still})", thing.phrase)
+            })
+            .collect();
+        if !before.is_empty() {
+            lines.push(format!(
+                "Estuvo en una mano y ya no (lo recuerda IRIS; no sabe de quién era la mano): {}.",
+                before.join(", ")
+            ));
+        }
+        lines
+    }
+
     /// The memory for the page: what is seen now, then what was, newest first.
     pub fn recall(&self, now: Instant) -> Vec<Recalled> {
         let present = self.present.iter().filter_map(|id| self.things.iter().find(|t| t.id == *id));
@@ -199,6 +281,8 @@ impl Memory {
                 present,
                 seen_for_s: thing.last_seen.duration_since(thing.first_seen).as_secs_f32(),
                 gone_for_s: if present { 0.0 } else { now.duration_since(thing.last_seen).as_secs_f32() },
+                in_hand: present && thing.last_held.is_some() && thing.last_held == Some(thing.last_seen),
+                held_ago_s: thing.last_held.map(|at| now.saturating_duration_since(at).as_secs_f32()),
             })
             .collect()
     }
@@ -256,6 +340,7 @@ impl Memory {
                 gone.join(", ")
             ));
         }
+        lines.extend(self.held(scene, now));
         lines.join("\n")
     }
 }
@@ -330,6 +415,45 @@ mod tests {
         let told = memory.describe(&scene, start + Duration::from_secs(20));
         assert!(told.contains("no manda imagen nueva desde hace 20 s"), "{told}");
         assert!(!told.contains("No se ve a ninguna persona"), "nothing is claimed about now: {told}");
+    }
+
+    #[test]
+    fn a_phone_put_down_is_told_as_held_until_a_moment_ago() {
+        let start = Instant::now();
+        let at = |second| start + Duration::from_secs(second);
+        let phone = ("cell phone", [120.0, 200.0, 160.0, 260.0], Some(vec![1.0, 0.0, 0.0]));
+        let hand = ("hand", [110.0, 220.0, 170.0, 280.0], None);
+        let mut memory = Memory::default();
+        for second in 0..3 {
+            memory.update(&frame(at(second), &[phone.clone(), hand.clone()]));
+        }
+        let told = memory.describe(&frame(at(2), &[phone.clone(), hand.clone()]), at(2));
+        assert!(told.contains("En una mano ahora (IRIS): cell phone."), "{told}");
+        // Put down on the table: still in view, no hand on it.
+        let on_table = ("cell phone", [20.0, 20.0, 60.0, 80.0], Some(vec![1.0, 0.0, 0.0]));
+        for second in 3..23 {
+            memory.update(&frame(at(second), &[on_table.clone()]));
+        }
+        let scene = frame(at(22), &[on_table.clone()]);
+        let told = memory.describe(&scene, at(22));
+        assert!(!told.contains("En una mano ahora"), "{told}");
+        assert!(told.contains("cell phone (hasta hace 20 s; sigue a la vista)"), "{told}");
+        let recalled = memory.recall(at(22));
+        assert!(!recalled[0].in_hand);
+        assert_eq!(recalled[0].held_ago_s, Some(20.0));
+    }
+
+    #[test]
+    fn a_hand_passing_over_a_thing_for_one_frame_does_not_hold_it() {
+        let start = Instant::now();
+        let cup = ("cup", [0.0, 0.0, 50.0, 50.0], None);
+        let mut memory = Memory::default();
+        memory.update(&frame(start, &[cup.clone(), ("hand", [10.0, 10.0, 40.0, 40.0], None)]));
+        for second in 1..4 {
+            memory.update(&frame(start + Duration::from_secs(second), &[cup.clone()]));
+        }
+        let scene = frame(start + Duration::from_secs(3), &[cup.clone()]);
+        assert!(!memory.describe(&scene, start + Duration::from_secs(3)).contains("mano"));
     }
 
     #[test]
