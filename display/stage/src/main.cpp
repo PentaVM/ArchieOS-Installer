@@ -41,6 +41,10 @@ int main(int argc, char *argv[])
                                            QStringLiteral("Cut instead of easing; no ripples."));
     const QCommandLineOption tier(QStringLiteral("tier"), QStringLiteral("normal, conserve or ultra."),
                                   QStringLiteral("tier"), QStringLiteral("normal"));
+    const QCommandLineOption seats(QStringLiteral("seats"),
+                                   QStringLiteral("exclusive: one seat, and a person's input takes the stage from the agent; "
+                                                  "shared: the agent has a pointer and keyboard of its own beside the person's"),
+                                   QStringLiteral("mode"), QStringLiteral("exclusive"));
     const QCommandLineOption tempo(QStringLiteral("tempo"),
                                    QStringLiteral("person, to be watched, or agent, four actions a second."),
                                    QStringLiteral("tempo"), QStringLiteral("person"));
@@ -69,7 +73,7 @@ int main(int argc, char *argv[])
                                        QStringLiteral("ms"));
     const QCommandLineOption quitAfter(QStringLiteral("quit-after-ms"), QStringLiteral("Exit after this long."),
                                        QStringLiteral("ms"));
-    parser.addOptions({socketName, control, keyFile, reducedMotion, tier, tempo, strokeSpeed, windowed, screen, width, height, grab, grabAfter,
+    parser.addOptions({socketName, control, keyFile, reducedMotion, tier, tempo, seats, strokeSpeed, windowed, screen, width, height, grab, grabAfter,
                        grabEvery, quitAfter});
     parser.process(app);
 
@@ -92,6 +96,11 @@ int main(int argc, char *argv[])
         }
     }
     options.reduced_motion = parser.isSet(reducedMotion);
+    if (parser.value(seats) == QLatin1String("shared")) {
+        options.shared_seats = true;
+    } else if (parser.value(seats) != QLatin1String("exclusive")) {
+        qWarning("archie-stage: --seats is exclusive or shared");
+    }
     if (parser.value(tempo) == QLatin1String("agent")) {
         // What IRIS needs to work an application: the same checks, the same cinematics,
         // on a clock that fits four actions in a second.
