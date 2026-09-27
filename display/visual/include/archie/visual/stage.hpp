@@ -450,9 +450,12 @@ enum class PlaybackState {
 /// for the steps due at each frame; motion is sampled at those frames.
 class Playback final {
 public:
+    /// `keyboard_focused`: the surface already has the keyboard. Keys and text then go at
+    /// once; focusing it again and waiting `focus_settle_ms` is only for a surface that is
+    /// about to get the focus. A game holding keys forty times a second paid 120 ms a key.
     [[nodiscard]] static Playback start(const StageCommand& command, const Surface& surface,
                                         PointF pointer_now, std::int64_t now_ms,
-                                        const PlaybackPolicy& policy);
+                                        const PlaybackPolicy& policy, bool keyboard_focused = false);
 
     /// Every step due by `now_ms` that has not been emitted yet, in order. While the
     /// pointer is travelling this includes one `Motion` step at the current position.

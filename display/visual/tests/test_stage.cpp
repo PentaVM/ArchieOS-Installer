@@ -458,6 +458,20 @@ void typing_and_chords_are_counted_not_carried() {
     const auto up = keys.cancel(two_down);
     CHECK(up.size() == 2 && up[0].index == 1 && up[1].index == 0);
 
+    // A key for a surface that already has the keyboard goes at once, with no refocus: a game
+    // holding keys many times a second must not wait to settle a focus it has.
+    StageCommand hold = click_on(table, 7, 0, 0);
+    hold.action = StageAction::KeyDown;
+    const Playback settled = Playback::start(hold, *table.find(7), PointF{}, T0, policy, true);
+    CHECK(settled.schedule().size() == 1);
+    CHECK(settled.schedule()[0].kind == StepKind::KeyPress && settled.schedule()[0].at_ms == T0);
+    const Playback cold = Playback::start(hold, *table.find(7), PointF{}, T0, policy);
+    CHECK(cold.schedule().size() == 2 && cold.schedule()[0].kind == StepKind::FocusSurface);
+    CHECK(cold.schedule()[1].at_ms == T0 + policy.focus_settle_ms);
+    const Playback warm_chord = Playback::start(chord, *table.find(7), PointF{}, T0, policy, true);
+    CHECK_BECAUSE(warm_chord.schedule()[0].kind == StepKind::KeyPress && warm_chord.schedule()[0].at_ms == T0,
+                  "a shortcut into the focused window does not wait either");
+
     StageCommand scroll = click_on(table, 7, 100, 100);
     scroll.action = StageAction::Scroll;
     scroll.scroll_steps_x = 1;
