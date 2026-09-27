@@ -458,7 +458,7 @@ mod tests {
     }
 
     fn scene(items: Vec<Seen>) -> Scene {
-        Scene { seen: items, width: 100, height: 100, frame: Arc::new(Vec::new()), at: Some(Instant::now()), step: None }
+        Scene { seen: items, width: 100, height: 100, frame: Arc::new(Vec::new()), at: Some(Instant::now()), observed_at_ms: Some(0), step: None }
     }
 
     #[test]
