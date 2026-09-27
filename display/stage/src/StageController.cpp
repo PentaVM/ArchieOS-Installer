@@ -816,9 +816,17 @@ void StageController::deliver(const InputStep &step)
     }
     case StepKind::Press:
         s->sendMousePressEvent(qt_button(step.button));
+        if (m_active->command.action == StageAction::ButtonDown) {
+            // Kept down after the command ends, and let go like a held key (see heldButton).
+            m_heldKeys.insert(heldButton(step.button), HeldKey{m_active->command.surface, m_commandSocket,
+                                                                monotonic() + kMaxKeyHoldMs});
+        }
         break;
     case StepKind::Release:
         s->sendMouseReleaseEvent(qt_button(step.button));
+        if (m_active->command.action == StageAction::ButtonUp) {
+            m_heldKeys.remove(heldButton(step.button));
+        }
         break;
     case StepKind::Wheel:
         if (step.wheel_y != 0) {
@@ -1219,17 +1227,33 @@ void StageController::tick()
     schedule(next);
 }
 
+int StageController::heldButton(archie::visual::PointerButton button)
+{
+    // Held mouse buttons share the held-key list, below every key code, so that everything
+    // that lets go of a held key (expiry, a takeover, a closed connection, focus leaving,
+    // shutdown) lets go of them too.
+    return -1 - static_cast<int>(button);
+}
+
+void StageController::letGo(int held)
+{
+    if (held < 0) {
+        if (QWaylandSeat *s = seat()) {
+            s->sendMouseReleaseEvent(qt_button(static_cast<archie::visual::PointerButton>(-1 - held)));
+        }
+    } else if (KeyTyper *keys = m_typer.get()) {
+        keys->key(held, false);
+    }
+}
+
 void StageController::releaseHeldKeys(const char *why, const QLocalSocket *owner)
 {
-    KeyTyper *keys = m_typer.get();
     for (auto it = m_heldKeys.begin(); it != m_heldKeys.end();) {
         if (owner && it->owner.data() != owner) {
             ++it;
             continue;
         }
-        if (keys) {
-            keys->key(it.key(), false);
-        }
+        letGo(it.key());
         qInfo("archie-stage: let go of a held key (%s)", why);
         it = m_heldKeys.erase(it);
     }
@@ -1238,12 +1262,9 @@ void StageController::releaseHeldKeys(const char *why, const QLocalSocket *owner
 std::optional<std::int64_t> StageController::expireHeldKeys(std::int64_t now)
 {
     std::optional<std::int64_t> next;
-    KeyTyper *keys = m_typer.get();
     for (auto it = m_heldKeys.begin(); it != m_heldKeys.end();) {
         if (now >= it->until_ms) {
-            if (keys) {
-                keys->key(it.key(), false);
-            }
+            letGo(it.key());
             qInfo("archie-stage: let go of a held key (hold_expired)");
             it = m_heldKeys.erase(it);
             continue;

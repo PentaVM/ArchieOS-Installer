@@ -415,6 +415,16 @@ pub enum StageAction {
     KeyUp {
         key: Key,
     },
+    /// Press one mouse button where the pointer is and keep it down until `ButtonUp`: a
+    /// game's "boost" or "jump" held on the mouse. Held and let go like a key: the
+    /// compositor lets it go after five seconds without it being pressed again, when a person
+    /// takes the stage, or when the connection that pressed it closes.
+    ButtonDown {
+        button: PointerButton,
+    },
+    ButtonUp {
+        button: PointerButton,
+    },
 }
 
 /// One point of a stroke, in the surface's own pixels.
@@ -526,7 +536,9 @@ impl StageAction {
             Self::Stroke { .. } | Self::Strokes { .. } => ActionKind::Stroke,
             Self::Focus => ActionKind::Focus,
             Self::Snapshot { .. } => ActionKind::Snapshot,
-            Self::KeyDown { .. } | Self::KeyUp { .. } => ActionKind::Hold,
+            Self::KeyDown { .. } | Self::KeyUp { .. } | Self::ButtonDown { .. } | Self::ButtonUp { .. } => {
+                ActionKind::Hold
+            }
         }
     }
 
@@ -552,6 +564,8 @@ impl StageAction {
             | Self::Key { .. }
             | Self::KeyDown { .. }
             | Self::KeyUp { .. }
+            | Self::ButtonDown { .. }
+            | Self::ButtonUp { .. }
             | Self::Focus
             | Self::Snapshot { .. } => Vec::new(),
         }

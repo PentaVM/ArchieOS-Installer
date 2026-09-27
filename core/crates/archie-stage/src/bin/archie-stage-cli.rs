@@ -12,6 +12,7 @@
 //!     click <x> <y> | double-click <x> <y> | move <x> <y> | drag <x> <y> <to_x> <to_y>
 //!     scroll <x> <y> <steps_y> | type <text> | key [ctrl+][shift+][alt+]<key> | focus
 //!     stroke <x,y> <x,y> [<x,y>...] | key-down <key> | key-up <key>
+//!     button-down left|right|middle | button-up left|right|middle
 //! ```
 //!
 //! Coordinates are surface-local. `--surface` picks a surface when an application has more
@@ -206,6 +207,20 @@ mod unix {
                     StageAction::KeyDown { key }
                 } else {
                     StageAction::KeyUp { key }
+                }
+            }
+            // `button-down right` ... `button-up right`: a mouse button kept down in between.
+            "button-down" | "button-up" => {
+                let button = match words.get(1).map(String::as_str) {
+                    Some("left") => PointerButton::Left,
+                    Some("right") => PointerButton::Right,
+                    Some("middle") => PointerButton::Middle,
+                    _ => return Err("button-down and button-up need left, right or middle".into()),
+                };
+                if verb == "button-down" {
+                    StageAction::ButtonDown { button }
+                } else {
+                    StageAction::ButtonUp { button }
                 }
             }
             // `stroke 10,10 80,10 80,60` — a line through those points, drawn in one
