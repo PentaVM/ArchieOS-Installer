@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! archie-stage-latency --socket <control.sock> --key-file <key> --policy <apps.toml>
-//!                      --app <app_id> [--count 40] [--out <sent.jsonl>]
+//!                      --app <app_id> [--count 40] [--out <sent.jsonl>] [--snapshot <end.png>]
 //! ```
 //!
 //! Each round holds a key down and lets it go (what a game's "drive forward" is), moves the
@@ -42,6 +42,7 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         Some(path) => Some(std::fs::File::create(&path).map_err(|e| format!("{path}: {e}"))?),
         None => None,
     };
+    let snapshot = take(&mut args, "--snapshot");
     let stream = UnixStream::connect(&socket).await.map_err(|e| format!("{socket}: {e}"))?;
     let (read, write) = stream.into_split();
     let mut seat = Seat {
@@ -91,6 +92,11 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
                                                    "executed": executed, "x": x, "y": y}));
             }
         }
+    }
+    // What the window shows at the end, for a check no log can give (what was typed where).
+    if let Some(path) = snapshot {
+        let window = seat.look().await?;
+        std::fs::write(&path, window.png()).map_err(|e| format!("{path}: {e}"))?;
     }
     let mut summary = serde_json::Map::new();
     for (kind, mut values) in times {
