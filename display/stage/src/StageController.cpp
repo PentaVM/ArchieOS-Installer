@@ -731,7 +731,8 @@ void StageController::handleLine(QLocalSocket *socket, const QByteArray &line)
     m_textRoute.reset();
     m_commandSocket = socket;
     m_capture.reset();
-    m_playback = Playback::start(m_active->command, *surface, m_pointer, now, m_playbackPolicy);
+    m_playback = Playback::start(m_active->command, *surface, m_pointer, now, m_playbackPolicy,
+                                 m_table.focused() == m_active->command.surface);
     m_director.command_started(m_active->command, *surface, *m_playback, now);
     tick();
 }

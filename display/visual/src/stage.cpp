@@ -500,7 +500,8 @@ PointF PointerTrajectory::at(std::int64_t now_ms) const noexcept {
 // ---------------------------------------------------------------------------------------
 
 Playback Playback::start(const StageCommand& command, const Surface& surface, PointF pointer_now,
-                         std::int64_t now_ms, const PlaybackPolicy& policy) {
+                         std::int64_t now_ms, const PlaybackPolicy& policy, bool keyboard_focused) {
+    const std::int64_t settle = keyboard_focused ? 0 : policy.focus_settle_ms;
     Playback playback;
     playback.m_command = command;
     playback.m_started_ms = now_ms;
@@ -630,21 +631,25 @@ Playback Playback::start(const StageCommand& command, const Surface& surface, Po
             break;
         }
         case StageAction::Text: {
-            step(now_ms, StepKind::FocusSurface, pointer_now, PointerButton::Left, 0);
+            if (!keyboard_focused) {
+                step(now_ms, StepKind::FocusSurface, pointer_now, PointerButton::Left, 0);
+            }
             std::int64_t at = now_ms;
             for (std::size_t i = 0; i < command.text_chars; ++i) {
-                at = now_ms + policy.focus_settle_ms + static_cast<std::int64_t>(i) * policy.key_interval_ms;
+                at = now_ms + settle + static_cast<std::int64_t>(i) * policy.key_interval_ms;
                 step(at, StepKind::TextUnit, pointer_now, PointerButton::Left, i);
             }
             end = at;
             break;
         }
         case StageAction::Key: {
-            step(now_ms, StepKind::FocusSurface, pointer_now, PointerButton::Left, 0);
+            if (!keyboard_focused) {
+                step(now_ms, StepKind::FocusSurface, pointer_now, PointerButton::Left, 0);
+            }
             const auto keys = static_cast<std::size_t>(std::max(0, command.key_count));
             std::int64_t at = now_ms;
             for (std::size_t i = 0; i < keys; ++i) {
-                at = now_ms + policy.focus_settle_ms + static_cast<std::int64_t>(i) * policy.key_interval_ms;
+                at = now_ms + settle + static_cast<std::int64_t>(i) * policy.key_interval_ms;
                 step(at, StepKind::KeyPress, pointer_now, PointerButton::Left, i);
             }
             at += policy.press_dwell_ms;
@@ -657,9 +662,11 @@ Playback Playback::start(const StageCommand& command, const Surface& surface, Po
             break;
         }
         case StageAction::KeyDown:
-            step(now_ms, StepKind::FocusSurface, pointer_now, PointerButton::Left, 0);
-            step(now_ms + policy.focus_settle_ms, StepKind::KeyPress, pointer_now, PointerButton::Left, 0);
-            end = now_ms + policy.focus_settle_ms;
+            if (!keyboard_focused) {
+                step(now_ms, StepKind::FocusSurface, pointer_now, PointerButton::Left, 0);
+            }
+            step(now_ms + settle, StepKind::KeyPress, pointer_now, PointerButton::Left, 0);
+            end = now_ms + settle;
             break;
         case StageAction::KeyUp:
             // Let go where it was pressed: no focus change, which could send the release to
