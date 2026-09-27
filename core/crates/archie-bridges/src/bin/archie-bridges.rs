@@ -4,11 +4,12 @@
 //! archie-bridges list
 //! archie-bridges guide <bridge>
 //! archie-bridges call <bridge> <tool> [<json arguments>] --workspace DIR [--program NAME=PATH]…
+//! archie-bridges run-job --workspace DIR --job ID [--program …] [--deliver-key FILE]
 //! archie-bridges index [--write FILE]
 //! archie-bridges new <id> [--root REPO]
 //! ```
 
-use archie_bridges::{index, open, Manifest, Programs, BUILTIN};
+use archie_bridges::{index, jobs, open, Manifest, Programs, BUILTIN};
 use serde_json::{Map, Value};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -18,6 +19,8 @@ const USAGE: &str = "usage:
   archie-bridges guide <bridge>               a bridge's SKILL.md
   archie-bridges call <bridge> <tool> [JSON] --workspace DIR [--program NAME=PATH]...
                                               run one tool; prints its answer, exit 1 if it failed
+  archie-bridges run-job --workspace DIR --job ID [--program ...] [--deliver-key FILE --deliver-to ADDR]
+                                              a long job a bridge started (run by the bridge, detached)
   archie-bridges index [--write FILE]         docs/bridges/INDEX.md, generated from the bridges
   archie-bridges new <id> [--root REPO]       the skeleton of a new bridge, per docs/BRIDGES.md";
 
@@ -52,6 +55,7 @@ fn run(args: Vec<String>) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         Some("call") => call(args.collect()),
+        Some("run-job") => run_job(args.collect()),
         Some("index") => {
             let page = index::render();
             match (args.next().as_deref(), args.next()) {
@@ -72,26 +76,55 @@ fn run(args: Vec<String>) -> Result<ExitCode, String> {
     }
 }
 
-fn call(args: Vec<String>) -> Result<ExitCode, String> {
-    let mut positional = Vec::new();
-    let mut workspace = None;
-    let mut programs = Programs::default();
+/// The flags `call` and `run-job` share: the workspace, programs and the desk.
+struct Setup {
+    positional: Vec<String>,
+    workspace: Option<PathBuf>,
+    job: Option<String>,
+    programs: Programs,
+}
+
+fn setup(args: Vec<String>) -> Result<Setup, String> {
+    let mut found = Setup {
+        positional: Vec::new(),
+        workspace: None,
+        job: None,
+        programs: Programs::default(),
+    };
+    let mut deliver_key = None;
+    let mut deliver_to: std::net::SocketAddr =
+        ([127, 0, 0, 1], archie_bridges::delivery::DEFAULT_PORT).into();
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
+        let mut value = |flag: &str| args.next().ok_or_else(|| format!("{flag} needs a value"));
         match arg.as_str() {
-            "--workspace" => {
-                workspace = Some(PathBuf::from(
-                    args.next().ok_or("--workspace needs a folder")?,
-                ))
-            }
+            "--workspace" => found.workspace = Some(PathBuf::from(value("--workspace")?)),
+            "--job" => found.job = Some(value("--job")?),
             "--program" => {
-                let pair = args.next().ok_or("--program needs NAME=PATH")?;
+                let pair = value("--program")?;
                 let (name, path) = pair.split_once('=').ok_or("--program is NAME=PATH")?;
-                programs.set(name, path);
+                found.programs.set(name, path);
             }
-            _ => positional.push(arg),
+            "--deliver-key" => deliver_key = Some(PathBuf::from(value("--deliver-key")?)),
+            "--deliver-to" => {
+                deliver_to = value("--deliver-to")?
+                    .parse()
+                    .map_err(|_| "--deliver-to is an address such as 127.0.0.1:7447")?
+            }
+            _ => found.positional.push(arg),
         }
     }
+    found.programs.delivery = deliver_key.map(|key| (key, deliver_to));
+    Ok(found)
+}
+
+fn call(args: Vec<String>) -> Result<ExitCode, String> {
+    let Setup {
+        positional,
+        workspace,
+        programs,
+        ..
+    } = setup(args)?;
     let [bridge, tool, rest @ ..] = positional.as_slice() else {
         return Err("call needs a bridge and a tool".into());
     };
@@ -119,6 +152,33 @@ fn call(args: Vec<String>) -> Result<ExitCode, String> {
     } else {
         ExitCode::SUCCESS
     })
+}
+
+/// A long job, started detached by a bridge's tool.
+fn run_job(args: Vec<String>) -> Result<ExitCode, String> {
+    let Setup {
+        workspace,
+        job,
+        programs,
+        ..
+    } = setup(args)?;
+    let folder = workspace.ok_or("run-job needs --workspace DIR")?;
+    let id = job.ok_or("run-job needs --job ID")?;
+    let workspace = archie_bridges::Workspace::open(&folder).map_err(|e| e.to_string())?;
+    let (mut runner, spec) = jobs::Runner::open(&workspace, &id).map_err(|e| e.to_string())?;
+    let bridge = open(&spec.bridge, &folder, &programs).map_err(|e| e.to_string())?;
+    eprintln!("archie-bridges: job {id} ({} {}) started", spec.bridge, spec.kind);
+    let result = bridge.run_job(&spec, &mut runner);
+    let cancelled = runner.cancelled();
+    let (state, error) = match result {
+        Ok(()) if cancelled => (jobs::State::Cancelled, None),
+        Ok(()) => (jobs::State::Done, None),
+        Err(why) => (jobs::State::Failed, Some(why)),
+    };
+    eprintln!("archie-bridges: job {id} ended: {state:?} {}", error.as_deref().unwrap_or(""));
+    let failed = state == jobs::State::Failed;
+    runner.finish(state, error).map_err(|e| e.to_string())?;
+    Ok(if failed { ExitCode::FAILURE } else { ExitCode::SUCCESS })
 }
 
 const MANIFEST_TEMPLATE: &str = r#"# The bridge's manifest. docs/BRIDGES.md explains every field.

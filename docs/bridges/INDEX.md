@@ -26,6 +26,7 @@ Use the tools for what they cover: they are exact and cheap. Operate the applica
 | Bridge | Application | What it does | Programs |
 |---|---|---|---|
 | [`kicad`](#kicad) | [KiCad](https://www.kicad.org) 10.x (kicad-cli since 7; pcb render since 9) | Read schematics and boards, run KiCad's ERC and DRC, set part fields, export fabrication files and render boards. | `kicad-cli` |
+| [`freecad`](#freecad) | [FreeCAD](https://www.freecad.org) 1.0 and 1.1 | Build parametric parts, make and sweep variants for hours, check solids and export STEP/IGES/STL/3MF for Fusion 360, SolidWorks, COMSOL or a printer, with pictures drawn without a display. | `freecadcmd`, `archie-bridges` |
 | [`video`](#video) | [MLT (Kdenlive, Shotcut)](https://www.mltframework.org) MLT 7.x | List and probe media, then render a timeline of cut clips, titles, music and fades to MP4, with a Kdenlive-openable project beside it. | `melt`, `ffprobe` |
 
 ### kicad
@@ -53,6 +54,29 @@ Read schematics and boards, run KiCad's ERC and DRC, set part fields, export fab
 | `kicad_export` | yes | Export manufacturing and documentation files |
 | `kicad_render` | yes | Render the board in 3D |
 | `kicad_version` | no | KiCad's version |
+
+### freecad
+
+Build parametric parts, make and sweep variants for hours, check solids and export STEP/IGES/STL/3MF for Fusion 360, SolidWorks, COMSOL or a printer, with pictures drawn without a display.
+
+- Works in: A folder of designs: .FCStd, STEP, IGES, meshes. New parts go to designs/, variants to variants/, sweeps to sweeps/.
+- Install on ArchieOS: `pacman -S freecad`
+- Install on Ubuntu: `add-apt-repository ppa:freecad-maintainers/freecad-stable && apt install freecad`
+- Install on Windows: `winget install FreeCAD.FreeCAD`
+- Through: [FreeCADCmd with its embedded Python (the script is a constant in the bridge)](https://wiki.freecad.org/Embedding_FreeCAD), [FCStd documents and spreadsheet aliases](https://wiki.freecad.org/Spreadsheet_Workbench)
+- GUI on the Stage (`org.freecad.FreeCAD`, `freecad`, `FreeCAD`): Sketching new profiles, picking particular edges or faces by eye, TechDraw drawings and assemblies: do those in FreeCAD's window on the Stage and check them with freecad_inspect and freecad_render.
+- Guide: [`bridges/freecad/SKILL.md`](../../bridges/freecad/SKILL.md)
+- End-to-end tests: `ARCHIE_BRIDGE_E2E=freecad cargo test -p archie-bridges --test freecad_e2e`
+
+| Tool | Changes files | What it does |
+|---|---|---|
+| `freecad_documents` | no | CAD files |
+| `freecad_inspect` | no | What a design holds |
+| `freecad_build` | yes | Build a part |
+| `freecad_set_parameters` | yes | Make a variant |
+| `freecad_export` | yes | Export for other CAD software |
+| `freecad_render` | yes | Picture of a design |
+| `freecad_sweep` | yes | Try many variants, for hours |
 
 ### video
 

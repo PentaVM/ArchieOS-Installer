@@ -201,7 +201,7 @@ async fn read_line<R: AsyncBufRead + Unpin>(
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
-    let config = match parse(std::env::args().skip(1).collect()) {
+    let mut config = match parse(std::env::args().skip(1).collect()) {
         Ok(Some(config)) => config,
         Ok(None) => {
             println!("{USAGE}");
@@ -241,6 +241,8 @@ async fn main() -> ExitCode {
         None => StatePaths::from_env(),
     };
     let mut toolbox = ArchieToolbox::new(paths, config.stage_socket.clone(), operator);
+    // A long job a bridge starts delivers to the same desk as this server.
+    config.programs.delivery = config.deliver_key.clone().map(|key| (key, config.deliver_to));
     for (id, dir) in &config.bridges {
         let bridge = match archie_bridges::open(id, dir, &config.programs) {
             Ok(bridge) => bridge,

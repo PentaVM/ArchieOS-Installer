@@ -34,9 +34,12 @@
 #![forbid(unsafe_code)]
 
 pub mod delivery;
+pub mod freecad;
 pub mod index;
+pub mod jobs;
 pub mod kicad;
 pub mod manifest;
+pub mod preview;
 pub mod run;
 pub mod script;
 pub mod sexpr;
@@ -128,23 +131,68 @@ pub trait Bridge: Send + Sync {
 
     /// Runs a tool the caller has checked is one of [`Bridge::tools`].
     fn call(&self, tool: &str, arguments: &Map<String, Value>) -> Outcome;
+
+    /// Runs a long job one of its tools started, inside `archie-bridges run-job`.
+    fn run_job(&self, spec: &jobs::Spec, _runner: &mut jobs::Runner) -> Result<(), String> {
+        Err(format!("the {} bridge runs no {} jobs", self.manifest().id, spec.kind))
+    }
 }
 
-/// Where each program a bridge runs is, by the name its manifest gives it. A program
-/// not named here is looked up on `PATH`.
+/// Where each program a bridge runs is, by the name its manifest gives it, and where a
+/// long job delivers. A program not named here is looked up beside this executable, then
+/// on `PATH`.
 #[derive(Debug, Clone, Default)]
-pub struct Programs(BTreeMap<String, PathBuf>);
+pub struct Programs {
+    paths: BTreeMap<String, PathBuf>,
+    /// The desk a long job delivers its stages to: the key file and the tunnel's address.
+    pub delivery: Option<(PathBuf, std::net::SocketAddr)>,
+}
 
 impl Programs {
     pub fn set(&mut self, name: impl Into<String>, path: impl Into<PathBuf>) {
-        self.0.insert(name.into(), path.into());
+        self.paths.insert(name.into(), path.into());
     }
 
     pub fn get(&self, name: &str) -> PathBuf {
-        self.0
-            .get(name)
-            .cloned()
-            .unwrap_or_else(|| PathBuf::from(name))
+        if let Some(path) = self.paths.get(name) {
+            return path.clone();
+        }
+        // Archie's own programs are installed together.
+        if name.starts_with("archie-") {
+            let beside = std::env::current_exe()
+                .ok()
+                .and_then(|exe| exe.parent().map(|dir| dir.join(name)))
+                .map(|p| if cfg!(windows) { p.with_extension("exe") } else { p });
+            if let Some(beside) = beside.filter(|p| p.is_file()) {
+                return beside;
+            }
+        }
+        PathBuf::from(name)
+    }
+
+    /// The same settings as `archie-bridges` flags, for a job process.
+    pub fn as_args(&self) -> Vec<std::ffi::OsString> {
+        let mut args = Vec::new();
+        for (name, path) in &self.paths {
+            args.push("--program".into());
+            let mut pair = std::ffi::OsString::from(format!("{name}="));
+            pair.push(path);
+            args.push(pair);
+        }
+        if let Some((key, desk)) = &self.delivery {
+            args.push("--deliver-key".into());
+            args.push(key.clone().into_os_string());
+            args.push("--deliver-to".into());
+            args.push(desk.to_string().into());
+        }
+        args
+    }
+
+    /// The deliverer a job uses, when delivery is set up.
+    pub fn deliverer(&self) -> Option<Result<delivery::Deliverer, delivery::DeliveryError>> {
+        self.delivery.as_ref().map(|(key, desk)| {
+            delivery::DeliveryKey::load(key).and_then(|key| delivery::Deliverer::new(*desk, key))
+        })
     }
 }
 
@@ -164,6 +212,14 @@ pub const BUILTIN: &[Builtin] = &[
         guide: kicad::GUIDE,
         open: |manifest, workspace, programs| {
             Box::new(kicad::Kicad::new(manifest, workspace, programs))
+        },
+    },
+    Builtin {
+        id: "freecad",
+        manifest: freecad::MANIFEST,
+        guide: freecad::GUIDE,
+        open: |manifest, workspace, programs| {
+            Box::new(freecad::Freecad::new(manifest, workspace, programs))
         },
     },
     Builtin {

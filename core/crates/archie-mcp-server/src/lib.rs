@@ -38,6 +38,7 @@
 
 pub mod archie;
 pub mod delivery;
+pub mod jobs;
 pub mod server;
 pub mod toolbox;
 

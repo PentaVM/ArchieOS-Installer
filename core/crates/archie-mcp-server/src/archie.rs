@@ -488,6 +488,9 @@ impl Toolbox for ArchieToolbox {
         if self.deliverer.is_some() && !self.bridges.is_empty() {
             tools.extend(crate::delivery::specs());
         }
+        if !self.bridges.is_empty() {
+            tools.extend(crate::jobs::specs());
+        }
         for bridge in &self.bridges {
             tools.extend(bridge.tools().into_iter().map(|tool| ToolSpec {
                 name: tool.name,
@@ -536,6 +539,9 @@ impl Toolbox for ArchieToolbox {
             })
             .await
             .unwrap_or_else(|_| ToolOutcome::error("the delivery stopped unexpectedly"));
+        }
+        if crate::jobs::NAMES.contains(&name) {
+            return crate::jobs::call(&self.bridges, name, &arguments);
         }
         match name {
             #[cfg(unix)]

@@ -111,6 +111,7 @@ dependencies = [
  "archie-types",
  "base64",
  "hex",
+ "png",
  "ring",
  "serde",
  "serde_json",
