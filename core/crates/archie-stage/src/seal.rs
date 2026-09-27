@@ -133,6 +133,12 @@ pub enum WireAction {
     KeyUp {
         key: Key,
     },
+    ButtonDown {
+        button: PointerButton,
+    },
+    ButtonUp {
+        button: PointerButton,
+    },
 }
 
 impl From<&StageAction> for WireAction {
@@ -192,6 +198,8 @@ impl From<&StageAction> for WireAction {
             },
             StageAction::KeyDown { key } => Self::KeyDown { key: *key },
             StageAction::KeyUp { key } => Self::KeyUp { key: *key },
+            StageAction::ButtonDown { button } => Self::ButtonDown { button: *button },
+            StageAction::ButtonUp { button } => Self::ButtonUp { button: *button },
         }
     }
 }
@@ -242,7 +250,7 @@ impl WireAction {
             }
             Self::Focus => true,
             // One key; a key alone is never one of the system's chords.
-            Self::KeyDown { .. } | Self::KeyUp { .. } => true,
+            Self::KeyDown { .. } | Self::KeyUp { .. } | Self::ButtonDown { .. } | Self::ButtonUp { .. } => true,
             // A part of a window is two corners of it, and it has to be a real rectangle
             // before it is sealed: the compositor checks it again against the live window.
             Self::Snapshot { region: None } => true,

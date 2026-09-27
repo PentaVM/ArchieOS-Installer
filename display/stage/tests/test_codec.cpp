@@ -223,6 +223,17 @@ void a_held_key_is_one_key() {
                   "a held chord is several holds, not one command with modifiers");
     CHECK(decoded(R"({"kind":"key_down","key":"Enter"})").error == QStringLiteral("command_malformed"));
     CHECK(decoded(R"({"kind":"key_up"})").error == QStringLiteral("command_malformed"));
+    // A held mouse button: one button, nothing else.
+    const auto boost = decoded(R"({"kind":"button_down","button":"left"})");
+    CHECK(boost.command.has_value());
+    if (boost.command) {
+        CHECK(boost.command->command.action == StageAction::ButtonDown);
+        CHECK(boost.command->command.button == PointerButton::Left);
+    }
+    const auto jumped = decoded(R"({"kind":"button_up","button":"right"})");
+    CHECK(jumped.command.has_value() && jumped.command->command.action == StageAction::ButtonUp);
+    CHECK(decoded(R"({"kind":"button_down","button":"left","x":3})").error == QStringLiteral("command_malformed"));
+    CHECK(decoded(R"({"kind":"button_down"})").error == QStringLiteral("command_malformed"));
 }
 
 }  // namespace

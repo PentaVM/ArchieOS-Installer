@@ -337,6 +337,14 @@ DecodeResult decode_command(const QByteArray& raw_line, const QByteArray& key, s
         decoded.keys.append(*key_code);
         c.action = kind == QLatin1String("key_down") ? StageAction::KeyDown : StageAction::KeyUp;
         c.key_count = 1;
+    } else if (kind == QLatin1String("button_down") || kind == QLatin1String("button_up")) {
+        // One mouse button, pressed where the pointer is and kept down, or let go.
+        const auto pressed = button(action.value(QLatin1String("button")));
+        if (!exact_keys(action, {"kind", "button"}) || !pressed) {
+            return fail("command_malformed");
+        }
+        c.action = kind == QLatin1String("button_down") ? StageAction::ButtonDown : StageAction::ButtonUp;
+        c.button = *pressed;
     } else if (kind == QLatin1String("stroke")) {
         // A line: where the button goes down, every point it is dragged through, and where
         // it comes up. The stage re-checks every one of them against the window.

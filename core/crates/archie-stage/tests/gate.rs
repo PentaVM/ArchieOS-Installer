@@ -715,6 +715,17 @@ approval_keys = ["enter"]
     })
     .allowed()
     .is_some());
+    // A game's boost held on the mouse is a hold too.
+    assert!(judge(StageAction::ButtonDown {
+        button: PointerButton::Right
+    })
+    .allowed()
+    .is_some());
+    assert!(judge(StageAction::ButtonUp {
+        button: PointerButton::Right
+    })
+    .allowed()
+    .is_some());
     // Holding Enter is still pressing Enter.
     assert!(matches!(
         judge(StageAction::KeyDown {
@@ -739,5 +750,24 @@ fn a_held_key_goes_on_the_wire_as_the_compositor_reads_it() {
     assert_eq!(
         serde_json::to_value(&up).unwrap(),
         serde_json::json!({"kind": "key_up", "key": "arrow_left"})
+    );
+}
+
+
+#[test]
+fn a_held_mouse_button_goes_on_the_wire_as_the_compositor_reads_it() {
+    let down = archie_stage::WireAction::from(&StageAction::ButtonDown {
+        button: PointerButton::Left,
+    });
+    assert_eq!(
+        serde_json::to_value(&down).unwrap(),
+        serde_json::json!({"kind": "button_down", "button": "left"})
+    );
+    let up = archie_stage::WireAction::from(&StageAction::ButtonUp {
+        button: PointerButton::Right,
+    });
+    assert_eq!(
+        serde_json::to_value(&up).unwrap(),
+        serde_json::json!({"kind": "button_up", "button": "right"})
     );
 }

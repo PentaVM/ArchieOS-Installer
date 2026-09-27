@@ -181,6 +181,10 @@ private:
     void noteAuthority(archie::visual::AuthorityMode before);
     /// Lets go of keys a KeyDown left pressed: all of them, or those one connection pressed.
     void releaseHeldKeys(const char *why, const QLocalSocket *owner = nullptr);
+    /// The held-list code of a mouse button kept down by ButtonDown (negative: below every key).
+    static int heldButton(archie::visual::PointerButton button);
+    /// Lets go of one held key or mouse button.
+    void letGo(int held);
     /// Lets go of held keys whose time is up. Returns when the next one is due.
     std::optional<std::int64_t> expireHeldKeys(std::int64_t now);
     void tick();

@@ -286,6 +286,10 @@ std::optional<CommandRefusal> check_command(const StageCommand& command,
                 return CommandRefusal::ChordOutOfBounds;
             }
             break;
+        case StageAction::ButtonDown:
+        case StageAction::ButtonUp:
+            // Where the pointer already is: nothing to check against the surface.
+            break;
         case StageAction::KeyDown:
         case StageAction::KeyUp:
             // One key at a time: a held chord is several holds, each let go on its own.
@@ -672,6 +676,14 @@ Playback Playback::start(const StageCommand& command, const Surface& surface, Po
             // Let go where it was pressed: no focus change, which could send the release to
             // another window and leave the key down in the first.
             step(now_ms, StepKind::KeyRelease, pointer_now, PointerButton::Left, 0);
+            end = now_ms;
+            break;
+        case StageAction::ButtonDown:
+            step(now_ms, StepKind::Press, pointer_now, command.button, 0);
+            end = now_ms;
+            break;
+        case StageAction::ButtonUp:
+            step(now_ms, StepKind::Release, pointer_now, command.button, 0);
             end = now_ms;
             break;
         case StageAction::Focus:

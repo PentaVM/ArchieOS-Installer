@@ -35,6 +35,8 @@ constexpr std::size_t kMaxRememberedPresses = 32;
         case StageAction::Key:
         case StageAction::KeyDown:
         case StageAction::KeyUp:
+        case StageAction::ButtonDown:
+        case StageAction::ButtonUp:
             return CaptionVerb::PressingKeys;
         case StageAction::Focus:
             return CaptionVerb::Focusing;

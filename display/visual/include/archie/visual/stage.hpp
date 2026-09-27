@@ -217,6 +217,10 @@ enum class StageAction {
     /// connection that pressed it closes. A held key is never left behind.
     KeyDown,
     KeyUp,
+    /// A mouse button pressed where the pointer is and kept down (a game's "boost"), and let
+    /// go: held, renewed and let go by the stage exactly like a key held by `KeyDown`.
+    ButtonDown,
+    ButtonUp,
 };
 
 /// One point of a stroke, in a surface's own logical pixels.

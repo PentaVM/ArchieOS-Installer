@@ -352,7 +352,9 @@ impl StageGate {
             | StageAction::Focus
             | StageAction::Snapshot { .. }
             | StageAction::KeyDown { .. }
-            | StageAction::KeyUp { .. } => {}
+            | StageAction::KeyUp { .. }
+            | StageAction::ButtonDown { .. }
+            | StageAction::ButtonUp { .. } => {}
         }
         if app.requires_approval.contains(&kind) {
             approval = Some("policy requires approval for this action");
