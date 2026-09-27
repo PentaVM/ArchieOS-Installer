@@ -20,6 +20,7 @@ use archie_speech::{
     ConversationalFloorState, InterruptionDirection, OverlapState, Probability, SilenceScope,
     Speaker,
 };
+use crate::addressee::AddresseeCues;
 use std::time::Duration;
 
 /// How long after Archie finished speaking a reply needs no name to be addressed to it.
@@ -149,17 +150,20 @@ pub fn after_utterance_within(
     since_archie_spoke: Option<Duration>,
     follow_up: Duration,
 ) -> ConversationalFloorState {
-    let mut evidence = Vec::new();
-    let named = names_archie(&heard.text);
+    after_utterance_with(heard, since_archie_spoke, follow_up, &AddresseeCues::default())
+}
+
+/// As [`after_utterance_within`], with what is known around the words: who else is there,
+/// where the speaker looked, whether someone else answered. See [`crate::addressee`].
+pub fn after_utterance_with(
+    heard: &Utterance,
+    since_archie_spoke: Option<Duration>,
+    follow_up: Duration,
+    cues: &AddresseeCues,
+) -> ConversationalFloorState {
     let replying = since_archie_spoke.is_some_and(|since| since <= follow_up);
-    let addressed = named || replying;
-    if named {
-        evidence.push("the utterance names Archie".to_string());
-    } else if replying {
-        evidence.push("it came right after Archie spoke".to_string());
-    } else {
-        evidence.push("it neither names Archie nor answers it".to_string());
-    }
+    let addressee = crate::addressee::estimate(&heard.text, replying, cues);
+    let mut evidence = addressee.evidence;
 
     let acknowledgement = is_acknowledgement(&heard.text);
     if acknowledgement {
@@ -202,7 +206,7 @@ pub fn after_utterance_within(
         silence_scope: scope,
         silence_ms: heard.silence_ms,
         interruption_utility: Probability::ZERO,
-        response_utility: Probability::new(if addressed { 0.9 } else { 0.1 }),
+        response_utility: Probability::new(addressee.probability),
         urgency: Probability::new(0.2),
         context_sufficiency: Probability::new(if heard.text.trim().is_empty() {
             0.0
