@@ -45,10 +45,10 @@ headless. Pictures come back as images you can look at.
 Example, a plate with a hole:
 
 ```json
-{"name": "plate", "parameters": {"w": 80, "d": 40, "t": 5, "hole": 8},
+{"name": "plate", "parameters": {"width": 80, "depth": 40, "thickness": 5, "hole": 8},
  "parts": [
-   {"name": "Plate", "kind": "box", "length": "w", "width": "d", "height": "t"},
-   {"name": "Hole", "kind": "cylinder", "radius": "hole/2", "height": "t*3", "at": ["w/2", "d/2", "-t"]},
+   {"name": "Plate", "kind": "box", "length": "width", "width": "depth", "height": "thickness"},
+   {"name": "Hole", "kind": "cylinder", "radius": "hole/2", "height": "thickness*3", "at": ["width/2", "depth/2", "-thickness"]},
    {"name": "Bracket", "kind": "cut", "base": "Plate", "tools": ["Hole"]}]}
 ```
 
@@ -94,6 +94,8 @@ or `right`. Look before describing a shape, and after every change.
 
 ## Traps
 
+- Give parameters descriptive names. FreeCAD reserves unit symbols as names (`t` is tonnes,
+  `h` hours, `d` days, and also `m`, `s`, `g`, `N`, `W`…) and cell names such as `A1`.
 - Expressions refer to parameters by their names in `Params`. A name the spreadsheet does
   not have makes the recompute fail. The error says which expression failed.
 - A fillet radius too large for an edge fails the whole fillet. Try a smaller one, or list

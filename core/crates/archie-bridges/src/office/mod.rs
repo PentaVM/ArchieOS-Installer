@@ -485,10 +485,24 @@ fn listing(dir: &Path) -> Vec<PathBuf> {
         .unwrap_or_default()
 }
 
-/// The text of one slide: what follows `<draw:page ` up to its end.
+/// The text of one slide: what follows `<draw:page ` up to its end, without the base64 of
+/// its embedded pictures.
 fn slide_text(page: &str) -> String {
     let inside = page.split_once('>').map(|(_, rest)| rest).unwrap_or("");
-    strip_tags(inside.split("</draw:page>").next().unwrap_or(""))
+    let mut slide = inside
+        .split("</draw:page>")
+        .next()
+        .unwrap_or("")
+        .to_string();
+    while let Some(start) = slide.find("<office:binary-data>") {
+        match slide[start..].find("</office:binary-data>") {
+            Some(end) => {
+                slide.replace_range(start..start + end + "</office:binary-data>".len(), "")
+            }
+            None => slide.truncate(start),
+        }
+    }
+    strip_tags(&slide)
 }
 
 /// The text of an XML fragment: paragraphs on their own lines, tags gone, entities read.
@@ -672,7 +686,7 @@ mod tests {
 
     #[test]
     fn slides_read_as_text() {
-        let xml = "<draw:page a=\"1\"><draw:frame><text:p>Title &amp; more</text:p></draw:frame><text:p>point</text:p></draw:page>";
+        let xml = "<draw:page a=\"1\"><draw:frame><text:p>Title &amp; more</text:p></draw:frame><text:p>point</text:p><draw:frame><draw:image><office:binary-data>iVBORw0KGgo=</office:binary-data></draw:image></draw:frame></draw:page>";
         assert_eq!(
             slide_text(xml.split("<draw:page ").nth(1).unwrap()),
             "Title & more\npoint"

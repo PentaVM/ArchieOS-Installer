@@ -19,7 +19,7 @@ doc = "https://developer.gimp.org/resource/writing-a-plug-in/"
 
 [install]
 arch = "pacman -S gimp"
-ubuntu = "flatpak install flathub org.gimp.GIMP"
+ubuntu = "GIMP 3 AppImage from gimp.org, extracted (Ubuntu 24.04 ships 2.10); --program gimp-console=<a copy of its AppRun that execs usr/bin/gimp-console-3.0>"
 windows = "winget install GIMP.GIMP.3"
 
 [vision]

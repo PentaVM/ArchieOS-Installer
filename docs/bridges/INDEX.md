@@ -35,7 +35,7 @@ Use the tools for what they cover: they are exact and cheap. Operate the applica
 | [`office`](#office) | [LibreOffice](https://www.libreoffice.org) 7.6 to 25.x | Write well-set documents, spreadsheets and decks as DOCX, XLSX, PPTX or PDF; read, convert and picture existing ones, Word and Excel files included. | `soffice` |
 | [`inkscape`](#inkscape) | [Inkscape](https://inkscape.org) 1.3 and 1.4 | Write and edit vector drawings, and export them as PDF, EPS, EMF, DXF or PNG for Illustrator, CorelDRAW, print shops and laser cutters. | `inkscape` |
 | [`gimp`](#gimp) | [GIMP](https://www.gimp.org) 3.0 and 3.2 | Inspect layered images, retouch them (resize, crop, levels, colour, sharpen, text) and export PSD for Photoshop, TIFF for print, or PNG, JPEG and WebP. | `gimp-console` |
-| [`qgis`](#qgis) | [QGIS](https://qgis.org) 3.34 LTR to 3.44 | Read GIS layers, run any of QGIS's native, GDAL and PDAL processing algorithms, convert to Shapefile, KML, GeoPackage or GeoTIFF for ArcGIS or Google Earth, and draw maps. | `qgis_process`, `gdalinfo`, `ogrinfo`, `gdal_translate` |
+| [`qgis`](#qgis) | [QGIS](https://qgis.org) 3.34 LTR to 3.44 | Read GIS layers, run any of QGIS's native, GDAL and PDAL processing algorithms, convert to Shapefile, KML, GeoPackage or GeoTIFF for ArcGIS or Google Earth, and draw maps. | `qgis_process`, `gdalinfo`, `ogrinfo`, `ogr2ogr`, `gdalwarp`, `gdal_translate` |
 | [`video`](#video) | [MLT (Kdenlive, Shotcut)](https://www.mltframework.org) MLT 7.x | List and probe media, then render a timeline of cut clips, titles, music and fades to MP4, with a Kdenlive-openable project beside it. | `melt`, `ffprobe` |
 | [`audio`](#audio) | [FFmpeg (Audacity for the GUI)](https://ffmpeg.org) FFmpeg 6 and 7 | Measure loudness, denoise, trim, fade, level to a LUFS target, mix tracks and convert recordings, with waveform pictures; WAV and FLAC for Audition, Pro Tools or Audacity. | `ffmpeg`, `ffprobe` |
 | [`obs`](#obs) | [OBS Studio](https://obsproject.com) 30 and 31 (obs-websocket 5.3 and later) | Read and switch scenes, add and update text and picture overlays, record into the workspace and see what is on air; going live stays a click of the person's. | `obs-websocket`, `obs-password` |
@@ -184,7 +184,7 @@ Read GIS layers, run any of QGIS's native, GDAL and PDAL processing algorithms, 
 - Install on ArchieOS: `pacman -S qgis gdal`
 - Install on Ubuntu: `apt install qgis qgis-plugin-grass gdal-bin`
 - Install on Windows: `winget install OSGeo.QGIS`
-- Through: [qgis_process --no-python (processing framework, JSON in and out)](https://docs.qgis.org/latest/en/docs/user_manual/processing/standalone.html), [GDAL gdalinfo, ogrinfo, gdal_translate](https://gdal.org/programs/index.html)
+- Through: [qgis_process --no-python (processing framework, JSON in and out)](https://docs.qgis.org/latest/en/docs/user_manual/processing/standalone.html), [GDAL gdalinfo, ogrinfo, ogr2ogr, gdalwarp, gdal_translate](https://gdal.org/programs/index.html)
 - GUI on the Stage (`org.qgis.qgis`, `qgis`): Styling, labelling and print layouts: open the project in QGIS on the Stage; check the data with qgis_info and the look with qgis_map.
 - Guide: [`bridges/qgis/SKILL.md`](../../bridges/qgis/SKILL.md)
 - End-to-end tests: `ARCHIE_BRIDGE_E2E=qgis cargo test -p archie-bridges --test qgis_e2e`

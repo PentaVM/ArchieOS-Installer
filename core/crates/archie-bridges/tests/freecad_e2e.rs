@@ -21,10 +21,10 @@ fn a_plate_is_built_varied_exported_and_pictured() {
     let built = call(
         bridge,
         "freecad_build",
-        json!({"name": "plate", "parameters": {"w": 80, "d": 40, "t": 5, "hole": 8},
+        json!({"name": "plate", "parameters": {"width": 80, "depth": 40, "thickness": 5, "hole": 8},
                "parts": [
-                   {"name": "Plate", "kind": "box", "length": "w", "width": "d", "height": "t"},
-                   {"name": "Hole", "kind": "cylinder", "radius": "hole/2", "height": "t*3", "at": ["w/2", "d/2", "-t"]},
+                   {"name": "Plate", "kind": "box", "length": "width", "width": "depth", "height": "thickness"},
+                   {"name": "Hole", "kind": "cylinder", "radius": "hole/2", "height": "thickness*3", "at": ["width/2", "depth/2", "-thickness"]},
                    {"name": "Bracket", "kind": "cut", "base": "Plate", "tools": ["Hole"]},
                    {"name": "Soft", "kind": "fillet", "base": "Bracket", "radius": 1, "edges": [1, 2, 3, 4]}]}),
     );
@@ -39,12 +39,12 @@ fn a_plate_is_built_varied_exported_and_pictured() {
     assert!(dir.join(built["preview"].as_str().unwrap()).is_file());
 
     let inspected = call(bridge, "freecad_inspect", json!({"file": file}));
-    assert_eq!(inspected["parameters"]["t"]["value"], 5.0);
+    assert_eq!(inspected["parameters"]["thickness"]["value"], 5.0);
 
     let thicker = call(
         bridge,
         "freecad_set_parameters",
-        json!({"file": file, "parameters": {"t": 8}}),
+        json!({"file": file, "parameters": {"thickness": 8}}),
     );
     assert!(thicker["volume_mm3"].as_f64().unwrap() > volume * 1.5);
 

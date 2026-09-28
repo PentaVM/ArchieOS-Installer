@@ -5,6 +5,8 @@
 //! parameter list first, then resolves every input layer inside the workspace and sends
 //! every output into a fresh folder, so a parameter cannot read or write elsewhere.
 
+pub mod map;
+
 use crate::manifest::Manifest;
 use crate::run::Run;
 use crate::workspace::Workspace;
@@ -14,8 +16,8 @@ use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-pub const MANIFEST: &str = include_str!("../../../../bridges/qgis/bridge.toml");
-pub const GUIDE: &str = include_str!("../../../../bridges/qgis/SKILL.md");
+pub const MANIFEST: &str = include_str!("../../../../../bridges/qgis/bridge.toml");
+pub const GUIDE: &str = include_str!("../../../../../bridges/qgis/SKILL.md");
 
 const LIMIT: Duration = Duration::from_secs(3600);
 const READS: [&str; 16] = [
@@ -32,7 +34,8 @@ const REFUSED: [&str; 6] = [
     "httprequest",
     "oracle",
 ];
-const INPUT_TYPES: [&str; 8] = [
+const INPUT_TYPES: [&str; 9] = [
+    "layer",
     "source",
     "vector",
     "raster",
@@ -297,7 +300,7 @@ impl Qgis {
                     "{id} has no parameter {name}; qgis_algorithm_help lists them"
                 ));
             };
-            let kind = parameter["type"].as_str().unwrap_or("");
+            let kind = kind(parameter);
             let value = if INPUT_TYPES.contains(&kind) {
                 match value {
                     Value::String(layer) => json!(self.layer(layer)?),
@@ -314,7 +317,7 @@ impl Qgis {
                     ),
                     _ => return Err(format!("{name} is a layer path in the workspace")),
                 }
-            } else if OUTPUT_TYPES.contains(&kind) {
+            } else if is_output(parameter) {
                 let file = value
                     .as_str()
                     .ok_or_else(|| format!("{name} is an output file name"))?;
@@ -327,6 +330,11 @@ impl Qgis {
             } else {
                 match value {
                     Value::Object(_) => return Err(format!("{name} takes a plain value")),
+                    Value::String(text) if looks_like_a_path(text) => {
+                        return Err(format!(
+                            "{name} is not a layer or output parameter; a path there is refused"
+                        ))
+                    }
                     other => other.clone(),
                 }
             };
@@ -335,8 +343,8 @@ impl Qgis {
         // Outputs the planner did not name still go to the folder, never to a temporary
         // place outside the workspace.
         for (name, parameter) in &declared {
-            let kind = parameter["type"].as_str().unwrap_or("");
-            if OUTPUT_TYPES.contains(&kind)
+            let kind = kind(parameter);
+            if is_output(parameter)
                 && !resolved.contains_key(name)
                 && parameter["optional"] != json!(true)
             {
@@ -471,47 +479,163 @@ impl Qgis {
             .get("width")
             .and_then(Value::as_u64)
             .unwrap_or(1600)
-            .clamp(200, 6000) as f64;
-        let mut inputs = Map::new();
-        inputs.insert("LAYERS".into(), json!(layers));
-        inputs.insert("EXTENT".into(), json!(extent));
-        inputs.insert(
-            "MAP_UNITS_PER_PIXEL".into(),
-            json!((numbers[1] - numbers[0]) / width),
-        );
-        inputs.insert("TILE_SIZE".into(), json!(1024));
-        inputs.insert("MAKE_BACKGROUND_TRANSPARENT".into(), json!(false));
-        inputs.insert("OUTPUT".into(), json!("map.tif"));
-        let (_, folder) = match self.run_algorithm("native:rasterize", &inputs) {
-            Ok(done) => done,
-            Err(why) => return Outcome::error(why),
+            .clamp(200, 4000) as u32;
+        let aspect = (numbers[3] - numbers[2]) / (numbers[1] - numbers[0]);
+        let height = ((width as f64 * aspect).round() as u32).clamp(100, 4000);
+        let crs: Option<String> = extent
+            .split_once('[')
+            .map(|(_, rest)| rest.trim_end_matches(']').trim().to_string())
+            .filter(|c| !c.is_empty());
+        let folder = match self.workspace.fresh_folder("maps", "map") {
+            Ok(folder) => folder,
+            Err(e) => return Outcome::error(e.to_string()),
         };
-        let tif = folder.join("map.tif");
-        let png = folder.join("map.png");
-        let converted = Run::new(self.programs.get("gdal_translate"))
-            .args(["-of", "PNG", "-q"])
-            .arg(&tif)
-            .arg(&png)
-            .limit(Duration::from_secs(300))
-            .run();
-        let answer = json!({"folder": self.workspace.relative(&folder), "geotiff": self.workspace.relative(&tif)});
-        match (converted, std::fs::read(&png)) {
-            (Ok(ran), Ok(bytes)) if ran.success() => {
-                let mut answer = answer;
-                answer["image"] = json!(self.workspace.relative(&png));
-                let outcome = Outcome::json(&answer);
-                if bytes.len() <= MAX_IMAGE {
-                    outcome.with_image(Image {
-                        mime: "image/png",
-                        data: bytes,
-                    })
-                } else {
-                    outcome
+        let scratch = folder.join(".layers");
+        if let Err(e) = std::fs::create_dir_all(&scratch) {
+            return Outcome::error(e.to_string());
+        }
+        let limit = Duration::from_secs(600);
+        let te: Vec<String> = [numbers[0], numbers[2], numbers[1], numbers[3]]
+            .iter()
+            .map(|n| n.to_string())
+            .collect();
+        let mut painted = Vec::new();
+        for (i, name) in layers.iter().enumerate() {
+            let source = match self.layer(name) {
+                Ok(source) => source,
+                Err(why) => return Outcome::error(why),
+            };
+            let raster = Run::new(self.programs.get("gdalinfo"))
+                .args(["-json", "-nomd", "-norat", "-noct"])
+                .arg(&source)
+                .limit(limit)
+                .run()
+                .is_ok_and(|r| r.success());
+            if raster {
+                // Warped to the map's CRS, extent and size, then made 8-bit for painting.
+                let warped = scratch.join(format!("{i}.tif"));
+                let mut warp = Run::new(self.programs.get("gdalwarp"))
+                    .args(["-q", "-overwrite", "-r", "bilinear", "-dstalpha", "-te"])
+                    .args(&te)
+                    .args(["-ts", &width.to_string(), &height.to_string()]);
+                if let Some(crs) = &crs {
+                    warp = warp.args(["-t_srs", crs]);
+                }
+                let png = scratch.join(format!("{i}.png"));
+                let ok = warp
+                    .arg(&source)
+                    .arg(&warped)
+                    .limit(limit)
+                    .run()
+                    .is_ok_and(|r| r.success())
+                    && Run::new(self.programs.get("gdal_translate"))
+                        .args(["-q", "-of", "PNG", "-ot", "Byte", "-scale"])
+                        .arg(&warped)
+                        .arg(&png)
+                        .limit(limit)
+                        .run()
+                        .is_ok_and(|r| r.success());
+                let pixels = ok
+                    .then(|| std::fs::read(&png).ok())
+                    .flatten()
+                    .and_then(|bytes| map::rgba(&bytes).ok());
+                match pixels {
+                    Some((rgba, w, h)) if w == width && h == height => {
+                        painted.push(map::Layer::Raster(rgba))
+                    }
+                    _ => {
+                        return Outcome::error(format!("{name}: GDAL could not warp it to the map"))
+                    }
+                }
+            } else {
+                // Vectors come as GeoJSON in the map's CRS, clipped to the extent.
+                let json = scratch.join(format!("{i}.geojson"));
+                let mut convert = Run::new(self.programs.get("ogr2ogr"))
+                    .args(["-f", "GeoJSON", "-clipdst"])
+                    .args(&te);
+                if let Some(crs) = &crs {
+                    convert = convert.args(["-t_srs", crs]);
+                }
+                let ran = convert
+                    .arg(&json)
+                    .arg(source.split('|').next().unwrap_or(&source))
+                    .limit(limit)
+                    .run();
+                if !ran.as_ref().is_ok_and(|r| r.success()) {
+                    return Outcome::error(format!("{name}: neither GDAL nor OGR reads it"));
+                }
+                let size = std::fs::metadata(&json).map(|m| m.len()).unwrap_or(0);
+                if size > 256 * 1024 * 1024 {
+                    return Outcome::error(format!(
+                        "{name} has more inside the extent than a map picture draws; zoom in"
+                    ));
+                }
+                match std::fs::read_to_string(&json)
+                    .ok()
+                    .and_then(|t| serde_json::from_str(&t).ok())
+                {
+                    Some(collection) => painted.push(map::Layer::Vector(collection)),
+                    None => {
+                        return Outcome::error(format!(
+                            "{name}: the reprojected layer does not read"
+                        ))
+                    }
                 }
             }
-            _ => Outcome::json(&answer),
+        }
+        let _ = std::fs::remove_dir_all(&scratch);
+        let bytes = match map::paint(
+            &painted,
+            [numbers[0], numbers[1], numbers[2], numbers[3]],
+            width,
+            height,
+        ) {
+            Ok(bytes) => bytes,
+            Err(why) => return Outcome::error(why),
+        };
+        let png = folder.join("map.png");
+        if let Err(e) = std::fs::write(&png, &bytes) {
+            return Outcome::error(e.to_string());
+        }
+        let outcome = Outcome::json(
+            &json!({"image": self.workspace.relative(&png), "size": [width, height], "crs": crs}),
+        );
+        if bytes.len() <= MAX_IMAGE {
+            outcome.with_image(Image {
+                mime: "image/png",
+                data: bytes,
+            })
+        } else {
+            outcome
         }
     }
+}
+
+/// A parameter's type as `qgis_process` describes it: `{"type": {"id": "sink", …}}` in
+/// current versions, a plain string in older ones.
+fn kind(parameter: &Value) -> &str {
+    parameter["type"]["id"]
+        .as_str()
+        .or_else(|| parameter["type"].as_str())
+        .or_else(|| parameter["raw_definition"]["parameter_type"].as_str())
+        .unwrap_or("")
+}
+
+/// Whether a parameter is somewhere the algorithm writes. Fails closed: QGIS's own flag
+/// or any destination type counts.
+fn is_output(parameter: &Value) -> bool {
+    parameter["is_destination"] == json!(true) || OUTPUT_TYPES.contains(&kind(parameter))
+}
+
+/// Text that names somewhere outside the workspace, in a parameter that is not a layer.
+fn looks_like_a_path(text: &str) -> bool {
+    let body = text.strip_prefix("expression:").unwrap_or(text);
+    text == body
+        && (text.starts_with('/')
+            || text.starts_with('~')
+            || text.contains(":\\")
+            || text.contains(":/"))
+        || body.contains("..")
 }
 
 /// A CRS's name from its WKT: the first quoted string.
@@ -610,8 +734,9 @@ impl Bridge for Qgis {
             BridgeTool {
                 name: "qgis_map",
                 title: "Draw a map",
-                description: "Draws layers (first at the bottom) over an extent \"xmin,xmax,ymin,ymax [EPSG:code]\" \
-                              into a GeoTIFF and a PNG in exports/, returned as an image.",
+                description: "Draws layers over an extent \"xmin,xmax,ymin,ymax [EPSG:code]\": rasters warped \
+                              underneath, then each vector layer in its own colour with translucent fills and \
+                              ringed points, first at the bottom. Writes maps/map-<n>/map.png and returns it.",
                 input_schema: json!({
                     "type": "object",
                     "properties": {
@@ -662,6 +787,31 @@ mod tests {
             "qgis:importintopostgis",
         ] {
             assert!(algorithm_allowed(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn parameter_kinds_are_read_as_qgis_process_writes_them() {
+        // qgis_process 3.34's help --json: the type is an object with an id.
+        let sink = json!({"is_destination": true, "type": {"id": "sink", "name": "Feature Sink"}});
+        let source = json!({"is_destination": false, "type": {"id": "source"}});
+        let old = json!({"type": "rasterDestination"});
+        let flagged = json!({"is_destination": true, "type": {"id": "something_new"}});
+        assert_eq!(kind(&sink), "sink");
+        assert_eq!(kind(&source), "source");
+        assert!(is_output(&sink) && is_output(&old) && is_output(&flagged));
+        assert!(!is_output(&source));
+        for path in [
+            "/etc/passwd",
+            "../x.gpkg",
+            "C:\\x",
+            "http://evil.example/x",
+            "~/x",
+        ] {
+            assert!(looks_like_a_path(path), "{path}");
+        }
+        for plain in ["expression:\"area\"/2", "EPSG:4326", "10", "roads"] {
+            assert!(!looks_like_a_path(plain), "{plain}");
         }
     }
 

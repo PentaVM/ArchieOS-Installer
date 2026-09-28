@@ -57,8 +57,8 @@ def describe(image):
         })
     return {
         "size": [image.get_width(), image.get_height()],
-        "mode": str(image.get_base_type()).split(".")[-1].split(" ")[0],
-        "precision": str(image.get_precision()).split(".")[-1].split(" ")[0],
+        "mode": getattr(image.get_base_type(), "value_nick", str(image.get_base_type())),
+        "precision": getattr(image.get_precision(), "value_nick", str(image.get_precision())),
         "layers": layers,
     }
 

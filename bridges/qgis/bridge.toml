@@ -2,7 +2,7 @@
 id = "qgis"
 title = "QGIS"
 summary = "Read GIS layers, run any of QGIS's native, GDAL and PDAL processing algorithms, convert to Shapefile, KML, GeoPackage or GeoTIFF for ArcGIS or Google Earth, and draw maps."
-programs = ["qgis_process", "gdalinfo", "ogrinfo", "gdal_translate"]
+programs = ["qgis_process", "gdalinfo", "ogrinfo", "ogr2ogr", "gdalwarp", "gdal_translate"]
 workspace = "A folder of geographic data: GeoPackage, Shapefile, GeoJSON, KML, CSV, GeoTIFF, LAS. Results go to exports/."
 e2e = "ARCHIE_BRIDGE_E2E=qgis cargo test -p archie-bridges --test qgis_e2e"
 
@@ -19,7 +19,7 @@ doc = "https://docs.qgis.org/latest/en/docs/user_manual/processing/standalone.ht
 
 [[surfaces]]
 kind = "cli"
-name = "GDAL gdalinfo, ogrinfo, gdal_translate"
+name = "GDAL gdalinfo, ogrinfo, ogr2ogr, gdalwarp, gdal_translate"
 doc = "https://gdal.org/programs/index.html"
 
 [install]

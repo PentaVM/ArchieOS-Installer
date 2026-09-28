@@ -5,6 +5,7 @@
 //! archie-bridges guide <bridge>
 //! archie-bridges call <bridge> <tool> [<json arguments>] --workspace DIR [--program NAME=PATH]…
 //! archie-bridges run-job --workspace DIR --job ID [--program …] [--deliver-key FILE]
+//! archie-bridges deliver <project> <stage> <files…> --workspace DIR --deliver-key FILE [--deliver-to ADDR] [--note TEXT]
 //! archie-bridges index [--write FILE]
 //! archie-bridges new <id> [--root REPO]
 //! ```
@@ -21,6 +22,8 @@ const USAGE: &str = "usage:
                                               run one tool; prints its answer, exit 1 if it failed
   archie-bridges run-job --workspace DIR --job ID [--program ...] [--deliver-key FILE --deliver-to ADDR]
                                               a long job a bridge started (run by the bridge, detached)
+  archie-bridges deliver <project> <stage> <files...> --workspace DIR --deliver-key FILE [--deliver-to ADDR] [--note TEXT]
+                                              send files to the paired desk, as archie_deliver does
   archie-bridges index [--write FILE]         docs/bridges/INDEX.md, generated from the bridges
   archie-bridges new <id> [--root REPO]       the skeleton of a new bridge, per docs/BRIDGES.md";
 
@@ -56,6 +59,7 @@ fn run(args: Vec<String>) -> Result<ExitCode, String> {
         }
         Some("call") => call(args.collect()),
         Some("run-job") => run_job(args.collect()),
+        Some("deliver") => deliver(args.collect()),
         Some("index") => {
             let page = index::render();
             match (args.next().as_deref(), args.next()) {
@@ -267,4 +271,49 @@ fn scaffold(args: Vec<String>) -> Result<ExitCode, String> {
         dir.display()
     );
     Ok(ExitCode::SUCCESS)
+}
+
+/// Files from a workspace to the paired desk, from a shell.
+fn deliver(args: Vec<String>) -> Result<ExitCode, String> {
+    let mut rest = Vec::new();
+    let mut note = String::new();
+    let mut args = args.into_iter();
+    while let Some(arg) = args.next() {
+        if arg == "--note" {
+            note = args.next().ok_or("--note needs text")?;
+        } else {
+            rest.push(arg);
+        }
+    }
+    let Setup {
+        positional,
+        workspace,
+        programs,
+        ..
+    } = setup(rest)?;
+    let [project, stage, files @ ..] = positional.as_slice() else {
+        return Err("deliver needs a project, a stage and files".into());
+    };
+    if files.is_empty() {
+        return Err("deliver needs files".into());
+    }
+    let workspace =
+        archie_bridges::Workspace::open(&workspace.ok_or("deliver needs --workspace DIR")?)
+            .map_err(|e| e.to_string())?;
+    let deliverer = programs
+        .deliverer()
+        .ok_or("deliver needs --deliver-key FILE")?
+        .map_err(|e| e.to_string())?;
+    let report = deliverer
+        .deliver(&workspace, files, project, stage, &note, false)
+        .map_err(|e| e.to_string())?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&report).unwrap_or_default()
+    );
+    Ok(if report.queued.is_empty() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    })
 }

@@ -169,7 +169,13 @@ def build(doc, spec):
                 raise ValueError("parameter names are letters, digits and _: " + alias)
             sheet.set("A%d" % row, alias)
             sheet.set("B%d" % row, str(value))
-            sheet.setAlias("B%d" % row, alias)
+            try:
+                sheet.setAlias("B%d" % row, alias)
+            except ValueError:
+                raise ValueError(
+                    "FreeCAD does not accept the parameter name %r: unit symbols (t, h, d, m, s, g, "
+                    "N, W...) and cell names (A1) are reserved. Use a longer name such as thickness." % alias
+                )
             names.add(alias)
         doc.recompute()
     made = {}

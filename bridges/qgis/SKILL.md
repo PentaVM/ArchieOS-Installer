@@ -54,9 +54,15 @@ Examples:
 
 ## Seeing the result
 
-`qgis_map {layers, extent}` draws layers bottom to top over an extent written as
-`"xmin,xmax,ymin,ymax [EPSG:code]"`. It uses QGIS's default styles, good enough to check
-where things are.
+`qgis_map {layers, extent, width}` draws layers bottom to top over an extent written as
+`"xmin,xmax,ymin,ymax [EPSG:code]"`, into `maps/map-<n>/map.png`:
+
+- rasters are warped underneath;
+- each vector layer gets its own colour, with translucent fills and ringed points;
+- every layer is reprojected to the extent's CRS.
+
+No QGIS project is needed. Use it to check where things are, and deliver it beside the
+data.
 
 ## Traps
 
