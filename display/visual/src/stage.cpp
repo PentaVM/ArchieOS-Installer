@@ -422,6 +422,14 @@ PlaybackPolicy PlaybackPolicy::agent_tempo() noexcept {
     return policy;
 }
 
+PlaybackPolicy PlaybackPolicy::live_tempo() noexcept {
+    PlaybackPolicy policy = agent_tempo();
+    policy.instant_input = true;
+    // One frame: still a press and a release the application can tell apart.
+    policy.press_dwell_ms = 16;
+    return policy;
+}
+
 PointerTrajectory PointerTrajectory::plan(PointF from, PointF to, std::int64_t start_ms,
                                           const TrajectoryPolicy& policy) {
     PointerTrajectory trajectory;
@@ -525,17 +533,26 @@ Playback Playback::start(const StageCommand& command, const Surface& surface, Po
 
     const PointF target = to_output(surface, command.local_x, command.local_y);
     std::int64_t end = now_ms;
+    // Reaching for a target. With instant input the application gets the pointer there at
+    // once, and the path a hand would take is kept only to be drawn.
+    const auto reach_to = [&playback, &policy, pointer_now, now_ms](PointF to) {
+        if (!policy.instant_input) {
+            return PointerTrajectory::plan(pointer_now, to, now_ms, policy.trajectory);
+        }
+        playback.m_drawn.push_back(PointerTrajectory::plan(pointer_now, to, now_ms, policy.trajectory));
+        return PointerTrajectory::straight(pointer_now, to, now_ms, 0);
+    };
 
     switch (command.action) {
         case StageAction::Move: {
-            const auto travel = PointerTrajectory::plan(pointer_now, target, now_ms, policy.trajectory);
+            const auto travel = reach_to(target);
             arrive(travel);
             end = travel.end_ms();
             break;
         }
         case StageAction::Click:
         case StageAction::DoubleClick: {
-            const auto travel = PointerTrajectory::plan(pointer_now, target, now_ms, policy.trajectory);
+            const auto travel = reach_to(target);
             arrive(travel);
             std::int64_t at = travel.end_ms();
             const int clicks = command.action == StageAction::DoubleClick ? 2 : 1;
@@ -615,7 +632,7 @@ Playback Playback::start(const StageCommand& command, const Surface& surface, Po
             break;
         }
         case StageAction::Scroll: {
-            const auto travel = PointerTrajectory::plan(pointer_now, target, now_ms, policy.trajectory);
+            const auto travel = reach_to(target);
             arrive(travel);
             const int count = std::max(std::abs(command.scroll_steps_x), std::abs(command.scroll_steps_y));
             std::int64_t at = travel.end_ms();
