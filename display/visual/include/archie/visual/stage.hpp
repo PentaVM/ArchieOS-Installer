@@ -432,6 +432,10 @@ struct PlaybackPolicy {
     /// How long a capture stays on screen as an action before its receipt: long enough for
     /// a person watching to see that the agent looked, and for the frame to be rendered.
     std::int64_t capture_hold_ms = 450;
+    /// The pointer's input arrives at once: the application gets the motion, press and
+    /// release without waiting for the drawn pointer, which still travels its path on screen
+    /// as an overlay. A game or a live controller cannot wait 130 ms for a hand to be shown.
+    bool instant_input = false;
 
     /// The tempo of an agent at work, rather than one demonstrating itself: the pointer
     /// covers a path in a quarter of the time, a press lasts two frames, and a capture
@@ -444,6 +448,10 @@ struct PlaybackPolicy {
     /// is the same; only the clock changes, and a person watching sees a blur rather than
     /// a demonstration.
     [[nodiscard]] static PlaybackPolicy video_tempo() noexcept;
+
+    /// The tempo of a live controller (a game, IRIS acting frame by frame): the agent's
+    /// clock with input delivered at once and the pointer's travel only drawn.
+    [[nodiscard]] static PlaybackPolicy live_tempo() noexcept;
 };
 
 enum class PlaybackState {
@@ -484,10 +492,14 @@ public:
     [[nodiscard]] bool button_held() const noexcept { return m_button_held; }
     /// The whole schedule, for tests and for drawing.
     [[nodiscard]] const std::vector<InputStep>& schedule() const noexcept { return m_steps; }
+    /// The pointer's travel as drawn when its input was delivered at once (`instant_input`);
+    /// empty when the drawn pointer is the input pointer.
+    [[nodiscard]] const std::vector<PointerTrajectory>& drawn() const noexcept { return m_drawn; }
 
 private:
     StageCommand m_command{};
     std::vector<PointerTrajectory> m_trajectories;
+    std::vector<PointerTrajectory> m_drawn;
     std::vector<InputStep> m_steps;
     std::size_t m_next = 0;
     std::int64_t m_started_ms = 0;

@@ -579,6 +579,31 @@ void an_agent_tempo_is_the_same_playback_on_a_faster_clock() {
     CHECK_BECAUSE(capture.state() == PlaybackState::Finished,
                   "an agent at work does not wait 450 ms for anyone to see that it looked");
 }
+void a_live_tempo_delivers_the_pointer_at_once_and_only_draws_its_travel() {
+
+    CASE("at live tempo the application gets the click now; the pointer's travel is an overlay");
+
+    SurfaceTable table = table_with_terminal();
+    const PlaybackPolicy agent = PlaybackPolicy::agent_tempo();
+    const PlaybackPolicy live = PlaybackPolicy::live_tempo();
+    const StageCommand click = click_on(table, 7, 400, 300);
+    Playback working = Playback::start(click, *table.find(7), PointF{100.0F, 100.0F}, T0, agent);
+    Playback now = Playback::start(click, *table.find(7), PointF{100.0F, 100.0F}, T0, live);
+    const auto first = now.due(T0);
+    bool pressed = false;
+    for (const auto& step : first) {
+        pressed = pressed || step.kind == StepKind::Press;
+    }
+    CHECK_BECAUSE(pressed, "the press is due at the moment the command starts");
+    CHECK_BECAUSE(now.ends_ms() - T0 <= live.press_dwell_ms, "the whole click is one press and one release");
+    CHECK_BECAUSE(now.pointer_at(T0) == working.pointer_at(working.ends_ms() + 1000),
+                  "the input pointer is already where the agent's hand would end up");
+    CHECK_BECAUSE(working.drawn().empty(), "at agent tempo the drawn pointer is the input pointer");
+    CHECK_EQ(now.drawn().size(), std::size_t{1});
+    if (!now.drawn().empty()) {
+        CHECK_BECAUSE(now.drawn().front().end_ms() > T0 + 40, "the travel is still drawn, as a hand would take it");
+    }
+}
 void a_capture_can_ask_for_one_box_instead_of_the_whole_window() {
     CASE("a snapshot may name a part of the surface, and only a real part of it");
 
@@ -770,6 +795,7 @@ int main() {
     typing_and_chords_are_counted_not_carried();
     a_capture_is_checked_like_a_touch_and_held_on_screen();
     an_agent_tempo_is_the_same_playback_on_a_faster_clock();
+    a_live_tempo_delivers_the_pointer_at_once_and_only_draws_its_travel();
     a_filming_tempo_still_draws_slower_than_an_application_can_look();
     a_capture_can_ask_for_one_box_instead_of_the_whole_window();
     a_stroke_is_pressed_followed_and_let_go();

@@ -46,7 +46,7 @@ int main(int argc, char *argv[])
                                                   "shared: the agent has a pointer and keyboard of its own beside the person's"),
                                    QStringLiteral("mode"), QStringLiteral("exclusive"));
     const QCommandLineOption tempo(QStringLiteral("tempo"),
-                                   QStringLiteral("person, to be watched, or agent, four actions a second."),
+                                   QStringLiteral("person, to be watched; agent, four actions a second; video; or live, input at once with the pointer's travel drawn over it."),
                                    QStringLiteral("tempo"), QStringLiteral("person"));
     const QCommandLineOption strokeSpeed(
         QStringLiteral("stroke-speed"),
@@ -107,8 +107,11 @@ int main(int argc, char *argv[])
         options.playback = archie::visual::PlaybackPolicy::agent_tempo();
     } else if (parser.value(tempo) == QLatin1String("video")) {
         options.playback = archie::visual::PlaybackPolicy::video_tempo();
+    } else if (parser.value(tempo) == QLatin1String("live")) {
+        // A game or IRIS acting frame by frame: input at once, the pointer's travel drawn over.
+        options.playback = archie::visual::PlaybackPolicy::live_tempo();
     } else if (parser.value(tempo) != QLatin1String("person")) {
-        qWarning("archie-stage: --tempo is person, agent or video");
+        qWarning("archie-stage: --tempo is person, agent, video or live");
     }
     if (parser.isSet(strokeSpeed)) {
         bool read = false;

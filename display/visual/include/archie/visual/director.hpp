@@ -223,6 +223,8 @@ private:
     std::int64_t m_mode_since_ms = 0;
 
     std::optional<Playback> m_playback{};
+    /// The drawn travel of the last command whose input went ahead of it.
+    std::vector<PointerTrajectory> m_glides{};
     std::optional<SurfaceId> m_framed_surface{};
     std::int64_t m_last_action_end_ms = 0;
     bool m_following = false;

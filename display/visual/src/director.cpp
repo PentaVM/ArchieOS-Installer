@@ -193,7 +193,12 @@ void StageDirector::command_started(const StageCommand& command, const Surface& 
         m_presses.pop_front();
     }
 
-    m_cursor_until_ms = std::max(m_cursor_until_ms, playback.ends_ms() + m_policy.cursor_linger_ms);
+    // Input delivered at once still has its travel drawn: the cursor glides on after the
+    // command has finished, for the person watching.
+    m_glides = playback.drawn();
+    const std::int64_t drawn_until = m_glides.empty() ? playback.ends_ms()
+                                                      : std::max(playback.ends_ms(), m_glides.back().end_ms());
+    m_cursor_until_ms = std::max(m_cursor_until_ms, drawn_until + m_policy.cursor_linger_ms);
     m_last_action_end_ms = playback.ends_ms();
 
     if (m_mode != AuthorityMode::Autonomous) {
@@ -270,7 +275,7 @@ void StageDirector::end_playback(PlaybackState outcome, std::optional<CommandRef
         }
     }
     m_last_cursor = m_playback->pointer_at(now_ms);
-    m_cursor_until_ms = now_ms + m_policy.cursor_linger_ms;
+    m_cursor_until_ms = std::max(now_ms, m_glides.empty() ? now_ms : m_glides.back().end_ms()) + m_policy.cursor_linger_ms;
     m_last_action_end_ms = now_ms;
     m_caption_until_ms = now_ms + m_policy.caption_hold_ms;
     m_playback.reset();
@@ -366,6 +371,18 @@ StageFrame StageDirector::frame(std::int64_t now_ms, RenderTier tier) const {
         if (now_ms < m_playback->ends_ms()) {
             changing = true;
         }
+    }
+    if (!m_glides.empty() && now_ms < m_glides.back().end_ms()) {
+        // The drawn pointer, when input went ahead of it.
+        PointF drawn = m_glides.front().from();
+        for (const auto& glide : m_glides) {
+            if (now_ms < glide.start_ms()) {
+                break;
+            }
+            drawn = glide.at(now_ms);
+        }
+        cursor = drawn;
+        changing = true;
     }
     if (autonomous && cursor.has_value() && now_ms < m_cursor_until_ms) {
         out.cursor_visible = true;
