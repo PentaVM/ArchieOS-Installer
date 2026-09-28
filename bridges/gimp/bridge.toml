@@ -1,0 +1,27 @@
+# GIMP: raster image editing.
+id = "gimp"
+title = "GIMP"
+summary = "Inspect layered images, retouch them (resize, crop, levels, colour, sharpen, text) and export PSD for Photoshop, TIFF for print, or PNG, JPEG and WebP."
+programs = ["gimp-console"]
+workspace = "A folder of images. Edits go to edits/, exports to exports/."
+e2e = "ARCHIE_BRIDGE_E2E=gimp cargo test -p archie-bridges --test gimp_e2e"
+
+[app]
+name = "GIMP"
+homepage = "https://www.gimp.org"
+license = "GPL-3.0-or-later"
+versions = "3.0 and 3.2"
+
+[[surfaces]]
+kind = "script"
+name = "gimp-console batch mode with its embedded Python (the script is a constant in the bridge)"
+doc = "https://developer.gimp.org/resource/writing-a-plug-in/"
+
+[install]
+arch = "pacman -S gimp"
+ubuntu = "GIMP 3 AppImage from gimp.org, extracted (Ubuntu 24.04 ships 2.10); --program gimp-console=<a copy of its AppRun that execs usr/bin/gimp-console-3.0>"
+windows = "winget install GIMP.GIMP.3"
+
+[vision]
+app_ids = ["gimp", "org.gimp.GIMP"]
+when = "Painting, selections by eye, healing and cloning, masks: do them in GIMP on the Stage and check the result with gimp_inspect."

@@ -1,0 +1,32 @@
+# Blender: 3D scenes, rendering and interchange.
+id = "blender"
+title = "Blender"
+summary = "Inspect and assemble 3D scenes, render stills and turntables with a studio set up for bare models, and export FBX, glTF, USD or OBJ for Maya, Unreal, Unity or the web."
+programs = ["blender", "ffmpeg", "archie-bridges"]
+workspace = "A folder of .blend scenes and 3D models. Renders go to renders/, videos to animations/, exports to exports/."
+e2e = "ARCHIE_BRIDGE_E2E=blender cargo test -p archie-bridges --test blender_e2e"
+
+[app]
+name = "Blender"
+homepage = "https://www.blender.org"
+license = "GPL-3.0-or-later"
+versions = "4.2 LTS to 4.5"
+
+[[surfaces]]
+kind = "script"
+name = "blender --background with its embedded Python (the script is a constant in the bridge)"
+doc = "https://docs.blender.org/api/current/info_quickstart.html"
+
+[[surfaces]]
+kind = "cli"
+name = "blender command line"
+doc = "https://docs.blender.org/manual/en/latest/advanced/command_line/arguments.html"
+
+[install]
+arch = "pacman -S blender"
+ubuntu = "snap install blender --classic"
+windows = "winget install BlenderFoundation.Blender"
+
+[vision]
+app_ids = ["blender"]
+when = "Modelling, sculpting, UV and material work by eye, and animation by hand: do it in Blender on the Stage and check it with blender_render."

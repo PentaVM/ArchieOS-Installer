@@ -1,0 +1,32 @@
+# Inkscape: vector drawing.
+id = "inkscape"
+title = "Inkscape"
+summary = "Write and edit vector drawings, and export them as PDF, EPS, EMF, DXF or PNG for Illustrator, CorelDRAW, print shops and laser cutters."
+programs = ["inkscape"]
+workspace = "A folder of drawings. New ones go to drawings/, edits to edits/, exports to exports/."
+e2e = "ARCHIE_BRIDGE_E2E=inkscape cargo test -p archie-bridges --test inkscape_e2e"
+
+[app]
+name = "Inkscape"
+homepage = "https://inkscape.org"
+license = "GPL-3.0-or-later"
+versions = "1.3 and 1.4"
+
+[[surfaces]]
+kind = "cli"
+name = "inkscape --actions, --export-type, --query-all"
+doc = "https://inkscape.org/doc/inkscape-man.html"
+
+[[surfaces]]
+kind = "file-format"
+name = "SVG 1.1"
+doc = "https://www.w3.org/TR/SVG11/"
+
+[install]
+arch = "pacman -S inkscape"
+ubuntu = "add-apt-repository ppa:inkscape.dev/stable && apt install inkscape"
+windows = "winget install Inkscape.Inkscape"
+
+[vision]
+app_ids = ["org.inkscape.Inkscape", "inkscape"]
+when = "Freehand drawing, node editing by eye and anything visual that is easier to point at than to name; check it with inkscape_render."

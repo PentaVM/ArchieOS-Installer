@@ -1,0 +1,37 @@
+# Video: cut, title, score and render with MLT, the engine under Kdenlive and Shotcut.
+id = "video"
+title = "Video"
+summary = "List and probe media, then render a timeline of cut clips, titles, music and fades to MP4, with a Kdenlive-openable project beside it."
+programs = ["melt", "ffprobe"]
+workspace = "A media folder: the sources to cut from; renders go to its renders/ folder."
+e2e = "ARCHIE_BRIDGE_E2E=video cargo test -p archie-bridges --test video_e2e"
+
+[app]
+name = "MLT (Kdenlive, Shotcut)"
+homepage = "https://www.mltframework.org"
+license = "LGPL-2.1-or-later"
+versions = "MLT 7.x"
+
+[[surfaces]]
+kind = "file-format"
+name = "MLT XML"
+doc = "https://www.mltframework.org/docs/mltxml/"
+
+[[surfaces]]
+kind = "cli"
+name = "melt"
+doc = "https://www.mltframework.org/docs/melt/"
+
+[[surfaces]]
+kind = "cli"
+name = "ffprobe"
+doc = "https://ffmpeg.org/ffprobe.html"
+
+[install]
+arch = "pacman -S mlt ffmpeg kdenlive"
+ubuntu = "apt install melt ffmpeg kdenlive"
+windows = "winget install KDE.Kdenlive"
+
+[vision]
+app_ids = ["org.kde.kdenlive", "kdenlive", "org.shotcut.Shotcut"]
+when = "Effects, transitions and colour work the timeline does not describe: open the rendered project in Kdenlive on the Stage and continue there."

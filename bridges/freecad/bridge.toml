@@ -1,0 +1,32 @@
+# FreeCAD: parametric solid modelling.
+id = "freecad"
+title = "FreeCAD"
+summary = "Build parametric parts, make and sweep variants for hours, check solids and export STEP/IGES/STL/3MF for Fusion 360, SolidWorks, COMSOL or a printer, with pictures drawn without a display."
+programs = ["freecadcmd", "archie-bridges"]
+workspace = "A folder of designs: .FCStd, STEP, IGES, meshes. New parts go to designs/, variants to variants/, sweeps to sweeps/."
+e2e = "ARCHIE_BRIDGE_E2E=freecad cargo test -p archie-bridges --test freecad_e2e"
+
+[app]
+name = "FreeCAD"
+homepage = "https://www.freecad.org"
+license = "LGPL-2.0-or-later"
+versions = "1.0 and 1.1"
+
+[[surfaces]]
+kind = "script"
+name = "FreeCADCmd with its embedded Python (the script is a constant in the bridge)"
+doc = "https://wiki.freecad.org/Embedding_FreeCAD"
+
+[[surfaces]]
+kind = "file-format"
+name = "FCStd documents and spreadsheet aliases"
+doc = "https://wiki.freecad.org/Spreadsheet_Workbench"
+
+[install]
+arch = "pacman -S freecad"
+ubuntu = "add-apt-repository ppa:freecad-maintainers/freecad-stable && apt install freecad"
+windows = "winget install FreeCAD.FreeCAD"
+
+[vision]
+app_ids = ["org.freecad.FreeCAD", "freecad", "FreeCAD"]
+when = "Sketching new profiles, picking particular edges or faces by eye, TechDraw drawings and assemblies: do those in FreeCAD's window on the Stage and check them with freecad_inspect and freecad_render."

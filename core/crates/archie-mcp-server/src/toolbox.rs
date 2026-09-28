@@ -64,6 +64,15 @@ pub struct ToolSpec {
 pub struct ToolOutcome {
     pub text: String,
     pub is_error: bool,
+    /// Images beside the text, such as a render of a board, for a client that shows them
+    /// to its model.
+    pub images: Vec<ToolImage>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolImage {
+    pub mime: &'static str,
+    pub data: Vec<u8>,
 }
 
 impl ToolOutcome {
@@ -71,6 +80,7 @@ impl ToolOutcome {
         Self {
             text: serde_json::to_string_pretty(value).unwrap_or_else(|_| "null".into()),
             is_error: false,
+            images: Vec::new(),
         }
     }
 
@@ -78,6 +88,7 @@ impl ToolOutcome {
         Self {
             text: message.into(),
             is_error: true,
+            images: Vec::new(),
         }
     }
 }

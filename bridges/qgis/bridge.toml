@@ -1,0 +1,32 @@
+# QGIS: geographic information.
+id = "qgis"
+title = "QGIS"
+summary = "Read GIS layers, run any of QGIS's native, GDAL and PDAL processing algorithms, convert to Shapefile, KML, GeoPackage or GeoTIFF for ArcGIS or Google Earth, and draw maps."
+programs = ["qgis_process", "gdalinfo", "ogrinfo", "ogr2ogr", "gdalwarp", "gdal_translate"]
+workspace = "A folder of geographic data: GeoPackage, Shapefile, GeoJSON, KML, CSV, GeoTIFF, LAS. Results go to exports/."
+e2e = "ARCHIE_BRIDGE_E2E=qgis cargo test -p archie-bridges --test qgis_e2e"
+
+[app]
+name = "QGIS"
+homepage = "https://qgis.org"
+license = "GPL-2.0-or-later"
+versions = "3.34 LTR to 3.44"
+
+[[surfaces]]
+kind = "cli"
+name = "qgis_process --no-python (processing framework, JSON in and out)"
+doc = "https://docs.qgis.org/latest/en/docs/user_manual/processing/standalone.html"
+
+[[surfaces]]
+kind = "cli"
+name = "GDAL gdalinfo, ogrinfo, ogr2ogr, gdalwarp, gdal_translate"
+doc = "https://gdal.org/programs/index.html"
+
+[install]
+arch = "pacman -S qgis gdal"
+ubuntu = "apt install qgis qgis-plugin-grass gdal-bin"
+windows = "winget install OSGeo.QGIS"
+
+[vision]
+app_ids = ["org.qgis.qgis", "qgis"]
+when = "Styling, labelling and print layouts: open the project in QGIS on the Stage; check the data with qgis_info and the look with qgis_map."

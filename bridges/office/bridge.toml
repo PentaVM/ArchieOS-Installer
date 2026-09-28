@@ -1,0 +1,32 @@
+# LibreOffice: documents, spreadsheets and presentations.
+id = "office"
+title = "Office"
+summary = "Write well-set documents, spreadsheets and decks as DOCX, XLSX, PPTX or PDF; read, convert and picture existing ones, Word and Excel files included."
+programs = ["soffice"]
+workspace = "A folder of documents. New ones go to documents/, conversions to exports/, pictures to renders/."
+e2e = "ARCHIE_BRIDGE_E2E=office cargo test -p archie-bridges --test office_e2e"
+
+[app]
+name = "LibreOffice"
+homepage = "https://www.libreoffice.org"
+license = "MPL-2.0"
+versions = "7.6 to 25.x"
+
+[[surfaces]]
+kind = "cli"
+name = "soffice --headless --convert-to"
+doc = "https://help.libreoffice.org/latest/en-US/text/shared/guide/start_parameters.html"
+
+[[surfaces]]
+kind = "file-format"
+name = "OpenDocument flat XML (fodt, fods, fodp)"
+doc = "https://docs.oasis-open.org/office/OpenDocument/v1.3/OpenDocument-v1.3-part3-schema.html"
+
+[install]
+arch = "pacman -S libreoffice-fresh"
+ubuntu = "apt install libreoffice-writer libreoffice-calc libreoffice-impress"
+windows = "winget install TheDocumentFoundation.LibreOffice"
+
+[vision]
+app_ids = ["libreoffice-writer", "libreoffice-calc", "libreoffice-impress", "soffice"]
+when = "Fine layout by eye, charts, tracked changes and comments: open the document in LibreOffice on the Stage, then check it with office_preview."
