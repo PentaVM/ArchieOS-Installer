@@ -29,6 +29,10 @@ pub struct Control {
     pub pointer: Vec<f32>,
     #[serde(default)]
     pub latency_ms: f32,
+    /// Set when IRIS could not act on the frame. Every other field is then its default, which
+    /// must not be read as "hold nothing": the first live run did, 126 times.
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 /// A plan step: what to do, for how long.

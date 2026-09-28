@@ -160,6 +160,11 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
                 continue;
             }
         };
+        if let Some(error) = &control.error {
+            failed += 1;
+            log_line(&trajectory, json!({"t": elapsed, "iris_error": error}));
+            continue;
+        }
         act_ms.push(control.latency_ms);
         let now_ms = started.elapsed().as_millis();
         let (mut actions, unsupported) = held.actions_towards(&control, now_ms);
