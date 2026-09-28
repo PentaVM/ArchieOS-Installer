@@ -541,6 +541,25 @@ allow = ["click", "snapshot"]
         authorize(&read, StageAction::Snapshot { region: None }),
         StageAdmission::Allowed(_)
     ));
+    // A live frame is a capture under the same lease, at a width the compositor accepts.
+    assert!(matches!(
+        authorize(&read, StageAction::Frame { max_width: 512 }),
+        StageAdmission::Allowed(_)
+    ));
+    assert!(
+        matches!(
+            authorize(&read, StageAction::Frame { max_width: 16 }),
+            StageAdmission::Refused(StageRefusal::CoordinateOutOfRange)
+        ),
+        "a frame too small to read is refused before it is sealed"
+    );
+    assert!(
+        matches!(
+            authorize(&execute, StageAction::Frame { max_width: 512 }),
+            StageAdmission::Refused(StageRefusal::Lease(LeaseRejection::ActionNotPermitted))
+        ),
+        "a frame is a look, not an operation"
+    );
     assert!(
         matches!(
             authorize(&read, click()),

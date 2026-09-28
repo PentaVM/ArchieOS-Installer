@@ -93,6 +93,24 @@ impl Seat {
         }
     }
 
+    /// One frame for a live controller: the whole window drawn at most `max_width` wide by
+    /// the compositor and handed over raw. The same gate and grant as `look`.
+    pub async fn frame(&mut self, max_width: u32) -> Result<Sheet, String> {
+        drain(&mut self.client, &mut self.world)
+            .await
+            .map_err(|e| e.to_string())?;
+        let request = self.request(StageAction::Frame { max_width }, "watch the window")?;
+        match self
+            .operator
+            .look(&mut self.client, &mut self.world, &request, &self.snapshots, Duration::from_secs(10))
+            .await
+            .map_err(|e| e.to_string())?
+        {
+            LookOutcome::Captured(snapshot) => decode(&snapshot.png),
+            LookOutcome::NotCaptured(outcome) => Err(format!("no frame: {outcome:?}")),
+        }
+    }
+
     pub async fn act(
         &mut self,
         action: StageAction,

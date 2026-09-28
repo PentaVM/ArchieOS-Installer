@@ -62,7 +62,8 @@ pub mod seal;
 
 pub use action::{
     ActionKind, Key, KeyChord, Modifier, NamedKey, PointerButton, Region, StageAction, StageText,
-    StrokePoint, MAX_STROKE_PATHS, MAX_STROKE_POINTS, MAX_STROKE_POINTS_IN_ALL,
+    StrokePoint, MAX_FRAME_WIDTH, MAX_STROKE_PATHS, MAX_STROKE_POINTS, MAX_STROKE_POINTS_IN_ALL,
+    MIN_FRAME_WIDTH,
 };
 pub use gate::{
     stage_resource, AuthorizedStageCommand, StageAdmission, StageGate, StageProposal, StageReceipt,

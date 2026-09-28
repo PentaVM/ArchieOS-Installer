@@ -172,6 +172,22 @@ void a_verifying_payload_must_still_be_a_command() {
         CHECK(part.command->command.local_x == 12 && part.command->command.local_y == 40);
         CHECK(part.command->command.to_local_x == 92 && part.command->command.to_local_y == 67);
     }
+    // A live frame is a whole-surface snapshot, drawn small and written raw.
+    const auto frame = refused(R"({"kind":"frame","max_width":512})");
+    CHECK(frame.command.has_value());
+    if (frame.command) {
+        CHECK(frame.command->command.action == archie::visual::StageAction::Snapshot);
+        CHECK(frame.command->command.capture_max_width == 512 && frame.command->command.capture_raw);
+        CHECK_BECAUSE(frame.command->command.to_local_x == 0, "a frame is always the whole surface");
+    }
+    CHECK_BECAUSE(!look.command || (look.command->command.capture_max_width == 0 && !look.command->command.capture_raw),
+                  "a snapshot stays full size and PNG");
+    CHECK(refused(R"({"kind":"frame","max_width":32})").error == QStringLiteral("command_malformed"));
+    CHECK(refused(R"({"kind":"frame","max_width":4096})").error == QStringLiteral("command_malformed"));
+    CHECK(refused(R"({"kind":"frame"})").error == QStringLiteral("command_malformed"));
+    CHECK_BECAUSE(refused(R"({"kind":"frame","max_width":512,"region":{"x":1,"y":2,"width":4,"height":9}})").error ==
+                      QStringLiteral("command_malformed"),
+                  "a frame has no region");
 }
 
 void text_and_chords_arrive_as_units() {

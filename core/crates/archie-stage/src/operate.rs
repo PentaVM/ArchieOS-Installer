@@ -226,7 +226,8 @@ impl Operator {
             .outcome)
     }
 
-    /// Captures a surface: `request.action` must be [`StageAction::Snapshot`]. The capture
+    /// Captures a surface: `request.action` must be [`StageAction::Snapshot`] or
+    /// [`StageAction::Frame`]. The capture
     /// is read from `snapshot_dir`, where the compositor beside this control socket keeps
     /// captures, checked against the digest it announced, and removed.
     pub async fn look<R, W>(
@@ -241,7 +242,7 @@ impl Operator {
         R: AsyncRead + Unpin,
         W: AsyncWrite + Unpin,
     {
-        if !matches!(request.action, StageAction::Snapshot { .. }) {
+        if !matches!(request.action, StageAction::Snapshot { .. } | StageAction::Frame { .. }) {
             return Err(OperateError::NotACapture);
         }
         let performed = self
@@ -431,6 +432,8 @@ struct CaptureEvent {
 /// The largest capture read back.
 pub const MAX_CAPTURE_BYTES: u64 = 64 * 1024 * 1024;
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+/// A frame for a live controller is a binary PPM: a text header and raw RGB rows.
+const PPM_SIGNATURE: &[u8] = b"P6\n";
 
 /// A captured surface, verified, with its file already removed.
 #[derive(Clone, PartialEq, Eq)]
@@ -448,6 +451,7 @@ pub struct Snapshot {
     pub height: u32,
     pub captured_at_ms: i64,
     pub sha256: String,
+    /// The encoded pixels: PNG for a snapshot, a binary PPM for a frame.
     pub png: Vec<u8>,
 }
 
@@ -496,7 +500,7 @@ fn take_capture(path: &str, sha256: &str, snapshot_dir: &Path) -> Result<Vec<u8>
         }
         let bytes = std::fs::read(path)?;
         let digest = hex::encode(ring::digest::digest(&ring::digest::SHA256, &bytes).as_ref());
-        if digest != sha256 || !bytes.starts_with(PNG_SIGNATURE) {
+        if digest != sha256 || !(bytes.starts_with(PNG_SIGNATURE) || bytes.starts_with(PPM_SIGNATURE)) {
             return Err(OperateError::CaptureInvalid);
         }
         Ok(bytes)

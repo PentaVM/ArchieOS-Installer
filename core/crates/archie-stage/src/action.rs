@@ -29,6 +29,10 @@ pub const MAX_STROKE_PATHS: usize = 64;
 pub const MAX_STROKE_POINTS_IN_ALL: usize = 1024;
 /// The largest surface-local coordinate accepted. No output is this large.
 pub const MAX_COORDINATE: i32 = 32_767;
+/// A live frame is drawn between these widths: small enough to encode in no time, large
+/// enough to read a screen.
+pub const MIN_FRAME_WIDTH: u32 = 64;
+pub const MAX_FRAME_WIDTH: u32 = 2048;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -406,6 +410,13 @@ pub enum StageAction {
     Snapshot {
         region: Option<Region>,
     },
+    /// One frame for a live controller: the whole surface, drawn by the compositor at most
+    /// `max_width` pixels wide and handed over as raw RGB (a binary PPM) rather than PNG.
+    /// The same grant as a snapshot; it exists because encoding a full-size PNG took 240 ms
+    /// of a 400 ms decision.
+    Frame {
+        max_width: u32,
+    },
     /// Press one key and keep it down until `KeyUp`. The compositor lets it go by itself
     /// after five seconds without it being pressed again, when a person takes the stage,
     /// when the focus leaves the surface, or when the connection that pressed it closes.
@@ -535,7 +546,7 @@ impl StageAction {
             // The same authority as one line: a drawing is not a new kind of touch.
             Self::Stroke { .. } | Self::Strokes { .. } => ActionKind::Stroke,
             Self::Focus => ActionKind::Focus,
-            Self::Snapshot { .. } => ActionKind::Snapshot,
+            Self::Snapshot { .. } | Self::Frame { .. } => ActionKind::Snapshot,
             Self::KeyDown { .. } | Self::KeyUp { .. } | Self::ButtonDown { .. } | Self::ButtonUp { .. } => {
                 ActionKind::Hold
             }
@@ -567,7 +578,8 @@ impl StageAction {
             | Self::ButtonDown { .. }
             | Self::ButtonUp { .. }
             | Self::Focus
-            | Self::Snapshot { .. } => Vec::new(),
+            | Self::Snapshot { .. }
+            | Self::Frame { .. } => Vec::new(),
         }
     }
 }

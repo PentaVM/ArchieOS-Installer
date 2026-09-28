@@ -25,6 +25,9 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::net::UnixStream;
 
+/// How wide the compositor draws the frames IRIS reads (IRIS letterboxes to 512).
+const FRAME_WIDTH: u32 = 512;
+
 const PLANNER: &str = "You are the planner of Archie, an AI that operates a computer. A fast visual model, IRIS, \
 does the doing: it sees the screen many times a second and turns ONE short instruction at a time into mouse and \
 keyboard input. You decide WHAT it should do, never HOW (no coordinates, no key names unless the task names them). \
@@ -124,43 +127,44 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
     let (mut ticks, mut sent, mut refused, mut failed) = (0u64, 0u64, 0u64, 0u64);
     let mut act_ms: Vec<f32> = Vec::new();
     let mut last_saved = -1i64;
+    // The frame IRIS reads is drawn FRAME_WIDTH wide by the compositor and sent raw: a
+    // full-size PNG cost 240 ms of a 400 ms decision. While IRIS decides on one frame, the
+    // next one is captured.
+    let surface_width = seat.world.surfaces_of(&task.app_id).next().map(|s| s.width).unwrap_or(0).max(1) as f32;
+    let mut window = seat.frame(FRAME_WIDTH).await?;
     while Instant::now() < deadline {
         let tick = Instant::now();
         let elapsed = started.elapsed().as_secs_f32();
         let Some(step) = step_at(&plan.steps, elapsed).cloned() else { break };
-        let window = match seat.look().await {
-            Ok(sheet) => sheet,
+        // Window pixels per frame pixel: where IRIS points goes back to the window with it.
+        let scale = (surface_width / window.width.max(1) as f32).max(1.0);
+        // The popup's teal was counted on full-size captures; a smaller frame has fewer pixels.
+        if resets.observe(teal_pixels(&window.pixels), (150.0 / (scale * scale)).ceil() as usize) {
+            log_line(&trajectory, json!({"t": elapsed, "event": "flip_reset_popup"}));
+        }
+        if elapsed as i64 > last_saved {
+            last_saved = elapsed as i64;
+            let _ = std::fs::write(frames.join(format!("{:04}.png", ticks)), window.png());
+        }
+        let url = format!("{iris}/act?session={stamp}&instruction={}&skill={}", urlencode(&step.what), urlencode(&skill));
+        let body = archie_arena::image::ppm(&window);
+        let ask = async {
+            let response = http.post(&url).body(body).send().await.map_err(|e| e.to_string())?;
+            response.json::<Control>().await.map_err(|e| e.to_string())
+        };
+        let (answer, next) = tokio::join!(ask, seat.frame(FRAME_WIDTH));
+        match next {
+            Ok(frame) => window = frame,
             Err(error) => {
                 failed += 1;
                 log_line(&trajectory, json!({"t": elapsed, "look": error}));
-                continue;
             }
-        };
-        if resets.observe(teal_pixels(&window.pixels), 150) {
-            log_line(&trajectory, json!({"t": elapsed, "event": "flip_reset_popup"}));
         }
-        // IRIS reads a 512-pixel canvas: a full-size capture encoded as PNG cost most of a tick
-        // (the first live run managed 2 ticks a second). The frame goes at 640 wide at most, and
-        // where IRIS points is scaled back to the window.
-        let (small, scale) = archie_arena::image::fit_width(&window, 640);
-        let png = small.png();
-        if elapsed as i64 > last_saved {
-            last_saved = elapsed as i64;
-            let _ = std::fs::write(frames.join(format!("{:04}.png", ticks)), &png);
-        }
-        let url = format!("{iris}/act?session={stamp}&instruction={}&skill={}", urlencode(&step.what), urlencode(&skill));
-        let control: Control = match http.post(&url).body(png).send().await {
-            Ok(response) => match response.json().await {
-                Ok(control) => control,
-                Err(error) => {
-                    failed += 1;
-                    log_line(&trajectory, json!({"t": elapsed, "iris": error.to_string()}));
-                    continue;
-                }
-            },
+        let control = match answer {
+            Ok(control) => control,
             Err(error) => {
                 failed += 1;
-                log_line(&trajectory, json!({"t": elapsed, "iris": error.to_string()}));
+                log_line(&trajectory, json!({"t": elapsed, "iris": error}));
                 continue;
             }
         };
