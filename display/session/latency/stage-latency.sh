@@ -5,6 +5,7 @@
 #
 #   stage-latency.sh [count]     prints the gate round trip and the delivery to the window
 #
+# LOOKS=N also times N captures each way: a full-size PNG snapshot and a 512-wide raw frame.
 # SEATS=shared starts the Stage with a seat for the agent beside the person's. HUMAN=1 (with
 # SEATS=shared) also plays a person through VNC while the agent works: mouse moves and typed
 # letters, which must reach the window without taking anything from the agent.
@@ -42,7 +43,7 @@ cat > "$RUN/policy.toml" <<P
 [[app]]
 app_id = "$APP"
 display_name = "latency probe"
-allow = ["move", "click", "key", "hold", "focus"]
+allow = ["move", "click", "key", "hold", "focus", "snapshot"]
 max_text_grade = "public"
 max_text_chars = 8
 P
@@ -57,7 +58,7 @@ if [ "${HUMAN:-0}" = 1 ]; then
   pids+=($!)
 fi
 "$CORE/archie-stage-latency" --socket "$RUN/control.sock" --key-file "$RUN/key" --policy "$RUN/policy.toml" \
-  --app "$APP" --count "$COUNT" --out "$RUN/sent.jsonl"
+  --app "$APP" --count "$COUNT" --out "$RUN/sent.jsonl" --looks "${LOOKS:-0}"
 if [ "${HUMAN:-0}" = 1 ]; then
   sleep 3
   echo "letters in the window: person h=$(grep -c '"key":72' "$RUN/window.log"), agent w=$(grep -c '"key":87' "$RUN/window.log")"

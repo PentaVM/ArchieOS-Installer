@@ -270,6 +270,10 @@ struct StageCommand {
     /// bottom-right of the part to capture; an empty rectangle means the whole surface.
     int to_local_x = 0;
     int to_local_y = 0;
+    /// For a `Snapshot` sent as a live frame: drawn at most this many pixels wide (0 is the
+    /// surface's own size) and written as a binary PPM instead of PNG.
+    int capture_max_width = 0;
+    bool capture_raw = false;
     PointerButton button = PointerButton::Left;
     int scroll_steps_x = 0;
     int scroll_steps_y = 0;

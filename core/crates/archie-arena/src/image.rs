@@ -2,8 +2,12 @@
 
 use archie_paint::bench::Sheet;
 
-/// Decodes a PNG (RGB or RGBA, 8 bits) into a sheet of RGB pixels.
+/// Decodes a capture into a sheet of RGB pixels: a PNG (RGB or RGBA, 8 bits), or the binary
+/// PPM a live frame arrives as.
 pub fn decode(png_bytes: &[u8]) -> Result<Sheet, String> {
+    if png_bytes.starts_with(b"P6") {
+        return decode_ppm(png_bytes);
+    }
     let mut decoder = png::Decoder::new(std::io::Cursor::new(png_bytes));
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = decoder.read_info().map_err(|e| format!("capture: {e}"))?;
@@ -18,6 +22,44 @@ pub fn decode(png_bytes: &[u8]) -> Result<Sheet, String> {
         .map(|p| [p[0], p[1], p[2]])
         .collect();
     Ok(Sheet { width: info.width, height: info.height, pixels })
+}
+
+/// A binary PPM (`P6`, maxval 255): three whitespace-separated numbers after the magic, one
+/// whitespace byte, then the rows.
+pub fn decode_ppm(bytes: &[u8]) -> Result<Sheet, String> {
+    let mut fields = Vec::with_capacity(3);
+    let mut at = 2;
+    while fields.len() < 3 {
+        while at < bytes.len() && bytes[at].is_ascii_whitespace() {
+            at += 1;
+        }
+        let start = at;
+        while at < bytes.len() && bytes[at].is_ascii_digit() {
+            at += 1;
+        }
+        let number: u32 = std::str::from_utf8(&bytes[start..at]).ok().and_then(|s| s.parse().ok()).ok_or("capture: bad PPM header")?;
+        fields.push(number);
+    }
+    let (width, height) = (fields[0], fields[1]);
+    if fields[2] != 255 || width == 0 || height == 0 || at >= bytes.len() {
+        return Err("capture: bad PPM header".into());
+    }
+    let body = &bytes[at + 1..];
+    let needed = width as usize * height as usize * 3;
+    if body.len() != needed {
+        return Err("capture: PPM size does not match its header".into());
+    }
+    Ok(Sheet { width, height, pixels: body.chunks_exact(3).map(|p| [p[0], p[1], p[2]]).collect() })
+}
+
+/// The sheet as a binary PPM: what IRIS reads without decoding a picture format.
+pub fn ppm(sheet: &Sheet) -> Vec<u8> {
+    let mut bytes = format!("P6\n{} {}\n255\n", sheet.width, sheet.height).into_bytes();
+    bytes.reserve(sheet.pixels.len() * 3);
+    for p in &sheet.pixels {
+        bytes.extend_from_slice(p);
+    }
+    bytes
 }
 
 /// Scaled so that it is at most `max_width` wide (box filter); returns the sheet and how many
@@ -211,5 +253,16 @@ mod tests {
         assert!(page.pixels.iter().all(|p| *p == [255, 255, 255]));
         let round = decode(&window().png()).unwrap();
         assert_eq!(round, window());
+    }
+
+    #[test]
+    fn a_live_frame_round_trips_as_ppm_and_a_bad_one_is_refused() {
+        let frame = window();
+        assert_eq!(decode(&ppm(&frame)).unwrap(), frame);
+        // The header the compositor writes, with a comment-free single newline before the rows.
+        let two = decode(b"P6\n2 1\n255\n\xff\x00\x00\x00\xff\x00").unwrap();
+        assert_eq!((two.width, two.height, two.pixels.clone()), (2, 1, vec![[255, 0, 0], [0, 255, 0]]));
+        assert!(decode(b"P6\n2 1\n255\n\xff\x00").is_err(), "short rows");
+        assert!(decode(b"P6\n2 1\n65535\n\xff\x00\x00\x00\xff\x00").is_err(), "16-bit is not what the stage writes");
     }
 }

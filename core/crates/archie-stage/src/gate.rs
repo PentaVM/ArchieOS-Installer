@@ -7,7 +7,7 @@
 
 use crate::action::{
     ActionKind, Key, StageAction, MAX_COORDINATE, MAX_SCROLL_STEPS, MAX_STROKE_PATHS,
-    MAX_STROKE_POINTS, MAX_STROKE_POINTS_IN_ALL, MAX_TEXT_CHARS,
+    MAX_FRAME_WIDTH, MAX_STROKE_POINTS, MAX_STROKE_POINTS_IN_ALL, MAX_TEXT_CHARS, MIN_FRAME_WIDTH,
 };
 use crate::policy::StagePolicy;
 use archie_policy::{Lease, LeaseRejection, Operation, Principal, Resource};
@@ -342,6 +342,11 @@ impl StageGate {
                 // A part of a window with no pixels in it is not a smaller ask, it is a
                 // malformed one, and the compositor would read it as "the whole window".
                 if region.is_empty() {
+                    return refuse(StageRefusal::CoordinateOutOfRange);
+                }
+            }
+            StageAction::Frame { max_width } => {
+                if !(MIN_FRAME_WIDTH..=MAX_FRAME_WIDTH).contains(max_width) {
                     return refuse(StageRefusal::CoordinateOutOfRange);
                 }
             }

@@ -43,6 +43,8 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         None => None,
     };
     let snapshot = take(&mut args, "--snapshot");
+    // Also time N captures each way: a full-size PNG snapshot and a 512-wide raw frame.
+    let looks: usize = take(&mut args, "--looks").map(|v| v.parse().unwrap_or(0)).unwrap_or(0).min(500);
     let stream = UnixStream::connect(&socket).await.map_err(|e| format!("{socket}: {e}"))?;
     let (read, write) = stream.into_split();
     let mut seat = Seat {
@@ -91,6 +93,18 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
                 let _ = writeln!(file, "{}", json!({"t": at, "kind": kind, "round": round, "gate_ms": took,
                                                    "executed": executed, "x": x, "y": y}));
             }
+        }
+    }
+    for _ in 0..looks {
+        let started = Instant::now();
+        match seat.look().await {
+            Ok(_) => times.entry("snapshot_png").or_default().push(started.elapsed().as_secs_f64() * 1000.0),
+            Err(_) => *refused.entry("snapshot_png").or_default() += 1,
+        }
+        let started = Instant::now();
+        match seat.frame(512).await {
+            Ok(_) => times.entry("frame_512_raw").or_default().push(started.elapsed().as_secs_f64() * 1000.0),
+            Err(_) => *refused.entry("frame_512_raw").or_default() += 1,
         }
     }
     // What the window shows at the end, for a check no log can give (what was typed where).

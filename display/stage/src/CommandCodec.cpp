@@ -21,6 +21,9 @@ using archie::visual::StageCommand;
 
 constexpr double kMaxExactInteger = 9007199254740992.0;  // 2^53
 constexpr int kMaxCoordinate = 32'767;
+// The widths a live frame may be drawn at (archie-stage MIN_FRAME_WIDTH/MAX_FRAME_WIDTH).
+constexpr int kMinFrameWidth = 64;
+constexpr int kMaxFrameWidth = 2048;
 
 DecodeResult fail(const char* code) {
     DecodeResult result;
@@ -421,6 +424,15 @@ DecodeResult decode_command(const QByteArray& raw_line, const QByteArray& key, s
     } else if (kind == QLatin1String("focus")) {
         if (!exact_keys(action, {"kind"})) return fail("command_malformed");
         c.action = StageAction::Focus;
+    } else if (kind == QLatin1String("frame")) {
+        // A live controller's frame: the whole surface, small and unencoded. The same
+        // capture as a snapshot in every check; only how it is drawn and written differs.
+        if (!exact_keys(action, {"kind", "max_width"})) return fail("command_malformed");
+        const auto width = integer(action.value(QLatin1String("max_width")), kMinFrameWidth, kMaxFrameWidth);
+        if (!width) return fail("command_malformed");
+        c.action = StageAction::Snapshot;
+        c.capture_max_width = static_cast<int>(*width);
+        c.capture_raw = true;
     } else if (kind == QLatin1String("snapshot")) {
         c.action = StageAction::Snapshot;
         // No region is the whole surface. A region is one box of it, which is both faster

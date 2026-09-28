@@ -250,6 +250,7 @@ async fn an_approved_action_goes_through_and_a_wrong_key_is_answered_with_sequen
 // ---- Captures ----------------------------------------------------------------------------
 
 const PNG: &[u8] = b"\x89PNG\r\n\x1a\nnot really an image, but the right signature";
+const PPM: &[u8] = b"P6\n2 1\n255\n\xff\x00\x00\x00\xff\x00";
 
 fn camera_policy() -> StagePolicy {
     StagePolicy::parse(
@@ -293,15 +294,19 @@ async fn start_camera(dir: std::path::PathBuf, camera: Camera) -> Client {
                 continue;
             };
             let mut reply = String::new();
-            if matches!(command.action, WireAction::Snapshot { .. }) {
-                let path = match camera {
-                    Camera::ElsewherePath => dir.join(format!("{}.png", command.seq)),
-                    _ => dir.join("snapshots").join(format!("{}.png", command.seq)),
+            if matches!(command.action, WireAction::Snapshot { .. } | WireAction::Frame { .. }) {
+                let (pixels, extension) = match command.action {
+                    WireAction::Frame { .. } => (PPM, "ppm"),
+                    _ => (PNG, "png"),
                 };
-                std::fs::write(&path, PNG).unwrap();
+                let path = match camera {
+                    Camera::ElsewherePath => dir.join(format!("{}.{extension}", command.seq)),
+                    _ => dir.join("snapshots").join(format!("{}.{extension}", command.seq)),
+                };
+                std::fs::write(&path, pixels).unwrap();
                 let digest = match camera {
                     Camera::WrongDigest => "0".repeat(64),
-                    _ => hex::encode(ring::digest::digest(&ring::digest::SHA256, PNG).as_ref()),
+                    _ => hex::encode(ring::digest::digest(&ring::digest::SHA256, pixels).as_ref()),
                 };
                 reply.push_str(&format!(
                     "{{\"event\":\"snapshot\",\"seq\":{},\"surface\":{},\"width\":800,\"height\":600,\"sha256\":\"{}\",\"path\":{}}}\n",
@@ -321,6 +326,33 @@ async fn start_camera(dir: std::path::PathBuf, camera: Camera) -> Client {
         }
     });
     StageClient::new(client_read, client_write)
+}
+
+#[tokio::test]
+async fn a_live_frame_arrives_raw_under_the_same_checks() {
+    let dir = scratch("frame");
+    let mut client = start_camera(dir.clone(), Camera::Honest).await;
+    let mut world = learned(&mut client).await;
+    let mut operator = Operator::new(
+        CommandKey::from_bytes(&KEY),
+        camera_policy(),
+        PolicyEngine::default(),
+    );
+    let outcome = operator
+        .look(
+            &mut client,
+            &mut world,
+            &request("org.freecad.FreeCAD", StageAction::Frame { max_width: 512 }),
+            &dir.join("snapshots"),
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+    let archie_stage::LookOutcome::Captured(frame) = outcome else {
+        panic!("expected a frame, got {outcome:?}");
+    };
+    assert_eq!(frame.png, PPM);
+    assert_eq!(std::fs::read_dir(dir.join("snapshots")).unwrap().count(), 0, "read once, then removed");
 }
 
 #[tokio::test]

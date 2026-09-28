@@ -250,6 +250,7 @@ private:
         archie::visual::IRect region{};
         int surface_width = 0;
         int surface_height = 0;
+        bool raw = false;   // a live frame: PPM, not PNG
         qint64 asked_at_ms = 0;
         bool done = false;
         bool ok = false;

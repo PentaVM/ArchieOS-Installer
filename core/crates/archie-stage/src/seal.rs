@@ -20,7 +20,7 @@
 use crate::action::{
     Key, KeyChord, Modifier, PointerButton, Region, StageAction, StageText, StrokePoint,
     MAX_COORDINATE, MAX_SCROLL_STEPS, MAX_STROKE_PATHS, MAX_STROKE_POINTS,
-    MAX_STROKE_POINTS_IN_ALL, MAX_TEXT_CHARS,
+    MAX_FRAME_WIDTH, MAX_STROKE_POINTS_IN_ALL, MAX_TEXT_CHARS, MIN_FRAME_WIDTH,
 };
 use crate::gate::AuthorizedStageCommand;
 use archie_types::Timestamp;
@@ -127,6 +127,9 @@ pub enum WireAction {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         region: Option<Region>,
     },
+    Frame {
+        max_width: u32,
+    },
     KeyDown {
         key: Key,
     },
@@ -196,6 +199,7 @@ impl From<&StageAction> for WireAction {
             StageAction::Snapshot { region } => Self::Snapshot {
                 region: region.filter(|region| !region.is_empty()),
             },
+            StageAction::Frame { max_width } => Self::Frame { max_width: *max_width },
             StageAction::KeyDown { key } => Self::KeyDown { key: *key },
             StageAction::KeyUp { key } => Self::KeyUp { key: *key },
             StageAction::ButtonDown { button } => Self::ButtonDown { button: *button },
@@ -254,6 +258,7 @@ impl WireAction {
             // A part of a window is two corners of it, and it has to be a real rectangle
             // before it is sealed: the compositor checks it again against the live window.
             Self::Snapshot { region: None } => true,
+            Self::Frame { max_width } => (MIN_FRAME_WIDTH..=MAX_FRAME_WIDTH).contains(max_width),
             Self::Snapshot {
                 region: Some(region),
             } => {

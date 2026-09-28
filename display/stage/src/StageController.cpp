@@ -850,7 +850,18 @@ void StageController::deliver(const InputStep &step)
         m_capture->surface_width = surface->geometry.w;
         m_capture->surface_height = surface->geometry.h;
         m_capture->asked_at_ms = QDateTime::currentMSecsSinceEpoch();
-        m_grab = item->grabToImage();
+        m_capture->raw = m_active->command.capture_raw;
+        {
+            // A live frame is drawn small by the scene graph itself, not scaled afterwards.
+            const int max_width = m_active->command.capture_max_width;
+            const qreal item_width = item->width();
+            if (max_width > 0 && item_width > max_width) {
+                const int height = qMax(1, qRound(item->height() * max_width / item_width));
+                m_grab = item->grabToImage(QSize(max_width, height));
+            } else {
+                m_grab = item->grabToImage();
+            }
+        }
         if (!m_grab) {
             m_capture->done = true;
             break;
@@ -930,7 +941,19 @@ void StageController::finishCapture(std::uint64_t sequence)
     }
     const QImage image = part == grabbed.rect() ? grabbed : grabbed.copy(part);
     QByteArray png;
-    {
+    if (m_capture->raw) {
+        // A binary PPM: a header and the RGB rows, nothing to compress. What a PNG of a whole
+        // window cost (240 ms of a 400 ms decision) is what a live controller cannot pay.
+        const QImage rgb = image.convertToFormat(QImage::Format_RGB888);
+        const QByteArray header = QByteArrayLiteral("P6\n") + QByteArray::number(rgb.width()) + ' ' +
+                                  QByteArray::number(rgb.height()) + QByteArrayLiteral("\n255\n");
+        const qsizetype row = static_cast<qsizetype>(rgb.width()) * 3;
+        png.reserve(header.size() + row * rgb.height());
+        png.append(header);
+        for (int y = 0; y < rgb.height(); ++y) {
+            png.append(reinterpret_cast<const char *>(rgb.constScanLine(y)), row);
+        }
+    } else {
         QBuffer buffer(&png);
         if (!buffer.open(QIODevice::WriteOnly) || !image.save(&buffer, "PNG")) {
             return;
@@ -945,7 +968,8 @@ void StageController::finishCapture(std::uint64_t sequence)
         !QFile::setPermissions(directory, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner)) {
         return;
     }
-    const QString path = directory + QStringLiteral("/") + QString::number(sequence) + QStringLiteral(".png");
+    const QString path = directory + QStringLiteral("/") + QString::number(sequence) +
+                         (m_capture->raw ? QStringLiteral(".ppm") : QStringLiteral(".png"));
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly) || file.write(png) != png.size() || !file.commit()) {
         return;

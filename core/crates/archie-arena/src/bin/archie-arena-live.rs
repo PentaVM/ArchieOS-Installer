@@ -12,7 +12,7 @@
 //! answer allow. The run writes `<out>/<task>/<run>/` (result.json, trajectory.jsonl, a frame
 //! every second in frames/) and appends to `<out>/results.jsonl`.
 
-use archie_arena::live::{step_at, teal_pixels, Control, Held, Plan, ResetCounter, Step};
+use archie_arena::live::{step_at, teal_pixels, Control, Decision, Held, Plan, ResetCounter, Step};
 use archie_arena::model::Nebius;
 use archie_arena::seat::{load_key, take, Seat};
 use archie_arena::task::Task;
@@ -24,6 +24,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::net::UnixStream;
+
+/// How wide the compositor draws the frames IRIS reads (IRIS letterboxes to 512).
+const FRAME_WIDTH: u32 = 512;
 
 const PLANNER: &str = "You are the planner of Archie, an AI that operates a computer. A fast visual model, IRIS, \
 does the doing: it sees the screen many times a second and turns ONE short instruction at a time into mouse and \
@@ -124,32 +127,62 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
     let (mut ticks, mut sent, mut refused, mut failed) = (0u64, 0u64, 0u64, 0u64);
     let mut act_ms: Vec<f32> = Vec::new();
     let mut last_saved = -1i64;
+    // The frame IRIS reads is drawn FRAME_WIDTH wide by the compositor and sent raw: a
+    // full-size PNG cost 240 ms of a 400 ms decision. While IRIS decides on a frame, the
+    // decision before it keeps playing: its chunk (the controls planned for the next frames)
+    // is carried out on a 60 Hz clock, so the game gets input every frame even when a decision
+    // takes several. One connection does both, in turn: the Stage's sequence check is global.
+    let surface_width = seat.world.surfaces_of(&task.app_id).next().map(|s| s.width).unwrap_or(0).max(1) as f32;
+    let mut clock = tokio::time::interval(Duration::from_millis(16));
+    clock.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut decision: Option<Decision> = None;
+    let mut decisions = 0u64;
     while Instant::now() < deadline {
         let tick = Instant::now();
         let elapsed = started.elapsed().as_secs_f32();
         let Some(step) = step_at(&plan.steps, elapsed).cloned() else { break };
-        let window = match seat.look().await {
-            Ok(sheet) => sheet,
+        let window = match seat.frame(FRAME_WIDTH).await {
+            Ok(frame) => frame,
             Err(error) => {
                 failed += 1;
                 log_line(&trajectory, json!({"t": elapsed, "look": error}));
                 continue;
             }
         };
-        if resets.observe(teal_pixels(&window.pixels), 150) {
+        let frame_ms = started.elapsed().as_millis();
+        let look_ms = tick.elapsed().as_millis();
+        // Window pixels per frame pixel: where IRIS points goes back to the window with it.
+        let scale = (surface_width / window.width.max(1) as f32).max(1.0);
+        // The popup's teal was counted on full-size captures; a smaller frame has fewer pixels.
+        if resets.observe(teal_pixels(&window.pixels), (150.0 / (scale * scale)).ceil() as usize) {
             log_line(&trajectory, json!({"t": elapsed, "event": "flip_reset_popup"}));
         }
-        // IRIS reads a 512-pixel canvas: a full-size capture encoded as PNG cost most of a tick
-        // (the first live run managed 2 ticks a second). The frame goes at 640 wide at most, and
-        // where IRIS points is scaled back to the window.
-        let (small, scale) = archie_arena::image::fit_width(&window, 640);
-        let png = small.png();
         if elapsed as i64 > last_saved {
             last_saved = elapsed as i64;
-            let _ = std::fs::write(frames.join(format!("{:04}.png", ticks)), &png);
+            let _ = std::fs::write(frames.join(format!("{:04}.png", ticks)), window.png());
         }
         let url = format!("{iris}/act?session={stamp}&instruction={}&skill={}", urlencode(&step.what), urlencode(&skill));
-        let control: Control = match http.post(&url).body(png).send().await {
+        let ask = http.post(&url).body(archie_arena::image::ppm(&window)).send();
+        tokio::pin!(ask);
+        let mut played = Vec::new();
+        let answer = loop {
+            tokio::select! {
+                answer = &mut ask => break answer,
+                _ = clock.tick() => {
+                    if let Some(current) = &decision {
+                        let now_ms = started.elapsed().as_millis();
+                        let (actions, _) = held.actions_towards(&current.at(now_ms), now_ms);
+                        for action in actions {
+                            let kind = action.kind().as_str();
+                            let said = send(&mut seat, action, &step.what).await;
+                            if said == "executed" { sent += 1 } else { refused += 1 }
+                            played.push(format!("{kind}:{said}"));
+                        }
+                    }
+                }
+            }
+        };
+        let control: Control = match answer {
             Ok(response) => match response.json().await {
                 Ok(control) => control,
                 Err(error) => {
@@ -170,16 +203,18 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
             continue;
         }
         act_ms.push(control.latency_ms);
+        decisions += 1;
+        let current = Decision { number: decisions, control, frame_ms };
         let now_ms = started.elapsed().as_millis();
-        let (mut actions, unsupported) = held.actions_towards(&control, now_ms);
-        // A GUI step IRIS says is a click lands where it points.
-        let click = match control.step_type.as_str() {
+        let (mut actions, unsupported) = held.actions_towards(&current.at(now_ms), now_ms);
+        // A GUI step IRIS says is a click lands where it points, once per decision.
+        let click = match current.control.step_type.as_str() {
             "click" => Some(PointerButton::Left),
             "right_click" => Some(PointerButton::Right),
             _ => None,
         };
         if let (Some(button), true) = (click, task.judge == "gui") {
-            if let [x, y] = control.pointer[..] {
+            if let [x, y] = current.control.pointer[..] {
                 actions.push(StageAction::Click { x: (x * scale).round() as i32, y: (y * scale).round() as i32, button });
             }
         }
@@ -195,9 +230,12 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
             outcomes.push(format!("{kind}:{said}"));
         }
         ticks += 1;
-        log_line(&trajectory, json!({"t": elapsed, "step": step.what, "keys": control.keys, "buttons": control.buttons,
-                                     "step_type": control.step_type, "act_ms": control.latency_ms,
-                                     "tick_ms": tick.elapsed().as_millis(), "sent": outcomes, "unsupported": unsupported}));
+        log_line(&trajectory, json!({"t": elapsed, "step": step.what, "keys": current.control.keys,
+                                     "buttons": current.control.buttons, "step_type": current.control.step_type,
+                                     "chunk": current.control.chunk.len(), "act_ms": current.control.latency_ms,
+                                     "look_ms": look_ms, "tick_ms": tick.elapsed().as_millis(),
+                                     "sent": outcomes, "played_from_chunk": played, "unsupported": unsupported}));
+        decision = Some(current);
     }
     for action in held.release_all() {
         let _ = send(&mut seat, action, "the run is over").await;
