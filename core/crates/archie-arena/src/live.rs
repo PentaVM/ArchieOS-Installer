@@ -33,6 +33,48 @@ pub struct Control {
     /// must not be read as "hold nothing": the first live run did, 126 times.
     #[serde(default)]
     pub error: Option<String>,
+    /// What IRIS plans to hold on the frames after this one, `chunk_hz` apart: played out
+    /// until the next decision lands. Empty from a head without chunks.
+    #[serde(default)]
+    pub chunk: Vec<Planned>,
+    #[serde(default)]
+    pub chunk_hz: f32,
+}
+
+/// One planned frame of a chunk.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+pub struct Planned {
+    #[serde(default)]
+    pub keys: Vec<String>,
+    #[serde(default)]
+    pub buttons: Vec<String>,
+}
+
+/// A decision, stamped with when the frame it was made on was captured.
+#[derive(Debug, Clone)]
+pub struct Decision {
+    pub number: u64,
+    pub control: Control,
+    pub frame_ms: u128,
+}
+
+impl Decision {
+    /// What to hold at `now_ms`: the control for now until the first planned frame is due,
+    /// then each planned frame in turn, and the last one past the end of the chunk. Time is
+    /// counted from the frame, so a slow decision starts partway into its own chunk.
+    pub fn at(&self, now_ms: u128) -> Control {
+        let control = &self.control;
+        if control.chunk.is_empty() || control.chunk_hz <= 0.0 {
+            return control.clone();
+        }
+        let elapsed_s = now_ms.saturating_sub(self.frame_ms) as f32 / 1000.0;
+        let index = (elapsed_s * control.chunk_hz).floor() as usize;
+        if index == 0 {
+            return control.clone();
+        }
+        let planned = &control.chunk[(index - 1).min(control.chunk.len() - 1)];
+        Control { keys: planned.keys.clone(), buttons: planned.buttons.clone(), ..control.clone() }
+    }
 }
 
 /// A plan step: what to do, for how long.
@@ -233,5 +275,24 @@ mod tests {
         assert_eq!(stage_key("space"), Key::parse("space"));
         assert!(stage_key("q").is_some());
         assert!(stage_key("ctrl").is_none());
+    }
+
+    #[test]
+    fn a_chunk_plays_out_from_the_frame_it_was_decided_on() {
+        let plan = |keys: &[&str]| Planned { keys: keys.iter().map(|k| k.to_string()).collect(), buttons: vec![] };
+        let control = Control {
+            keys: vec!["w".into()],
+            chunk: vec![plan(&["w", "space"]), plan(&["a"]), plan(&[])],
+            chunk_hz: 16.0,
+            ..Control::default()
+        };
+        let decision = Decision { number: 1, control, frame_ms: 1_000 };
+        assert_eq!(decision.at(1_000).keys, vec!["w"], "now");
+        assert_eq!(decision.at(1_070).keys, vec!["w", "space"], "the first planned frame, 62.5 ms on");
+        assert_eq!(decision.at(1_130).keys, vec!["a"]);
+        assert!(decision.at(1_190).keys.is_empty());
+        assert!(decision.at(9_000).keys.is_empty(), "past the chunk, its last frame holds");
+        let plain = Decision { number: 2, control: Control { keys: vec!["d".into()], ..Control::default() }, frame_ms: 0 };
+        assert_eq!(plain.at(5_000).keys, vec!["d"], "a head without chunks holds its one control");
     }
 }
