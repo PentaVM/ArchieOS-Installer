@@ -234,6 +234,12 @@ contradictions and makes unavailable, insufficient and disputed evidence explici
 heads may attach a cited advisory interpretation; they cannot establish a graph fact from
 their own score or from repeated ambient input.
 
+Skill learning is the one lane where opted-in screen windows train anything, and it runs only
+in REM sleep ([RFC-014](RFC-014-REM-SLEEP.md)). Windows are admitted only when a person
+demonstrated the step or a receipt verified the outcome. Each skill trains as a LoRA adapter
+on the frozen IRIS base, and ships only past a sealed benchmark. The day's windows are
+deleted at the end of every cycle.
+
 ## 6. Local control plane
 
 The CLI sends one bounded newline-delimited JSON request and receives one response.
