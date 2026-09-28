@@ -17,6 +17,8 @@ user_pref("browser.sessionstore.resume_from_crash", false);
 user_pref("browser.startup.page", 0);
 user_pref("browser.tabs.warnOnClose", false);
 user_pref("media.autoplay.default", 5);
+user_pref("browser.translations.automaticallyPopup", false);
+user_pref("browser.translations.enable", false);
 P
 ( echo 900 > /proc/self/oom_score_adj
   XDG_RUNTIME_DIR=$RUN/xdg WAYLAND_DISPLAY=archie-stage MOZ_ENABLE_WAYLAND=1 LIBGL_ALWAYS_SOFTWARE=1 \

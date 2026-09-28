@@ -139,7 +139,11 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         if resets.observe(teal_pixels(&window.pixels), 150) {
             log_line(&trajectory, json!({"t": elapsed, "event": "flip_reset_popup"}));
         }
-        let png = window.png();
+        // IRIS reads a 512-pixel canvas: a full-size capture encoded as PNG cost most of a tick
+        // (the first live run managed 2 ticks a second). The frame goes at 640 wide at most, and
+        // where IRIS points is scaled back to the window.
+        let (small, scale) = archie_arena::image::fit_width(&window, 640);
+        let png = small.png();
         if elapsed as i64 > last_saved {
             last_saved = elapsed as i64;
             let _ = std::fs::write(frames.join(format!("{:04}.png", ticks)), &png);
@@ -176,7 +180,7 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         };
         if let (Some(button), true) = (click, task.judge == "gui") {
             if let [x, y] = control.pointer[..] {
-                actions.push(StageAction::Click { x: x.round() as i32, y: y.round() as i32, button });
+                actions.push(StageAction::Click { x: (x * scale).round() as i32, y: (y * scale).round() as i32, button });
             }
         }
         let mut outcomes = Vec::new();
