@@ -535,6 +535,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "archie-skill-node"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "toml",
+]
+
+[[package]]
 name = "archie-speech"
 version = "0.1.0"
 dependencies = [
