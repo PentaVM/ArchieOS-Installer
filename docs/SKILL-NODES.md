@@ -67,26 +67,13 @@ by itself.
    archie-skill-node init --config C:\iris\node.toml --contributor nelson --gpu "RTX 3070 8GB"
    ```
    Check the paths in the file it writes.
-5. **The shared repository.** Clone it to the `board_repo` path of the config, with the git
-   identity you want credited:
-   ```bash
-   git clone https://github.com/PentaVM/iris-skills C:\iris\iris-skills
-   ```
-   Pushes use your own git credentials (the ones `git push` already uses on that machine).
-6. **Data.**
-   - CS:GO: `tools/vast/fetch_csgo.sh` into `IRIS_CSGO_DIR`.
-   - A recorded skill: its windows in `C:\iris\node\data\<name>\*.npz`. With `IRIS_SKILL_SEAL`
-     set, the node seals some of them.
-7. **Connect your agent.** Run this on the node to print the lines to paste into your agent:
-   ```bash
-   archie-skill-node client --host you@your-pc --config C:\iris\node.toml --name iris-you
-   ```
+5. **The shared repository.** It is `PentaVM/iris-skills`, private (Nelson, 2026-10-03). Everyone
+who runs a node needs write access to it. The first claim writes the board.
 
-**The shared repository.** Nelson creates one git repository (for example
-`PentaVM/iris-skills`) with one first commit, and gives write access to everyone who runs a
-node. The first claim writes the board. For IRIS to download packages by itself the
-repository's files must be reachable over HTTPS without a login (a public repository, or the
-Hub site serving them); until then set `public_url = ""` and install with `skill_install`.
+Because it is private, IRIS cannot download packages by itself: leave `public_url = ""` and
+install the package in use on each machine with `skill_install`. If the repository is made
+public later, set `public_url` to `https://raw.githubusercontent.com/PentaVM/iris-skills/main`
+and point `IRIS_SKILL_CATALOG` at its `catalog.json`.
 
 ## Limits, as of 2026-09-30
 
