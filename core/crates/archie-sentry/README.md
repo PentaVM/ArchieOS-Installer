@@ -5,7 +5,48 @@ autorización con `archie-policy`, observación anterior y posterior, y recibos
 durables. `Verified` exige una medición posterior que satisfaga la postcondición;
 un ACK por sí solo no acredita el resultado.
 
-## Estado comprobado
+## Operador Linux
+
+`archie sentry-execute office-switch switch-on` prepara una intención en Core,
+muestra el payload y exige escribir el digest completo dentro de 30 segundos.
+La aprobación sólo vale en esa conexión, con el UID autorizado, el mismo proceso
+y el mismo terminal en primer plano. No existe `--yes`. Las cuentas de agentes
+deben estar separadas de los UIDs operadores; esto comprueba una sesión de terminal,
+no biometría ni proximidad física. Windows no autentica este camino de actuación.
+
+```toml
+[sentry]
+operator_uids = [1000] # Sustituir por la cuenta operadora del nodo Linux.
+
+[sentry.home_assistant]
+endpoint = "https://192.168.1.5:8123/"
+token_file = "/etc/archie/secrets/home-assistant.token"
+
+[[sentry.home_assistant.resources]]
+resource_id = "office-switch"
+entity = "switch.office"
+```
+
+El archivo de token debe ser regular, privado (`0600`), accesible al usuario de
+archied, sin symlink y de máximo 4096 bytes. Se abre de nuevo por operación; la
+rotación se comprueba con las cabeceras Authorization recibidas por una fixture.
+Configurar una entidad no empareja el recurso: State debe contener su pairing
+aprobado por el flujo confiable de Core. La policy por defecto continúa negando
+actuation; declarar `safety_boundary_present` requiere una frontera real en el nodo.
+No habilitarla sólo para conseguir que la operación pase.
+
+`archie sentry-receipt <intent-id>` consulta el recibo durable. Una reserva sin
+resultado se muestra `Indeterminate` y devuelve salida fallida; no se reenvía.
+La preparación de climate comprueba °C antes del guard final y consume esa
+preparación una sola vez, sin otra consulta previa al POST de actuación.
+
+El CLI y el daemon se verifican como procesos separados contra HA de fixture,
+con PTY, confirmación, journal PostgreSQL y exactamente una actuación observada.
+El cierre tras dispatch conserva un fence consultable al volver a arrancar Core.
+La evidencia actual y sus límites están en
+[el informe del operador](../../../docs/superpowers/sentry-operator-verification-2026-10-03.md).
+
+## Evidencia del motor anterior a esta entrega
 
 En Windows pasaron 31 pruebas de contratos, motor y protocolos. En Linux pasan 31
 y ocho adicionales con PostgreSQL 18.6, TimescaleDB 2.29.2 y pgvector 0.8.6:
@@ -82,10 +123,10 @@ sólo su propio schema, cuyo nombre incluye un identificador aleatorio.
 ## Fronteras pendientes para producción
 
 `CoreAuthority` es autoridad de composición dentro de un proceso confiable. No es
-un comprobante remoto ni se deserializa desde JSON. Todavía se necesita el flujo
-autenticado del operador, presencia verificable, transporte Edge autenticado y
-rotación de credenciales. No deben exponerse los métodos de actuation como RPC
-sin esas fronteras.
+un comprobante remoto ni se deserializa desde JSON. Esta entrega conecta operador
+local y rotación de token HA. Quedan el transporte Edge remoto autenticado, su
+ciclo de claves, el enrolment verificable de dispositivos reales y la validación
+de presencia física cuando el caso de uso la requiera.
 
 La instalación del daemon actualizado, empaquetado ISO, ejecución
 con dispositivos físicos, MQTT, Matter, routers, ONVIF, fusión IRIS y cámaras

@@ -13,7 +13,10 @@ use reqwest::{
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    time::{Duration, Instant},
+};
 
 pub struct HomeAssistant {
     edge: String,
@@ -22,6 +25,7 @@ pub struct HomeAssistant {
     client: Client,
     authorization: HeaderValue,
     entities: BTreeMap<String, String>,
+    climate_preflight: Option<(String, Command, Instant)>,
 }
 impl std::fmt::Debug for HomeAssistant {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -75,6 +79,7 @@ impl HomeAssistant {
             client: client()?,
             authorization,
             entities,
+            climate_preflight: None,
         })
     }
     fn entity(&self, resource: &ResourceDescriptor) -> Result<&str, AdapterError> {
@@ -235,6 +240,28 @@ impl EdgeAdapter for HomeAssistant {
             state,
         })
     }
+    async fn preflight(
+        &mut self,
+        resource: &ResourceDescriptor,
+        command: &Command,
+    ) -> Result<(), AdapterError> {
+        self.climate_preflight = None;
+        command.validate().map_err(|_| AdapterError::Protocol)?;
+        if matches!(command, Command::ClimateSetTemperature { .. }) {
+            if !self.entity(resource)?.starts_with("climate.")
+                || !resource.capabilities.contains(&command.capability())
+            {
+                return Err(AdapterError::Unsupported);
+            }
+            self.require_celsius().await?;
+            self.climate_preflight = Some((
+                resource.resource_id.clone(),
+                command.clone(),
+                Instant::now(),
+            ));
+        }
+        Ok(())
+    }
     async fn apply(
         &mut self,
         resource: &ResourceDescriptor,
@@ -258,7 +285,16 @@ impl EdgeAdapter for HomeAssistant {
                 "turn_on"
             }
             ("climate", Command::ClimateSetTemperature { milli_celsius }) => {
-                self.require_celsius().await?;
+                let (id, prepared, at) = self
+                    .climate_preflight
+                    .take()
+                    .ok_or(AdapterError::Unsupported)?;
+                if id != resource.resource_id
+                    || prepared != *command
+                    || at.elapsed() > Duration::from_secs(5)
+                {
+                    return Err(AdapterError::Unsupported);
+                }
                 data["temperature"] = json!(*milli_celsius as f64 / 1000.0);
                 "set_temperature"
             }

@@ -31,6 +31,9 @@ tokio.workspace = true
 toml.workspace = true
 tracing.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 async-trait.workspace = true
 archie-state = { workspace = true, features = ["test-support"] }

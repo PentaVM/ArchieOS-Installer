@@ -167,7 +167,7 @@ async fn climate_rechecks_units_after_observation_and_refuses_changed_config() {
     adapter.observe(&resource).await.unwrap();
     assert_eq!(
         adapter
-            .apply(
+            .preflight(
                 &resource,
                 &Command::ClimateSetTemperature {
                     milli_celsius: 22500
@@ -203,15 +203,19 @@ async fn climate_sends_celsius_only_after_checking_system_units() {
     .unwrap();
     let mut resource = resource();
     resource.capabilities = vec![CommandKind::ClimateSetTemperature];
-    adapter
-        .apply(
-            &resource,
-            &Command::ClimateSetTemperature {
-                milli_celsius: 22500,
-            },
-        )
-        .await
-        .unwrap();
+    let command = Command::ClimateSetTemperature {
+        milli_celsius: 22500,
+    };
+    assert_eq!(
+        adapter.apply(&resource, &command).await,
+        Err(AdapterError::Unsupported)
+    );
+    adapter.preflight(&resource, &command).await.unwrap();
+    adapter.apply(&resource, &command).await.unwrap();
+    assert_eq!(
+        adapter.apply(&resource, &command).await,
+        Err(AdapterError::Unsupported)
+    );
     let requests = task.await.unwrap();
     let text = String::from_utf8_lossy(&requests[1]);
     assert!(text.starts_with("POST /api/services/climate/set_temperature "));

@@ -699,6 +699,12 @@ impl Runtime {
                 node_id: self.node_id().to_string(),
                 version: ARCHIEOS_VERSION.to_string(),
             },
+            ControlRequest::SentryPrepare { .. }
+            | ControlRequest::SentryApprove { .. }
+            | ControlRequest::SentryCancel
+            | ControlRequest::SentryReceipt { .. } => {
+                ControlResponse::error("authenticated local operator session required")
+            }
             ControlRequest::Status => ControlResponse::Status(Box::new(self.status_view().await)),
             ControlRequest::Boot => ControlResponse::Boot(Box::new(self.boot_report.clone())),
             ControlRequest::Metrics => ControlResponse::Metrics(Box::new(self.metrics.snapshot())),

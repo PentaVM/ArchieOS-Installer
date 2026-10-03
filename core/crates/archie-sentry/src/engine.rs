@@ -42,6 +42,15 @@ pub trait EdgeAdapter: Send {
     fn adapter_id(&self) -> &str;
     async fn observe(&mut self, resource: &ResourceDescriptor)
         -> Result<Observation, AdapterError>;
+    /// Complete awaited protocol preparation before Core's final revocation check.
+    /// This must not actuate. `apply` must proceed directly to its dispatch request.
+    async fn preflight(
+        &mut self,
+        _resource: &ResourceDescriptor,
+        _command: &crate::contracts::Command,
+    ) -> Result<(), AdapterError> {
+        Ok(())
+    }
     async fn apply(
         &mut self,
         resource: &ResourceDescriptor,
@@ -401,6 +410,16 @@ impl<J: Journal> Engine<J> {
         }
         result.before = Some(before);
         result.stages.push(Stage::ObservedBefore);
+        let duration = match budget.remaining(intent) {
+            Ok(d) => d,
+            Err(_) => return,
+        };
+        if !matches!(
+            tokio::time::timeout(duration, adapter.preflight(resource, &intent.command)).await,
+            Ok(Ok(()))
+        ) {
+            return;
+        }
         if self
             .guard
             .as_ref()

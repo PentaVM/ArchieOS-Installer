@@ -178,6 +178,7 @@ dependencies = [
  "archie-types",
  "fs2",
  "hex",
+ "libc",
  "serde",
  "serde_json",
  "sha2",

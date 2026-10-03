@@ -21,7 +21,7 @@ impl From<postgres::Error> for JournalError {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct JournalRecord {
     pub intent_id: String,

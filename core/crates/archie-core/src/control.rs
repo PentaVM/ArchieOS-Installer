@@ -14,8 +14,9 @@
 //! falls back to a loopback TCP port published in `/run/archie/archied.endpoint`.
 //!
 //! Read-only queries are unauthenticated beyond socket access. Anything that changes
-//! state carries an explicit marker and is refused unless the daemon was started with
-//! control mutations enabled.
+//! state carries an explicit marker. Sentry mutations require an allowed kernel UID,
+//! the same foreground terminal and a single-use review on the same Unix connection.
+//! Windows loopback and the context-free dispatcher cannot provide that authority.
 
 use crate::boot::BootReport;
 use archie_observability::MetricSnapshot;
@@ -37,6 +38,8 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 /// Largest single control message accepted, to bound what a client can make the daemon
 /// allocate.
 pub const MAX_CONTROL_MESSAGE_BYTES: usize = 1024 * 1024;
+pub use archie_sentry::contracts::Command as SentryCommand;
+pub use archie_sentry::engine::ExecutionStatus as SentryExecutionStatus;
 
 /// A bounded, operator-scoped Nmap survey profile. These are inventory operations, not
 /// vulnerability exploitation, credential testing, arbitrary NSE script execution, or
@@ -1341,12 +1344,33 @@ pub enum ControlRequest {
     Devices,
     /// Recent durable physical-operation records. This is read-only and cannot approve,
     /// cancel, send, or otherwise dispatch an operation.
-    DeviceOperations { limit: u32 },
+    DeviceOperations {
+        limit: u32,
+    },
     /// Read-only IPP query for a printer in operator configuration. No caller URL.
-    SentryPrinter { resource_id: String },
+    SentryPrinter {
+        resource_id: String,
+    },
+    /// Prepare one typed operation in an authenticated local operator session.
+    SentryPrepare {
+        resource_id: String,
+        command: archie_sentry::contracts::Command,
+    },
+    /// Confirm the exact digest returned on this same connection.
+    SentryApprove {
+        intent_id: String,
+        digest: String,
+    },
+    SentryCancel,
+    /// Query a durable outcome/fence through an authenticated local session.
+    SentryReceipt {
+        intent_id: String,
+    },
     /// Recent Cortex learning trajectories. This is a privacy-minimised read-only
     /// projection; it cannot parse a correction, write the graph or promote a model.
-    CortexTrajectories { limit: u32 },
+    CortexTrajectories {
+        limit: u32,
+    },
     /// Registered models.
     Models,
     /// The boot report from this daemon's start.
@@ -1354,7 +1378,9 @@ pub enum ControlRequest {
     /// Metrics snapshot.
     Metrics,
     /// Recent audit records.
-    Audit { limit: u32 },
+    Audit {
+        limit: u32,
+    },
     /// Liveness check.
     Ping,
 }
@@ -1362,11 +1388,12 @@ pub enum ControlRequest {
 impl ControlRequest {
     /// Whether servicing this request changes daemon state.
     ///
-    /// Every request in v0.1 is read-only. The method exists so that adding a mutating
-    /// request later cannot silently skip an authorisation check — the dispatcher
-    /// branches on this.
+    /// Sentry preparation/approval/cancellation require the operator dispatcher.
     pub fn is_mutating(&self) -> bool {
-        false
+        matches!(
+            self,
+            Self::SentryPrepare { .. } | Self::SentryApprove { .. } | Self::SentryCancel
+        )
     }
 
     pub fn name(&self) -> &'static str {
@@ -1379,6 +1406,10 @@ impl ControlRequest {
             Self::Devices => "devices",
             Self::DeviceOperations { .. } => "device-operations",
             Self::SentryPrinter { .. } => "sentry-printer",
+            Self::SentryPrepare { .. } => "sentry-prepare",
+            Self::SentryApprove { .. } => "sentry-approve",
+            Self::SentryCancel => "sentry-cancel",
+            Self::SentryReceipt { .. } => "sentry-receipt",
             Self::CortexTrajectories { .. } => "cortex-trajectories",
             Self::Models => "models",
             Self::Boot => "boot",
@@ -1590,6 +1621,13 @@ pub enum ControlResponse {
         resource_id: String,
         snapshot: archie_sentry::adapters::ipp::PrinterSnapshot,
     },
+    SentryPrepared {
+        intent: Box<archie_sentry::contracts::Intent>,
+        digest: String,
+    },
+    SentryResult(Box<archie_sentry::engine::ExecutionResult>),
+    SentryCancelled,
+    SentryReceipt(Box<archie_sentry::journal::JournalRecord>),
     CortexTrajectories {
         trajectories: Vec<CortexTrajectoryView>,
     },

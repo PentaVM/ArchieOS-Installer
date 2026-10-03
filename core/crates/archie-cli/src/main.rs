@@ -1,8 +1,7 @@
 //! `archie` — the ArchieOS command-line interface.
 //!
-//! A thin client. Every subcommand is one control request and one rendering; the CLI
-//! holds no state and makes no decisions, so what it shows is always what the daemon
-//! actually believes rather than a second, drifting model of the system.
+//! A thin client. Queries render daemon state; Sentry execution adds an interactive
+//! review of a Core-prepared intent on the same connection before confirmation.
 //!
 //! Every command accepts `--json` for machine consumption.
 
@@ -64,6 +63,14 @@ enum Command {
         /// Resource ID from the node's Sentry configuration.
         resource_id: String,
     },
+    /// Review and execute one paired device operation in an interactive Linux session.
+    SentryExecute {
+        resource_id: String,
+        #[command(subcommand)]
+        action: SentryAction,
+    },
+    /// Read a durable outcome or ambiguous dispatch fence; never retries an operation.
+    SentryReceipt { intent_id: String },
     /// Recent prepared/cancelled physical-operation records (read-only; never dispatches).
     DeviceOperations {
         /// How many records to show.
@@ -209,6 +216,31 @@ enum IrisCommand {
     },
 }
 
+#[derive(Debug, Subcommand)]
+enum SentryAction {
+    SwitchOn,
+    SwitchOff,
+    Pause,
+    Play,
+    Brightness { percent: u8 },
+    Temperature { milli_celsius: i32 },
+}
+impl SentryAction {
+    fn command(&self) -> archie_core::control::SentryCommand {
+        use archie_core::control::SentryCommand;
+        match *self {
+            Self::SwitchOn => SentryCommand::SwitchSet { on: true },
+            Self::SwitchOff => SentryCommand::SwitchSet { on: false },
+            Self::Pause => SentryCommand::MediaPause,
+            Self::Play => SentryCommand::MediaPlay,
+            Self::Brightness { percent } => SentryCommand::LightSetBrightness { percent },
+            Self::Temperature { milli_celsius } => {
+                SentryCommand::ClimateSetTemperature { milli_celsius }
+            }
+        }
+    }
+}
+
 impl Command {
     /// The daemon request this command makes, or `None` when it makes none.
     ///
@@ -237,6 +269,16 @@ impl Command {
             Self::Devices => ControlRequest::Devices,
             Self::SentryPrinter { resource_id } => ControlRequest::SentryPrinter {
                 resource_id: resource_id.clone(),
+            },
+            Self::SentryExecute {
+                resource_id,
+                action,
+            } => ControlRequest::SentryPrepare {
+                resource_id: resource_id.clone(),
+                command: action.command(),
+            },
+            Self::SentryReceipt { intent_id } => ControlRequest::SentryReceipt {
+                intent_id: intent_id.clone(),
             },
             Self::DeviceOperations { limit } => ControlRequest::DeviceOperations { limit: *limit },
             Self::CortexTrajectories { limit } => {
@@ -699,6 +741,10 @@ async fn main() -> std::process::ExitCode {
         }
     };
 
+    if matches!(cli.command, Command::SentryExecute { .. }) {
+        return review_and_execute(&mut stream, &request, cli.json).await;
+    }
+
     let response = match request_over(&mut stream, &request).await {
         Ok(response) => response,
         Err(e) => {
@@ -722,8 +768,75 @@ async fn main() -> std::process::ExitCode {
     exit_code(&response)
 }
 
+async fn review_and_execute(
+    stream: &mut endpoint::ControlStream,
+    request: &ControlRequest,
+    json: bool,
+) -> std::process::ExitCode {
+    use std::io::{BufRead, IsTerminal, Read, Write};
+    if !cfg!(target_os = "linux") || !std::io::stdin().is_terminal() {
+        eprintln!("archie: Sentry execution requires an interactive Linux terminal; there is no unattended approval flag");
+        return std::process::ExitCode::FAILURE;
+    }
+    let prepared = match request_over(stream, request).await {
+        Ok(response) => response,
+        Err(_) => {
+            eprintln!("archie: preparation failed");
+            return std::process::ExitCode::FAILURE;
+        }
+    };
+    let ControlResponse::SentryPrepared { intent, digest } = prepared else {
+        eprint!("{}", render(&prepared));
+        return std::process::ExitCode::FAILURE;
+    };
+    if intent.digest().ok().as_deref() != Some(&digest) {
+        eprintln!("archie: preparation digest mismatch");
+        return std::process::ExitCode::FAILURE;
+    }
+    eprintln!("Review this exact operation (expires in at most 30 seconds):\n{}\nType the complete digest to approve, or Enter to cancel:\n{digest}", serde_json::to_string_pretty(&intent).unwrap_or_default());
+    let _ = std::io::stderr().flush();
+    let mut input = String::new();
+    if std::io::stdin()
+        .lock()
+        .take(130)
+        .read_line(&mut input)
+        .is_err()
+        || input.trim() != digest
+    {
+        let _ = request_over(stream, &ControlRequest::SentryCancel).await;
+        eprintln!("archie: operation not approved");
+        return std::process::ExitCode::FAILURE;
+    }
+    let response = match request_over(
+        stream,
+        &ControlRequest::SentryApprove {
+            intent_id: intent.intent_id,
+            digest,
+        },
+    )
+    .await
+    {
+        Ok(response) => response,
+        Err(_) => {
+            eprintln!("archie: result unavailable; do not resend an ambiguous operation");
+            return std::process::ExitCode::FAILURE;
+        }
+    };
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&response).unwrap_or_default()
+        );
+    } else {
+        print!("{}", render(&response));
+    }
+    exit_code(&response)
+}
+
 fn exit_code(response: &ControlResponse) -> std::process::ExitCode {
-    if response.is_error() {
+    let unverified = matches!(response, ControlResponse::SentryResult(result) if result.status != archie_core::control::SentryExecutionStatus::Verified);
+    let uncertain_receipt = matches!(response, ControlResponse::SentryReceipt(record) if record.result.as_ref().map_or(true, |result| result.status != archie_core::control::SentryExecutionStatus::Verified));
+    if response.is_error() || unverified || uncertain_receipt {
         std::process::ExitCode::FAILURE
     } else {
         std::process::ExitCode::SUCCESS
@@ -749,6 +862,13 @@ fn render(response: &ControlResponse) -> String {
             "printer: {resource_id}\nstate: {:?}\nUUID: {}\nobserved: {}\nidentity: matches configured UUID (self-reported)\n",
             snapshot.state, snapshot.uuid.as_deref().unwrap_or("unreported"), snapshot.observed_at.as_millis()
         ),
+        ControlResponse::SentryPrepared { intent, digest } => format!("prepared {} for {}\ndigest: {digest}\n", intent.intent_id, intent.resource_id),
+        ControlResponse::SentryResult(result) => format!("operation {}: {:?}\nreceipt: {}\n", result.operation_id, result.status, result.intent_id),
+        ControlResponse::SentryCancelled => "Sentry operation cancelled\n".into(),
+        ControlResponse::SentryReceipt(record) => match &record.result {
+            Some(result) => format!("receipt {}: {:?}\noperation: {}\n", record.intent_id, result.status, record.operation_id),
+            None => format!("receipt {}: Indeterminate\noperation: {}\nDispatch is durably fenced; inspect the device before issuing a new intent. This query never retries.\n", record.intent_id, record.operation_id),
+        },
         ControlResponse::DeviceOperations { operations } => render_device_operations(operations),
         ControlResponse::CortexTrajectories { trajectories } => {
             render_cortex_trajectories(trajectories)

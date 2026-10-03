@@ -18,8 +18,8 @@
 
 use archie_core::boot::BootReport;
 use archie_core::config::ArchieConfig;
-use archie_core::control::serve_connection;
 use archie_core::endpoint;
+use archie_core::operator::serve_operator_connection;
 use archie_core::runtime::Runtime;
 use archie_observability::{init_logging, LogFormat};
 use archie_state::StatePaths;
@@ -234,11 +234,7 @@ async fn serve_control(
                         // not block the operator's next `archie status`.
                         let runtime = runtime.clone();
                         tokio::spawn(async move {
-                            let result = serve_connection(stream, |request| {
-                                let runtime = runtime.clone();
-                                async move { runtime.handle_control(request).await }
-                            })
-                            .await;
+                            let result = serve_operator_connection(stream, runtime).await;
                             if let Err(e) = result {
                                 warn!(error = %e, "control connection ended with an error");
                             }

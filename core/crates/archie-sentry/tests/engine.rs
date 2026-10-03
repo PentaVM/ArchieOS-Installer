@@ -74,6 +74,107 @@ fn registry() -> Arc<Mutex<Registry>> {
     Arc::new(Mutex::new(registry))
 }
 
+#[tokio::test]
+async fn climate_preparation_revocation_is_checked_before_the_actuation_post() {
+    use archie_sentry::adapters::home_assistant::HomeAssistant;
+    use std::{
+        collections::BTreeMap,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+    let mut i = intent();
+    i.command = Command::ClimateSetTemperature {
+        milli_celsius: 22500,
+    };
+    let a = authority(&i);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/", listener.local_addr().unwrap());
+    let revocable = a.clone();
+    let posts = Arc::new(AtomicUsize::new(0));
+    let sends = posts.clone();
+    let server = tokio::spawn(async move {
+        let mut configs = 0;
+        loop {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0; 1024];
+            loop {
+                let n = stream.read(&mut chunk).await.unwrap();
+                assert!(n > 0);
+                request.extend_from_slice(&chunk[..n]);
+                if let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let header = String::from_utf8_lossy(&request[..end]);
+                    let length = header
+                        .lines()
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .and_then(|n| n.trim().parse::<usize>().ok())
+                        })
+                        .unwrap_or(0);
+                    if request.len() >= end + 4 + length {
+                        break;
+                    }
+                }
+                assert!(request.len() < 8192);
+            }
+            let header = String::from_utf8_lossy(&request);
+            let response = if header.starts_with("GET /api/config ") {
+                configs += 1;
+                if configs == 2 {
+                    revocable.set_user_present(false).unwrap();
+                }
+                serde_json::json!({"unit_system":{"temperature":"°C"}})
+            } else if header.starts_with("GET /api/states/climate.office ") {
+                serde_json::json!({"entity_id":"climate.office","state":"heat",
+                    "attributes":{"temperature":if sends.load(Ordering::SeqCst) == 0 {21.5} else {22.5}},
+                    "last_reported":Timestamp::now().to_rfc3339()})
+            } else {
+                if header.starts_with("POST /api/services/climate/set_temperature ") {
+                    sends.fetch_add(1, Ordering::SeqCst);
+                } else {
+                    assert!(header.starts_with("POST /api/services/homeassistant/update_entity "));
+                }
+                serde_json::json!([])
+            };
+            let bytes = serde_json::to_vec(&response).unwrap();
+            stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", bytes.len()).as_bytes()).await.unwrap();
+            stream.write_all(&bytes).await.unwrap();
+        }
+    });
+    let mut routes = Registry::default();
+    routes
+        .register(ResourceDescriptor {
+            resource_id: i.resource_id.clone(),
+            edge_id: "edge-home".into(),
+            adapter_id: "fixture".into(),
+            paired: true,
+            capabilities: vec![CommandKind::ClimateSetTemperature],
+        })
+        .unwrap();
+    let mut adapter = HomeAssistant::new(
+        "edge-home",
+        "fixture",
+        &base,
+        "fixture-token",
+        BTreeMap::from([(i.resource_id.clone(), "climate.office".into())]),
+    )
+    .unwrap();
+    let mut engine = Engine::new(Arc::new(Mutex::new(routes)), MemoryJournal::default());
+    let result = engine.execute(&i, &a, &mut adapter).await.unwrap();
+    server.abort();
+    assert_eq!(
+        posts.load(Ordering::SeqCst),
+        0,
+        "revocation during units preparation must prevent POST"
+    );
+    assert_eq!(result.status, ExecutionStatus::Denied);
+    assert!(result.dispatched_at.is_none());
+}
+
 struct SlowGuard(std::sync::atomic::AtomicUsize);
 impl ExecutionGuard for SlowGuard {
     fn validate(&self, _: &Intent, _: &CoreAuthority) -> Result<(), EngineError> {

@@ -7,58 +7,10 @@ use archie_sentry::{
     registry::Registry,
 };
 use archie_state::{StateError, StateStore};
-use serde::{Deserialize, Serialize};
+
 use std::sync::{Arc, Mutex};
 
-/// Read-only operator bindings. A reported UUID is an identity check, not a
-/// cryptographic pairing proof or authority to actuate.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(default, deny_unknown_fields)]
-pub struct SentrySection {
-    pub printers: Vec<PrinterBinding>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PrinterBinding {
-    pub resource_id: String,
-    pub endpoint: String,
-    pub expected_uuid: String,
-}
-
-impl SentrySection {
-    pub fn validate(&self) -> Result<(), crate::config::ConfigError> {
-        let invalid =
-            || crate::config::ConfigError::Invalid("invalid Sentry printer binding".into());
-        if self.printers.len() > 64 {
-            return Err(invalid());
-        }
-        let mut resources = std::collections::BTreeSet::new();
-        for printer in &self.printers {
-            archie_sentry::contracts::validate_id(&printer.resource_id).map_err(|_| invalid())?;
-            if !resources.insert(&printer.resource_id) {
-                return Err(invalid());
-            }
-            IppClient::new(&printer.endpoint).map_err(|_| invalid())?;
-            let raw = printer
-                .expected_uuid
-                .strip_prefix("urn:uuid:")
-                .ok_or_else(invalid)?;
-            if raw.len() != 36
-                || !raw.bytes().enumerate().all(|(i, b)| {
-                    if [8, 13, 18, 23].contains(&i) {
-                        b == b'-'
-                    } else {
-                        b.is_ascii_hexdigit() && !b.is_ascii_uppercase()
-                    }
-                })
-            {
-                return Err(invalid());
-            }
-        }
-        Ok(())
-    }
-}
+pub use crate::sentry_config::{PrinterBinding, SentrySection};
 
 struct StateGuard {
     state: Arc<StateStore>,
@@ -82,6 +34,16 @@ pub struct SentryService {
     state: Arc<StateStore>,
     registry: Arc<Mutex<Registry>>,
     guard: Arc<StateGuard>,
+}
+struct CompositeGuard {
+    state: Arc<StateGuard>,
+    extra: Arc<dyn ExecutionGuard>,
+}
+impl ExecutionGuard for CompositeGuard {
+    fn validate(&self, intent: &Intent, authority: &CoreAuthority) -> Result<(), EngineError> {
+        self.state.validate(intent, authority)?;
+        self.extra.validate(intent, authority)
+    }
 }
 impl SentryService {
     /// Registry routes and policy are trusted Core configuration.
@@ -125,6 +87,22 @@ impl SentryService {
         let journal = self.state.sentry_journal()?;
         Engine::new(self.registry.clone(), journal)
             .with_guard(self.guard.clone())
+            .execute(intent, authority, adapter)
+            .await
+    }
+    pub(crate) async fn execute_with_guard(
+        &self,
+        intent: &Intent,
+        authority: &CoreAuthority,
+        adapter: &mut dyn EdgeAdapter,
+        extra: Arc<dyn ExecutionGuard>,
+    ) -> Result<ExecutionResult, EngineError> {
+        let journal = self.state.sentry_journal()?;
+        Engine::new(self.registry.clone(), journal)
+            .with_guard(Arc::new(CompositeGuard {
+                state: self.guard.clone(),
+                extra,
+            }))
             .execute(intent, authority, adapter)
             .await
     }
