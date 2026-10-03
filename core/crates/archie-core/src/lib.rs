@@ -28,6 +28,7 @@ pub mod execution;
 pub mod hardware;
 pub mod hotplug;
 pub mod runtime;
+pub mod sentry;
 pub mod task_service;
 
 pub use boot::{BootReport, BootStage, StageStatus};

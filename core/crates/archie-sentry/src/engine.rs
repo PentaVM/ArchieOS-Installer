@@ -148,6 +148,30 @@ struct AuthorityState {
 #[derive(Clone)]
 pub struct CoreAuthority(Arc<Mutex<AuthorityState>>);
 impl CoreAuthority {
+    /// Applies the composing Core's policy without issuing any authority.
+    pub fn check_policy(&self, intent: &Intent, policy: &PolicyEngine) -> Result<(), EngineError> {
+        let state = self.0.lock().map_err(|_| EngineError::Poisoned)?;
+        if state.reviewed_digest != intent.digest()? {
+            return Err(EngineError::Authority);
+        }
+        let request = CapabilityRequest {
+            trace_id: intent.trace_id,
+            task_id: None,
+            principal: state.principal.clone(),
+            resource: Resource::Device {
+                device: intent.resource_id.clone(),
+            },
+            scope: Scope::OneOperation {
+                operation: intent.operation_id,
+            },
+            constraints: state.lease.constraints.clone(),
+            justification: "Core Sentry dispatch guard".into(),
+        };
+        if !policy.decide(&request).decision.grants_authority() {
+            return Err(EngineError::Authority);
+        }
+        Ok(())
+    }
     pub fn from_reviewed_intent(
         policy: PolicyEngine,
         lease: Lease,
@@ -262,13 +286,26 @@ impl CoreAuthority {
     }
 }
 
+/// Trusted Core checks of live pairing, preparation and policy.
+pub trait ExecutionGuard: Send + Sync {
+    fn validate(&self, intent: &Intent, authority: &CoreAuthority) -> Result<(), EngineError>;
+}
 pub struct Engine<J: Journal> {
     registry: Arc<Mutex<Registry>>,
     journal: J,
+    guard: Option<Arc<dyn ExecutionGuard>>,
 }
 impl<J: Journal> Engine<J> {
     pub fn new(registry: Arc<Mutex<Registry>>, journal: J) -> Self {
-        Self { registry, journal }
+        Self {
+            registry,
+            journal,
+            guard: None,
+        }
+    }
+    pub fn with_guard(mut self, guard: Arc<dyn ExecutionGuard>) -> Self {
+        self.guard = Some(guard);
+        self
     }
     fn resolve(
         &self,
@@ -292,6 +329,9 @@ impl<J: Journal> Engine<J> {
         let digest = intent.digest()?;
         if let Some(record) = self.journal.load(&intent.intent_id)? {
             return replay(intent, &digest, record);
+        }
+        if let Some(guard) = &self.guard {
+            guard.validate(intent, authority)?;
         }
         let start = Instant::now();
         let mut budget = Budget::new(intent, start)?;
@@ -361,10 +401,14 @@ impl<J: Journal> Engine<J> {
         }
         result.before = Some(before);
         result.stages.push(Stage::ObservedBefore);
-        let duration = match budget.remaining(intent) {
-            Ok(d) => d,
-            Err(_) => return,
-        };
+        if self
+            .guard
+            .as_ref()
+            .is_some_and(|g| g.validate(intent, authority).is_err())
+        {
+            result.status = ExecutionStatus::Denied;
+            return;
+        }
         if self
             .resolve(intent, &resource.edge_id, &resource.adapter_id)
             .is_err()
@@ -374,6 +418,22 @@ impl<J: Journal> Engine<J> {
             result.status = ExecutionStatus::Denied;
             return;
         }
+        if result.before.as_ref().map_or(true, |b| {
+            b.validate_after(
+                intent,
+                &resource.adapter_id,
+                intent.created_at,
+                Timestamp::now(),
+            )
+            .is_err()
+        }) {
+            return;
+        }
+        // Storage checks may have waited: recompute the budget before dispatch.
+        let duration = match budget.remaining(intent) {
+            Ok(d) => d,
+            Err(_) => return,
+        };
         if authority.authorize(intent, Timestamp::now(), true).is_err() {
             result.status = ExecutionStatus::Denied;
             return;

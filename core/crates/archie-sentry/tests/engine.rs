@@ -73,6 +73,97 @@ fn registry() -> Arc<Mutex<Registry>> {
         .unwrap();
     Arc::new(Mutex::new(registry))
 }
+
+struct SlowGuard(std::sync::atomic::AtomicUsize);
+impl ExecutionGuard for SlowGuard {
+    fn validate(&self, _: &Intent, _: &CoreAuthority) -> Result<(), EngineError> {
+        if self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(80));
+        }
+        Ok(())
+    }
+}
+
+struct UnpairGuard {
+    calls: std::sync::atomic::AtomicUsize,
+    registry: Arc<Mutex<Registry>>,
+}
+impl ExecutionGuard for UnpairGuard {
+    fn validate(&self, _: &Intent, _: &CoreAuthority) -> Result<(), EngineError> {
+        if self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0 {
+            self.registry
+                .lock()
+                .unwrap()
+                .set_paired("switch-office", false)
+                .unwrap();
+        }
+        Ok(())
+    }
+}
+#[tokio::test]
+async fn registry_revoked_during_core_guard_is_checked_again_before_dispatch() {
+    let i = intent();
+    let a = authority(&i);
+    let mut edge = Switch::default();
+    let registry = registry();
+    let guard = Arc::new(UnpairGuard {
+        calls: std::sync::atomic::AtomicUsize::new(0),
+        registry: registry.clone(),
+    });
+    let mut engine = Engine::new(registry, MemoryJournal::default()).with_guard(guard);
+    let r = engine.execute(&i, &a, &mut edge).await.unwrap();
+    assert_eq!(edge.applications, 0);
+    assert_eq!(r.status, ExecutionStatus::Denied);
+}
+
+#[derive(Default)]
+struct FailFinishJournal(MemoryJournal);
+impl Journal for FailFinishJournal {
+    fn load(&mut self, id: &str) -> Result<Option<JournalRecord>, JournalError> {
+        self.0.load(id)
+    }
+    fn reserve(
+        &mut self,
+        i: &Intent,
+        digest: &str,
+        at: Timestamp,
+    ) -> Result<Option<JournalRecord>, JournalError> {
+        self.0.reserve(i, digest, at)
+    }
+    fn finish(&mut self, _: &ExecutionResult) -> Result<(), JournalError> {
+        Err(JournalError::Unavailable)
+    }
+}
+#[tokio::test]
+async fn failed_receipt_write_after_actuation_preserves_fence_and_prevents_resend() {
+    let i = intent();
+    let a = authority(&i);
+    let mut edge = Switch::default();
+    let mut engine = Engine::new(registry(), FailFinishJournal::default());
+    assert!(matches!(
+        engine.execute(&i, &a, &mut edge).await,
+        Err(EngineError::Journal(JournalError::Unavailable))
+    ));
+    assert_eq!(edge.applications, 1);
+    a.revoke().unwrap();
+    let replay = engine.execute(&i, &a, &mut edge).await.unwrap();
+    assert_eq!(replay.status, ExecutionStatus::Indeterminate);
+    assert!(replay.replayed);
+    assert_eq!(edge.applications, 1);
+    assert_eq!(edge.observations, 2);
+}
+#[tokio::test]
+async fn observation_that_ages_during_core_guard_cannot_dispatch() {
+    let mut i = intent();
+    i.max_observation_age_ms = 20;
+    let a = authority(&i);
+    let mut edge = Switch::default();
+    let guard = Arc::new(SlowGuard(std::sync::atomic::AtomicUsize::new(0)));
+    let mut engine = Engine::new(registry(), MemoryJournal::default()).with_guard(guard);
+    let r = engine.execute(&i, &a, &mut edge).await.unwrap();
+    assert_eq!(edge.applications, 0);
+    assert_eq!(r.status, ExecutionStatus::Unavailable);
+}
 struct Switch {
     on: bool,
     apply_changes: bool,

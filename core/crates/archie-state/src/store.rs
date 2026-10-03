@@ -317,6 +317,15 @@ struct DatabaseConfig {
     schema: String,
 }
 impl StateStore {
+    /// Uses Core's durable connection, without a memory fallback.
+    pub fn sentry_journal(
+        &self,
+    ) -> std::result::Result<
+        archie_sentry::journal::PostgresJournal<'_>,
+        archie_sentry::journal::JournalError,
+    > {
+        archie_sentry::journal::PostgresJournal::open(&self.cognitive)
+    }
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         #[cfg(feature = "test-support")]
@@ -950,8 +959,21 @@ impl StateStore {
         trace_id: TraceId,
         operation_sha256: &str,
     ) -> Result<DeviceOperationRecord> {
-        validate_device_reference(device_reference)?;
         validate_operation_digest(operation_sha256)?;
+        self.prepare_bound_device_operation(device_reference, trace_id, |_| {
+            Ok(operation_sha256.to_owned())
+        })
+    }
+
+    /// Bind the typed request to the allocated ID inside the transaction.
+    /// `bind` only computes a digest and must not perform external I/O or approval.
+    pub fn prepare_bound_device_operation(
+        &self,
+        device_reference: &str,
+        trace_id: TraceId,
+        bind: impl FnOnce(u64) -> Result<String> + Send,
+    ) -> Result<DeviceOperationRecord> {
+        validate_device_reference(device_reference)?;
         let prepared_at = Timestamp::now();
 
         self.with_connection(|conn| {
@@ -969,16 +991,27 @@ impl StateStore {
                 )));
             }
 
+            let operation_id: i64 = conn
+                .query_one(
+                    "SELECT nextval(pg_get_serial_sequence('device_operations','operation_id'))",
+                    &[],
+                )?
+                .try_get(0)?;
+            let allocated = u64::try_from(operation_id)
+                .map_err(|_| StateError::Corrupt("invalid allocated identifier".into()))?;
+            let operation_sha256 = bind(allocated)?;
+            validate_operation_digest(&operation_sha256)?;
             let operation_id: i64 = conn.select_one(
                 "INSERT INTO device_operations
-                   (device_reference, trace_id, operation_sha256, prepared_at, state)
-                 VALUES ($1, $2, $3, $4, $5) RETURNING operation_id",
+                   (device_reference, trace_id, operation_sha256, prepared_at, state, operation_id)
+                 OVERRIDING SYSTEM VALUE VALUES ($1, $2, $3, $4, $5, $6) RETURNING operation_id",
                 sql_params![
                     device_reference,
                     trace_id.to_string(),
-                    operation_sha256,
+                    &operation_sha256,
                     prepared_at.as_millis(),
                     DeviceOperationState::Prepared.as_str(),
+                    operation_id,
                 ],
                 |row| row.try_get(0),
             )?;
@@ -1021,6 +1054,24 @@ impl StateStore {
                     "device operation {operation_id} has an unknown state {state}"
                 ))),
             }
+        })
+    }
+
+    /// Validate pairing and preparation together under the shared writer fence.
+    pub fn validate_prepared_device_operation(
+        &self,
+        operation_id: u64,
+        device_reference: &str,
+        trace_id: TraceId,
+        operation_sha256: &str,
+    ) -> Result<()> {
+        let operation_id = operation_id_to_sql(operation_id)?;
+        validate_device_reference(device_reference)?;
+        validate_operation_digest(operation_sha256)?;
+        self.with_connection(|tx| {
+            let valid:bool=tx.query_one("SELECT EXISTS(SELECT 1 FROM device_operations o JOIN devices d ON d.device_reference=o.device_reference WHERE o.operation_id=$1 AND d.device_reference=$2 AND o.trace_id=$3 AND o.operation_sha256=$4 AND o.state='prepared' AND d.pairing_state='paired')",&[&operation_id,&device_reference,&trace_id.to_string(),&operation_sha256])?.try_get(0)?;
+            if !valid { return Err(StateError::InvalidDevice("prepared operation identity or pairing refused".into())); }
+            Ok(())
         })
     }
 

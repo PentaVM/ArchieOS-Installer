@@ -1,8 +1,25 @@
 //! Reservation is a durable dispatch fence. A pending record must never be re-sent.
+pub use crate::postgres_journal::PostgresJournal;
 use crate::{contracts::Intent, engine::ExecutionResult};
 use archie_types::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+
+impl From<archie_postgres::StoreError> for JournalError {
+    fn from(error: archie_postgres::StoreError) -> Self {
+        match error {
+            archie_postgres::StoreError::Invariant(_) | archie_postgres::StoreError::Schema => {
+                Self::Corrupt
+            }
+            _ => Self::Unavailable,
+        }
+    }
+}
+impl From<postgres::Error> for JournalError {
+    fn from(_: postgres::Error) -> Self {
+        Self::Unavailable
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -17,6 +17,7 @@ archie-registry.workspace = true
 archie-scheduler.workspace = true
 archie-router.workspace = true
 archie-policy.workspace = true
+archie-sentry.workspace = true
 archie-execution.workspace = true
 anyhow.workspace = true
 fs2.workspace = true
@@ -31,6 +32,7 @@ toml.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+async-trait.workspace = true
 archie-state = { workspace = true, features = ["test-support"] }
 archie-memory.workspace = true
 serde_json.workspace = true
