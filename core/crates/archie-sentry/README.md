@@ -51,7 +51,24 @@ por sus metadatos IPP, pero no respondió a TCP 631. No se enviaron trabajos.
 
 ## Diagnóstico
 
+El daemon actualizado ofrece `archie sentry-printer <resource-id>`. Core busca
+únicamente bindings del operador en `archie.toml`; no admite URLs desde el cliente.
+La consulta requiere que el `printer-uuid` informado coincida con el configurado.
+Esa coincidencia de un UUID autodeclarado no constituye pairing autenticado.
+
+```toml
+[[sentry.printers]]
+resource_id = "office-printer"
+endpoint = "ipp://192.168.1.232:631/ipp/print"
+expected_uuid = "urn:uuid:e3248000-80ce-11db-8000-202b20a4fe3b"
+```
+
+El CLI y un daemon de esta rama se arrancaron como procesos reales en una raíz
+aislada y verificaron el recorrido hasta una fixture TCP IPP. La consulta a la
+Brother desde ese mismo daemon devolvió `Transport`; continúa sin validación física.
+
 ```sh
+cargo run -p archie-cli --bin archie -- sentry-printer office-printer
 cargo run -p archie-sentry --bin archie-sentry-probe -- ipp ipp://<IP-local>:631/ipp/print
 cargo test -p archie-sentry
 ```

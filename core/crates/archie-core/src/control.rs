@@ -1324,7 +1324,7 @@ fn is_lowercase_sha256(value: &str) -> bool {
 
 /// What the CLI can ask for.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "request", rename_all = "snake_case")]
+#[serde(tag = "request", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ControlRequest {
     /// Everything `archie status` shows.
     Status,
@@ -1342,6 +1342,8 @@ pub enum ControlRequest {
     /// Recent durable physical-operation records. This is read-only and cannot approve,
     /// cancel, send, or otherwise dispatch an operation.
     DeviceOperations { limit: u32 },
+    /// Read-only IPP query for a printer in operator configuration. No caller URL.
+    SentryPrinter { resource_id: String },
     /// Recent Cortex learning trajectories. This is a privacy-minimised read-only
     /// projection; it cannot parse a correction, write the graph or promote a model.
     CortexTrajectories { limit: u32 },
@@ -1376,6 +1378,7 @@ impl ControlRequest {
             Self::Peers => "peers",
             Self::Devices => "devices",
             Self::DeviceOperations { .. } => "device-operations",
+            Self::SentryPrinter { .. } => "sentry-printer",
             Self::CortexTrajectories { .. } => "cortex-trajectories",
             Self::Models => "models",
             Self::Boot => "boot",
@@ -1582,6 +1585,10 @@ pub enum ControlResponse {
     },
     DeviceOperations {
         operations: Vec<DeviceOperationView>,
+    },
+    SentryPrinter {
+        resource_id: String,
+        snapshot: archie_sentry::adapters::ipp::PrinterSnapshot,
     },
     CortexTrajectories {
         trajectories: Vec<CortexTrajectoryView>,

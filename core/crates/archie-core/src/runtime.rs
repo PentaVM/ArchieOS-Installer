@@ -744,6 +744,9 @@ impl Runtime {
                 },
                 Err(e) => ControlResponse::error(e.to_string()),
             },
+            ControlRequest::SentryPrinter { resource_id } => {
+                self.sentry_printer(&resource_id).await
+            }
             ControlRequest::DeviceOperations { limit } => {
                 match self.state.recent_device_operations(limit.min(1000)) {
                     Ok(operations) => ControlResponse::DeviceOperations {

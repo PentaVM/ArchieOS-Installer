@@ -59,6 +59,11 @@ enum Command {
     Peers,
     /// Locally recorded device pairing inventory (read-only; no adapter connection).
     Devices,
+    /// Query one configured printer through Sentry (read-only; never prints).
+    SentryPrinter {
+        /// Resource ID from the node's Sentry configuration.
+        resource_id: String,
+    },
     /// Recent prepared/cancelled physical-operation records (read-only; never dispatches).
     DeviceOperations {
         /// How many records to show.
@@ -230,6 +235,9 @@ impl Command {
             Self::Providers => ControlRequest::Providers,
             Self::Peers => ControlRequest::Peers,
             Self::Devices => ControlRequest::Devices,
+            Self::SentryPrinter { resource_id } => ControlRequest::SentryPrinter {
+                resource_id: resource_id.clone(),
+            },
             Self::DeviceOperations { limit } => ControlRequest::DeviceOperations { limit: *limit },
             Self::CortexTrajectories { limit } => {
                 ControlRequest::CortexTrajectories { limit: *limit }
@@ -737,6 +745,10 @@ fn render(response: &ControlResponse) -> String {
         ControlResponse::Providers { providers, active } => render_providers(providers, active),
         ControlResponse::Peers { peers } => render_peers(peers),
         ControlResponse::Devices { devices } => render_devices(devices),
+        ControlResponse::SentryPrinter { resource_id, snapshot } => format!(
+            "printer: {resource_id}\nstate: {:?}\nUUID: {}\nobserved: {}\nidentity: matches configured UUID (self-reported)\n",
+            snapshot.state, snapshot.uuid.as_deref().unwrap_or("unreported"), snapshot.observed_at.as_millis()
+        ),
         ControlResponse::DeviceOperations { operations } => render_device_operations(operations),
         ControlResponse::CortexTrajectories { trajectories } => {
             render_cortex_trajectories(trajectories)

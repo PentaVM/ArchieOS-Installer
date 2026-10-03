@@ -216,6 +216,7 @@ pub struct ArchieConfig {
     pub providers: ProvidersSection,
     pub world: WorldSection,
     pub owner: Option<OwnerSection>,
+    pub sentry: crate::sentry::SentrySection,
 }
 
 impl ArchieConfig {
@@ -252,6 +253,7 @@ impl ArchieConfig {
     }
 
     pub fn validate(&self) -> Result<(), ConfigError> {
+        self.sentry.validate()?;
         if let Some(owner) = &self.owner {
             for value in [
                 &owner.name,
