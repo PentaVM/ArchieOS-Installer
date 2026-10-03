@@ -195,7 +195,10 @@ impl<H: Hub> Node<H> {
     fn board_view(&self) -> Outcome {
         let (board, _) = self.read_board()?;
         let now = (self.clock)();
-        Ok(json!({"needs": board.needs(&self.config.contributor, now), "skills": board.skills,
+        // Skills trainable from data the trainer fetches by itself and nobody has started.
+        let ready: Vec<Value> = node::READY_SOURCES.iter().filter(|(skill, _)| !board.skills.contains_key(*skill))
+            .map(|(skill, source)| json!({"skill": skill, "source": source})).collect();
+        Ok(json!({"needs": board.needs(&self.config.contributor, now), "ready_to_start": ready, "skills": board.skills,
                   "wanted": board.wanted, "credits": board.credits, "base": board.base,
                   "this_node": self.config.contributor}))
     }

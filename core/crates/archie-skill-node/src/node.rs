@@ -64,14 +64,31 @@ pub fn valid_job_id(id: &str) -> bool {
     (1..=80).contains(&id.len()) && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
-/// Where a job's data comes from: the CS:GO set the trainer knows, or a folder of recorded
-/// windows under this node's `work_dir/data`.
+/// Skills every node can train from data the trainer fetches by itself, and their sources
+/// (archie_iris_foundry.skill_training.SKILL_SOURCES): a game, and families of apps.
+pub const READY_SOURCES: [(&str, &str); 5] = [
+    ("csgo", "csgo"),
+    ("android", "gui:aitw,coat"),
+    ("web", "gui:mind2web"),
+    ("desktop", "gui:guide"),
+    ("miniwob", "gui:miniwob"),
+];
+
+/// Where a job's data comes from: a set the trainer knows (CS:GO, or the GUI steps of some
+/// families of apps), or a folder of recorded windows under this node's `work_dir/data`.
 pub fn source_arg(config: &NodeConfig, source: &str) -> Result<String, String> {
     if source == "csgo" {
         return Ok("csgo".into());
     }
+    if let Some(subsets) = source.strip_prefix("gui:") {
+        let known = ["aitw", "coat", "mind2web", "miniwob", "guide"];
+        if !subsets.is_empty() && subsets.split(',').all(|subset| known.contains(&subset)) {
+            return Ok(source.to_string());
+        }
+        return Err("gui: sources are aitw, coat, mind2web, miniwob and guide, comma-separated".into());
+    }
     if !valid_name(source) {
-        return Err("source is 'csgo' or the name of a folder in work_dir/data".into());
+        return Err("source is 'csgo', 'gui:<subsets>' or the name of a folder in work_dir/data".into());
     }
     let folder = config.work_dir.join("data").join(source);
     if !folder.is_dir() {
@@ -246,6 +263,9 @@ mod tests {
         std::fs::create_dir_all(work.join("data").join("kdenlive")).unwrap();
         let config = config(&work);
         assert_eq!(source_arg(&config, "csgo").unwrap(), "csgo");
+        assert_eq!(source_arg(&config, "gui:aitw,coat").unwrap(), "gui:aitw,coat");
+        assert!(source_arg(&config, "gui:").is_err() && source_arg(&config, "gui:aitw,../x").is_err());
+        assert!(READY_SOURCES.iter().all(|(_, source)| source_arg(&config, source).is_ok()));
         assert!(source_arg(&config, "kdenlive").unwrap().ends_with("kdenlive"));
         assert!(source_arg(&config, "missing").is_err());
         assert!(source_arg(&config, "../../secrets").is_err());
