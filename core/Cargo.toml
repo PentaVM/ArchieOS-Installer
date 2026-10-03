@@ -38,6 +38,7 @@ members = [
     "crates/archie-search",
     "crates/archie-stage",
     "crates/archie-mcp-server",
+    "crates/archie-skill-node",
     "crates/archie-bridges",
     "crates/archie-desk",
     "crates/archie-toolpack",
