@@ -8,6 +8,7 @@ use serde_json::{json, Map, Value};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const BOARD_PATH: &str = "board.json";
+pub const CATALOG_PATH: &str = "catalog.json";
 
 pub struct Tool {
     pub name: &'static str,
@@ -185,9 +186,9 @@ impl<H: Hub> Node<H> {
             .filter(|job| job.state(&self.config) == "running").map(|job| job.id).collect();
         Ok(json!({
             "contributor": self.config.contributor, "gpu": self.config.gpu, "gpu_now": node::gpu_now(),
-            "base_weights": self.config.weights.is_file(), "base": self.config.base,
-            "skills_installed": installed, "jobs_running": running, "hub_repo": self.config.hub_repo,
-            "hub_token_set": self.config.token().is_ok(),
+            "base_weights": self.config.weights.is_file(),
+            "skills_installed": installed, "jobs_running": running,
+            "board_repo": self.config.board_repo.is_dir(), "catalog_published": !self.config.public_url.is_empty(),
         }))
     }
 
@@ -248,11 +249,15 @@ impl<H: Hub> Node<H> {
             report[key].as_object().map(|m| m.iter().filter_map(|(k, v)| v.as_f64().map(|v| (k.clone(), v))).collect())
                 .unwrap_or_default()
         };
-        let candidate = Candidate { path: path.clone(), sha256, trained_by: me.clone(), gpu: self.config.gpu.clone(),
+        let candidate = Candidate { path: path.clone(), sha256, bytes: bytes.len() as u64, trained_by: me.clone(),
+                                    gpu: self.config.gpu.clone(),
                                     at: now, sealed_before: measures("before"), sealed_after: measures("after"),
                                     state: "waiting".into() };
         let skill = job.skill.clone();
-        let base = report["base"].as_str().unwrap_or("").to_string();
+        let base = report["base_fingerprint"].as_str().unwrap_or("").to_string();
+        if base.len() != 64 {
+            return Err("the trainer's report has no base fingerprint: update archie-iris".into());
+        }
         self.change(&format!("{me} publishes a {skill} candidate"), vec![(path.clone(), bytes)], |board| {
             // The first package names the base every later one must share.
             if board.base.is_empty() {
@@ -273,7 +278,7 @@ impl<H: Hub> Node<H> {
         let report = job.report(&self.config).ok_or("the check has not finished: job_status")?;
         let verified = report["verified"] == Value::Bool(true);
         let reason = report["reason"].as_str().unwrap_or("").to_string();
-        let base = report["base"].as_str().unwrap_or("").to_string();
+        let base = report["base_fingerprint"].as_str().unwrap_or("").to_string();
         let (me, now, skill, candidate) = (self.config.contributor.clone(), (self.clock)(), job.skill.clone(), job.candidate.clone());
         self.change(&format!("{me} checks {skill}: {}", if verified { "verified" } else { "rejected" }), Vec::new(), |board| {
             board.record_check(&skill, &candidate, &me, verified, &reason, &base, now).map_err(|e| e.to_string())
@@ -285,7 +290,7 @@ impl<H: Hub> Node<H> {
         let head = self.hub.head().map_err(|e| e.to_string())?;
         let board = match self.hub.read(BOARD_PATH) {
             Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| format!("board.json: {e}"))?,
-            Err(HubError::NotFound) => Board::empty(&self.config.base),
+            Err(HubError::NotFound) => Board::empty(""),
             Err(error) => return Err(error.to_string()),
         };
         Ok((board, head))
@@ -302,6 +307,11 @@ impl<H: Hub> Node<H> {
             edit(&mut board)?;
             let mut files = extra.clone();
             files.push((BOARD_PATH.into(), serde_json::to_vec_pretty(&board).map_err(|e| e.to_string())?));
+            if !self.config.public_url.is_empty() {
+                // What IRIS serving reads: the board's packages in use, in the same commit.
+                files.push((CATALOG_PATH.into(),
+                            serde_json::to_vec_pretty(&board.catalog(&self.config.public_url)).map_err(|e| e.to_string())?));
+            }
             match self.hub.commit(summary, &files, &head) {
                 Ok(_) => return Ok(()),
                 Err(HubError::Moved) => continue,

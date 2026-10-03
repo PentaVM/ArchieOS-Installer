@@ -23,20 +23,20 @@ pub struct NodeConfig {
     pub skills_dir: PathBuf,
     /// Jobs and downloaded candidates.
     pub work_dir: PathBuf,
-    /// The shared repository, e.g. "PentaVM/iris-skills".
-    pub hub_repo: String,
-    /// The environment variable holding this person's Hub token. The token itself is never
-    /// written in this file, printed, or put on a command line.
-    #[serde(default = "default_token_env")]
-    pub hub_token_env: String,
-    /// The first 16 characters of the base's fingerprint (`archie_iris_foundry.lora.base_fingerprint`),
-    /// as the trainer's reports give it. The board is created with it.
+    /// This node's clone of the shared git repository (the board, the catalog, the packages).
+    /// Pushes go out with this person's own git identity and credentials.
+    pub board_repo: PathBuf,
+    #[serde(default = "default_branch")]
+    pub board_branch: String,
+    /// Where the shared repository's files are served over HTTPS, for the catalog IRIS
+    /// downloads from (e.g. "https://raw.githubusercontent.com/PentaVM/iris-skills/main").
+    /// Empty: the board is kept, no catalog is written.
     #[serde(default)]
-    pub base: String,
+    pub public_url: String,
 }
 
-fn default_token_env() -> String {
-    "HF_TOKEN".into()
+fn default_branch() -> String {
+    "main".into()
 }
 
 impl NodeConfig {
@@ -47,14 +47,6 @@ impl NodeConfig {
             return Err("contributor must be 1-32 letters, digits, '-' or '_'".into());
         }
         Ok(config)
-    }
-
-    pub fn token(&self) -> Result<String, String> {
-        std::env::var(&self.hub_token_env)
-            .ok()
-            .filter(|t| !t.trim().is_empty())
-            .map(|t| t.trim().to_string())
-            .ok_or_else(|| format!("set {} to this person's Hub token (never in the config file)", self.hub_token_env))
     }
 
     pub fn jobs_dir(&self) -> PathBuf {
@@ -239,8 +231,8 @@ mod tests {
         NodeConfig {
             contributor: "nelson".into(), gpu: "RTX 3070 8GB".into(), python: "python".into(),
             foundry: work.join("archie-iris"), weights: work.join("base.pt"), skills_dir: work.join("skills"),
-            work_dir: work.to_path_buf(), hub_repo: "PentaVM/iris-skills".into(), hub_token_env: "HF_TOKEN".into(),
-            base: String::new(),
+            work_dir: work.to_path_buf(), board_repo: work.join("iris-skills"), board_branch: "main".into(),
+            public_url: String::new(),
         }
     }
 

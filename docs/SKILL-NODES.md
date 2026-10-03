@@ -9,7 +9,7 @@ flowchart LR
   A[Nelson's agent] -- ssh + MCP --> N1[Nelson's RTX 3070 node]
   B[Sheriff's agent] -- ssh + MCP --> N2[Sheriff's RTX 3060 Ti node]
   C[Xavi's agent] -- ssh + MCP --> N3[Xavi's RTX 3060 Ti node]
-  N1 & N2 & N3 -- commits, each with its owner's token --> H[(Hub repo: board.json + packages)]
+  N1 & N2 & N3 -- git push, each as its owner --> H[(shared git repo: board.json, catalog.json, packages)]
 ```
 
 ## How work is shared
@@ -41,9 +41,16 @@ flowchart LR
 6. **Install.** `skill_install` downloads the package in use for a skill to where IRIS serving
    reads it.
 
-**Credits.** Every change is a commit made with the token of the node's person, so the Hub's
-history shows who trained and who checked what. The board also counts, per person, packages
-promoted, checks made and packages rejected.
+**Credits.** Every change is a git commit pushed with the identity and credentials of the
+node's person, so the repository's history shows who trained and who checked what. The node
+never handles a token. The board also counts, per person, packages promoted, checks made and
+packages rejected.
+
+**What IRIS reads.** When `public_url` is set, every change also writes `catalog.json` in the
+format IRIS serving downloads from (`archie-iris-skill-catalog-v1`): the package in use for
+each skill, with its base fingerprint, SHA-256, size and HTTPS address. With
+`IRIS_SKILL_CATALOG` pointing at it, `/act?skill=csgo&adapter=auto` fetches a verified package
+by itself.
 
 ## Setting up a node (Windows)
 
@@ -60,12 +67,12 @@ promoted, checks made and packages rejected.
    archie-skill-node init --config C:\iris\node.toml --contributor nelson --gpu "RTX 3070 8GB"
    ```
    Check the paths in the file it writes.
-5. **The token.** Create a Hugging Face token with write access to the shared repository and
-   store it for your account only:
+5. **The shared repository.** Clone it to the `board_repo` path of the config, with the git
+   identity you want credited:
    ```bash
-   setx HF_TOKEN "hf_..."
+   git clone https://github.com/PentaVM/iris-skills C:\iris\iris-skills
    ```
-   Never put it in the config file or in a chat.
+   Pushes use your own git credentials (the ones `git push` already uses on that machine).
 6. **Data.**
    - CS:GO: `tools/vast/fetch_csgo.sh` into `IRIS_CSGO_DIR`.
    - A recorded skill: its windows in `C:\iris\node\data\<name>\*.npz`. With `IRIS_SKILL_SEAL`
@@ -75,21 +82,26 @@ promoted, checks made and packages rejected.
    archie-skill-node client --host you@your-pc --config C:\iris\node.toml --name iris-you
    ```
 
-**The shared repository.** Nelson creates one private Hub model repository (for example
-`PentaVM/iris-skills`) and gives write access to everyone who runs a node. The first
-package published writes the board.
+**The shared repository.** Nelson creates one git repository (for example
+`PentaVM/iris-skills`) with one first commit, and gives write access to everyone who runs a
+node. The first claim writes the board. For IRIS to download packages by itself the
+repository's files must be reachable over HTTPS without a login (a public repository, or the
+Hub site serving them); until then set `public_url = ""` and install with `skill_install`.
 
 ## Limits, as of 2026-09-30
 
-- **Not built yet.** This PC's disks are full and the Vast host is down, so the binary has not
-  been compiled. Its first build and test run go on the RTX 3070.
+- **Tested without a GPU.** The crate builds and its 11 tests pass on Windows, including the
+  git backend against a real bare repository. An end-to-end run through MCP worked too: claim,
+  a stand-in trainer started detached, job status, publish, and the commit history. No real
+  adapter has been trained through it yet.
 - **Memory is not measured.** The 8 GB peak of a skill job on the Beta 2 base has not been
   measured. If it does not fit, the batch goes down first.
-- **Windows sessions.** OpenSSH can end a session's processes when it closes. The node first
-  starts the trainer outside the session's job object. If Windows refuses that, the trainer
-  runs inside the session, and disconnecting may stop it. The first run on Windows tells which
-  applies.
-- **Package size.** Packages are committed inline, up to 8 MB. A rank-8 adapter is a few MB.
+- **Windows sessions.** The trainer outlived the server that started it in a local run. Over
+  OpenSSH it has not been tried: OpenSSH can end a session's processes when it closes. The
+  node first starts the trainer outside the session's job object; if Windows refuses that,
+  the trainer runs inside the session and disconnecting may stop it.
+- **Package size.** Packages are committed to the shared repository, up to 32 MB each. A
+  rank-8 adapter is a few MB.
 - **GUI steps.** The trainer takes window sources (CS:GO, recorded windows). Pointing steps
   from GUI datasets are not a skill source yet.
 

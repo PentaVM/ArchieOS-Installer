@@ -6,8 +6,8 @@
 //!
 //! * The agent connects through SSH (`ssh person@machine archie-skill-node mcp`), so the
 //!   machine opens no port, and any agent that speaks MCP can use it.
-//! * The board and the packages live in one cloud repository. Each change is a commit made
-//!   with the token of the person whose node made it: the history is the credit.
+//! * The board and the packages live in one git repository. Each change is a commit pushed
+//!   with the identity of the person whose node made it: the history is the credit.
 //! * A package is used only after a node other than the one that trained it has checked it
 //!   on its own sealed windows. Nobody promotes their own work.
 

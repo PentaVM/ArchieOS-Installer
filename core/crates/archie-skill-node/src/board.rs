@@ -1,8 +1,8 @@
 //! The shared board: which skills exist, who is training which, the candidates waiting for a
 //! second node's check, the package in use for each skill, and the credits.
 //!
-//! It is one JSON file in the cloud repository. Every change is a commit made with the
-//! token of the person whose node made it, on top of the board it read, so two changes
+//! It is one JSON file in the shared git repository. Every change is a commit pushed as the
+//! person whose node made it, on top of the board it read, so two changes
 //! never silently overwrite each other and the history says who did what.
 
 use serde::{Deserialize, Serialize};
@@ -15,8 +15,8 @@ pub const MAX_CLAIM_HOURS: u64 = 12;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Board {
     pub format: String,
-    /// The IRIS base every package on this board was trained on: the first 16 characters of
-    /// its fingerprint, as the trainer reports it.
+    /// The IRIS base every package on this board was trained on: its fingerprint, the 64
+    /// hex characters the trainer reports and IRIS checks before loading a package.
     #[serde(default)]
     pub base: String,
     #[serde(default)]
@@ -45,6 +45,8 @@ pub struct Skill {
 pub struct Package {
     pub path: String,
     pub sha256: String,
+    #[serde(default)]
+    pub bytes: u64,
     pub trained_by: String,
     pub verified_by: String,
     pub gpu: String,
@@ -57,6 +59,8 @@ pub struct Package {
 pub struct Candidate {
     pub path: String,
     pub sha256: String,
+    #[serde(default)]
+    pub bytes: u64,
     pub trained_by: String,
     pub gpu: String,
     pub at: u64,
@@ -170,7 +174,7 @@ impl Board {
         self.credits.entry(checker.to_string()).or_default().verified += 1;
         if verified {
             self.credits.entry(candidate.trained_by.clone()).or_default().promoted += 1;
-            entry.current = Some(Package { path: candidate.path, sha256: candidate.sha256,
+            entry.current = Some(Package { path: candidate.path, sha256: candidate.sha256, bytes: candidate.bytes,
                                            trained_by: candidate.trained_by, verified_by: checker.to_string(),
                                            gpu: candidate.gpu, at: now, sealed_after: candidate.sealed_after });
         } else {
@@ -180,6 +184,18 @@ impl Board {
             entry.candidates.push(rejected);
         }
         Ok(())
+    }
+
+    /// The catalog IRIS serving downloads from (`archie-iris-skill-catalog-v1`): the package
+    /// in use for each skill, with its base, digest, size and address under `public_url`.
+    pub fn catalog(&self, public_url: &str) -> serde_json::Value {
+        let skills: serde_json::Map<String, serde_json::Value> = self.skills.iter()
+            .filter_map(|(name, skill)| skill.current.as_ref().map(|current| (name.clone(), serde_json::json!({
+                "base": self.base, "sha256": current.sha256, "bytes": current.bytes,
+                "url": format!("{}/{}", public_url.trim_end_matches('/'), current.path),
+                "trained_by": current.trained_by, "verified_by": current.verified_by}))))
+            .collect();
+        serde_json::json!({"format": "archie-iris-skill-catalog-v1", "skills": skills})
     }
 
     /// The work there is, most needed first, for an AI choosing what its node does next:
@@ -234,7 +250,7 @@ mod tests {
     use super::*;
 
     fn candidate(by: &str, path: &str) -> Candidate {
-        Candidate { path: path.into(), sha256: "ab".into(), trained_by: by.into(), gpu: "RTX 3060 Ti".into(), at: 10,
+        Candidate { path: path.into(), sha256: "ab".into(), bytes: 13, trained_by: by.into(), gpu: "RTX 3060 Ti".into(), at: 10,
                     sealed_before: BTreeMap::new(), sealed_after: BTreeMap::from([("key_f1".into(), 0.8)]),
                     state: "waiting".into() }
     }
@@ -266,6 +282,11 @@ mod tests {
         assert_eq!((current.trained_by.as_str(), current.verified_by.as_str()), ("nelson", "xavi"));
         assert_eq!(board.credits["nelson"].promoted, 1);
         assert_eq!(board.credits["xavi"].verified, 1);
+        let catalog = board.catalog("https://skills.example/main/");
+        assert_eq!(catalog["format"], "archie-iris-skill-catalog-v1");
+        assert_eq!(catalog["skills"]["csgo"]["url"], "https://skills.example/main/skills/csgo/a.skill");
+        assert_eq!((catalog["skills"]["csgo"]["bytes"].as_u64(), catalog["skills"]["csgo"]["base"].as_str()),
+                   (Some(13), Some("base")));
     }
 
     #[test]

@@ -61,7 +61,8 @@ fn node(repo: &Rc<RefCell<Repo>>, who: &str, work: &Path) -> Node<FakeHub> {
     let config = NodeConfig {
         contributor: who.into(), gpu: "RTX 3060 Ti 8GB".into(), python: "python".into(), foundry: work.join("iris"),
         weights: work.join("base.pt"), skills_dir: work.join("skills"), work_dir: work.to_path_buf(),
-        hub_repo: "PentaVM/iris-skills".into(), hub_token_env: "ARCHIE_TEST_NO_TOKEN".into(), base: "b".repeat(16),
+        board_repo: work.join("iris-skills"), board_branch: "main".into(),
+        public_url: "https://skills.example/main".into(),
     };
     Node { config, hub: FakeHub { repo: repo.clone(), author: who.into() }, clock: || 1_000 }
 }
@@ -99,10 +100,10 @@ fn two_people_train_and_check_each_other_and_the_board_credits_both() {
     assert!(refused.contains("skill_claimed_by:nelson"), "{refused}");
 
     // Nelson's own sealed check turned it down: nothing is uploaded.
-    finished_job(&nelson, "1-train-csgo", "train", "", json!({"promoted": false, "reason": "no_gain", "base": "b".repeat(16)}));
+    finished_job(&nelson, "1-train-csgo", "train", "", json!({"promoted": false, "reason": "no_gain", "base_fingerprint": "b".repeat(64)}));
     assert!(nelson.call("skill_publish", &args(json!({"job": "1-train-csgo"}))).unwrap_err().contains("no_gain"));
 
-    finished_job(&nelson, "2-train-csgo", "train", "", json!({"promoted": true, "reason": "gain:0.1", "base": "b".repeat(16),
+    finished_job(&nelson, "2-train-csgo", "train", "", json!({"promoted": true, "reason": "gain:0.1", "base_fingerprint": "b".repeat(64),
         "before": {"key_f1": 0.6}, "after": {"key_f1": 0.7}}));
     let published = nelson.call("skill_publish", &args(json!({"job": "2-train-csgo"}))).unwrap();
     let path = published["published"].as_str().unwrap().to_string();
@@ -111,7 +112,8 @@ fn two_people_train_and_check_each_other_and_the_board_credits_both() {
     let after_publish = board(&repo);
     assert!(after_publish.skills["csgo"].claim.is_none());
     assert_eq!(after_publish.skills["csgo"].candidates[0].sha256, sha256_hex(b"adapter bytes"));
-    assert_eq!(after_publish.base, "b".repeat(16));
+    assert_eq!(after_publish.base, "b".repeat(64));
+    assert_eq!(after_publish.skills["csgo"].candidates[0].bytes, 13);
 
     // Xavi's work list starts with checking it; Nelson's does not.
     let xavi_board = xavi.call("skill_board", &Map::new()).unwrap();
@@ -120,15 +122,20 @@ fn two_people_train_and_check_each_other_and_the_board_credits_both() {
     assert!(nelson_board["needs"].as_array().unwrap().iter().all(|need| need["kind"] != "check"));
 
     // Nelson cannot record a check of his own package.
-    finished_job(&nelson, "3-verify-csgo", "verify", &path, json!({"verified": true, "reason": "gain", "base": "b".repeat(16)}));
+    finished_job(&nelson, "3-verify-csgo", "verify", &path, json!({"verified": true, "reason": "gain", "base_fingerprint": "b".repeat(64)}));
     assert!(nelson.call("skill_record_check", &args(json!({"job": "3-verify-csgo"}))).is_err());
 
-    finished_job(&xavi, "4-verify-csgo", "verify", &path, json!({"verified": true, "reason": "gain:0.08", "base": "b".repeat(16)}));
+    finished_job(&xavi, "4-verify-csgo", "verify", &path, json!({"verified": true, "reason": "gain:0.08", "base_fingerprint": "b".repeat(64)}));
     xavi.call("skill_record_check", &args(json!({"job": "4-verify-csgo"}))).unwrap();
     let done = board(&repo);
     let current = done.skills["csgo"].current.as_ref().unwrap();
     assert_eq!((current.trained_by.as_str(), current.verified_by.as_str()), ("nelson", "xavi"));
     assert_eq!((done.credits["nelson"].promoted, done.credits["xavi"].verified), (1, 1));
+    // The catalog IRIS reads names the package in use, its base, digest and address.
+    let catalog: Value = serde_json::from_slice(&repo.borrow().files["catalog.json"]).unwrap();
+    assert_eq!(catalog["skills"]["csgo"]["url"], format!("https://skills.example/main/{path}"));
+    assert_eq!(catalog["skills"]["csgo"]["base"], "b".repeat(64));
+    assert_eq!(catalog["skills"]["csgo"]["sha256"], sha256_hex(b"adapter bytes"));
     // Each change was committed by the node that made it.
     assert_eq!(repo.borrow().authors, vec!["nelson", "nelson", "xavi"]);
 
@@ -172,6 +179,6 @@ fn the_protocol_lists_the_tools_and_answers_calls_and_errors() {
     let status: Value = serde_json::from_str(&mcp::handle(&mut node,
         r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"node_status","arguments":{}}}"#).unwrap()).unwrap();
     let text = status["result"]["content"][0]["text"].as_str().unwrap();
-    assert!(text.contains("\"hub_token_set\": false"), "the token's presence is said, never the token");
+    assert!(text.contains("\"contributor\": \"nelson\""));
     let _ = std::fs::remove_dir_all(dir);
 }

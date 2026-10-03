@@ -8,7 +8,7 @@
 //!                                                 print the lines that connect an agent to this node
 //! ```
 
-use archie_skill_node::hub::HuggingFace;
+use archie_skill_node::hub::GitRepo;
 use archie_skill_node::node::{valid_name, NodeConfig};
 use archie_skill_node::tools::{now, Node};
 use archie_skill_node::mcp;
@@ -23,15 +23,13 @@ fn take(args: &mut Vec<String>, flag: &str) -> Option<String> {
 }
 
 fn serve(config: NodeConfig) -> ExitCode {
-    let token = match config.token() {
-        Ok(token) => token,
-        Err(message) => {
-            eprintln!("archie-skill-node: {message}");
-            return ExitCode::from(2);
-        }
-    };
-    let hub = HuggingFace::new(&config.hub_repo, token);
-    eprintln!("archie-skill-node: ready for {} on {}", config.contributor, config.hub_repo);
+    if !config.board_repo.join(".git").exists() {
+        eprintln!("archie-skill-node: {} is not a clone of the shared repository (git clone it there first)",
+                  config.board_repo.display());
+        return ExitCode::from(2);
+    }
+    let hub = GitRepo::new(&config.board_repo, &config.board_branch);
+    eprintln!("archie-skill-node: ready for {} on {}", config.contributor, config.board_repo.display());
     let mut node = Node { config, hub, clock: now };
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
@@ -54,8 +52,8 @@ fn serve(config: NodeConfig) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-const TEMPLATE: &str = r#"# An IRIS skill node. Fill in the paths; the Hub token goes in the environment variable
-# named below (setx HF_TOKEN ... on Windows), never in this file.
+const TEMPLATE: &str = r#"# An IRIS skill node. Fill in the paths. board_repo is your own clone of the shared
+# repository: pushes use your git identity, so the history credits you.
 contributor = "{contributor}"
 gpu = "{gpu}"
 python = "C:/iris/venv/Scripts/python.exe"
@@ -63,10 +61,11 @@ foundry = "C:/iris/archie-iris"
 weights = "C:/iris/base/iris-beta2.pt"
 skills_dir = "C:/iris/skills"
 work_dir = "C:/iris/node"
-hub_repo = "PentaVM/iris-skills"
-hub_token_env = "HF_TOKEN"
-# The first 16 characters of the base's fingerprint, from the trainer.
-base = ""
+board_repo = "C:/iris/iris-skills"
+board_branch = "main"
+# Where the shared repository's files are served over HTTPS, for the catalog IRIS downloads
+# from; leave empty until the repository is public.
+public_url = ""
 "#;
 
 fn main() -> ExitCode {
@@ -104,7 +103,7 @@ fn main() -> ExitCode {
             let text = TEMPLATE.replace("{contributor}", &contributor).replace("{gpu}", &gpu);
             match std::fs::write(&path, text) {
                 Ok(()) => {
-                    println!("wrote {}; fill in the paths and set HF_TOKEN", path.display());
+                    println!("wrote {}; fill in the paths and clone the shared repository to board_repo", path.display());
                     ExitCode::SUCCESS
                 }
                 Err(error) => {
