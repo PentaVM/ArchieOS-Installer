@@ -75,3 +75,138 @@ async fn the_routed_planner_answers_with_a_plan_for_iris() {
     let private = Question { privacy: PrivacyGrade::Restricted, ..question };
     assert!(routed.candidates(&private).is_err());
 }
+
+mod private {
+    use super::*;
+    use archie_model_runtime::routed::{Disclosure, RoutedError};
+    use archie_registry::ModelRegistry;
+    use archie_types::{Availability, DataRetention, ModelDescriptor, ModelId, TokenCost};
+    use archie_vault::{EntityKind, Veil};
+    use std::collections::BTreeMap;
+
+    const KEY: &str = "sk-live-7Hq2ZxVb91LmTn4cRw8yKd3PfAeU6sGj";
+
+    /// The shipped models with their key present: cloud only.
+    fn cloud_only() -> Routed {
+        std::env::set_var("NEBIUS_TOKEN_FACTORY_KEY", "a-key-for-tests-that-call-nothing");
+        Routed::from_dir(shipped_models()).unwrap()
+    }
+
+    fn question<'a>(privacy: PrivacyGrade, user: &'a str) -> Question<'a> {
+        Question {
+            role: ModelRole::CognitiveResponse,
+            privacy,
+            system: "You write configuration files.",
+            user,
+            image: None,
+            max_tokens: 800,
+            timeout: Duration::from_secs(60),
+        }
+    }
+
+    #[test]
+    fn sensitive_text_goes_to_a_cloud_model_only_with_its_secrets_left_behind() {
+        let text = format!("Write the .env for Camila Rojas's service. API key {KEY}, alerts to camila@acme.cl.");
+        let veil = Veil::new().knowing(EntityKind::Person, "Camila Rojas");
+        match cloud_only().disclosure(&question(PrivacyGrade::Sensitive, &text), &veil).unwrap() {
+            Disclosure::Veiled { models, veiled } => {
+                assert!(models[0].as_str().starts_with("nebius.nemotron"));
+                let leaving = veiled.texts.join("\n");
+                for kept_here in [KEY, "camila@acme.cl", "Camila Rojas"] {
+                    assert!(!leaving.contains(kept_here), "{kept_here} would have left: {leaving}");
+                }
+                assert!(leaving.contains("SECRET_1") && leaving.contains("EMAIL_1") && leaving.contains("PERSON_1"));
+                assert_eq!(veiled.unveil.restore("KEY=SECRET_1\nTO=EMAIL_1"), format!("KEY={KEY}\nTO=camila@acme.cl"));
+            }
+            other => panic!("sensitive text must be veiled for the cloud, got {other:?}"),
+        }
+    }
+
+    /// A key typed into a request nobody graded is covered all the same.
+    #[test]
+    fn even_public_text_is_veiled_before_a_cloud_model_sees_it() {
+        let text = format!("Why does curl -H 'Authorization: Bearer {KEY}' return 401?");
+        match cloud_only().disclosure(&question(PrivacyGrade::Public, &text), &Veil::new()).unwrap() {
+            Disclosure::Veiled { veiled, .. } => assert!(!veiled.texts[1].contains(KEY), "{}", veiled.texts[1]),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn restricted_and_secret_text_and_pictures_do_not_leave() {
+        let routed = cloud_only();
+        let veil = Veil::new();
+        for grade in [PrivacyGrade::Restricted, PrivacyGrade::Secret] {
+            let refused = routed.disclosure(&question(grade, "my diary, in full"), &veil);
+            assert!(matches!(refused, Err(RoutedError::Withheld(_))), "{grade}: {refused:?}");
+        }
+        let png = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0];
+        let mut with_picture = question(PrivacyGrade::Internal, "what is on my screen?");
+        with_picture.image = Some(archie_model_runtime::VisionImage {
+            mime: archie_model_runtime::VisionMime::Png,
+            bytes: &png,
+            width: 1,
+            height: 1,
+        });
+        assert!(matches!(routed.disclosure(&with_picture, &veil), Err(RoutedError::Withheld(_))));
+    }
+
+    /// With a model on the machine, private text is given to it as it is, and to nothing else.
+    #[test]
+    fn a_local_model_is_asked_unveiled_and_the_cloud_is_not_asked_at_all() {
+        std::env::set_var("NEBIUS_TOKEN_FACTORY_KEY", "a-key-for-tests-that-call-nothing");
+        let mut registry = ModelRegistry::load_from_dir(shipped_models()).unwrap();
+        registry
+            .register(ModelDescriptor {
+                id: ModelId::parse("local.qwen").unwrap(),
+                display_name: "Qwen, here".into(),
+                provider: ProviderKind::OpenAiCompatible,
+                locality: Locality::Local,
+                node: None,
+                context_window: 32_768,
+                max_output_tokens: 4096,
+                capabilities: vec![ModelRole::CognitiveResponse.capability()],
+                max_privacy_grade: PrivacyGrade::Restricted,
+                retention: DataRetention::Unknown,
+                availability: Availability::Ready,
+                cost: TokenCost::FREE,
+                latency_ema_ms: Some(900),
+                quality_tier: 40,
+                required_accelerator_bytes: None,
+                labels: BTreeMap::from([("base-url".to_string(), "http://127.0.0.1:11434/v1/".to_string())]),
+            })
+            .unwrap();
+        let routed = Routed::new(registry);
+        let text = format!("Rotate this key: {KEY}");
+        for grade in [PrivacyGrade::Public, PrivacyGrade::Sensitive, PrivacyGrade::Restricted] {
+            match routed.disclosure(&question(grade, &text), &Veil::new()).unwrap() {
+                Disclosure::Kept { models } => assert_eq!(models, [ModelId::parse("local.qwen").unwrap()], "{grade}"),
+                other => panic!("{grade}: {other:?}"),
+            }
+        }
+    }
+
+    /// Against Nebius: a key, an address and a name go in veiled, Nemotron writes the file,
+    /// and the real values are in what comes back.
+    #[tokio::test]
+    #[ignore = "calls Nebius: needs NEBIUS_TOKEN_FACTORY_KEY and the network"]
+    async fn a_cloud_model_writes_a_file_with_a_key_it_never_saw() {
+        let routed = Routed::from_dir(shipped_models()).unwrap();
+        let text = format!(
+            "Write a .env file with exactly three lines: OPENAI_API_KEY set to {KEY}, ALERT_EMAIL set to \
+             camila@acme.cl, and OWNER set to Camila Rojas. Reply with the file only."
+        );
+        let veil = Veil::new().knowing(EntityKind::Person, "Camila Rojas");
+        let asked = question(PrivacyGrade::Sensitive, &text);
+        if let Disclosure::Veiled { veiled, .. } = routed.disclosure(&asked, &veil).unwrap() {
+            println!("what leaves the machine:\n{}\n", veiled.texts[1]);
+        }
+        let answer = routed.ask_private(&asked, &veil).await.unwrap();
+        println!("{} answered in {:.1} s; covered {:?}\n{}", answer.answered.model, answer.answered.seconds, answer.covered, answer.answered.text);
+        assert!(answer.left_the_machine);
+        assert_eq!(answer.covered, BTreeMap::from([("EMAIL".to_string(), 1), ("PERSON".to_string(), 1), ("SECRET".to_string(), 1)]));
+        for restored in [KEY, "camila@acme.cl", "Camila Rojas"] {
+            assert!(answer.answered.text.contains(restored), "{restored} is missing from the answer");
+        }
+    }
+}

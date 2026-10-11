@@ -104,11 +104,29 @@ Every piece of data on the node has a grade, and a model sees only what its plac
 | `restricted` | Models on this machine only. |
 | `secret` | No model. Passwords and keys are never part of a prompt. |
 
-If nothing local can answer a private request, the answer is a refusal. It is never sent
-to a cloud model instead. The screen can show anything, so it goes to IRIS, which is
-local and cleared for restricted data. What a remote planner may see of the node is set
-by the clearance the operator started it with, and a tool above that clearance is not
-listed at all.
+The screen can show anything, so it goes to IRIS, which is local and cleared for
+restricted data. What a remote planner may see of the node is set by the clearance the
+operator started it with, and a tool above that clearance is not listed at all.
+
+### Stand-ins
+
+When a private request has to go to a cloud model, the node veils it first. Keys and
+passwords, e-mail addresses, telephone numbers, card numbers, RUTs and the names the
+operator registered leave as stand-ins: `SECRET_1`, `EMAIL_1`, `PHONE_1`, `CARD_1`,
+`RUT_1`, `PERSON_1`, `COMPANY_1`. The table that reverses them never leaves the node,
+and the real values are put back into your answer there.
+
+If you are shown stand-ins:
+
+- Use each exactly as written, wherever its value belongs: in the file, the command, the
+  letter. `OPENAI_API_KEY=SECRET_1` is a correct line.
+- Do not change, expand, translate, explain or guess them, and do not invent new ones. A
+  stand-in the node did not issue stands for nothing.
+- Do not ask for the real value. You do not need it to do the work.
+
+Veiling removes what identifies and what unlocks, not what the text means. So
+`restricted` text is answered only by a model on the machine, and when there is none the
+answer is a refusal, never a cloud model.
 
 ## Models on the node
 
@@ -143,11 +161,12 @@ next when one does not answer.
 | `nebius.kimi-k3` | Response, reasoning and vision. |
 | `nebius.minicpm-v-4-5` | Vision only. |
 
-They are cloud models of unverified retention, so they are given public data only. For
-anything private the node needs a reasoning model of its own: any OpenAI-compatible
-server on the machine (llama.cpp, Ollama, vLLM), described by a manifest with
-`provider = "openai-compatible"`, `locality = "local"` and its `base-url`.
-[`docs/ROUTER.md`](docs/ROUTER.md) shows one.
+They are cloud models of unverified retention. Public text goes to them as it is;
+`internal` and `sensitive` text goes veiled, with stand-ins; `restricted` text does not
+go. A reasoning model of the node's own answers everything unveiled, and is the only
+thing that answers `restricted`: any OpenAI-compatible server on the machine (llama.cpp,
+Ollama, vLLM), described by a manifest with `provider = "openai-compatible"`,
+`locality = "local"` and its `base-url`. [`docs/ROUTER.md`](docs/ROUTER.md) shows one.
 
 ## How Archie speaks
 
