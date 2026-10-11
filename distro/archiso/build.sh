@@ -60,9 +60,9 @@ fi
 
 export CARGO_TARGET_DIR="${cargo_target}"
 cargo build --locked --release --manifest-path "${repo_root}/core/Cargo.toml" \
-  -p archie-installer -p archie-state -p archied -p archie-cli -p archie-displayd -p archie-worldd -p archie-executord -p archie-task-runner -p archie-model-runtime
+  -p archie-installer -p archie-state -p archied -p archie-cli -p archie-displayd -p archie-worldd -p archie-executord -p archie-task-runner -p archie-model-runtime -p archie-rem -p archie-lan
 
-for binary in archie-map-fetch archie-install archie archied archie-db archie-displayd archie-worldd archie-executord archie-task-runner archie-infer archie-ask; do
+for binary in archie-map-fetch archie-install archie archied archie-db archie-displayd archie-worldd archie-executord archie-task-runner archie-infer archie-ask archie-rem archie-lan; do
   file "${cargo_target}/release/${binary}" | grep -q 'ELF 64-bit.*x86-64' || {
     echo "archieos-build: ${binary} is not a Linux x86-64 ELF release binary" >&2
     exit 65
@@ -117,6 +117,13 @@ install -Dm644 "${repo_root}/distro/installer/packages.x86_64" "${stage}/airootf
 install -Dm755 "${cargo_target}/release/archie-map-fetch" "${stage}/airootfs/usr/bin/archie-map-fetch"
 install -Dm755 "${cargo_target}/release/archie-infer" "${stage}/airootfs/usr/bin/archie-infer"
 install -Dm755 "${cargo_target}/release/archie-ask" "${stage}/airootfs/usr/bin/archie-ask"
+# Sentry's LAN inventory runs as the module worker modules/sentry/lan.toml names.
+install -Dm755 "${cargo_target}/release/archie-lan" "${stage}/airootfs/usr/bin/archie-lan"
+# REM's supervisor. The unit is installed and not enabled: with no jobs registered and
+# no trainer it would have nothing to pause, and recording is the owner's to turn on.
+install -Dm755 "${cargo_target}/release/archie-rem" "${stage}/airootfs/usr/bin/archie-rem"
+install -Dm644 "${repo_root}/distro/rem/rem.toml" "${stage}/airootfs/etc/archie/rem.toml"
+install -Dm644 "${repo_root}/distro/rem/archie-rem.service" "${stage}/airootfs/etc/systemd/system/archie-rem.service"
 install -Dm644 "${repo_root}/distro/installer/archie-wizard.desktop" "${stage}/airootfs/usr/share/applications/archie-wizard.desktop"
 install -Dm644 "${repo_root}/distro/installer/archie-installer.service" "${stage}/airootfs/etc/systemd/system/archie-installer.service"
 install -Dm755 "${native_build}/archie-display" \
@@ -230,7 +237,7 @@ done
 if find "${stage}/airootfs/usr/bin" -type f \
   ! -name archie ! -name archied ! -name archie-db ! -name archie-displayd ! -name archie-worldd ! -name archie-cortexd \
   ! -name archie-display ! -name archie-executord ! -name archie-task-runner \
-  ! -name archie-sentry ! -name archie-install ! -name archie-wizard ! -name archie-map-fetch ! -name archie-infer ! -name archie-ask ! -name archie-wizard-session \
+  ! -name archie-sentry ! -name archie-install ! -name archie-wizard ! -name archie-map-fetch ! -name archie-infer ! -name archie-ask ! -name archie-rem ! -name archie-lan ! -name archie-wizard-session \
   -print -quit | grep -q .; then
   echo "archieos-build: unexpected staged Archie binary" >&2
   exit 66

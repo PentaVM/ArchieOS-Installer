@@ -6,7 +6,10 @@ use crate::{mdns, roku, ssdp, upnp};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+/// How long the devices that answered are asked about themselves, all together.
+const ASKING: Duration = Duration::from_secs(45);
 
 /// One device, as it described itself.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -92,19 +95,22 @@ pub fn scan(listen: Duration) -> std::io::Result<Inventory> {
 
     let mut descriptions = BTreeMap::new();
     let mut states = BTreeMap::new();
+    // Devices are asked one after another, so the asking as a whole has an end too. One
+    // not reached in time is still listed, from what it announced.
+    let until = Instant::now() + ASKING;
     for answer in &answers {
         // A description is read only from the host that announced it: a device does not
         // get to send this node to fetch from somewhere else.
-        let published = answer.location.as_deref().and_then(LanUrl::parse).filter(|url| url.host == answer.from);
+        let published = answer.location.as_deref().and_then(LanUrl::parse).filter(|url| url.host() == answer.from);
         if let Some(url) = published {
-            if !descriptions.contains_key(&answer.from) {
+            if !descriptions.contains_key(&answer.from) && Instant::now() < until {
                 if let Ok(body) = get(&url) {
                     descriptions.insert(answer.from, upnp::parse(&body));
                 }
             }
         }
         let is_roku = answer.target == "roku:ecp" || answer.server.to_lowercase().contains("roku");
-        if is_roku && !states.contains_key(&answer.from) {
+        if is_roku && !states.contains_key(&answer.from) && Instant::now() < until {
             states.insert(answer.from, roku::observe(answer.from));
         }
     }

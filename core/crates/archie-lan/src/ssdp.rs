@@ -6,6 +6,8 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
 const GROUP: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(239, 255, 255, 250)), 1900);
+/// A device answers once for each service it offers; past this the listening stops early.
+const MAX_ANSWERS: usize = 2048;
 
 /// One device's answer to a search.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,7 +65,7 @@ pub fn search(local: Ipv4Addr, listen: Duration) -> std::io::Result<Vec<Answer>>
     let until = Instant::now() + listen;
     let mut answers = Vec::new();
     let mut buffer = [0u8; 2048];
-    while Instant::now() < until {
+    while Instant::now() < until && answers.len() < MAX_ANSWERS {
         match socket.recv_from(&mut buffer) {
             Ok((length, from)) if is_lan(from.ip()) => {
                 if let Some(answer) = parse_answer(from.ip(), &buffer[..length]) {

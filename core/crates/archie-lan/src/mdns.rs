@@ -19,6 +19,9 @@ const TXT: u16 = 16;
 const SRV: u16 = 33;
 /// The most kinds of service one browse follows: a device may not make it ask forever.
 const MAX_KINDS: usize = 64;
+/// More hosts than a home or office network holds; past it, new ones are not learned.
+const MAX_HOSTS: usize = 1024;
+const MAX_SERVICES: usize = 64;
 
 /// What one record says.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -146,13 +149,17 @@ pub fn learn(host: &mut Host, packet: &[u8]) -> Vec<String> {
             Data::Pointer(target) if name == META => kinds.push(target),
             Data::Pointer(target) => {
                 if let Some((instance, kind)) = instance_of(&target) {
-                    host.services.insert(kind);
+                    if host.services.len() < MAX_SERVICES {
+                        host.services.insert(kind);
+                    }
                     host.name.get_or_insert(instance);
                 }
             }
             Data::Service { .. } => {
                 if let Some((_, kind)) = instance_of(&name) {
-                    host.services.insert(kind);
+                    if host.services.len() < MAX_SERVICES {
+                        host.services.insert(kind);
+                    }
                 }
             }
             Data::Text(strings) => {
@@ -180,6 +187,9 @@ pub fn browse(local: Ipv4Addr, listen: Duration) -> std::io::Result<BTreeMap<IpA
     while Instant::now() < until {
         match socket.recv_from(&mut buffer) {
             Ok((length, from)) if is_lan(from.ip()) => {
+                if hosts.len() >= MAX_HOSTS && !hosts.contains_key(&from.ip()) {
+                    continue;
+                }
                 for kind in learn(hosts.entry(from.ip()).or_default(), &buffer[..length]) {
                     let known = kind.ends_with(".local") && kind.starts_with('_') && kind.len() <= 80;
                     if known && asked.len() < MAX_KINDS && asked.insert(kind.clone()) {

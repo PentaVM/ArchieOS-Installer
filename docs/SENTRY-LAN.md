@@ -29,6 +29,21 @@ machine's traffic leaves by, so it reaches the real network and not a hypervisor
 `archie-lan-inventory-v1`: `scanned_unix` and one entry per device with `address`,
 `class`, `name`, `manufacturer`, `model`, `services`, `seen_by` and `state`.
 
+The file is written for its owner only (mode 0600) and replaced whole, so a reader never
+sees half of one.
+
+## What a device can cost
+
+A device on the network is not trusted to send a sensible amount of anything, or to
+finish:
+
+| | Ceiling |
+|---|---|
+| One HTTP answer | 256 KiB and 6 seconds, however slowly it arrives |
+| Asking every device that answered | 45 seconds in all; the rest are listed from what they announced |
+| SSDP answers in one scan | 2048 |
+| mDNS hosts in one scan | 1024, with 64 services each and 64 kinds of service asked about |
+
 ## What it does not do
 
 - **Leave the LAN.** Only private and link-local addresses are spoken to or believed. A

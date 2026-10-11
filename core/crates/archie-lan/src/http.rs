@@ -5,19 +5,21 @@
 use crate::is_lan;
 use std::io::{Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpStream};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// The most a device may send back.
 pub const MAX_BODY: usize = 256 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(3);
+/// The longest one device is listened to, however slowly it sends.
+const DEADLINE: Duration = Duration::from_secs(6);
 
 /// `http://host:port/path`, taken apart. Only literal IP hosts: a name would be resolved
 /// by whoever answers DNS, and could point anywhere.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LanUrl {
-    pub host: IpAddr,
-    pub port: u16,
-    pub path: String,
+    host: IpAddr,
+    port: u16,
+    path: String,
 }
 
 impl LanUrl {
@@ -34,6 +36,10 @@ impl LanUrl {
         let safe = path.len() <= 512 && path.bytes().all(|b| b.is_ascii_graphic());
         (is_lan(address.ip()) && safe).then(|| Self { host: address.ip(), port: address.port(), path: path.to_string() })
     }
+
+    pub fn host(&self) -> IpAddr {
+        self.host
+    }
 }
 
 /// The body of a `200 OK`, or why there is none.
@@ -44,8 +50,23 @@ pub fn get(url: &LanUrl) -> Result<Vec<u8>, String> {
     stream.set_write_timeout(Some(TIMEOUT)).map_err(|e| e.to_string())?;
     let request = format!("GET {} HTTP/1.0\r\nHost: {address}\r\nConnection: close\r\n\r\n", url.path);
     stream.write_all(request.as_bytes()).map_err(|e| e.to_string())?;
+    // The socket's timeout bounds each read, not the answer: a device that sends a byte
+    // every two seconds would otherwise be listened to for days.
+    let until = Instant::now() + DEADLINE;
+    let ceiling = MAX_BODY + 8 * 1024;
     let mut response = Vec::new();
-    stream.take((MAX_BODY + 8 * 1024) as u64).read_to_end(&mut response).map_err(|e| e.to_string())?;
+    let mut chunk = [0u8; 8192];
+    while response.len() < ceiling {
+        let left = until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err("the device took too long to answer".into());
+        }
+        stream.set_read_timeout(Some(left.min(TIMEOUT))).map_err(|e| e.to_string())?;
+        match stream.read(&mut chunk).map_err(|e| e.to_string())? {
+            0 => break,
+            read => response.extend_from_slice(&chunk[..read]),
+        }
+    }
     body_of(&response)
 }
 
@@ -67,6 +88,25 @@ pub fn body_of(response: &[u8]) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_device_that_trickles_its_answer_is_given_up_on() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let (mut peer, _) = listener.accept().unwrap();
+            let _ = peer.write_all(b"HTTP/1.0 200 OK\r\n\r\n");
+            // Each byte arrives inside the socket's own timeout; only the deadline ends it.
+            while peer.write_all(b"x").is_ok() {
+                std::thread::sleep(Duration::from_millis(500));
+            }
+        });
+        let started = Instant::now();
+        // Built by hand: the parser refuses loopback, as it should.
+        let answer = get(&LanUrl { host: "127.0.0.1".parse().unwrap(), port, path: "/".into() });
+        assert_eq!(answer, Err("the device took too long to answer".to_string()));
+        assert!(started.elapsed() < DEADLINE + TIMEOUT);
+    }
 
     #[test]
     fn only_addresses_on_the_lan_are_fetched_from() {
