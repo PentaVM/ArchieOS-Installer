@@ -4,6 +4,8 @@
 archie setup
 archie doctor
 sudo /usr/lib/archie/install-nemotron-speech
+scripts/models/install-piper-runtime.sh
+scripts/models/install-piper-voices.sh
 archie speech model status
 archie tools test freecad
 ```
@@ -20,6 +22,13 @@ archie provider add nebius     # then inject NEBIUS_TOKEN_FACTORY_KEY locally
 archie provider add ollama     # local loopback; no API key
 ```
 
+The Piper pack installs separate Spanish and English voices under the ignored local
+directory `models-cache/piper`. Archie selects one for each answer sentence, based on the
+language of the generated text. The ONNX files are checksum-verified and stay outside Git;
+their model cards and recording dataset terms are installed alongside them.
+The runtime script installs the pinned Python Piper and ONNX Runtime packages into the
+active Python environment. Run it inside the environment that will launch `run-archie.sh`.
+
 Harnesses are optional. Install each upstream CLI under its own terms, then run
 `archie harness login <id>` and `archie harness test <id>`. Credentials remain in the
 upstream CLI's own store.
@@ -27,4 +36,3 @@ upstream CLI's own store.
 Windows drives are intentionally unavailable inside the runtime. Files enter or leave a
 workspace through the host bridge contract; the privileged Windows bridge itself remains
 an explicit alpha limitation.
-

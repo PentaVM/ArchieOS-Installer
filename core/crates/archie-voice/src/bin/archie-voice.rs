@@ -538,6 +538,7 @@ struct SpeechFlags {
     engine: String,
     piper: String,
     piper_model: Option<String>,
+    piper_model_en: Option<String>,
     tts_model: Option<String>,
     codec_model: Option<String>,
     tts_tokenizer: Option<String>,
@@ -563,6 +564,7 @@ fn speech_flags(args: &mut Vec<String>) -> Result<SpeechFlags, String> {
         engine: take(args, "--voice-engine").unwrap_or_else(|| "piper".into()),
         piper: take(args, "--piper").unwrap_or_else(|| "piper".into()),
         piper_model: take(args, "--piper-model"),
+        piper_model_en: take(args, "--piper-model-en"),
         tts_model: take(args, "--tts-model"),
         codec_model: take(args, "--codec-model"),
         tts_tokenizer: take(args, "--tts-tokenizer"),
@@ -595,7 +597,10 @@ fn speech_flags(args: &mut Vec<String>) -> Result<SpeechFlags, String> {
             .transpose()?
             .unwrap_or(5.0),
         asr_gpu: take(args, "--asr-gpu")
-            .map(|n| n.parse::<i32>().map_err(|_| "--asr-gpu is a CUDA device index, or -1"))
+            .map(|n| {
+                n.parse::<i32>()
+                    .map_err(|_| "--asr-gpu is a CUDA device index, or -1")
+            })
             .transpose()?
             .unwrap_or(-1),
     })
@@ -630,22 +635,34 @@ fn live_flags(args: &mut Vec<String>) -> Result<LiveFlags, String> {
         // Looks closer that curiosity may take on its own in one session: each is a
         // paid call to a vision model on Nebius.
         curiosity: take(args, "--curiosity")
-            .map(|n| n.parse::<u32>().map_err(|_| "--curiosity is a number of looks"))
+            .map(|n| {
+                n.parse::<u32>()
+                    .map_err(|_| "--curiosity is a number of looks")
+            })
             .transpose()?
             .unwrap_or(40),
         rehear_model: take(args, "--rehear-model"),
         voice_style: take(args, "--voice-style").unwrap_or_else(|| "plain".into()),
         follow_up_s: take(args, "--follow-up-s")
-            .map(|n| n.parse::<u64>().map_err(|_| "--follow-up-s is a number of seconds"))
+            .map(|n| {
+                n.parse::<u64>()
+                    .map_err(|_| "--follow-up-s is a number of seconds")
+            })
             .transpose()?
             .unwrap_or(15),
         rvc_voice: take(args, "--rvc-voice"),
         rvc_key: take(args, "--rvc-key")
-            .map(|n| n.parse::<f32>().map_err(|_| "--rvc-key is a number of semitones"))
+            .map(|n| {
+                n.parse::<f32>()
+                    .map_err(|_| "--rvc-key is a number of semitones")
+            })
             .transpose()?
             .unwrap_or(0.0),
         rvc_index_rate: take(args, "--rvc-index-rate")
-            .map(|n| n.parse::<f32>().map_err(|_| "--rvc-index-rate is between 0 and 1"))
+            .map(|n| {
+                n.parse::<f32>()
+                    .map_err(|_| "--rvc-index-rate is between 0 and 1")
+            })
             .transpose()?
             .unwrap_or(0.0),
         ort_library: take(args, "--ort-library").or_else(|| std::env::var("ORT_DYLIB_PATH").ok()),
@@ -668,10 +685,16 @@ fn converted_voice(
     let at = Instant::now();
     let rvc = RvcVoice::load(
         std::path::Path::new(manifest),
-        Tuning { key: flags.rvc_key, index_rate: flags.rvc_index_rate },
+        Tuning {
+            key: flags.rvc_key,
+            index_rate: flags.rvc_index_rate,
+        },
         4,
     )?;
-    println!("converted voice {manifest} ready in {} ms", at.elapsed().as_millis());
+    println!(
+        "converted voice {manifest} ready in {} ms",
+        at.elapsed().as_millis()
+    );
     Ok(Box::new(ConvertedVoice::new(voice, rvc)))
 }
 
@@ -686,9 +709,11 @@ fn converted_voice(
 
 #[cfg(not(all(unix, feature = "live")))]
 fn live(_asking: Asking, _speech: SpeechFlags, _flags: LiveFlags) -> Result<ExitCode, String> {
-    Err("this build has no live session: build archie-voice with --features live, where \
+    Err(
+        "this build has no live session: build archie-voice with --features live, where \
          NeMo-Speech.cpp is installed"
-        .into())
+            .into(),
+    )
 }
 
 /// Talks with a person through a browser page: their microphone and camera in, the voice
@@ -703,45 +728,75 @@ fn live(asking: Asking, speech: SpeechFlags, flags: LiveFlags) -> Result<ExitCod
     use std::sync::atomic::AtomicBool;
     use std::sync::{mpsc, Arc};
 
-    if speech.engine != "magpie" {
-        return Err("live speaks with Magpie: give --voice-engine magpie and its model files".into());
+    if flags.rvc_voice.is_some() && speech.engine != "magpie" {
+        return Err("RVC live conversion currently requires --voice-engine magpie".into());
     }
     let at = Instant::now();
-    let ears = Ears::load_on(Path::new(&speech.asr_model), Some(speech.lookahead), speech.asr_gpu)
-        .map_err(|e| e.to_string())?;
+    let ears = Ears::load_on(
+        Path::new(&speech.asr_model),
+        Some(speech.lookahead),
+        speech.asr_gpu,
+    )
+    .map_err(|e| e.to_string())?;
     println!("ears ready in {} ms", at.elapsed().as_millis());
     let rehear = match &flags.rehear_model {
         Some(model) => {
             let at = Instant::now();
-            let second = Ears::load_on(Path::new(model), None, speech.asr_gpu).map_err(|e| e.to_string())?;
+            let second =
+                Ears::load_on(Path::new(model), None, speech.asr_gpu).map_err(|e| e.to_string())?;
             println!("second hearing ready in {} ms", at.elapsed().as_millis());
             Some(second)
         }
         None => None,
     };
-    let style = live::style::Style::parse(&flags.voice_style)?;
-    let needed = |value: &Option<String>, flag: &str| value.clone().ok_or(format!("live needs {flag}"));
-    let (magpie, codec, tokenizer) = (
-        needed(&speech.tts_model, "--tts-model")?,
-        needed(&speech.codec_model, "--codec-model")?,
-        needed(&speech.tts_tokenizer, "--tts-tokenizer")?,
-    );
     let at = Instant::now();
-    let voice = Voice::load(
-        &VoiceFiles {
-            magpie: Path::new(&magpie),
-            codec: Path::new(&codec),
-            tokenizer_dir: Path::new(&tokenizer),
-        },
-        &speech.tts_language,
-        speech.voice.as_deref(),
-        speech.threads,
-    )
-    .map_err(|e| e.to_string())?;
-    let following = language::FollowingVoice::new(voice, &speech.tts_language, &flags.tts_english);
-    let voice: Box<dyn archie_voice::voice::Speaks> = match &flags.rvc_voice {
-        Some(manifest) => converted_voice(following, manifest, &flags)?,
-        None => Box::new(live::style::StyledVoice::new(following, style)),
+    let voice: Box<dyn archie_voice::voice::Speaks> = match speech.engine.as_str() {
+        "magpie" => {
+            let style = live::style::Style::parse(&flags.voice_style)?;
+            let needed = |value: &Option<String>, flag: &str| {
+                value
+                    .clone()
+                    .ok_or(format!("live Magpie voice needs {flag}"))
+            };
+            let (magpie, codec, tokenizer) = (
+                needed(&speech.tts_model, "--tts-model")?,
+                needed(&speech.codec_model, "--codec-model")?,
+                needed(&speech.tts_tokenizer, "--tts-tokenizer")?,
+            );
+            let voice = Voice::load(
+                &VoiceFiles {
+                    magpie: Path::new(&magpie),
+                    codec: Path::new(&codec),
+                    tokenizer_dir: Path::new(&tokenizer),
+                },
+                &speech.tts_language,
+                speech.voice.as_deref(),
+                speech.threads,
+            )
+            .map_err(|e| e.to_string())?;
+            let following =
+                language::FollowingVoice::new(voice, &speech.tts_language, &flags.tts_english);
+            match &flags.rvc_voice {
+                Some(manifest) => converted_voice(following, manifest, &flags)?,
+                None => Box::new(live::style::StyledVoice::new(following, style)),
+            }
+        }
+        "piper" => {
+            let model = speech
+                .piper_model
+                .as_deref()
+                .ok_or("live Piper voice needs --piper-model <voice.onnx>")?;
+            Box::new(archie_voice::piper::BilingualPiper::start(
+                Path::new(&speech.piper),
+                Path::new(model),
+                speech.piper_model_en.as_deref().map(Path::new),
+            )?)
+        }
+        other => {
+            return Err(format!(
+                "live --voice-engine is piper or magpie, not {other}"
+            ))
+        }
     };
     let rate = voice.sample_rate();
     println!("voice ready in {} ms, {rate} Hz", at.elapsed().as_millis());
@@ -757,7 +812,11 @@ fn live(asking: Asking, speech: SpeechFlags, flags: LiveFlags) -> Result<ExitCod
         } else {
             identifier.means().join(" + ")
         },
-        if researcher.is_some() { "with Tavily" } else { "off (no TAVILY_API_KEY)" }
+        if researcher.is_some() {
+            "with Tavily"
+        } else {
+            "off (no TAVILY_API_KEY)"
+        }
     );
     let senses = live::Senses::new(audio_in, identifier, researcher, rate, flags.curiosity);
     let eyes = eyes::IrisEyes::new(&flags.iris, 0.35)?;
@@ -804,7 +863,12 @@ fn live(asking: Asking, speech: SpeechFlags, flags: LiveFlags) -> Result<ExitCod
     let mut act = |intent: &archie_speech::SpeechToolIntentCandidate| -> String {
         runtime
             .block_on(senses.handle_tool(&intent.tool_name, &intent.raw_arguments))
-            .unwrap_or_else(|| format!("No se hizo: aquí no tengo la herramienta {}.", intent.tool_name))
+            .unwrap_or_else(|| {
+                format!(
+                    "No se hizo: aquí no tengo la herramienta {}.",
+                    intent.tool_name
+                )
+            })
     };
     let mut context = || senses.context(&clock);
     let started = Instant::now();
@@ -846,7 +910,9 @@ fn live(asking: Asking, speech: SpeechFlags, flags: LiveFlags) -> Result<ExitCod
     conversation::converse(
         &setup,
         &ears,
-        rehear.as_ref(),
+        rehear
+            .as_ref()
+            .map(|ears| ears as &dyn archie_voice::asr::SpeechRecognizer),
         voice,
         Hearing::Stream(audio),
         Saying::Stream(StreamedVoice::new(voice_out, rate)),
@@ -941,10 +1007,10 @@ fn converse(
                 .piper_model
                 .clone()
                 .ok_or("the piper voice needs --piper-model <voice.onnx>")?;
-            Box::new(archie_voice::piper::Piper::start(
+            Box::new(archie_voice::piper::BilingualPiper::start(
                 Path::new(&speech.piper),
                 Path::new(&model),
-                None,
+                speech.piper_model_en.as_deref().map(Path::new),
             )?)
         }
         other => return Err(format!("--voice-engine is piper or magpie, not {other}")),

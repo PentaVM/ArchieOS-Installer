@@ -20,6 +20,47 @@ const ASKED: &str = "how is the disk";
 const FIRST: &str = "The array is healthy.";
 const SECOND: &str = "One drive is at eighty percent.";
 
+// A transport may race cancellation. The session must fence its own output,
+// regardless of whether the backend has stopped returning queued events yet.
+struct LateBackend(ScriptedCognitiveModel);
+impl CognitiveModelAdapter for LateBackend {
+    fn languages(&self) -> &[String] {
+        self.0.languages()
+    }
+    fn begin(
+        &mut self,
+        request: archie_speech::CognitiveRequest,
+    ) -> Result<(), archie_speech::CognitiveError> {
+        self.0.begin(request)
+    }
+    fn poll(&mut self) -> Option<archie_speech::CognitiveEvent> {
+        self.0.poll()
+    }
+    fn cancel(&mut self, _: &str, _: CancelReason) {}
+    fn running_turn(&self) -> Option<&str> {
+        self.0.running_turn()
+    }
+}
+
+#[test]
+fn cancellation_fences_late_speech_and_tool_proposals() {
+    let brain = brain().answering(
+        ASKED,
+        ScriptedReply::saying(&[FIRST]).proposing("open_app", "{}"),
+    );
+    let mut session =
+        SpeechSession::new(plan("en"), FloorPolicy::default(), LateBackend(brain)).unwrap();
+    session
+        .heard("late", ASKED, &floor_is_free_with_a_real_answer())
+        .unwrap();
+    session.cancel(CancelReason::Interrupted);
+    assert!(
+        session.pump().is_empty(),
+        "cancelled events must never be released"
+    );
+    assert!(session.written_text().is_empty());
+}
+
 fn renderer(languages: &[&str]) -> SpeechCapabilities {
     SpeechCapabilities {
         accepts_external_response_text: true,

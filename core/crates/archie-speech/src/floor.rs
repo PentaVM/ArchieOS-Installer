@@ -82,9 +82,21 @@ pub enum SilenceScope {
 /// A newtype rather than a bare `f32` because every field in the state below is one, and
 /// a state built from an out-of-range or NaN estimate would make the policy's comparisons
 /// meaningless in a way that produces no error, just strange behaviour.
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]
 pub struct Probability(f32);
+
+impl<'de> Deserialize<'de> for Probability {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = f32::deserialize(deserializer)?;
+        if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+            return Err(serde::de::Error::custom(
+                "probability must be finite and in [0, 1]",
+            ));
+        }
+        Ok(Self(value))
+    }
+}
 
 impl Probability {
     pub const ZERO: Self = Self(0.0);
@@ -320,6 +332,13 @@ impl FloorPolicy {
     /// start"; then interruption, which is the only way to speak over somebody; then the
     /// ordinary case of a free floor.
     pub fn decide(&self, state: &ConversationalFloorState) -> FloorDecision {
+        if !self.valid() {
+            return FloorDecision::new(
+                FloorAction::Silent,
+                SpeechBudget::None,
+                "invalid floor thresholds",
+            );
+        }
         match state.current_speaker {
             Speaker::Archie => self.while_archie_speaks(state),
             Speaker::Owner | Speaker::Other | Speaker::Unidentified => {
@@ -462,6 +481,25 @@ impl FloorPolicy {
     /// answer to a question that no longer exists is worse than saying nothing, because
     /// it sounds like Archie was not listening.
     pub fn may_resume(&self, state: &ConversationalFloorState) -> bool {
-        state.response_still_valid.get() >= self.resume_validity_threshold
+        self.valid()
+            && state.current_speaker == Speaker::Nobody
+            && state.silence_scope != SilenceScope::WithinClause
+            && state.speaker_hold.get() < self.speaker_hold_threshold
+            && state.response_still_valid.get() >= self.resume_validity_threshold
+    }
+
+    fn valid(&self) -> bool {
+        [
+            self.speaker_hold_threshold,
+            self.response_utility_threshold,
+            self.soft_interrupt_threshold,
+            self.strong_interrupt_threshold,
+            self.strong_interrupt_urgency,
+            self.acknowledgement_threshold,
+            self.context_sufficiency_threshold,
+            self.resume_validity_threshold,
+        ]
+        .iter()
+        .all(|value| value.is_finite() && (0.0..=1.0).contains(value))
     }
 }

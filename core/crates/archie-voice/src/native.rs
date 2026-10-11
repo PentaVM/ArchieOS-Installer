@@ -344,7 +344,11 @@ impl Ears {
 
     /// As [`Self::load`], on GPU `gpu` (a CUDA device index), or the CPU when it is -1. On
     /// a GPU the ears keep up with far less lookahead, so they answer sooner.
-    pub fn load_on(model: &Path, right_context: Option<i32>, gpu: i32) -> Result<Self, NativeError> {
+    pub fn load_on(
+        model: &Path,
+        right_context: Option<i32>,
+        gpu: i32,
+    ) -> Result<Self, NativeError> {
         let path = c_path(model, "the ASR model path")?;
         let backend = ffi::AsrBackendConfig {
             size: size_of::<ffi::AsrBackendConfig>(),
@@ -523,6 +527,46 @@ pub struct Listening<'a> {
 // SAFETY: a stream may move between threads; it must only be driven from one at a time,
 // which `&mut self` on every method guarantees.
 unsafe impl Send for Listening<'_> {}
+
+impl crate::asr::SpeechRecognizer for Ears {
+    fn listen(
+        &self,
+        language: &str,
+        phrases: &[&str],
+        boost: f32,
+    ) -> Result<Box<dyn crate::asr::AsrStream + '_>, String> {
+        Ears::listen(self, language, phrases, boost)
+            .map(|stream| Box::new(stream) as Box<dyn crate::asr::AsrStream>)
+            .map_err(|error| error.to_string())
+    }
+
+    fn recognize(&self, samples: &[f32], rate: u32) -> Result<String, String> {
+        Ears::recognize(self, samples, rate, None)
+            .map(|heard| heard.text)
+            .map_err(|error| error.to_string())
+    }
+}
+
+impl crate::asr::AsrStream for Listening<'_> {
+    fn push(&mut self, samples: &[f32], rate: u32) -> Result<(), String> {
+        Listening::push(self, samples, rate).map_err(|error| error.to_string())
+    }
+
+    fn next(&mut self) -> Result<Option<crate::asr::Heard>, String> {
+        Listening::next(self)
+            .map(|heard| {
+                heard.map(|heard| crate::asr::Heard {
+                    text: heard.text,
+                    is_final: heard.is_final,
+                })
+            })
+            .map_err(|error| error.to_string())
+    }
+
+    fn end_utterance(&mut self) -> Result<(), String> {
+        Listening::end_utterance(self).map_err(|error| error.to_string())
+    }
+}
 
 impl Listening<'_> {
     /// Feeds mono audio at `sample_rate` (8 to 96 kHz; resampled inside).

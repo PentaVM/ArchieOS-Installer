@@ -20,7 +20,8 @@ leased Stage command that the policy can refuse, and every result comes back as 
 ```
 
 This repository is the NVIDIA / Nebius competition edition: Rust for the control plane,
-C++ for the native and visual subsystems. Nothing in ArchieOS itself is Python.
+C++ for the native and visual subsystems. The optional Piper process bridge uses Python;
+the speech floor, policies and orchestration remain in Rust.
 
 ## What works today
 
@@ -29,7 +30,13 @@ C++ for the native and visual subsystems. Nothing in ArchieOS itself is Python.
   (Spanish and 39 other language-locales) through NVIDIA NeMo-Speech.cpp, a floor that
   decides whether Archie was addressed ("Archie", or anything while it is listening),
   Nemotron on Nebius for the answer, and a voice: Piper on a CPU, Magpie with a GPU.
-  Answers are spoken in short sentences, in the language the person used.
+  Answers are spoken in short sentences, in the language the person used. Piper can use
+  separate local Spanish and English models and selects between them sentence by
+  sentence; install the Python runtime and the checksum-verified models with
+  `scripts/models/install-piper-runtime.sh` and `scripts/models/install-piper-voices.sh`. The pack
+  uses the US-English `john` and Mexican-Spanish `ald` voices from Piper, with their
+  source and dataset terms recorded beside the models. They are open voices with a
+  similar broad profile, not Baymax recordings or a clone of his actor.
 - `archie-voice live`: the same conversation reached from a browser page (microphone,
   speaker and camera over a loopback WebSocket), with **IRIS as Archie's eyes**. Archie is
   told only what IRIS reads, how old it is, and what was there before and left. It can

@@ -1,6 +1,6 @@
 //! Piper, a voice that keeps up with speech on a CPU.
 //!
-//! Piper is C++ over ONNX Runtime. It runs here as one long-lived process, so the voice
+//! Piper runs here as one long-lived external process (native or the Python bridge), so the voice
 //! model loads once: each piece of text goes in as a line of JSON naming a WAV file, and
 //! Piper answers with that file's path when the audio is complete, which is how the end of
 //! each piece is known without guessing from a stream of raw samples.
@@ -25,6 +25,47 @@ pub struct Piper {
     rate: u32,
     dir: PathBuf,
     said: u64,
+}
+
+/// Keeps one local Piper process for each language and selects by the answer text.
+pub struct BilingualPiper {
+    spanish: Piper,
+    english: Option<Piper>,
+}
+
+impl BilingualPiper {
+    pub fn start(
+        binary: &Path,
+        spanish_model: &Path,
+        english_model: Option<&Path>,
+    ) -> Result<Self, String> {
+        let spanish = Piper::start(binary, spanish_model, None)?;
+        let english = english_model
+            .map(|model| Piper::start(binary, model, None))
+            .transpose()?;
+        if english
+            .as_ref()
+            .is_some_and(|voice| voice.sample_rate() != spanish.sample_rate())
+        {
+            return Err("English and Spanish Piper voices must have the same sample rate".into());
+        }
+        Ok(Self { spanish, english })
+    }
+}
+
+impl Speaks for BilingualPiper {
+    fn sample_rate(&self) -> u32 {
+        self.spanish.sample_rate()
+    }
+
+    fn say(&mut self, text: &str, hear: &mut dyn FnMut(&[i16]) -> bool) -> Result<Said, String> {
+        if crate::language::spoken_language(text) == "en" {
+            if let Some(english) = self.english.as_mut() {
+                return english.say(text, hear);
+            }
+        }
+        self.spanish.say(text, hear)
+    }
 }
 
 impl Piper {
