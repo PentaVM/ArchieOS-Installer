@@ -52,6 +52,7 @@ members = [
     "crates/archie-iris",
     "crates/archie-orb",
     "crates/archie-rem",
+    "crates/archie-lan",
 ]
 
 [workspace.package]
