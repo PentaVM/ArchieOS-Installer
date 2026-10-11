@@ -1,0 +1,30 @@
+# Hermes 4 405B, on Nebius Token Factory.
+#
+# Nous Research's model.
+# It is a cloud model. Requests leave the machine, and Nebius's retention has not been
+# verified for this deployment, so it is cleared for public data only. An operator who has
+# verified it may raise max_privacy_grade to "internal" and set retention = "zero-verified".
+id = "nebius.hermes-4-405b"
+display_name = "Hermes 4 405B"
+provider = "nebius-token-factory"
+locality = "cloud"
+
+context_window = 131072
+max_output_tokens = 8192
+
+capabilities = ["cognition.response", "cognition.reasoning"]
+max_privacy_grade = "public"
+availability = "ready"
+
+# Assigned by hand to order the choices, not measured. latency_ema_ms is the time one
+# 60-second plan took from Chile on 2026-10-11.
+quality_tier = 78
+latency_ema_ms = 4600
+
+# Nebius's list price that day, in millionths of a US dollar per million tokens.
+[cost]
+input_micros_per_mtok = 1000000
+output_micros_per_mtok = 3000000
+
+[labels]
+provider-model = "NousResearch/Hermes-4-405B"

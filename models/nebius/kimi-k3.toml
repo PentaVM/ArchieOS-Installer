@@ -1,0 +1,30 @@
+# Kimi K3, on Nebius Token Factory.
+#
+# Reads images well; it was the Arena's first planner. The most expensive here.
+# It is a cloud model. Requests leave the machine, and Nebius's retention has not been
+# verified for this deployment, so it is cleared for public data only. An operator who has
+# verified it may raise max_privacy_grade to "internal" and set retention = "zero-verified".
+id = "nebius.kimi-k3"
+display_name = "Kimi K3"
+provider = "nebius-token-factory"
+locality = "cloud"
+
+context_window = 1024000
+max_output_tokens = 8192
+
+capabilities = ["cognition.response", "cognition.reasoning", "cognition.vision"]
+max_privacy_grade = "public"
+availability = "ready"
+
+# Assigned by hand to order the choices, not measured. latency_ema_ms is the time one
+# 60-second plan took from Chile on 2026-10-11.
+quality_tier = 84
+latency_ema_ms = 3900
+
+# Nebius's list price that day, in millionths of a US dollar per million tokens.
+[cost]
+input_micros_per_mtok = 3000000
+output_micros_per_mtok = 15000000
+
+[labels]
+provider-model = "moonshotai/Kimi-K3"

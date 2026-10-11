@@ -86,6 +86,7 @@ archie-geofabric = { path = "crates/archie-geofabric" }
 archie-displayd = { path = "crates/archie-displayd" }
 archie-worldd = { path = "crates/archie-worldd", default-features = false }
 archie-model-runtime = { path = "crates/archie-model-runtime" }
+archie-rem = { path = "crates/archie-rem" }
 archie-vault = { path = "crates/archie-vault" }
 archie-mcp = { path = "crates/archie-mcp" }
 archie-search = { path = "crates/archie-search" }

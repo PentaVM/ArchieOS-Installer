@@ -3,7 +3,8 @@
 //! ```text
 //! archie-arena-live --task <task.toml> --tier <seconds> --socket <control.sock> --key-file <key>
 //!                   --policy <apps.toml> --out <runs dir> --iris <http://127.0.0.1:8765>
-//!                   [--settle-s 20] [--planners <model,...>] [--skill <text>]
+//!                   [--settle-s 20] [--models <dir>] [--skill <text>]
+//!                   [--record <skill-id> [--rem-spool <dir>] [--rem-day <dir>]]
 //! ```
 //!
 //! Before the clock (untimed): the task's reset, the window's settling, and the planner's
@@ -11,12 +12,20 @@
 //! and the changes to what is held sent through the Stage gate — as fast as a capture and an
 //! answer allow. The run writes `<out>/<task>/<run>/` (result.json, trajectory.jsonl, a frame
 //! every second in frames/) and appends to `<out>/results.jsonl`.
+//!
+//! `--record` is the operator opting this run into learning (RFC-014). IRIS, started with
+//! the same `--rem-spool`, keeps each decision as a training window for that skill. When
+//! the task's judge says the run succeeded, the windows are sealed into the day's buffer
+//! with a receipt each, for the night's REM cycle; otherwise they are deleted here.
 
 use archie_arena::live::{step_at, teal_pixels, Control, Decision, Held, Plan, ResetCounter, Step};
-use archie_arena::model::Nebius;
 use archie_arena::seat::{load_key, take, Seat};
 use archie_arena::task::Task;
+use archie_model_runtime::routed::{Question, Routed};
 use archie_policy::PolicyEngine;
+use archie_rem::record::{discard_run, keep_run, Sample, Verified};
+use archie_rem::DayBuffer;
+use archie_types::{ModelRole, PrivacyGrade};
 use archie_stage::{learn, Operator, PointerButton, StageAction, StageClient, StagePolicy, StageWorld};
 use serde_json::json;
 use std::io::Write;
@@ -58,12 +67,12 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
     let out_root = PathBuf::from(take(&mut args, "--out").ok_or("--out is required")?);
     let iris = take(&mut args, "--iris").ok_or("--iris is required")?.trim_end_matches('/').to_string();
     let settle: u64 = take(&mut args, "--settle-s").map(|v| v.parse().unwrap_or(20)).unwrap_or(20);
-    let planners = take(&mut args, "--planners");
+    let models = take(&mut args, "--models").unwrap_or_else(|| "/etc/archie/models".into());
     let skill_flag = take(&mut args, "--skill");
-    let mut task = Task::load(&task_path)?;
-    if let Some(list) = planners {
-        task.planners = list.split(',').map(|m| m.trim().to_string()).filter(|m| !m.is_empty()).collect();
-    }
+    let record = take(&mut args, "--record");
+    let rem_spool = PathBuf::from(take(&mut args, "--rem-spool").unwrap_or_else(|| "/run/archie/rem/spool".into()));
+    let rem_day = PathBuf::from(take(&mut args, "--rem-day").unwrap_or_else(|| "/var/lib/archie/rem/day".into()));
+    let task = Task::load(&task_path)?;
     let stamp = format!("{}-live-t{tier}", SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
     let out = out_root.join(&task.id).join(&stamp);
     let frames = out.join("frames");
@@ -98,13 +107,27 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
     let first = seat.look().await?;
     std::fs::write(out.join("first.png"), first.png()).map_err(|e| e.to_string())?;
 
-    // The plan, untimed: what to do, not how.
-    let nebius = Nebius::from_environment()?;
-    let brief = format!("TASK: {}\n\nTIME: {tier} s once you answer. The screenshot is the screen now ({}x{}).",
-                        task.prompt, first.width, first.height);
-    let answer = nebius
-        .ask(&task.planners, PLANNER, &brief, &[archie_arena::image::data_url(&first)], 4000, Duration::from_secs(300))
-        .await?;
+    // The plan, untimed: what to do, not how. It is asked of whichever reasoning model the
+    // router chooses among the node's manifests. That model is told what is open, not
+    // shown it: seeing the screen is IRIS's part, and a benchmark's task is public while a
+    // screen can show anything.
+    let brief = format!(
+        "TASK: {}\n\nThe application open on the screen is {} ({}x{} pixels).\n\nTIME: {tier} s once you answer.",
+        task.prompt, task.app_id, first.width, first.height
+    );
+    let answer = Routed::from_dir(&models)
+        .map_err(|e| format!("{models}: {e}"))?
+        .ask(&Question {
+            role: ModelRole::ReasoningWorker,
+            privacy: PrivacyGrade::Public,
+            system: PLANNER,
+            user: &brief,
+            image: None,
+            max_tokens: 4000,
+            timeout: Duration::from_secs(300),
+        })
+        .await
+        .map_err(|e| e.to_string())?;
     let plan: Plan = answer
         .text
         .find('{')
@@ -113,7 +136,7 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         .unwrap_or(Plan { skill: String::new(), steps: vec![Step { what: task.prompt.clone(), seconds: tier as f32 }] });
     let skill = skill_flag.unwrap_or_else(|| plan.skill.clone());
     log_line(&trajectory, json!({"t": 0.0, "plan": plan.steps.iter().map(|s| json!({"do": s.what, "seconds": s.seconds})).collect::<Vec<_>>(),
-                                 "skill": skill, "planner": answer.model, "planner_seconds": answer.seconds}));
+                                 "skill": skill, "planner": answer.model.to_string(), "planner_seconds": answer.seconds}));
 
     // The clock.
     let http = reqwest::Client::builder().timeout(Duration::from_secs(5)).build().map_err(|e| e.to_string())?;
@@ -161,7 +184,10 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
             last_saved = elapsed as i64;
             let _ = std::fs::write(frames.join(format!("{:04}.png", ticks)), window.png());
         }
-        let url = format!("{iris}/act?session={stamp}&instruction={}&skill={}", urlencode(&step.what), urlencode(&skill));
+        let mut url = format!("{iris}/act?session={stamp}&instruction={}&skill={}", urlencode(&step.what), urlencode(&skill));
+        if let Some(app) = &record {
+            url.push_str(&format!("&record={stamp}&app={}", urlencode(app)));
+        }
         let ask = http.post(&url).body(archie_arena::image::ppm(&window)).send();
         tokio::pin!(ask);
         let mut played = Vec::new();
@@ -242,8 +268,14 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
     }
     let spent = started.elapsed().as_secs_f32();
     act_ms.sort_by(|a, b| a.total_cmp(b));
+    // Only a run the judge counted a success in teaches anything.
+    let verified = task.judge == "flip_reset" && resets.resets > 0;
+    let learning = match &record {
+        Some(app) => keep_or_discard(&http, &iris, app, &stamp, verified, &rem_spool, &rem_day).await,
+        None => json!(null),
+    };
     let result = json!({
-        "task": task.id, "tier": tier, "run": stamp, "mode": "iris-live", "seconds_spent": spent,
+        "task": task.id, "tier": tier, "run": stamp, "mode": "iris-live", "seconds_spent": spent, "learning": learning,
         "ticks": ticks, "ticks_per_second": ticks as f32 / spent.max(0.001), "actions_executed": sent,
         "actions_refused": refused, "failed": failed, "plan_steps": plan.steps.len(), "skill": skill,
         "iris_act_ms_p50": act_ms.get(act_ms.len() / 2), "flip_resets": resets.resets,
@@ -253,6 +285,50 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
     log_line(&out_root.join("results.jsonl"), result.clone());
     println!("{result}");
     Ok(ExitCode::SUCCESS)
+}
+
+/// What became of a recorded run: sealed for the night with its receipts, or deleted.
+async fn keep_or_discard(
+    http: &reqwest::Client,
+    iris: &str,
+    app: &str,
+    run: &str,
+    verified: bool,
+    spool: &Path,
+    day: &Path,
+) -> serde_json::Value {
+    if !verified {
+        return match discard_run(spool, app, run) {
+            Ok(()) => json!({"kept": 0, "why": "the judge did not count the run a success"}),
+            Err(error) => json!({"kept": 0, "error": error.to_string()}),
+        };
+    }
+    // IRIS answers once every window it queued is on disk, so this may take a few seconds.
+    let asked = http
+        .post(format!("{iris}/act/recorded?app={}&run={run}", urlencode(app)))
+        .timeout(Duration::from_secs(120))
+        .send()
+        .await;
+    let samples: Result<Vec<Sample>, String> = match asked {
+        Ok(response) => response
+            .json::<serde_json::Value>()
+            .await
+            .map_err(|e| e.to_string())
+            .and_then(|body| serde_json::from_value(body["samples"].clone()).map_err(|e| e.to_string())),
+        Err(error) => Err(error.to_string()),
+    };
+    let kept = samples.and_then(|samples| {
+        let buffer = DayBuffer::open(day).map_err(|e| e.to_string())?;
+        keep_run(&buffer, spool, app, run, Verified::TaskOutcome, &samples).map_err(|e| e.to_string())
+    });
+    match kept {
+        Ok(count) => json!({"kept": count}),
+        Err(error) => {
+            // Windows that could not be vouched for do not stay in the clear.
+            let _ = discard_run(spool, app, run);
+            json!({"kept": 0, "error": error})
+        }
+    }
 }
 
 fn urlencode(text: &str) -> String {

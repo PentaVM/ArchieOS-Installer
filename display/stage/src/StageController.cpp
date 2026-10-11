@@ -1075,10 +1075,54 @@ void StageController::noteAuthority(AuthorityMode before)
     emit authorityChanged();
 }
 
+namespace {
+
+/// Whether an event on the stage's window is a person's hand on the machine.
+bool is_person_input(QEvent::Type type)
+{
+    switch (type) {
+    case QEvent::MouseMove:
+    case QEvent::MouseButtonPress:
+    case QEvent::MouseButtonDblClick:
+    case QEvent::MouseButtonRelease:
+    case QEvent::Wheel:
+    case QEvent::TouchBegin:
+    case QEvent::TouchUpdate:
+    case QEvent::TouchEnd:
+    case QEvent::KeyPress:
+    case QEvent::KeyRelease:
+        return true;
+    default:
+        return false;
+    }
+}
+
+} // namespace
+
+void StageController::notePerson()
+{
+    if (m_options.presence_file.isEmpty()) {
+        return;
+    }
+    // A mouse moving reports hundreds of times a second; the reader only needs the minute.
+    const auto now = std::chrono::steady_clock::now();
+    if (m_presenceWritten && now - *m_presenceWritten < std::chrono::seconds(5)) {
+        return;
+    }
+    m_presenceWritten = now;
+    QFile file(m_options.presence_file);
+    if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        file.write("\n");
+    }
+}
+
 bool StageController::eventFilter(QObject *watched, QEvent *event)
 {
     if (watched != m_window) {
         return QObject::eventFilter(watched, event);
+    }
+    if (is_person_input(event->type())) {
+        notePerson();
     }
     const auto now = monotonic();
     const AuthorityMode before = m_authority.mode();

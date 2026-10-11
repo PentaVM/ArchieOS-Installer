@@ -211,19 +211,35 @@ impl<'a, W: World> Cycle<'a, W> {
         let _ = self.world.activity(idle_seconds).write(&self.plan.activity_file);
     }
 
-    /// Opens every sealed window into the work directory and says how many there were.
+    /// Opens the day's buffer into the work directory as the trainer reads it, and says how
+    /// many windows there were. A name's `+` are the folders the file goes back into
+    /// (`windows+photopea+run-7+000001.npz`), and every run's receipts are joined into one
+    /// `receipts.jsonl`.
     fn open_windows(&mut self) -> Result<usize, String> {
         let buffer = DayBuffer::open(&self.plan.buffer_dir).map_err(|e| e.to_string())?;
         let names = buffer.names().map_err(|e| e.to_string())?;
-        if names.is_empty() {
-            return Ok(0);
-        }
-        std::fs::create_dir_all(&self.plan.work_dir).map_err(|e| format!("{}: {e}", self.plan.work_dir.display()))?;
+        let work = &self.plan.work_dir;
+        let failed = |path: &Path, e: std::io::Error| format!("{}: {e}", path.display());
+        let mut windows = 0;
+        let mut receipts = Vec::new();
         for name in &names {
             let plain = buffer.unseal(name).map_err(|e| e.to_string())?;
-            std::fs::write(self.plan.work_dir.join(name), plain).map_err(|e| format!("{name}: {e}"))?;
+            if name.starts_with("receipts+") {
+                receipts.extend_from_slice(&plain);
+                continue;
+            }
+            let path = name.split('+').fold(work.clone(), |path, part| path.join(part));
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| failed(parent, e))?;
+            }
+            std::fs::write(&path, plain).map_err(|e| failed(&path, e))?;
+            windows += usize::from(name.starts_with("windows+"));
         }
-        Ok(names.len())
+        if windows > 0 {
+            let path = work.join("receipts.jsonl");
+            std::fs::write(&path, receipts).map_err(|e| failed(&path, e))?;
+        }
+        Ok(windows)
     }
 
     /// The two steps that always happen, then the marker goes.
@@ -253,11 +269,11 @@ impl<'a, W: World> Cycle<'a, W> {
                 return;
             }
         };
-        let mut waiting: Vec<(Job, SystemTime)> = Vec::new();
+        let mut waiting: Vec<(Job, Option<SystemTime>)> = Vec::new();
         for job in jobs {
-            let told_at = self.world.now();
+            let before = job.beat();
             match self.world.run(&job.resume) {
-                Ok(0) => waiting.push((job, told_at)),
+                Ok(0) => waiting.push((job, before)),
                 Ok(code) => {
                     report.errors.push(format!("{}: its resume exited with {code}", job.id));
                     report.stuck.push(job.id);
@@ -270,7 +286,7 @@ impl<'a, W: World> Cycle<'a, W> {
         }
         let mut waited = 0;
         loop {
-            let (moving, still): (Vec<_>, Vec<_>) = waiting.into_iter().partition(|(job, told_at)| job.moved_since(*told_at));
+            let (moving, still): (Vec<_>, Vec<_>) = waiting.into_iter().partition(|(job, before)| job.moved_from(*before));
             report.resumed.extend(moving.into_iter().map(|(job, _)| job.id));
             waiting = still;
             if waiting.is_empty() || waited >= self.plan.resume_wait_seconds {
@@ -375,8 +391,12 @@ mod tests {
             Ok(0)
         }
         fn start(&mut self, command: &[String]) -> Result<Box<dyn Running>, String> {
-            let opened: Vec<_> = std::fs::read_dir(self.root.join("work")).unwrap().flatten().collect();
-            self.log.borrow_mut().push(format!("train {} with {} window(s)", command.join(" "), opened.len()));
+            let work = self.root.join("work");
+            let opened = std::fs::read_dir(work.join("windows/photopea/run-7")).unwrap().count();
+            assert!(work.join("records/photopea/run-7/000001.json").exists());
+            let receipts = std::fs::read_to_string(work.join("receipts.jsonl")).unwrap();
+            assert_eq!(receipts.lines().count(), 2, "every run's receipts, in one file");
+            self.log.borrow_mut().push(format!("train {} with {opened} window(s)", command.join(" ")));
             assert!(self.root.join("run/activity.json").exists(), "the trainer needs a fresh activity file");
             Ok(Box::new(Trainer { polls: 0, ends_after: self.trainer_ends_after, log: self.log.clone() }))
         }
@@ -406,8 +426,12 @@ mod tests {
             .unwrap();
         }
         let buffer = DayBuffer::open(root.join("day")).unwrap();
-        buffer.seal("records.jsonl", b"{}").unwrap();
-        buffer.seal("photopea.run1.s0.npz", b"a window").unwrap();
+        for sample in ["000000", "000001"] {
+            buffer.seal(&format!("windows+photopea+run-7+{sample}.npz"), b"a window").unwrap();
+            buffer.seal(&format!("records+photopea+run-7+{sample}.json"), b"{}").unwrap();
+        }
+        buffer.seal("receipts+photopea+run-7.jsonl", b"{\"receipt_id\":\"a\"}\n").unwrap();
+        buffer.seal("receipts+photopea+run-8.jsonl", b"{\"receipt_id\":\"b\"}\n").unwrap();
         let plan = Plan {
             gate: Gate { window: NightWindow { start_minute: 120, end_minute: 360 }, idle_seconds: 1800 },
             jobs_dir: root.join("jobs"),

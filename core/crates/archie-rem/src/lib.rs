@@ -30,6 +30,7 @@ pub mod buffer;
 pub mod cycle;
 pub mod gate;
 pub mod jobs;
+pub mod record;
 
 pub use activity::Activity;
 pub use buffer::{BufferError, DayBuffer};

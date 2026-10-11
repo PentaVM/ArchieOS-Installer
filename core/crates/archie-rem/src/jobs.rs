@@ -61,12 +61,20 @@ impl Job {
         Ok(())
     }
 
-    /// Whether the job has made progress since `since`: its heartbeat was rewritten after
-    /// it. A process that exists and writes nothing has not resumed.
-    pub fn moved_since(&self, since: SystemTime) -> bool {
-        std::fs::metadata(&self.heartbeat)
-            .and_then(|meta| meta.modified())
-            .is_ok_and(|modified| modified > since)
+    /// When the heartbeat was last rewritten, if it exists.
+    pub fn beat(&self) -> Option<SystemTime> {
+        std::fs::metadata(&self.heartbeat).and_then(|meta| meta.modified()).ok()
+    }
+
+    /// Whether the job has made progress since its heartbeat read `before`: the heartbeat
+    /// was rewritten. A process that exists and writes nothing has not resumed.
+    ///
+    /// The heartbeat is compared with its own earlier time, never with the clock. Linux
+    /// stamps files from a coarse clock that can run milliseconds behind the one a program
+    /// reads, so a heartbeat written just after "now" can carry a time before it; on a
+    /// real machine that reported a job that had resumed as stuck.
+    pub fn moved_from(&self, before: Option<SystemTime>) -> bool {
+        self.beat().is_some_and(|now| Some(now) != before)
     }
 
     /// Whether the job is alive at all: its heartbeat is younger than its maximum age.
@@ -214,11 +222,14 @@ mod tests {
         let dir = scratch("heartbeat");
         let heartbeat = dir.join("heartbeat.json");
         let job = job("trainer", &heartbeat);
-        let resumed_at = SystemTime::now() + Duration::from_secs(5);
-        assert!(!job.moved_since(resumed_at), "no heartbeat at all");
+        assert!(!job.moved_from(None), "no heartbeat at all");
         std::fs::write(&heartbeat, "{}").unwrap();
-        assert!(!job.moved_since(resumed_at), "written before the resume");
-        assert!(job.moved_since(SystemTime::now() - Duration::from_secs(60)));
+        let before = job.beat();
+        assert!(job.moved_from(None), "a heartbeat appeared");
+        assert!(!job.moved_from(before), "the same heartbeat as before the resume");
+        std::thread::sleep(Duration::from_millis(30));
+        std::fs::write(&heartbeat, "{}").unwrap();
+        assert!(job.moved_from(before), "rewritten since");
         assert!(job.is_live(SystemTime::now()));
         assert!(!job.is_live(SystemTime::now() + Duration::from_secs(601)), "older than its maximum age");
     }

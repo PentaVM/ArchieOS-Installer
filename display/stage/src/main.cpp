@@ -54,6 +54,11 @@ int main(int argc, char *argv[])
                        "own frame rate, so a line drawn faster than about ten pixels a frame reaches it as "
                        "a polygon of its corners."),
         QStringLiteral("px/s"));
+    const QCommandLineOption presenceFile(
+        QStringLiteral("presence-file"),
+        QStringLiteral("A file rewritten when a person touches the mouse or keyboard; its age is how long "
+                       "the machine has been untouched. Empty writes none."),
+        QStringLiteral("path"), QStringLiteral("/run/archie/person-input"));
     const QCommandLineOption windowed(QStringLiteral("windowed"), QStringLiteral("Do not go full screen."));
     const QCommandLineOption screen(
         QStringLiteral("screen"),
@@ -73,7 +78,7 @@ int main(int argc, char *argv[])
                                        QStringLiteral("ms"));
     const QCommandLineOption quitAfter(QStringLiteral("quit-after-ms"), QStringLiteral("Exit after this long."),
                                        QStringLiteral("ms"));
-    parser.addOptions({socketName, control, keyFile, reducedMotion, tier, tempo, seats, strokeSpeed, windowed, screen, width, height, grab, grabAfter,
+    parser.addOptions({socketName, control, keyFile, reducedMotion, tier, tempo, seats, strokeSpeed, presenceFile, windowed, screen, width, height, grab, grabAfter,
                        grabEvery, quitAfter});
     parser.process(app);
 
@@ -96,6 +101,7 @@ int main(int argc, char *argv[])
         }
     }
     options.reduced_motion = parser.isSet(reducedMotion);
+    options.presence_file = parser.value(presenceFile);
     if (parser.value(seats) == QLatin1String("shared")) {
         options.shared_seats = true;
     } else if (parser.value(seats) != QLatin1String("exclusive")) {
