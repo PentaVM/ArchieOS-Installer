@@ -1,0 +1,38 @@
+[Unit]
+Description=ARCHIE Sentry: continuous audit of the traffic on the owner's network
+Documentation=file:/usr/share/doc/archie-os/SENTRY-NETWATCH.md
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/archie/netwatch.env
+
+[Service]
+Type=simple
+# ARCHIE_NETWATCH_INTERFACE names the interface. The file is the owner's to write: a
+# network is not captured until someone says which one.
+EnvironmentFile=/etc/archie/netwatch.env
+ExecStart=/usr/bin/archie-netwatch live --interface ${ARCHIE_NETWATCH_INTERFACE} --state-dir /var/lib/archie/netwatch
+Restart=on-failure
+RestartSec=30s
+DynamicUser=yes
+StateDirectory=archie/netwatch
+StateDirectoryMode=0700
+UMask=0077
+# What dumpcap needs to open the interface, and nothing else.
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

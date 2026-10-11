@@ -60,9 +60,9 @@ fi
 
 export CARGO_TARGET_DIR="${cargo_target}"
 cargo build --locked --release --manifest-path "${repo_root}/core/Cargo.toml" \
-  -p archie-installer -p archie-state -p archied -p archie-cli -p archie-displayd -p archie-worldd -p archie-executord -p archie-task-runner -p archie-model-runtime -p archie-rem -p archie-lan
+  -p archie-installer -p archie-state -p archied -p archie-cli -p archie-displayd -p archie-worldd -p archie-executord -p archie-task-runner -p archie-model-runtime -p archie-rem -p archie-lan -p archie-sentry
 
-for binary in archie-map-fetch archie-install archie archied archie-db archie-displayd archie-worldd archie-executord archie-task-runner archie-infer archie-ask archie-rem archie-lan; do
+for binary in archie-map-fetch archie-install archie archied archie-db archie-displayd archie-worldd archie-executord archie-task-runner archie-infer archie-ask archie-rem archie-lan archie-netwatch archie-print; do
   file "${cargo_target}/release/${binary}" | grep -q 'ELF 64-bit.*x86-64' || {
     echo "archieos-build: ${binary} is not a Linux x86-64 ELF release binary" >&2
     exit 65
@@ -119,6 +119,11 @@ install -Dm755 "${cargo_target}/release/archie-infer" "${stage}/airootfs/usr/bin
 install -Dm755 "${cargo_target}/release/archie-ask" "${stage}/airootfs/usr/bin/archie-ask"
 # Sentry's LAN inventory runs as the module worker modules/sentry/lan.toml names.
 install -Dm755 "${cargo_target}/release/archie-lan" "${stage}/airootfs/usr/bin/archie-lan"
+# The traffic audit. Installed and not enabled: it starts once the owner has named the
+# interface in /etc/archie/netwatch.env. TShark comes from wireshark-cli.
+install -Dm755 "${cargo_target}/release/archie-netwatch" "${stage}/airootfs/usr/bin/archie-netwatch"
+install -Dm755 "${cargo_target}/release/archie-print" "${stage}/airootfs/usr/bin/archie-print"
+install -Dm644 "${repo_root}/distro/sentry/archie-netwatch.service" "${stage}/airootfs/etc/systemd/system/archie-netwatch.service"
 # REM's supervisor. The unit is installed and not enabled: with no jobs registered and
 # no trainer it would have nothing to pause, and recording is the owner's to turn on.
 install -Dm755 "${cargo_target}/release/archie-rem" "${stage}/airootfs/usr/bin/archie-rem"
@@ -237,7 +242,7 @@ done
 if find "${stage}/airootfs/usr/bin" -type f \
   ! -name archie ! -name archied ! -name archie-db ! -name archie-displayd ! -name archie-worldd ! -name archie-cortexd \
   ! -name archie-display ! -name archie-executord ! -name archie-task-runner \
-  ! -name archie-sentry ! -name archie-install ! -name archie-wizard ! -name archie-map-fetch ! -name archie-infer ! -name archie-ask ! -name archie-rem ! -name archie-lan ! -name archie-wizard-session \
+  ! -name archie-sentry ! -name archie-install ! -name archie-wizard ! -name archie-map-fetch ! -name archie-infer ! -name archie-ask ! -name archie-rem ! -name archie-lan ! -name archie-netwatch ! -name archie-print ! -name archie-wizard-session \
   -print -quit | grep -q .; then
   echo "archieos-build: unexpected staged Archie binary" >&2
   exit 66

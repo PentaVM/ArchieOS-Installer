@@ -7,3 +7,4 @@ pub mod engine;
 pub mod journal;
 mod postgres_journal;
 pub mod registry;
+pub mod page;

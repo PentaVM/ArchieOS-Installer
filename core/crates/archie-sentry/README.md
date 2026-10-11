@@ -85,10 +85,34 @@ La temperatura sólo se admite cuando `GET /api/config` declara °C en
 `unit_system.temperature`. Se comprueba al observar y nuevamente antes de llamar
 `climate.set_temperature`; Fahrenheit y cambios de unidad se rechazan.
 
-IPP implementa únicamente `Get-Printer-Attributes`, validando el request ID, tipos,
+La consulta IPP (`Get-Printer-Attributes`) valida el request ID, tipos,
 límites y truncaciones. IPP/IPPS sin puerto usan 631; se conservan los puertos
 explícitos y los de endpoints HTTP/HTTPS. La Brother DCP-T720DW registrada en Windows fue localizada
-por sus metadatos IPP, pero no respondió a TCP 631. No se enviaron trabajos.
+por sus metadatos IPP, pero no respondió a TCP 631.
+
+## Imprimir
+
+`archie-print` es la herramienta del operador para imprimir en una impresora IPP de la
+red local. Pregunta a la impresora qué es y qué formatos acepta, muestra qué se enviaría
+(nombre, páginas, sha256) y sólo envía cuando la persona en el terminal escribe `print`.
+Luego sigue el trabajo con `Get-Job-Attributes` hasta que la impresora informa cómo
+terminó y entrega un recibo JSON. `completed` es lo que la impresora declara; no es una
+medición de la bandeja de salida.
+
+```sh
+archie-print --printer ipp://192.168.1.232/ipp/print --text "Hola, soy Archie."
+archie-print --printer ipp://192.168.1.232/ipp/print --expect-uuid urn:uuid:… informe.pdf
+```
+
+Un PDF, JPEG, PWG o URF se envía tal cual si la impresora declara ese formato. El texto
+se dibuja en páginas A4 JPEG (`page.rs`, 200 ppp, tipografía fija 8×8 con las letras del
+español), porque las impresoras domésticas rara vez aceptan `text/plain`. Un trabajo se
+envía una sola vez: un fallo después del envío se informa y no se reintenta.
+
+Verificado contra una impresora simulada (codec, envío único, seguimiento del trabajo).
+**No verificado contra la Brother DCP-T720DW**: el 2026-10-11 no respondía en la red.
+Imprimir todavía no pasa por `Intent`/journal/aprobación por digest de Core; ver
+`docs/HANDOFF-2026-10-11-SENTRY-AUDITORIA.md`.
 
 ## Diagnóstico
 

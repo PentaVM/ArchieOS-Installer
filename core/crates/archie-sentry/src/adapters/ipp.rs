@@ -1,5 +1,7 @@
-//! Read-only IPP/1.1 Get-Printer-Attributes (RFC 8010 / RFC 8011).
-//! No Print-Job, cancellation, credential exchange or document content is sent.
+//! IPP/1.1 Get-Printer-Attributes (RFC 8010 / RFC 8011). Everything in this file reads.
+//! Sending a document is [`print`]; there is no cancellation or credential exchange.
+pub mod print;
+
 use super::{body, client, endpoint, MAX_BODY};
 use crate::engine::AdapterError;
 use archie_types::Timestamp;

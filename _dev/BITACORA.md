@@ -1,5 +1,22 @@
 # Bitácora — ArchieOS-Nvidia
 
+## 2026-10-11 — Claude — Captura en vivo, auditoría continua e impresión
+
+Para Codex: leer `../docs/HANDOFF-2026-10-11-SENTRY-AUDITORIA.md`. El dueño pide que lo
+audites y mejores; ese documento lista lo no probado y los defectos que yo mismo veo.
+
+- `archie-netwatch` (crate `archie-lan`): TShark captura, se auditan direcciones,
+  puertos, flags y tres nombres por trama, sin payload. Registro por dispositivo y seis
+  alertas. Probado en vivo en Linux con tráfico generado: `new-device`, `port-scan` y
+  `cleartext-login` salieron; las otras tres reglas sólo tienen prueba unitaria.
+- `archie-print` (crate `archie-sentry`): `Print-Job` y `Get-Job-Attributes`, texto a
+  páginas JPEG. Probado contra impresora simulada. **Ninguna impresora real**: la
+  Brother no estaba en la red. No pasa por `Intent`/journal/aprobación por digest.
+- ISO: `build.sh` y `packages.x86_64` los incluyen; sin construir.
+
+Sentry no está terminado: las tres fuentes de red no están unidas ni llegan al world
+graph, no hay respuesta, ni adaptador de router, ni baselines.
+
 ## 2026-10-11 — Claude — Un solo repositorio, Sentry portado, LAN acotado
 
 Decisión del dueño: **solo se usa `PentaVM/ArchieOS-Nvidia`**. `PentaVM/ArchieOS` queda

@@ -1,0 +1,80 @@
+# Sentry: the continuous audit of the network
+
+`archie-netwatch` listens to the traffic on the owner's network and keeps a record of
+what each device does on it. From that record it raises alerts.
+
+```bash
+archie-netwatch interfaces
+archie-netwatch live --interface eth0 --state-dir /var/lib/archie/netwatch
+archie-netwatch read capture.pcapng --state-dir ./audit
+archie-netwatch report --state-dir /var/lib/archie/netwatch --alerts 50
+```
+
+`live` runs until it is stopped. `read` audits a capture file by the same rules, on the
+frames' own clock. `report` prints the devices and the most recent alerts as JSON.
+
+## What it reads
+
+TShark does the capture and the dissection (`wireshark-cli`). From each frame it is asked
+for the time, the length, hardware and IP addresses, the sender an ARP frame names, TCP
+and UDP ports, the SYN and ACK flags, and three names: a DNS question, a DHCP host name
+and a TLS server name. No payload is asked for, and only the first 768 bytes of a frame
+are copied off the interface.
+
+## What it keeps
+
+`state.json`, per device (by hardware address): first and last seen, addresses, host
+name, frames and bytes sent, the names it asked DNS for (up to 512) and the bytes it sent
+to each place outside the network (up to 64, by server name where one was seen). Also
+which device last claimed each IPv4 address.
+
+`alerts.jsonl`, one alert to a line; past 4 MiB it becomes `alerts.1.jsonl`.
+
+Both are written for their owner only (mode 0600). Which names a device asks for says a
+great deal about the people who use it.
+
+## Alerts
+
+| Rule | Severity | Raised when |
+|---|---|---|
+| `new-device` | notice | a hardware address not seen before sends from a LAN address, after the learning time (`--learn`, 600 s) |
+| `address-moved` | high for the router's address, else notice | an IPv4 address is claimed over ARP by a different device than before |
+| `port-scan` | high | one device opens connections to 100 ports of one host within a minute |
+| `host-sweep` | high | one device opens the same port on 50 hosts of the network within a minute |
+| `cleartext-login` | warning | a device opens Telnet or FTP |
+| `dns-tunnel-suspect` | warning | a DNS question is over 180 characters, or has a label of 40 or more near-random characters |
+
+An alert is a reason to look, with what was seen. It is not a verdict, and nothing here
+acts on a device or on the network. Each is told once for its subject.
+
+## Running it as a service
+
+`archie-netwatch.service` is installed and not enabled. Write the interface into
+`/etc/archie/netwatch.env` and enable it:
+
+```bash
+echo 'ARCHIE_NETWATCH_INTERFACE=eth0' | sudo tee /etc/archie/netwatch.env
+sudo systemctl enable --now archie-netwatch
+```
+
+It runs as a transient user holding only `CAP_NET_RAW` and `CAP_NET_ADMIN`, which is what
+`dumpcap` needs to open the interface.
+
+## What it can see
+
+A machine on a switch sees its own traffic, broadcasts and multicast: ARP, DHCP, mDNS,
+and whatever is addressed to it. That is enough for `new-device` and `address-moved` for
+the whole network, and for the other rules only for this machine. To audit every
+device's traffic the node has to be where that traffic passes: the router or gateway
+itself, a mirror port on the switch, or a tap.
+
+## Limits
+
+- Not verified as a systemd unit or inside the ISO. Verified live on Linux, as root, on
+  one interface (see the hand-off for the run).
+- Encrypted DNS (DoH, DoT) hides the questions; only the server name of the resolver shows.
+- `address-moved` is told once for each device that claims an address. Two devices
+  fighting over one address are two alerts, not a stream.
+- A device that changes its hardware address (phones do, per network) is a new device.
+- The inventory `archie-lan scan` writes and this record are not joined yet, and neither
+  reaches Sentry's world graph.
