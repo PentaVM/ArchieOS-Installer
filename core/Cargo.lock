@@ -174,8 +174,10 @@ dependencies = [
  "archie-registry",
  "archie-router",
  "archie-scheduler",
+ "archie-sentry",
  "archie-state",
  "archie-types",
+ "async-trait",
  "fs2",
  "hex",
  "libc",
@@ -540,6 +542,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "archie-sentry"
+version = "0.1.0"
+dependencies = [
+ "archie-policy",
+ "archie-postgres",
+ "archie-types",
+ "async-trait",
+ "postgres",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.20",
+ "time",
+ "tokio",
+]
+
+[[package]]
 name = "archie-sight"
 version = "0.1.0"
 dependencies = [
@@ -608,6 +628,7 @@ dependencies = [
  "archie-observability",
  "archie-orb",
  "archie-postgres",
+ "archie-sentry",
  "archie-state",
  "archie-types",
  "fs2",

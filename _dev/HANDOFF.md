@@ -1,5 +1,9 @@
 # Relevo vigente — 2026-10-11
 
+**Actualización (Claude, mismo día):** el dueño decidió usar solo `PentaVM/ArchieOS-Nvidia`.
+Sentry ya está portado aquí; `PentaVM/ArchieOS` no se continúa. Ver la entrada más
+reciente de `BITACORA.md`.
+
 Leer `../docs/HANDOFF-2026-10-11-SENTRY-CONTEXTO.md` y `BITACORA.md`.
 
 Este checkout está en `main` de `PentaVM/ArchieOS-Nvidia`, actualizado con los merges
