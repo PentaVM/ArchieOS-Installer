@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Give Archie something to do on the screen, in words.
+#
+#   archie-operate "do a flip reset" --app car-soccer
+#   archie-operate "explore the menus of the editor" --app photopea --seconds 60
+#   archie-operate "scroll to the bottom of the page" --url https://example.org
+#
+# The reasoning model (through Nebius) plans the steps before the clock starts. IRIS then
+# watches the Stage and works the mouse and keyboard, a step at a time, for --seconds.
+# What happened is kept in ~/archie-runs: the plan, every decision, a frame a second.
+set -euo pipefail
+RUN=${ARCHIE_RUN:-$HOME/.archie/run}
+KEY=$HOME/.config/archie/nebius.key
+goal=${1:-}
+if [ -z "$goal" ]; then
+  sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' >&2
+  exit 64
+fi
+shift
+seconds=60 url='' app='' settle=20
+while [ $# -gt 0 ]; do
+  case $1 in
+    --seconds) seconds=${2:-}; shift 2 ;;
+    --url) url=${2:-}; shift 2 ;;
+    --app) app=${2:-}; shift 2 ;;
+    *) echo "archie-operate: unknown option $1" >&2; exit 64 ;;
+  esac
+done
+case "$app" in
+  car-soccer)
+    url=https://car-soccer.com/
+    # The game loads 216 files and warms its effects; software rendering makes that slow.
+    settle=60
+    about='car-soccer.com is open in free play: a car and a ball in an empty arena. Driving is W A S D, boost is the left mouse button, jump is the right mouse button, air roll left and right are Q and E.'
+    ;;
+  photopea)
+    url=https://www.photopea.com/
+    about='Photopea, a Photoshop-like image editor, is open in the browser.'
+    ;;
+  '')
+    [ -n "$url" ] || { echo 'archie-operate: say where, with --app car-soccer|photopea or --url URL' >&2; exit 64; }
+    about="The page $url is open in the browser."
+    ;;
+  *) echo "archie-operate: no such app: $app (car-soccer, photopea, or --url)" >&2; exit 64 ;;
+esac
+case "$seconds" in '' | *[!0-9]*) echo 'archie-operate: --seconds is a whole number' >&2; exit 64 ;; esac
+case "$url" in http://* | https://*) ;; *) echo 'archie-operate: --url is an http or https address' >&2; exit 64 ;; esac
+case "$url" in *[\'\"\ \\]*) echo 'archie-operate: that address has characters a URL does not' >&2; exit 64 ;; esac
+# The key in the environment, when there is one, is used and not written anywhere.
+if [ -z "${NEBIUS_TOKEN_FACTORY_KEY:-}" ]; then
+  [ -s "$KEY" ] || { echo 'archie-operate: run archie-setup first' >&2; exit 1; }
+  NEBIUS_TOKEN_FACTORY_KEY=$(cat "$KEY")
+fi
+export NEBIUS_TOKEN_FACTORY_KEY
+
+archie-session up
+# A JSON string is a valid TOML basic string, so the words are quoted by jq.
+{
+  printf 'id = "operate"\napp_id = "firefox"\njudge = "none"\nends_early = false\ntiers = [%s]\n' "$seconds"
+  printf 'reset = %s\n' "$(jq -Rn --arg v "archie-session open '$url'" '$v')"
+  printf 'prompt = %s\n' "$(jq -Rn --arg v "$about $goal" '$v')"
+} > "$RUN/task.toml"
+mkdir -p "$HOME/archie-runs"
+archie-arena-live --task "$RUN/task.toml" --tier "$seconds" \
+  --socket "$RUN/control.sock" --key-file "$RUN/key" --policy /usr/share/archie/operator/apps.toml \
+  --out "$HOME/archie-runs" --iris http://127.0.0.1:8765 --models /etc/archie/models --settle-s "${ARCHIE_SETTLE:-$settle}"
+echo "archie-operate: the run is in $(ls -dt "$HOME"/archie-runs/operate/*/ | head -1)"
