@@ -1,0 +1,16 @@
+[package]
+name = "archie-lan"
+description = "Sentry's sense of the local network: which devices are on the owner's LAN, what they are, and what the ones that say so are doing."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "archie-lan"
+path = "src/main.rs"
+
+[dependencies]
+archie-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true

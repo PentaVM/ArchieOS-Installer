@@ -327,6 +327,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "archie-lan"
+version = "0.1.0"
+dependencies = [
+ "archie-types",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "archie-mcp"
 version = "0.1.0"
 dependencies = [

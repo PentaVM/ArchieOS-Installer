@@ -1,0 +1,22 @@
+# Sentry's sense of the local network: which devices are on the owner's LAN, what kind
+# of thing each is, and what the ones that offer it say they are doing.
+#
+# It asks the way a phone on the same network asks (SSDP and mDNS), reads the description
+# a device publishes, and asks a Roku what is on. It observes only: it never leaves the
+# LAN, never probes ports or tries credentials, and changes nothing on any device.
+id = "sentry.lan"
+version = "0.1.0"
+description = "Local network inventory: devices on the owner's LAN, their kind and reported state"
+priority = 120
+
+required_capabilities = ["compute.cpu", "network.lan"]
+dependencies = ["core.archie"]
+permissions = ["network-lan", "device-communicate", "read-telemetry"]
+
+[worker]
+kind = "process"
+command = "/usr/bin/archie-lan"
+args = ["watch", "--out", "/var/lib/archie/sentry/lan.json", "--every", "300"]
+
+[health_check]
+kind = "none"
