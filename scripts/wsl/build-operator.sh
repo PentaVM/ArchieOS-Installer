@@ -34,7 +34,6 @@ install -d "$rootfs"
 # own virtual network, so archie-netwatch has nothing of the house to listen to here.
 pacstrap -K -c "$rootfs" base ca-certificates curl jq python firefox mesa \
   qt6-base qt6-declarative qt6-wayland ttf-dejavu
-rm -rf /var/cache/pacman/pkg/*
 
 rm -f "$rootfs/etc/resolv.conf" "$rootfs/boot"/vmlinuz-* "$rootfs/boot"/initramfs-*
 cp -a "$repo_root/distro/wsl-operator/rootfs/." "$rootfs/"
