@@ -30,7 +30,8 @@ const NOT_INITIALIZED: i64 = -32002;
 const INSTRUCTIONS: &str = "Archie is the agent of an ArchieOS node. These tools read the node's state and, when \
 the operator has allowed it, operate applications on the Archie Stage. Actions go through the node's policy and \
 a person can take the stage back at any moment; a refusal is an answer, not an error to work around. Results \
-never contain more than this server's clearance allows.";
+never contain more than this server's clearance allows. Call archie_contract once before anything else: it says \
+who does what, and how to hand work on the screen to IRIS, the node's own eyes and hands.";
 
 pub struct McpServer<T> {
     toolbox: T,
