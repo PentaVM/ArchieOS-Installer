@@ -25,6 +25,9 @@
 //! * [`ContextGateway`] — assembles a [`ContextCapsule`]: minimal, task-bound,
 //!   expiring, pseudonymised where it leaves the machine, and unserialisable so that it
 //!   cannot become a trace by accident.
+//! * [`Veil`] — covers free text before it leaves: credentials, addresses, numbers that
+//!   identify and the operator's named entities become stand-ins, and the table that
+//!   puts them back stays here.
 //!
 //! # What this crate does not do
 //!
@@ -39,6 +42,7 @@
 pub mod gateway;
 pub mod reference;
 pub mod store;
+pub mod veil;
 
 pub use gateway::{
     max_grade_for, CapsuleEntry, CapsuleReceipt, ContextCapsule, ContextGateway, ContextRequest,
@@ -49,3 +53,4 @@ pub use store::{
     refusals, AuditAction, AuditEntry, Disclosure, SealedCredential, SealedEntry, Vault,
     VaultError, VaultKey,
 };
+pub use veil::{Unveil, Veil, Veiled};

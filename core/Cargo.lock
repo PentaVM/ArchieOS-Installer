@@ -382,6 +382,7 @@ dependencies = [
  "archie-registry",
  "archie-router",
  "archie-types",
+ "archie-vault",
  "base64",
  "clap",
  "futures-util",

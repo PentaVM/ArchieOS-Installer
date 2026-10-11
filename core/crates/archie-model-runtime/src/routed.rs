@@ -6,6 +6,16 @@
 //! The router chooses among the node's manifests, this module calls the choice through
 //! the same boundary as every other call, and when that model fails the next eligible
 //! one is tried. Which model answered comes back with the answer.
+//!
+//! # Private questions and models the node does not run
+//!
+//! [`Routed::ask_private`] is for text that may hold what must not be shown to a third
+//! party: a key, an address, a name. When a model on the operator's own machines may
+//! answer, it is asked as is. When only a cloud model can, the text is veiled first
+//! ([`archie_vault::Veil`]): credentials, addresses and named entities leave as stand-ins,
+//! the table that reverses them stays in this process, and the real values are put back
+//! into the answer here. The cloud model writes the file or the letter and never holds
+//! what goes in it.
 
 use crate::{
     provider_model_id, ChatMessage, ChatRequest, InferenceClient, MessageRole, ProviderEndpoint,
@@ -13,7 +23,10 @@ use crate::{
 };
 use archie_registry::{ModelRegistry, ModelRegistryError};
 use archie_router::{Router, RoutingRequest, Weights};
-use archie_types::{ModelId, ModelRole, PrivacyGrade};
+use archie_types::{Locality, ModelId, ModelRole, PrivacyGrade};
+use archie_vault::veil::Kind;
+use archie_vault::{Veil, Veiled};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 use thiserror::Error;
@@ -28,6 +41,33 @@ pub enum RoutedError {
     /// Every eligible model was tried; each one's failure, in the order tried.
     #[error("no model answered: {}", .0.iter().map(|(model, why)| format!("{model}: {why}")).collect::<Vec<_>>().join("; "))]
     AllFailed(Vec<(ModelId, String)>),
+    /// The question was not sent, and why.
+    #[error("not sent: {0}")]
+    Withheld(String),
+}
+
+/// Told to a model that is given veiled text, so it carries the stand-ins through.
+const STAND_INS: &str = "\n\nWords such as SECRET_1, EMAIL_1, PHONE_1, CARD_1, RUT_1, PERSON_1 or COMPANY_1 in this \
+conversation are stand-ins for real values you are not shown. Use each exactly as written wherever its value \
+belongs. Do not change, expand, explain or guess them.";
+
+/// How a private question is to be asked.
+#[derive(Debug)]
+pub enum Disclosure {
+    /// As it is, of models on the operator's own machines.
+    Kept { models: Vec<ModelId> },
+    /// Veiled, of models that disclose to a third party.
+    Veiled { models: Vec<ModelId>, veiled: Veiled },
+}
+
+/// The answer to a private question, with what may be written down about how it was got.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrivateAnswer {
+    pub answered: Answered,
+    /// Whether the text left the operator's machines, veiled.
+    pub left_the_machine: bool,
+    /// How many values of each kind were covered before it left.
+    pub covered: BTreeMap<String, usize>,
 }
 
 /// What is asked.
@@ -104,9 +144,86 @@ impl Routed {
     }
 
     pub async fn ask(&self, question: &Question<'_>) -> Result<Answered, RoutedError> {
+        self.ask_among(self.candidates(question)?, question).await
+    }
+
+    /// Decides how a private question may be asked, without asking it.
+    ///
+    /// Models on the operator's own machines come first and are given the text as it is:
+    /// veiling local inference costs accuracy and protects nothing. Only when none may
+    /// answer is the text veiled for a cloud model, and then only if it is graded no
+    /// higher than `sensitive`, carries no picture (pixels cannot be veiled), and nothing
+    /// with a sensitive shape is left in it afterwards.
+    pub fn disclosure(&self, question: &Question<'_>, veil: &Veil) -> Result<Disclosure, RoutedError> {
+        if question.privacy == PrivacyGrade::Secret {
+            return Err(RoutedError::Withheld("secret data reaches no model".into()));
+        }
+        let own: Vec<ModelId> = self
+            .candidates(question)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|model| self.registry.get(model).is_some_and(|m| m.locality != Locality::Cloud))
+            .collect();
+        if !own.is_empty() {
+            return Ok(Disclosure::Kept { models: own });
+        }
+        if question.privacy > PrivacyGrade::Sensitive {
+            return Err(RoutedError::Withheld(
+                "restricted data does not leave this machine, and no model on it can answer".into(),
+            ));
+        }
+        if question.image.is_some() {
+            return Err(RoutedError::Withheld("a picture cannot be veiled, and no model on this machine can see".into()));
+        }
+        let veiled = veil.cover(&[question.system, question.user]);
+        let residue = veiled.residue();
+        if !residue.is_empty() {
+            return Err(RoutedError::Withheld(format!("the veil left {} sensitive value(s) uncovered: {}", residue.len(), kinds(&residue))));
+        }
+        let outgoing = Question {
+            role: question.role,
+            privacy: PrivacyGrade::Public,
+            system: &veiled.texts[0],
+            user: &veiled.texts[1],
+            image: None,
+            max_tokens: question.max_tokens,
+            timeout: question.timeout,
+        };
+        let models = self.candidates(&outgoing)?;
+        Ok(Disclosure::Veiled { models, veiled })
+    }
+
+    /// Asks a question that may hold what a third party must not see. See the module's
+    /// documentation for what leaves and what does not.
+    pub async fn ask_private(&self, question: &Question<'_>, veil: &Veil) -> Result<PrivateAnswer, RoutedError> {
+        match self.disclosure(question, veil)? {
+            Disclosure::Kept { models } => Ok(PrivateAnswer {
+                answered: self.ask_among(models, question).await?,
+                left_the_machine: false,
+                covered: BTreeMap::new(),
+            }),
+            Disclosure::Veiled { models, veiled } => {
+                let system = format!("{}{STAND_INS}", veiled.texts[0]);
+                let outgoing = Question {
+                    role: question.role,
+                    privacy: PrivacyGrade::Public,
+                    system: &system,
+                    user: &veiled.texts[1],
+                    image: None,
+                    max_tokens: question.max_tokens,
+                    timeout: question.timeout,
+                };
+                let mut answered = self.ask_among(models, &outgoing).await?;
+                answered.text = veiled.unveil.restore(&answered.text);
+                Ok(PrivateAnswer { answered, left_the_machine: true, covered: veiled.unveil.covered() })
+            }
+        }
+    }
+
+    async fn ask_among(&self, models: Vec<ModelId>, question: &Question<'_>) -> Result<Answered, RoutedError> {
         let started = Instant::now();
         let mut failures = Vec::new();
-        for model in self.candidates(question)? {
+        for model in models {
             let left = question.timeout.saturating_sub(started.elapsed());
             if left.is_zero() {
                 failures.push((model, "no time left".to_string()));
@@ -161,4 +278,11 @@ impl Routed {
             completion_tokens: response.usage.map_or(0, |usage| usage.completion_tokens),
         })
     }
+}
+
+fn kinds(found: &[Kind]) -> String {
+    let mut names: Vec<&str> = found.iter().map(|kind| kind.prefix()).collect();
+    names.sort_unstable();
+    names.dedup();
+    names.join(", ").to_lowercase()
 }
