@@ -159,8 +159,10 @@ las entregas comprometidas. `AGENTS.md` guarda estas instrucciones para continua
   integración. Auditoría estática de todos sus cleanup top-level: antes rechazaba
   un destino fuera de variables de imagen/workspace; después pasaron los cuatro
   comandos restantes y la sintaxis Bash. No se ejecutó el builder ni se borró esa caché.
-- Branches de origin cubiertas por main al cierre. Rama bilingüe histórica equivalente;
-  worktrees de otros agentes preservados. El remoto `archieos` se excluye del trabajo.
+- Branches terminadas de origin cubiertas por main. En el último fetch llegó
+  `4b282cd`, prototipo GUI Fase B en curso: se deja en la rama de Claude, sin tratarlo
+  como integración funcional. Rama bilingüe histórica equivalente; worktrees de otros
+  agentes preservados. El remoto `archieos` se excluye del trabajo.
 - El único fallo de bridges informado por la auditoría se reprodujo: índice generado
   GIMP desactualizado. Se regeneró desde manifiestos; cambió una línea, sin alterar
   el bridge ni sus operaciones.

@@ -63,6 +63,9 @@ existing SpeechSession/FloorPolicy. Bilingual CLI must preserve current RVC wrap
   and real Windows-drive access stay deferred/unverified. Operator's automount,
   shared-seat/emergency-stop and benchmark assumptions are distinct from production
   OS validation. GUI proposals remain unaccepted; no new authority service integrated.
+- Last fetch delivered GUI prototype `4b282cd` after audit merge. It is unfinished
+  Phase B work assigned to Claude/Xavi, so it stays on its branch; importing the
+  completed audit did not authorize treating that prototype as a finished integration.
 
 ## Reviewer declined-to-judge rulings
 

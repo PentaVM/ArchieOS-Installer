@@ -25,6 +25,9 @@ de Claude/Xavi: no se implementa aquí esa GUI ni se genera/modifica su WSL.
 - Revisión de integración retiró una línea del build Operator que borraba la caché
   pacman del host. La limpieza del rootfs se mantiene. La comprobación estática de
   destinos de limpieza pasó después del fix; no se ejecutó el build para probarlo.
+- Último fetch: `4b282cd` añade un prototipo GUI Fase B. No se importa ese trabajo
+  en curso de Claude/Xavi ni se lo declara integración funcional. Main guarda la
+  auditoría Fase A; la continuación de GUI permanece en su rama propia.
 
 ## Comportamiento de voz corregido
 
