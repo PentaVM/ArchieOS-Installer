@@ -1,0 +1,10 @@
+# What IRIS may do in the application it operates in this image: move, click, press and
+# hold keys and buttons, and look. It types no text and draws no strokes.
+
+[[app]]
+app_id = "firefox"
+display_name = "the browser"
+allow = ["move", "click", "key", "hold", "focus", "snapshot"]
+max_text_grade = "public"
+max_text_chars = 8
+aliases = ["browser", "photopea", "car soccer"]
