@@ -10,6 +10,10 @@ license.workspace = true
 name = "archie-lan"
 path = "src/main.rs"
 
+[[bin]]
+name = "archie-netwatch"
+path = "src/bin/archie-netwatch.rs"
+
 [dependencies]
 archie-types.workspace = true
 serde.workspace = true

@@ -25,6 +25,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod audit;
+pub mod capture;
 pub mod classify;
 pub mod http;
 pub mod inventory;

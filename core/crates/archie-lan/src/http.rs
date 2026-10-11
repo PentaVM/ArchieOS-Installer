@@ -62,9 +62,13 @@ pub fn get(url: &LanUrl) -> Result<Vec<u8>, String> {
             return Err("the device took too long to answer".into());
         }
         stream.set_read_timeout(Some(left.min(TIMEOUT))).map_err(|e| e.to_string())?;
-        match stream.read(&mut chunk).map_err(|e| e.to_string())? {
-            0 => break,
-            read => response.extend_from_slice(&chunk[..read]),
+        match stream.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(read) => response.extend_from_slice(&chunk[..read]),
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock) => {
+                return Err("the device took too long to answer".into());
+            }
+            Err(e) => return Err(e.to_string()),
         }
     }
     body_of(&response)
