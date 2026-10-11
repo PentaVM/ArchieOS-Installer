@@ -20,6 +20,15 @@ fn temp_paths() -> StatePaths {
 async fn identity_state_and_self_topology_survive_a_restart() {
     let paths = temp_paths();
 
+    // The model manifests the image stages, so the node boots knowing IRIS.
+    let shipped = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(3)
+        .unwrap()
+        .join("models/iris/iris-beta-2-1.toml");
+    std::fs::create_dir_all(paths.models().join("iris")).unwrap();
+    std::fs::copy(shipped, paths.models().join("iris/iris-beta-2-1.toml")).unwrap();
+
     let first = Runtime::boot(paths.clone(), ArchieConfig::default())
         .await
         .unwrap();
@@ -55,6 +64,7 @@ async fn assert_local_contract(runtime: &Runtime, expected_node: &str) {
             assert!(status.capabilities.iter().any(|c| c == "compute.cpu"));
             assert_eq!(status.peers, 0);
             assert_eq!(status.health, "ok");
+            assert_eq!(status.models_registered, 1, "the staged IRIS manifest is registered");
         }
         response => panic!("unexpected status response: {response:?}"),
     }

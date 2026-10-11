@@ -196,30 +196,16 @@ impl ModuleRegistry {
     /// no modules installed is a valid, if quiet, node. A malformed manifest *is* an
     /// error — silently skipping it would make a typo look like a missing feature.
     pub fn load_from_dir(dir: impl AsRef<Path>) -> Result<Self, ModuleRegistryError> {
-        let dir = dir.as_ref();
         let mut registry = Self::new();
-        if !dir.exists() {
-            return Ok(registry);
-        }
-
-        let mut paths: Vec<std::path::PathBuf> = Vec::new();
-        collect_manifests(dir, &mut paths, 0)?;
-        // Sorted so that a duplicate-id error names the same file every run, whatever
-        // order the filesystem happened to return.
-        paths.sort();
-
-        for path in paths {
-            let text = std::fs::read_to_string(&path).map_err(|source| {
-                ModuleRegistryError::Directory {
-                    path: path.display().to_string(),
-                    source,
-                }
-            })?;
-            let manifest: ModuleManifest =
-                toml::from_str(&text).map_err(|source| ModuleRegistryError::Parse {
-                    path: path.display().to_string(),
-                    source,
-                })?;
+        let files = crate::manifests::read_all(dir.as_ref()).map_err(|unreadable| {
+            ModuleRegistryError::Directory {
+                path: unreadable.path,
+                source: unreadable.source,
+            }
+        })?;
+        for (path, text) in files {
+            let manifest: ModuleManifest = toml::from_str(&text)
+                .map_err(|source| ModuleRegistryError::Parse { path, source })?;
             registry.register(manifest)?;
         }
         Ok(registry)
@@ -573,45 +559,4 @@ impl DeviceAdapterRegistry {
         }
         Ok(())
     }
-}
-
-/// Depth-limited recursive walk for `*.toml` manifests.
-///
-/// The depth cap is deliberate: a symlink loop under `/etc/archie/modules` would
-/// otherwise hang the boot sequence rather than failing it.
-fn collect_manifests(
-    dir: &Path,
-    out: &mut Vec<std::path::PathBuf>,
-    depth: usize,
-) -> Result<(), ModuleRegistryError> {
-    const MAX_DEPTH: usize = 8;
-    if depth > MAX_DEPTH {
-        return Ok(());
-    }
-
-    let entries = std::fs::read_dir(dir).map_err(|source| ModuleRegistryError::Directory {
-        path: dir.display().to_string(),
-        source,
-    })?;
-
-    for entry in entries {
-        let entry = entry.map_err(|source| ModuleRegistryError::Directory {
-            path: dir.display().to_string(),
-            source,
-        })?;
-        let path = entry.path();
-        let file_type = entry
-            .file_type()
-            .map_err(|source| ModuleRegistryError::Directory {
-                path: path.display().to_string(),
-                source,
-            })?;
-
-        if file_type.is_dir() {
-            collect_manifests(&path, out, depth + 1)?;
-        } else if path.extension().and_then(|e| e.to_str()) == Some("toml") {
-            out.push(path);
-        }
-    }
-    Ok(())
 }

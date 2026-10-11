@@ -178,6 +178,16 @@ while IFS= read -r -d "" manifest; do
     "${stage}/airootfs/etc/archie/providers/$(basename "${manifest}")"
 done < <(find "${repo_root}/providers/data" -name "*.toml" -type f -print0)
 
+# Model manifests say which models the node has and what each may see; the router reads
+# them at boot. Only the manifests are staged. The weights they name are not in the image:
+# they are fetched at first run and checked against the manifest's hash.
+install -d "${stage}/airootfs/etc/archie/models"
+while IFS= read -r -d "" manifest; do
+  family="$(basename "$(dirname "${manifest}")")"
+  install -Dm644 "${manifest}" \
+    "${stage}/airootfs/etc/archie/models/${family}/$(basename "${manifest}")"
+done < <(find "${repo_root}/models" -name "*.toml" -type f -print0)
+
 install -d "${stage}/airootfs/etc/systemd/system/multi-user.target.wants"
 install -d "${stage}/airootfs/etc/systemd/system/network-online.target.wants"
 install -d "${stage}/airootfs/etc/systemd/system/graphical.target.wants"

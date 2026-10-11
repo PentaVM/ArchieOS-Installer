@@ -1120,8 +1120,9 @@ fn render_cortex_trajectories(trajectories: &[CortexTrajectoryView]) -> String {
 
 fn render_models(models: &[ModelView]) -> String {
     if models.is_empty() {
-        return "no model providers registered\n\nArchie can discover and register one \
-                later; see docs/MODEL_ROUTING.md.\n"
+        return "no models installed\n\nModel manifests are read from the node's models \
+                directory at boot, and `archie provider add` connects a local or cloud \
+                backend. See docs/ROUTER.md.\n"
             .to_string();
     }
     let mut out = String::from("MODELS\n\n");
@@ -1253,8 +1254,8 @@ mod tests {
     #[test]
     fn an_empty_model_list_says_what_to_do_next() {
         let rendered = render_models(&[]);
-        assert!(rendered.contains("no model providers registered"));
-        assert!(rendered.contains("MODEL_ROUTING"));
+        assert!(rendered.contains("no models installed"));
+        assert!(rendered.contains("docs/ROUTER.md"));
     }
 
     #[test]

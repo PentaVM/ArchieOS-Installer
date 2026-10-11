@@ -1,0 +1,67 @@
+//! The model manifests this repository ships, loaded and routed as a node would.
+//!
+//! A manifest that parses but cannot be chosen is worse than a missing one: it looks
+//! installed. These tests take `models/` exactly as it is staged onto a node and ask the
+//! router the questions the rest of the system asks.
+
+use archie_registry::ModelRegistry;
+use archie_router::{Router, RoutingRequest, Weights};
+use archie_types::{Locality, ModelRole, PrivacyGrade};
+use std::path::{Path, PathBuf};
+
+fn shipped_models() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(3)
+        .expect("crate sits three levels below the repository root")
+        .join("models")
+}
+
+fn shipped() -> ModelRegistry {
+    ModelRegistry::load_from_dir(shipped_models()).expect("every shipped model manifest loads")
+}
+
+/// A screen can show anything, so whatever acts on it must be allowed restricted data.
+/// IRIS is local; if its manifest ever said otherwise this is where it would show.
+#[test]
+fn the_screen_is_handed_to_iris_even_when_it_is_restricted() {
+    let registry = shipped();
+    let request = RoutingRequest::new(PrivacyGrade::Restricted, 24, 8)
+        .requiring(ModelRole::VisualActor.capability());
+    let outcome = Router::new(Weights::default()).route(&registry, &request);
+    let chosen = outcome
+        .selected_model()
+        .unwrap_or_else(|| panic!("nothing can act on a screen: {}", outcome.explain()));
+    let model = registry.get(chosen).expect("the chosen model is registered");
+    assert_eq!(model.locality, Locality::Local);
+    assert!(model.id.as_str().starts_with("iris."), "chose {}", model.id);
+}
+
+#[test]
+fn iris_holds_the_roles_its_manifest_claims_and_no_speech_or_reasoning_role() {
+    let registry = shipped();
+    let iris = registry
+        .iter()
+        .find(|m| m.id.as_str().starts_with("iris."))
+        .expect("IRIS is shipped");
+    for role in [ModelRole::VisionModel, ModelRole::VisualActor, ModelRole::EmbeddingModel] {
+        assert!(iris.provides(&role.capability()), "IRIS should hold {role}");
+    }
+    for role in [ModelRole::CognitiveResponse, ModelRole::ReasoningWorker, ModelRole::Tts] {
+        assert!(!iris.provides(&role.capability()), "IRIS must not claim {role}");
+    }
+}
+
+/// The weights a manifest names are fetched and checked by hash before they are loaded,
+/// so a manifest without one cannot be installed.
+#[test]
+fn a_local_model_names_the_weights_it_runs_by_hash() {
+    for model in shipped().iter().filter(|m| m.locality == Locality::Local) {
+        let hash = model.labels.get("weights_sha256").map(String::as_str).unwrap_or("");
+        assert!(
+            hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()),
+            "{} names no SHA-256 for its weights",
+            model.id
+        );
+    }
+}

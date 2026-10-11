@@ -508,26 +508,15 @@ impl ProviderRegistry {
     pub fn load_from_dir(dir: impl AsRef<Path>) -> Result<Self, ProviderRegistryError> {
         let dir = dir.as_ref();
         let mut registry = Self::new();
-        if !dir.exists() {
-            return Ok(registry);
-        }
-
-        let mut paths = Vec::new();
-        collect_toml(dir, &mut paths, 0)?;
-        paths.sort();
-
-        for path in paths {
-            let text = std::fs::read_to_string(&path).map_err(|source| {
-                ProviderRegistryError::Directory {
-                    path: path.display().to_string(),
-                    source,
-                }
-            })?;
-            let manifest: ProviderManifest =
-                toml::from_str(&text).map_err(|source| ProviderRegistryError::Parse {
-                    path: path.display().to_string(),
-                    source,
-                })?;
+        let files = crate::manifests::read_all(dir).map_err(|unreadable| {
+            ProviderRegistryError::Directory {
+                path: unreadable.path,
+                source: unreadable.source,
+            }
+        })?;
+        for (path, text) in files {
+            let manifest: ProviderManifest = toml::from_str(&text)
+                .map_err(|source| ProviderRegistryError::Parse { path, source })?;
             registry.register(manifest)?;
         }
         Ok(registry)
@@ -611,38 +600,4 @@ impl ProviderRegistry {
 
         ProviderStatus::Available
     }
-}
-
-fn collect_toml(
-    dir: &Path,
-    out: &mut Vec<std::path::PathBuf>,
-    depth: usize,
-) -> Result<(), ProviderRegistryError> {
-    const MAX_DEPTH: usize = 8;
-    if depth > MAX_DEPTH {
-        return Ok(());
-    }
-    let entries = std::fs::read_dir(dir).map_err(|source| ProviderRegistryError::Directory {
-        path: dir.display().to_string(),
-        source,
-    })?;
-    for entry in entries {
-        let entry = entry.map_err(|source| ProviderRegistryError::Directory {
-            path: dir.display().to_string(),
-            source,
-        })?;
-        let path = entry.path();
-        let file_type = entry
-            .file_type()
-            .map_err(|source| ProviderRegistryError::Directory {
-                path: path.display().to_string(),
-                source,
-            })?;
-        if file_type.is_dir() {
-            collect_toml(&path, out, depth + 1)?;
-        } else if path.extension().and_then(|e| e.to_str()) == Some("toml") {
-            out.push(path);
-        }
-    }
-    Ok(())
 }

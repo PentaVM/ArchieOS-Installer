@@ -6,6 +6,7 @@
 
 use archie_types::{Capability, ModelDescriptor, ModelId, NodeId, PrivacyGrade};
 use std::collections::BTreeMap;
+use std::path::Path;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -22,6 +23,20 @@ pub enum ModelRegistryError {
 
     #[error("model {0} declares a zero context window")]
     ZeroContext(ModelId),
+
+    #[error("cannot read model directory {path}: {source}")]
+    Directory {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("model manifest {path} is not valid TOML: {source}")]
+    Parse {
+        path: String,
+        #[source]
+        source: toml::de::Error,
+    },
 }
 
 /// Registered models, keyed by id.
@@ -33,6 +48,29 @@ pub struct ModelRegistry {
 impl ModelRegistry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Load every `*.toml` model manifest under `dir`, descending into family directories.
+    ///
+    /// A manifest is a [`ModelDescriptor`] written down: what the model is, where it
+    /// runs, which roles it holds and how sensitive the data it may see. A node with no
+    /// manifests has no models, which is a valid node that cannot think yet. A malformed
+    /// one is an error: a typo that silently removed the only local model would show up
+    /// later as private requests being refused for no visible reason.
+    pub fn load_from_dir(dir: impl AsRef<Path>) -> Result<Self, ModelRegistryError> {
+        let mut registry = Self::new();
+        let files = crate::manifests::read_all(dir.as_ref()).map_err(|unreadable| {
+            ModelRegistryError::Directory {
+                path: unreadable.path,
+                source: unreadable.source,
+            }
+        })?;
+        for (path, text) in files {
+            let model: ModelDescriptor = toml::from_str(&text)
+                .map_err(|source| ModelRegistryError::Parse { path, source })?;
+            registry.register(model)?;
+        }
+        Ok(registry)
     }
 
     /// Register a model after validating what can be checked statically.
