@@ -16,6 +16,10 @@ use std::time::Duration;
 
 const DAEMON_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// `ARCHIE.md`, the contract every model works under, as `archie_contract` returns it.
+/// It is public by design: it says how the node works and names nothing on it.
+pub const CONTRACT: &str = include_str!("../../../../ARCHIE.md");
+
 /// The fields of `archie status` an IDE agent gets. An allowlist, so a field added to the
 /// status later stays on the node until someone decides otherwise. Left out today: the
 /// hostname, the network interfaces and the machine's configured location — what a
@@ -408,6 +412,14 @@ impl Toolbox for ArchieToolbox {
         };
         let mut tools = vec![
             read_only(
+                "archie_contract",
+                "How to work as Archie",
+                "The contract every model works under here: who does what, how to hand screen work to \
+                 IRIS as a plan, which tools and bridges exist, what data a model is and is not given, \
+                 and what Archie never does. Read it once before anything else.",
+                PrivacyGrade::Public,
+            ),
+            read_only(
                 "archie_ping",
                 "Is Archie running?",
                 "Whether the node's daemon, archied, answers, and its version.",
@@ -549,6 +561,11 @@ impl Toolbox for ArchieToolbox {
             #[cfg(unix)]
             "stage_act" => self.stage_act(&arguments).await,
             "archie_bridge_guide" => self.bridge_guide(&arguments),
+            "archie_contract" if arguments.is_empty() => ToolOutcome {
+                text: CONTRACT.to_string(),
+                is_error: false,
+                images: Vec::new(),
+            },
             _ => {
                 if !arguments.is_empty() {
                     return ToolOutcome::error("this tool takes no arguments");

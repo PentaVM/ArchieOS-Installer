@@ -382,11 +382,9 @@ impl Runtime {
 
         // ---- data providers ---------------------------------------------------------
         // Declared external data feeds — seismic, aviation, orbital, cyber threat
-        // intel — distinct from the model providers below: these feed the world model,
-        // not the router. Absent on every node until the ISO staging step that copies
-        // `providers/data/*.toml` to `paths.providers()` exists; until then this is
-        // honestly empty, which `ProviderRegistry::load_from_dir` already treats as a
-        // valid offline node rather than an error.
+        // intel — distinct from the models below: these feed the world model, not the
+        // router. The image stages `providers/data/*.toml` into `paths.providers()`; a
+        // node with none installed is a valid offline node rather than an error.
         let providers = match ProviderRegistry::load_from_dir(paths.providers()) {
             Ok(registry) => {
                 if registry.is_empty() {
@@ -416,14 +414,34 @@ impl Runtime {
         let provider_plan = providers.resolve(&provider_context);
 
         // ---- 12. models -----------------------------------------------------------
-        // v0.1 registers no providers: none are configured, and inventing one would be
-        // a lie the router would then act on. The registry exists and is populated the
-        // moment a provider is configured.
-        let models = ModelRegistry::new();
-        report.push(BootStage::skipped(
-            stages::MODELS,
-            "no model providers configured",
-        ));
+        // The manifests staged into `paths.models()`: IRIS, and whatever local or cloud
+        // model the operator has added. A node with none cannot think yet and says so;
+        // a manifest that does not load is a failure, because a typo that dropped the
+        // only local model would later look like private requests being refused for no
+        // reason.
+        let models = match ModelRegistry::load_from_dir(paths.models()) {
+            Ok(registry) => {
+                if registry.is_empty() {
+                    report.push(BootStage::skipped(stages::MODELS, "no models installed"));
+                } else if registry.has_local_model() {
+                    report.push(BootStage::ready(stages::MODELS, false));
+                } else {
+                    report.push(BootStage::degraded(
+                        stages::MODELS,
+                        false,
+                        format!(
+                            "{} model(s) installed, none on this machine: restricted data cannot be answered",
+                            registry.len()
+                        ),
+                    ));
+                }
+                registry
+            }
+            Err(e) => {
+                report.push(BootStage::failed(stages::MODELS, false, e.to_string()));
+                ModelRegistry::new()
+            }
+        };
 
         // ---- 13. workers ----------------------------------------------------------
         if topology.loaded_count() == 0 {

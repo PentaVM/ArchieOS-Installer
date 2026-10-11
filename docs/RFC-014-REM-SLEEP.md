@@ -1,7 +1,12 @@
 # RFC-014 — REM sleep: nightly reconciliation and skill learning
 
-- **Status:** design. Serving and training skills exist in archie-iris (PR #13): `/act?adapter=`,
-  `skill_training` and `promote()`. The REM supervisor itself is not implemented.
+- **Status:** partly built.
+  - archie-iris serves and trains skills (`/act?adapter=`, `skill_training`, `promote()`) and
+    prepares a night's training from verified windows (`rem_sleep`).
+  - `archie-rem` is the supervisor: the gate, pausing and resuming registered jobs, the
+    activity file the trainer reads, the day's encrypted buffer and its deletion, and
+    recovery of a cycle cut short. See [What is built](#what-is-built).
+  - Nothing records windows yet, so a cycle has nothing to train on. Steps 2 and 7 are design.
 - **Scope:** what Archie does while the person sleeps: reconcile memory, benchmark its
   skills in secret, train the ones that need it, promote or discard, then resume paused work.
 - **Runs on:** the person's machine. The smallest supported GPU is an RTX 3060 Ti (8 GB).
@@ -222,11 +227,32 @@ Text reaches the conversation only through the planner's context, which RFC-011 
 govern. The exclusion list still applies, because frames are data even when outputs are not
 text.
 
+## What is built
+
+`archie-rem` (`core/crates/archie-rem`, unit `distro/rem/archie-rem.service`, configuration
+`/etc/archie/rem.toml`) is the supervisor of steps 0, 1, 5, 8 and 9.
+
+| Step | How |
+|---|---|
+| 0 Entering and leaving | `Gate`: night window, mains power, time since a person's input. A touch or a pulled plug stops a cycle; the clock does not. |
+| 1 Pause | A job is a file in `/etc/archie/rem/jobs/`: checkpoint command, resume command, heartbeat file and its maximum age. The resume list is written before the first job is touched. |
+| 5 Train | The configured trainer command is started with the day's windows opened under `/run`. It is told of the person's return through the activity file, and killed after a grace period if it stays. |
+| 8 Delete | The windows are sealed under a key made that day (`DayBuffer`). Deleting overwrites and removes the key, then the files. It happens at the end of every cycle, at start-up after a cycle cut short, and for windows older than `retention_hours` when no cycle ran. |
+| 9 Resume | Each job on the list is told to resume and counts as resumed when its heartbeat is rewritten. One that is not stays listed and is reported. |
+
+`archie-rem status` says what the machine is doing and whether REM would start now.
+
+The supervisor reads the time since a person's input from the age of a presence file
+(`/run/archie/person-input`). While nothing writes that file, REM never starts: a node that
+cannot tell whether someone is there behaves as if someone is.
+
 ## Open items
 
-- The REM supervisor service and job registry: Rust, not written.
-- Vault-backed window buffer and crypto-shredding: not written.
-- 8 GB peak on a 3060 Ti with the Beta 2 base: not measured.
+- **The recorder.** Nothing writes windows into the day's buffer, or the records and
+  receipts the trainer admits them by. It belongs where a person's input and a task's verified
+  outcome are both seen: the Stage and the IRIS bridge.
+- **The presence file.** The Stage sees a person's input and does not yet write it.
+- 8 GB peak on a 3060 Ti with the Beta 2.1 base: not measured.
 - Probation bookkeeping from verification receipts: not written.
 - Cloud aggregation, DP accounting and package signing: design only.
 - Software detection that maps an app to a skill id: Bridges cover 10 apps; the general

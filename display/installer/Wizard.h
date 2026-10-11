@@ -2,12 +2,14 @@
 #include <QObject>
 #include <QVariantList>
 #include <QVariantMap>
+#include <QUrl>
 #include <QNetworkAccessManager>
 #include <QAudioSource>
 #include <QVideoSink>
 class Wizard : public QObject {
     Q_OBJECT
     Q_PROPERTY(QVariantList regions READ regions NOTIFY changed)
+    Q_PROPERTY(QVariantList catalogCategories READ catalogCategories NOTIFY changed)
     Q_PROPERTY(QVariantList volumes READ volumes NOTIFY changed)
     Q_PROPERTY(QVariantList networks READ networks NOTIFY changed)
     Q_PROPERTY(QVariantMap location READ location NOTIFY changed)
@@ -19,6 +21,7 @@ class Wizard : public QObject {
 public:
     explicit Wizard(QObject *parent=nullptr);
     QVariantList regions() const { return m_regions; }
+    QVariantList catalogCategories() const { return m_catalogCategories; }
     QVariantList volumes() const { return m_volumes; }
     QVariantList networks() const { return m_networks; }
     QVariantMap location() const { return m_location; }
@@ -48,9 +51,12 @@ signals:
     void permissionGranted(const QString &resource);
 private:
     void message(const QString &text);
-    void readCatalog(const QByteArray &bytes);
+    bool readCatalog(const QByteArray &bytes);
+    bool readCategoryCatalog(const QString &kind, const QByteArray &bytes, bool cache);
+    void fetchGeofabrikIndex(const QUrl &url);
+    void loadCachedCategoryCatalogs();
     QNetworkAccessManager m_network;
-    QVariantList m_regions, m_volumes, m_networks;
+    QVariantList m_regions, m_catalogCategories, m_volumes, m_networks;
     QVariantMap m_location;
     QString m_status, m_draft;
     int m_approvalEpoch=0;

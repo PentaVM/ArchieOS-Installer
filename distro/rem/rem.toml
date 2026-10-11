@@ -1,0 +1,28 @@
+# /etc/archie/rem.toml: when REM sleep runs and what it trains with (RFC-014).
+#
+# With no trainer the supervisor still pauses and resumes the registered jobs at night and
+# deletes the day's windows. Recording those windows is opt-in and is not turned on here.
+
+night_start = "02:00"
+night_end = "06:00"
+idle_minutes = 30
+
+jobs_dir = "/etc/archie/rem/jobs"
+state_dir = "/var/lib/archie/rem"
+run_dir = "/run/archie/rem"
+
+# The IRIS Foundry trainer, on a node that has it and the Beta 2.1 weights. {work} is where
+# the day's windows are opened for the cycle, {activity} the file it reads at every step.
+# IRIS_REM_SEAL, the node's sealing secret, comes from /etc/archie/rem.env.
+#
+# trainer = [
+#   "python", "-m", "archie_iris_foundry.rem_sleep",
+#   "--manifest", "{work}/records.jsonl",
+#   "--verified-receipts", "{work}/receipts.jsonl",
+#   "--windows-root", "{work}",
+#   "--activity-file", "{activity}",
+#   "--weights", "/var/lib/archie/models/iris/iris-beta21-step132000.pt",
+#   "--skills-dir", "/var/lib/archie/iris-skills",
+#   "--report", "/var/lib/archie/rem/last-report.json",
+#   "--execute",
+# ]

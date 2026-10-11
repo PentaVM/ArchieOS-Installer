@@ -1,0 +1,18 @@
+[package]
+name = "archie-rem"
+description = "REM sleep: at night, with nobody at the machine, pause long jobs, let IRIS learn from the day's verified work, delete the day's windows and resume."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "archie-rem"
+path = "src/main.rs"
+
+[dependencies]
+ring.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+toml.workspace = true

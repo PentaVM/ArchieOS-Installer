@@ -1209,3 +1209,45 @@ fn no_shipped_module_names_an_interpreter_or_passes_for_runnable() {
         "an unwritten module is reported as unwritten"
     );
 }
+
+/// A node with no model manifests is a node that cannot think yet, not a broken one; a
+/// manifest that does not parse is an error naming the file.
+#[test]
+fn model_manifests_load_from_a_directory_and_a_bad_one_is_named() {
+    use archie_registry::{ModelRegistry, ModelRegistryError};
+
+    let dir = std::env::temp_dir().join(format!("archie-models-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(ModelRegistry::load_from_dir(&dir).unwrap().is_empty());
+
+    std::fs::create_dir_all(dir.join("family")).unwrap();
+    std::fs::write(
+        dir.join("family/thinker.toml"),
+        r#"
+id = "local.thinker"
+display_name = "Thinker"
+provider = "llama-cpp"
+locality = "local"
+context_window = 8192
+max_output_tokens = 1024
+capabilities = ["cognition.response"]
+max_privacy_grade = "restricted"
+availability = "ready"
+quality_tier = 50
+[cost]
+input_micros_per_mtok = 0
+output_micros_per_mtok = 0
+"#,
+    )
+    .unwrap();
+    let registry = ModelRegistry::load_from_dir(&dir).unwrap();
+    assert_eq!(registry.len(), 1);
+    assert!(registry.has_local_model());
+
+    std::fs::write(dir.join("broken.toml"), "id = ").unwrap();
+    match ModelRegistry::load_from_dir(&dir) {
+        Err(ModelRegistryError::Parse { path, .. }) => assert!(path.ends_with("broken.toml")),
+        other => panic!("a malformed manifest must be a parse error, got {other:?}"),
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

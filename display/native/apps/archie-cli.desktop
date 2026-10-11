@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=CLI
+Comment=Terminal para operar el sistema directamente
+Exec=foot
+TryExec=foot
+Categories=X-Archie;System;TerminalEmulator;
+X-Archie-Glyph=>_
+X-Archie-App-Id=foot

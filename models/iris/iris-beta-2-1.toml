@@ -1,0 +1,42 @@
+# IRIS Beta 2.1: Archie's eyes and hands.
+#
+# It finds what a phrase names on a screen or in a camera frame, keeps identity embeddings
+# of what it saw, and proposes the next control (a pointer move, a key, a chunk of game
+# input) for the goal a planner gave it. The planner thinks; IRIS does, frame by frame.
+#
+# Weights: release iris-beta2.1-2026-09-28 of PentaVM/archie-iris, step 132,000,
+# composite score v3 0.781, GUI pointer within 5 % on 60 % of held-out steps.
+# Trained as non-commercial research; see docs/IRIS-LICENSES.md before redistributing.
+id = "iris.beta-2-1"
+display_name = "IRIS Beta 2.1"
+provider = "archie-runtime"
+locality = "local"
+
+# What it reads and writes is not prose. The instruction it is given reaches fusion as at
+# most 32 tokens, and one decision is a chunk of 8 controls.
+context_window = 32
+max_output_tokens = 8
+
+capabilities = ["cognition.vision", "cognition.action", "cognition.embedding"]
+
+# It runs on this machine and nowhere else, so it may see the screen whatever is on it.
+max_privacy_grade = "restricted"
+
+# Registered, not loaded: the runtime brings it up when something asks for it.
+availability = "cold"
+quality_tier = 78
+
+# One decision took 56 ms on an RTX 5090 that was also training. Not yet measured on a
+# GPU of its own, nor on 8 GB.
+latency_ema_ms = 56
+
+[cost]
+input_micros_per_mtok = 0
+output_micros_per_mtok = 0
+
+[labels]
+endpoint = "http://127.0.0.1:8765"
+weights = "iris-beta21-step132000.pt"
+weights_sha256 = "c6cadb02f5a5bffc4ea3c3348d32b475ef7531f643675c06c65451037e4f3b97"
+weights_bytes = "1414806323"
+release = "https://github.com/PentaVM/archie-iris/releases/tag/iris-beta2.1-2026-09-28"

@@ -118,6 +118,13 @@ impl StatePaths {
         self.config_dir.join("providers")
     }
 
+    /// Installed model manifests: which models this node has, where each runs and what
+    /// it may see. Read-only and root-owned like the two above; the weights a manifest
+    /// names live elsewhere and are checked against its hash before they are loaded.
+    pub fn models(&self) -> PathBuf {
+        self.config_dir.join("models")
+    }
+
     /// The daemon control socket the CLI connects to.
     pub fn control_socket(&self) -> PathBuf {
         self.runtime_dir.join("archied.sock")
@@ -228,6 +235,7 @@ mod tests {
         let p = StatePaths::system();
         assert_eq!(p.providers(), PathBuf::from("/etc/archie/providers"));
         assert_eq!(p.providers().parent(), p.modules().parent());
+        assert_eq!(p.models(), PathBuf::from("/etc/archie/models"));
     }
 
     #[test]

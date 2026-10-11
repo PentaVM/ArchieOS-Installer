@@ -49,6 +49,10 @@ pub enum ModelRole {
     ReasoningWorker,
     /// Sees.
     VisionModel,
+    /// Sees a screen or a camera and proposes the next control: a pointer move, a key, a
+    /// chunk of game input. What a planner hands the doing to, since a model that only
+    /// describes what it sees cannot be asked to click.
+    VisualActor,
     EmbeddingModel,
     Reranker,
     /// Speech to text, without generating a reply.
@@ -63,13 +67,14 @@ pub enum ModelRole {
 
 impl ModelRole {
     /// Every role, for menus, manifests and exhaustiveness tests.
-    pub const ALL: [ModelRole; 12] = [
+    pub const ALL: [ModelRole; 13] = [
         Self::SpeechFrontend,
         Self::SpeechRenderer,
         Self::SpeechUnified,
         Self::CognitiveResponse,
         Self::ReasoningWorker,
         Self::VisionModel,
+        Self::VisualActor,
         Self::EmbeddingModel,
         Self::Reranker,
         Self::Asr,
@@ -92,6 +97,7 @@ impl ModelRole {
             Self::CognitiveResponse => "cognition.response",
             Self::ReasoningWorker => "cognition.reasoning",
             Self::VisionModel => "cognition.vision",
+            Self::VisualActor => "cognition.action",
             Self::EmbeddingModel => "cognition.embedding",
             Self::Reranker => "cognition.rerank",
             Self::Asr => "speech.asr",
