@@ -26,6 +26,45 @@ pub enum CommandKind {
     SwitchSet,
     LightSetBrightness,
     ClimateSetTemperature,
+    RemoteKey,
+    AppLaunch,
+    PrintSubmit,
+}
+
+/// Remote keys with a measurable postcondition. Navigation keys (directions,
+/// select, volume steps) are deliberately absent: the protocols served today
+/// do not report cursor or volume state, so their effect cannot be verified
+/// and this engine does not actuate what it cannot verify.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteKeyName {
+    PowerOn,
+    PowerOff,
+    Home,
+    Play,
+    Pause,
+}
+
+/// Raster or page description a printer declared in `document-format-supported`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrintFormat {
+    PwgRaster,
+    UrfRaster,
+    Jpeg,
+    Pdf,
+    PlainText,
+}
+impl PrintFormat {
+    pub fn mime(&self) -> &'static str {
+        match self {
+            Self::PwgRaster => "image/pwg-raster",
+            Self::UrfRaster => "image/urf",
+            Self::Jpeg => "image/jpeg",
+            Self::Pdf => "application/pdf",
+            Self::PlainText => "text/plain",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -36,6 +75,9 @@ pub enum Command {
     SwitchSet { on: bool },
     LightSetBrightness { percent: u8 },
     ClimateSetTemperature { milli_celsius: i32 },
+    RemoteKey { key: RemoteKeyName },
+    AppLaunch { app_id: String },
+    PrintSubmit { sha256: String, format: PrintFormat, pages: u16 },
 }
 impl Command {
     pub fn capability(&self) -> CommandKind {
@@ -45,7 +87,22 @@ impl Command {
             Self::SwitchSet { .. } => CommandKind::SwitchSet,
             Self::LightSetBrightness { .. } => CommandKind::LightSetBrightness,
             Self::ClimateSetTemperature { .. } => CommandKind::ClimateSetTemperature,
+            Self::RemoteKey { .. } => CommandKind::RemoteKey,
+            Self::AppLaunch { .. } => CommandKind::AppLaunch,
+            Self::PrintSubmit { .. } => CommandKind::PrintSubmit,
         }
+    }
+    /// The job name a printer must report for this submission. Stable and
+    /// content-derived, so the queue entry is the postcondition evidence.
+    pub fn print_job_name(sha256: &str) -> Result<String, ContractError> {
+        if sha256.len() != 64
+            || !sha256
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        {
+            return Err(ContractError("print content must be a lowercase sha256 hex"));
+        }
+        Ok(format!("archie-{}", &sha256[..16]))
     }
     pub fn validate(&self) -> Result<(), ContractError> {
         match self {
@@ -58,6 +115,20 @@ impl Command {
                 Err(ContractError(
                     "temperature outside 5000..=35000 milli-Celsius",
                 ))
+            }
+            Self::AppLaunch { app_id } => {
+                validate_id(app_id).map_err(|_| ContractError("invalid application id"))
+            }
+            Self::PrintSubmit {
+                sha256,
+                format: _,
+                pages,
+            } => {
+                Self::print_job_name(sha256)?;
+                if !(1..=9999).contains(pages) {
+                    return Err(ContractError("print pages outside 1..=9999"));
+                }
+                Ok(())
             }
             _ => Ok(()),
         }
@@ -80,6 +151,34 @@ impl Command {
                     target_milli_celsius,
                 },
             ) => milli_celsius == target_milli_celsius,
+            (
+                Self::RemoteKey { key },
+                ResourceState::Tv {
+                    power_on,
+                    showing_home,
+                    playing,
+                    ..
+                },
+            ) => match key {
+                RemoteKeyName::PowerOn => *power_on,
+                RemoteKeyName::PowerOff => !*power_on,
+                RemoteKeyName::Home => *power_on && *showing_home,
+                RemoteKeyName::Play => *power_on && *playing == Some(true),
+                RemoteKeyName::Pause => *power_on && *playing == Some(false),
+            },
+            (
+                Self::AppLaunch { app_id },
+                ResourceState::Tv {
+                    power_on,
+                    active_app,
+                    ..
+                },
+            ) => *power_on && active_app.as_deref() == Some(app_id.as_str()),
+            (
+                Self::PrintSubmit { sha256, .. },
+                ResourceState::Printer { job_present, .. },
+            ) => job_present.as_deref()
+                == Self::print_job_name(sha256).ok().as_deref(),
             _ => false,
         }
     }
@@ -92,6 +191,16 @@ pub enum ResourceState {
     Switch { on: bool },
     Light { on: bool, brightness_percent: u8 },
     Climate { target_milli_celsius: i32 },
+    Tv {
+        power_on: bool,
+        showing_home: bool,
+        active_app: Option<String>,
+        playing: Option<bool>,
+    },
+    Printer {
+        idle: bool,
+        job_present: Option<String>,
+    },
     Unknown,
 }
 
@@ -197,6 +306,19 @@ impl Observation {
                 target_milli_celsius,
             } if !(5000..=35000).contains(&target_milli_celsius) => {
                 Err(ContractError("invalid measured temperature"))
+            }
+            ResourceState::Tv {
+                ref active_app, ..
+            } if active_app.as_deref().is_some_and(|a| validate_id(a).is_err()) => {
+                Err(ContractError("invalid measured application id"))
+            }
+            ResourceState::Printer {
+                ref job_present, ..
+            } if job_present
+                .as_deref()
+                .is_some_and(|j| j.len() > 64 || j.bytes().any(|b| b.is_ascii_control())) =>
+            {
+                Err(ContractError("invalid measured print job"))
             }
             _ => Ok(()),
         }
