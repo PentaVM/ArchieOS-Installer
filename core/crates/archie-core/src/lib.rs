@@ -28,6 +28,7 @@ pub mod execution;
 pub mod hardware;
 pub mod hotplug;
 pub mod operator;
+pub mod passive_network;
 mod operator_session;
 pub mod runtime;
 pub mod sentry;

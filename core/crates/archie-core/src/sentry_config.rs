@@ -32,6 +32,9 @@ pub struct HomeAssistantBinding {
     pub endpoint: String,
     pub token_file: String,
     pub resources: Vec<HomeAssistantResource>,
+    /// Observation-only bindings. They never enter the actuator registry.
+    #[serde(default)]
+    pub telemetry_resources: Vec<HomeAssistantResource>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,13 +58,15 @@ impl HomeAssistantBinding {
     fn entities(&self) -> BTreeMap<String, String> {
         self.resources
             .iter()
+            .chain(&self.telemetry_resources)
             .map(|r| (r.resource_id.clone(), r.entity.clone()))
             .collect()
     }
     pub fn validate(&self) -> Result<(), AdapterError> {
-        if self.resources.is_empty()
-            || self.resources.len() > 64
-            || self.entities().len() != self.resources.len()
+        let count = self.resources.len() + self.telemetry_resources.len();
+        if count == 0
+            || count > 64
+            || self.entities().len() != count
             || self.token_file.len() > 512
             || !Path::new(&self.token_file).is_absolute()
         {
@@ -156,7 +161,7 @@ impl SentrySection {
         }
         if let Some(ha) = &self.home_assistant {
             ha.validate().map_err(|_| invalid())?;
-            for resource in &ha.resources {
+            for resource in ha.resources.iter().chain(&ha.telemetry_resources) {
                 if !resources.insert(&resource.resource_id) {
                     return Err(invalid());
                 }

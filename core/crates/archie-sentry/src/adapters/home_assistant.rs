@@ -10,7 +10,7 @@ use reqwest::{
     header::{HeaderValue, AUTHORIZATION},
     Client, Url,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
@@ -59,8 +59,16 @@ impl HomeAssistant {
         for (resource, entity) in &entities {
             validate_id(resource).map_err(|_| AdapterError::Protocol)?;
             let (domain, name) = entity.split_once('.').ok_or(AdapterError::Protocol)?;
-            if !matches!(domain, "switch" | "light" | "media_player" | "climate")
-                || name.is_empty()
+            if !matches!(
+                domain,
+                "switch"
+                    | "light"
+                    | "media_player"
+                    | "climate"
+                    | "sensor"
+                    | "binary_sensor"
+                    | "device_tracker"
+            ) || name.is_empty()
                 || name.len() > 100
                 || !name
                     .bytes()
@@ -91,6 +99,56 @@ impl HomeAssistant {
             .get(&resource.resource_id)
             .map(String::as_str)
             .ok_or(AdapterError::Unsupported)
+    }
+    /// Read HA's cached report without refreshing or commanding a device. This
+    /// snapshot is telemetry, never execution evidence or a pairing credential.
+    pub async fn snapshot(&self, resource_id: &str) -> Result<HomeSnapshot, AdapterError> {
+        let entity = self
+            .entities
+            .get(resource_id)
+            .ok_or(AdapterError::Unsupported)?;
+        let response = self
+            .client
+            .get(
+                self.base
+                    .join(&format!("api/states/{entity}"))
+                    .map_err(|_| AdapterError::Protocol)?,
+            )
+            .header(AUTHORIZATION, self.authorization.clone())
+            .send()
+            .await
+            .map_err(|_| AdapterError::Transport)?;
+        let bytes = body(response, "application/json").await?;
+        let value: HaState = serde_json::from_slice(&bytes).map_err(|_| AdapterError::Protocol)?;
+        if value.entity_id != *entity || !bounded_text(&value.state, 256) {
+            return Err(AdapterError::Protocol);
+        }
+        let stamp = value
+            .last_reported
+            .or(value.last_updated)
+            .ok_or(AdapterError::Protocol)?;
+        let parsed =
+            time::OffsetDateTime::parse(&stamp, &time::format_description::well_known::Rfc3339)
+                .map_err(|_| AdapterError::Protocol)?;
+        let millis = i64::try_from(parsed.unix_timestamp_nanos() / 1_000_000)
+            .map_err(|_| AdapterError::Protocol)?;
+        let unit = match value.attributes.get("unit_of_measurement") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(s)) if bounded_text(s, 32) => Some(s.clone()),
+            _ => return Err(AdapterError::Protocol),
+        };
+        let available = !matches!(value.state.as_str(), "unknown" | "unavailable");
+        let report = serde_json::to_vec(&(resource_id, entity, millis, &value.state, &unit))
+            .map_err(|_| AdapterError::Protocol)?;
+        Ok(HomeSnapshot {
+            resource_id: resource_id.into(),
+            entity_id: entity.clone(),
+            state: value.state,
+            unit,
+            available,
+            reported_at: Timestamp(millis),
+            evidence_id: format!("ha-cache-{:x}", Sha256::digest(report)),
+        })
     }
     async fn service(&self, domain: &str, service: &str, data: Value) -> Result<(), AdapterError> {
         let bytes = serde_json::to_vec(&data).map_err(|_| AdapterError::Protocol)?;
@@ -138,6 +196,21 @@ impl HomeAssistant {
         }
         Ok(())
     }
+}
+fn bounded_text(value: &str, maximum: usize) -> bool {
+    !value.is_empty() && value.len() <= maximum && !value.chars().any(char::is_control)
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HomeSnapshot {
+    pub resource_id: String,
+    pub entity_id: String,
+    pub state: String,
+    pub unit: Option<String>,
+    pub available: bool,
+    /// Provider timestamp, not time of retrieval. The report may be stale.
+    pub reported_at: Timestamp,
+    pub evidence_id: String,
 }
 #[derive(Deserialize)]
 struct HaState {

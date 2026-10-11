@@ -75,6 +75,114 @@ fn ha(base: &str) -> Result<HomeAssistant, AdapterError> {
 }
 
 #[tokio::test]
+async fn cached_sensor_read_is_get_only_minimised_and_preserves_age() {
+    let report = serde_json::json!({"entity_id":"sensor.room","state":"21.5",
+        "attributes":{"unit_of_measurement":"°C","private_payload":"do not retain"},
+        "last_updated":"2020-01-01T00:00:00Z"});
+    let bytes = serde_json::to_vec(&report).unwrap();
+    let (url, task) = server(vec![
+        ("200 OK\r\nContent-Type: application/json", bytes.clone()),
+        ("200 OK\r\nContent-Type: application/json", bytes),
+    ])
+    .await;
+    let adapter = HomeAssistant::new(
+        "edge",
+        "ha",
+        &url,
+        "fixture-token",
+        BTreeMap::from([("room".into(), "sensor.room".into())]),
+    )
+    .unwrap();
+    assert!(matches!(
+        adapter.snapshot("unconfigured").await,
+        Err(AdapterError::Unsupported)
+    ));
+    let first = adapter.snapshot("room").await.unwrap();
+    let second = adapter.snapshot("room").await.unwrap();
+    assert_eq!(first, second);
+    assert_eq!(first.reported_at, Timestamp(1_577_836_800_000));
+    assert_eq!(first.unit.as_deref(), Some("°C"));
+    let output = serde_json::to_string(&first).unwrap();
+    assert!(!output.contains("private_payload") && !output.contains("fixture-token"));
+    for request in task.await.unwrap() {
+        assert!(request.starts_with(b"GET /api/states/sensor.room HTTP/1.1\r\n"));
+        assert!(!String::from_utf8_lossy(&request).contains("update_entity"));
+    }
+}
+
+#[tokio::test]
+async fn cached_sensor_unknown_is_not_a_live_measurement_and_mismatch_is_rejected() {
+    let reports = [
+        serde_json::json!({"entity_id":"binary_sensor.door","state":"unavailable",
+            "attributes":{},"last_reported":"2020-01-01T00:00:00Z"}),
+        serde_json::json!({"entity_id":"binary_sensor.other","state":"on",
+            "attributes":{},"last_reported":"2020-01-01T00:00:00Z"}),
+        serde_json::json!({"entity_id":"binary_sensor.door","state":"on",
+            "attributes":{},"last_reported":"bad timestamp"}),
+    ];
+    let (url, task) = server(
+        reports
+            .into_iter()
+            .map(|v| {
+                (
+                    "200 OK\r\nContent-Type: application/json",
+                    serde_json::to_vec(&v).unwrap(),
+                )
+            })
+            .collect(),
+    )
+    .await;
+    let adapter = HomeAssistant::new(
+        "edge",
+        "ha",
+        &url,
+        "fixture-token",
+        BTreeMap::from([("door".into(), "binary_sensor.door".into())]),
+    )
+    .unwrap();
+    assert!(!adapter.snapshot("door").await.unwrap().available);
+    assert!(matches!(
+        adapter.snapshot("door").await,
+        Err(AdapterError::Protocol)
+    ));
+    assert!(matches!(
+        adapter.snapshot("door").await,
+        Err(AdapterError::Protocol)
+    ));
+    task.await.unwrap();
+}
+
+#[tokio::test]
+async fn cached_sensor_rejects_control_characters_and_never_actuates_sensor() {
+    let report = serde_json::json!({"entity_id":"sensor.room","state":"21\nforged line",
+        "attributes":{},"last_updated":"2020-01-01T00:00:00Z"});
+    let (url, task) = server(vec![(
+        "200 OK\r\nContent-Type: application/json",
+        serde_json::to_vec(&report).unwrap(),
+    )])
+    .await;
+    let mut adapter = HomeAssistant::new(
+        "edge",
+        "ha",
+        &url,
+        "fixture-token",
+        BTreeMap::from([("lamp".into(), "sensor.room".into())]),
+    )
+    .unwrap();
+    assert!(matches!(
+        adapter.snapshot("lamp").await,
+        Err(AdapterError::Protocol)
+    ));
+    assert!(matches!(
+        adapter
+            .apply(&resource(), &Command::SwitchSet { on: true })
+            .await,
+        Err(AdapterError::Unsupported)
+    ));
+    task.await.unwrap();
+}
+
+#[tokio::test]
 async fn identical_ha_report_keeps_evidence_identity_instead_of_inventing_a_measurement() {
     let stamp = Timestamp::now();
     let body = serde_json::to_vec(

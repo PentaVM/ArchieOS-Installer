@@ -63,6 +63,17 @@ enum Command {
         /// Resource ID from the node's Sentry configuration.
         resource_id: String,
     },
+    /// Read a configured home entity's cached report without commanding it.
+    SentryHomeStatus { resource_id: String },
+    /// Analyze an offline TShark mDNS export. Never captures or scans the network.
+    SentryNetworkAnalyze {
+        #[arg(long, required = true)]
+        scope: Vec<String>,
+        #[arg(long)]
+        input: std::path::PathBuf,
+        #[arg(long)]
+        baseline: Option<std::path::PathBuf>,
+    },
     /// Review and execute one paired device operation in an interactive Linux session.
     SentryExecute {
         resource_id: String,
@@ -270,6 +281,9 @@ impl Command {
             Self::SentryPrinter { resource_id } => ControlRequest::SentryPrinter {
                 resource_id: resource_id.clone(),
             },
+            Self::SentryHomeStatus { resource_id } => ControlRequest::SentryHomeStatus {
+                resource_id: resource_id.clone(),
+            },
             Self::SentryExecute {
                 resource_id,
                 action,
@@ -289,7 +303,7 @@ impl Command {
             Self::Metrics => ControlRequest::Metrics,
             Self::Audit { limit } => ControlRequest::Audit { limit: *limit },
             Self::Ping => ControlRequest::Ping,
-            Self::Enrol { .. } => return None,
+            Self::Enrol { .. } | Self::SentryNetworkAnalyze { .. } => return None,
         })
     }
 }
@@ -729,6 +743,11 @@ async fn main() -> std::process::ExitCode {
     let Some(request) = cli.command.to_request() else {
         return match &cli.command {
             Command::Enrol { owner_key } => enrol(&paths, owner_key.as_deref(), cli.json),
+            Command::SentryNetworkAnalyze {
+                scope,
+                input,
+                baseline,
+            } => analyze_network(scope, input, baseline.as_deref(), cli.json),
             other => local_command(other, &workstation_root(cli.root.as_deref()), cli.json).await,
         };
     };
@@ -766,6 +785,63 @@ async fn main() -> std::process::ExitCode {
 
     print!("{}", render(&response));
     exit_code(&response)
+}
+
+fn analyze_network(
+    scope: &[String],
+    input: &std::path::Path,
+    baseline: Option<&std::path::Path>,
+    json: bool,
+) -> std::process::ExitCode {
+    use std::io::Read;
+    fn read(path: &std::path::Path) -> Result<String, String> {
+        let file =
+            std::fs::File::open(path).map_err(|_| "cannot open network export".to_owned())?;
+        if !file
+            .metadata()
+            .map_err(|_| "cannot inspect network export")?
+            .is_file()
+        {
+            return Err("network export must be a regular file".into());
+        }
+        let mut bytes = Vec::new();
+        file.take((archie_core::passive_network::MAX_EXPORT_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)
+            .map_err(|_| "cannot read network export")?;
+        if bytes.len() > archie_core::passive_network::MAX_EXPORT_BYTES {
+            return Err("network export too large".into());
+        }
+        String::from_utf8(bytes).map_err(|_| "network export must be UTF-8".into())
+    }
+    let result = (|| {
+        let current = read(input)?;
+        let previous = baseline.map(read).transpose()?;
+        archie_core::passive_network::analyze(scope.to_vec(), &current, previous.as_deref())
+    })();
+    match result {
+        Ok((assets, changes)) => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"source":"offline_mdns_metadata",
+                    "trusted":false,"assets":assets,"changes":changes})
+                );
+            } else {
+                println!("Passive mDNS metadata: {} observed hosts; {} changes. Advertisements are untrusted.", assets.len(), changes.len());
+                for asset in assets {
+                    println!("{}: {:?}", asset.ipv4_address, asset.candidates);
+                }
+                for change in changes {
+                    println!("{change:?}");
+                }
+            }
+            std::process::ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("archie: {error}");
+            std::process::ExitCode::FAILURE
+        }
+    }
 }
 
 async fn review_and_execute(
@@ -862,6 +938,10 @@ fn render(response: &ControlResponse) -> String {
             "printer: {resource_id}\nstate: {:?}\nUUID: {}\nobserved: {}\nidentity: matches configured UUID (self-reported)\n",
             snapshot.state, snapshot.uuid.as_deref().unwrap_or("unreported"), snapshot.observed_at.as_millis()
         ),
+        ControlResponse::SentryHomeStatus { snapshot } => format!(
+            "home: {}\nstate: {} {}\navailable: {}\nprovider reported: {}\nsource: HA cache (freshness not guaranteed)\n",
+            snapshot.resource_id, snapshot.state, snapshot.unit.as_deref().unwrap_or(""),
+            snapshot.available, snapshot.reported_at.as_millis()),
         ControlResponse::SentryPrepared { intent, digest } => format!("prepared {} for {}\ndigest: {digest}\n", intent.intent_id, intent.resource_id),
         ControlResponse::SentryResult(result) => format!("operation {}: {:?}\nreceipt: {}\n", result.operation_id, result.status, result.intent_id),
         ControlResponse::SentryCancelled => "Sentry operation cancelled\n".into(),

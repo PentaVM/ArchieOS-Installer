@@ -315,7 +315,7 @@ pub struct SourcedNetworkEvidence {
 /// Deterministic analytic result for a candidate inventory class. A classification is
 /// only an observation: it cannot propose pairing, select an adapter, mint a lease or
 /// enable any device transport.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnalyticDeviceClassification {
     pub class: DeviceClass,
     /// 0–100 evidence score. Only candidates at or above the conservative threshold
@@ -335,7 +335,7 @@ pub struct NetworkAssetObservation {
 
 /// Reproducible candidate inventory view of one observation. An empty `candidates`
 /// list means a host was observed but the analytic rules do not identify a device class.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClassifiedNetworkAsset {
     pub ipv4_address: Ipv4Addr,
     pub candidates: Vec<AnalyticDeviceClassification>,
@@ -344,7 +344,8 @@ pub struct ClassifiedNetworkAsset {
 /// Deterministic difference between two observations of the same declared network
 /// scope. This is an analytic finding only: it does not mutate inventory, trust,
 /// pairing, routing, firewall state or any device.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NetworkInventoryChange {
     NewlyObserved {
         ipv4_address: Ipv4Addr,
@@ -1351,6 +1352,10 @@ pub enum ControlRequest {
     SentryPrinter {
         resource_id: String,
     },
+    /// Read configured HA cache telemetry; no refresh, URL or actuation.
+    SentryHomeStatus {
+        resource_id: String,
+    },
     /// Prepare one typed operation in an authenticated local operator session.
     SentryPrepare {
         resource_id: String,
@@ -1406,6 +1411,7 @@ impl ControlRequest {
             Self::Devices => "devices",
             Self::DeviceOperations { .. } => "device-operations",
             Self::SentryPrinter { .. } => "sentry-printer",
+            Self::SentryHomeStatus { .. } => "sentry-home-status",
             Self::SentryPrepare { .. } => "sentry-prepare",
             Self::SentryApprove { .. } => "sentry-approve",
             Self::SentryCancel => "sentry-cancel",
@@ -1620,6 +1626,9 @@ pub enum ControlResponse {
     SentryPrinter {
         resource_id: String,
         snapshot: archie_sentry::adapters::ipp::PrinterSnapshot,
+    },
+    SentryHomeStatus {
+        snapshot: archie_sentry::adapters::home_assistant::HomeSnapshot,
     },
     SentryPrepared {
         intent: Box<archie_sentry::contracts::Intent>,

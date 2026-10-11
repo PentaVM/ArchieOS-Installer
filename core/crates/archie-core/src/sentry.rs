@@ -108,6 +108,33 @@ impl SentryService {
     }
 }
 impl crate::Runtime {
+    pub async fn sentry_home_status(&self, resource_id: &str) -> crate::control::ControlResponse {
+        use crate::control::ControlResponse;
+        if archie_sentry::contracts::validate_id(resource_id).is_err() {
+            return ControlResponse::error("invalid Sentry home resource");
+        }
+        let Some(binding) = &self.config.sentry.home_assistant else {
+            return ControlResponse::error("Sentry Home Assistant is not configured");
+        };
+        if !binding
+            .resources
+            .iter()
+            .chain(&binding.telemetry_resources)
+            .any(|r| r.resource_id == resource_id)
+        {
+            return ControlResponse::error("Sentry home resource is not configured");
+        }
+        let adapter = match binding.adapter() {
+            Ok(adapter) => adapter,
+            Err(_) => {
+                return ControlResponse::error("Sentry home binding or credentials unavailable")
+            }
+        };
+        match adapter.snapshot(resource_id).await {
+            Ok(snapshot) => ControlResponse::SentryHomeStatus { snapshot },
+            Err(error) => ControlResponse::error(format!("Sentry home query failed: {error}")),
+        }
+    }
     /// Queries one configured printer. Wire clients cannot supply a URL or expand
     /// the configured network scope. This never prepares or sends a print job.
     pub async fn sentry_printer(&self, resource_id: &str) -> crate::control::ControlResponse {
