@@ -1,5 +1,11 @@
 # Relevo para continuar ArchieOS — 2026-10-11
 
+> Actualización posterior del mismo día: el dueño ordenó trabajar solo en
+> `PentaVM/ArchieOS-Nvidia`. Sentry del árbol histórico ya fue portado e integrado
+> hasta `aaf2071`. La tabla y los pendientes inferiores registran el estado anterior;
+> contrastarlos con `HANDOFF-2026-10-11-SENTRY-AUDITORIA.md` y
+> `HANDOFF-2026-10-11-SPEECH-FLOOR.md`. No continuar features ni pushear al viejo repo.
+
 ## Leer primero
 
 Este relevo distingue dos repositorios. No son checkouts intercambiables:

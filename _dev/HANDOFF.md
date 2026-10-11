@@ -1,5 +1,13 @@
 # Relevo vigente — 2026-10-11
 
+**Actualización de voz e integración (Codex):** continuar exclusivamente en
+`PentaVM/ArchieOS-Nvidia`. Leer primero
+`../docs/HANDOFF-2026-10-11-SPEECH-FLOOR.md`. Main incorpora `feat/sentry-complete`
+hasta `aaf2071`; el trabajo bilingüe pendiente se adapta sobre las implementaciones
+actuales. No copiar versiones antiguas de memoria ni reaplicar commits equivalentes.
+Claude/Xavi conservan el port WSL y la nueva GUI profesional; este trabajo no los ejecuta.
+Los párrafos inferiores conservan contexto histórico, no destinos de trabajo vigentes.
+
 **Actualización (Claude, mismo día):** el dueño decidió usar solo `PentaVM/ArchieOS-Nvidia`.
 Sentry ya está portado aquí; `PentaVM/ArchieOS` no se continúa. Ver la entrada más
 reciente de `BITACORA.md`.

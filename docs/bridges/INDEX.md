@@ -162,7 +162,7 @@ Inspect layered images, retouch them (resize, crop, levels, colour, sharpen, tex
 
 - Works in: A folder of images. Edits go to edits/, exports to exports/.
 - Install on ArchieOS: `pacman -S gimp`
-- Install on Ubuntu: `flatpak install flathub org.gimp.GIMP`
+- Install on Ubuntu: `GIMP 3 AppImage from gimp.org, extracted (Ubuntu 24.04 ships 2.10); --program gimp-console=<a copy of its AppRun that execs usr/bin/gimp-console-3.0>`
 - Install on Windows: `winget install GIMP.GIMP.3`
 - Through: [gimp-console batch mode with its embedded Python (the script is a constant in the bridge)](https://developer.gimp.org/resource/writing-a-plug-in/)
 - GUI on the Stage (`gimp`, `org.gimp.GIMP`): Painting, selections by eye, healing and cloning, masks: do them in GIMP on the Stage and check the result with gimp_inspect.

@@ -135,3 +135,96 @@ de Jarvis ni declarar entrega de mensajes desde stubs.
 Publicación: push normal de cada main, sin force, y comparación de HEAD con
 `git ls-remote origin refs/heads/main` antes de avisar. El SHA final se consulta
 en Git; este registro forma parte del commit que se publica.
+
+## 2026-10-11 — Codex — Floor de voz y consolidación exclusiva en Nvidia
+
+El dueño corrigió el destino: trabajar siempre en `PentaVM/ArchieOS-Nvidia` para
+el hackathon. Claude/Xavi poseen el port WSL y la nueva GUI. El handoff adjunto
+describe su encargo; no autoriza a Codex a ejecutarlo. Codex termina voz y mergea
+las entregas comprometidas. `AGENTS.md` guarda estas instrucciones para continuar.
+
+### Integración
+
+- Base `0bd6405`; fast-forward de Sentry hasta `aaf2071` (11 commits ya escritos).
+- `e5cf04a`: floor/speech-to-speech, interfaz ASR aditiva y voz bilingüe. El commit
+  `c9b3603` de la rama de voz ya tiene un patch equivalente en main; se portó su
+  trabajo pendiente por archivos conservando la memoria y el wrapper RVC actuales.
+- Claude publicó después `b22625e`, WSL Operator: merge `633f7ac`. No se generó,
+  importó ni ejecutó la imagen o sus herramientas durante este trabajo.
+- `586637d`, auditoría GUI: merge `30978a0`. Son documentos y propuestas, sin código
+  GUI ni aprobación de sus ADR. La auditoría se hizo sobre la base antigua; requiere
+  actualizar contratos después de esta consolidación.
+- Revisión suplementaria de las nuevas entregas: una línea del builder borraba
+  `/var/cache/pacman/pkg/*` del host como root. Se retiró en un fix mínimo de
+  integración. Auditoría estática de todos sus cleanup top-level: antes rechazaba
+  un destino fuera de variables de imagen/workspace; después pasaron los cuatro
+  comandos restantes y la sintaxis Bash. No se ejecutó el builder ni se borró esa caché.
+- Branches de origin cubiertas por main al cierre. Rama bilingüe histórica equivalente;
+  worktrees de otros agentes preservados. El remoto `archieos` se excluye del trabajo.
+- El único fallo de bridges informado por la auditoría se reprodujo: índice generado
+  GIMP desactualizado. Se regeneró desde manifiestos; cambió una línea, sin alterar
+  el bridge ni sus operaciones.
+
+### Voz y revisión
+
+Se conserva ASR/NeMo, SpeechSession/FloorPolicy y la ruta de propuestas/políticas.
+El loop retiene finales precoces y cláusulas, evalúa ASR antes de interrumpir, conserva
+correcciones y usa recibos del turno correcto. Historial y reproducción ya no se
+confunden con texto generado. Cancelación bloquea eventos tardíos y shutdown corta
+la cola. Piper ES/EN convive con Magpie/RVC; no se presenta Piper+RVC como compatible.
+
+La revisión final de lectura encontró tres fallos adicionales, reproducidos antes
+del fix: acknowledgements repetidos que iniciaban otro turno, corrección corta cuyo
+ASR terminaba en silencio, y worker que seguía tras un error TTS. Se corrigieron con
+pruebas del loop y del worker. También se mantuvo el override de Piper nativo sin
+exigir Python. No se reaplicaron archivos viejos de IRIS, Orbe o memoria.
+
+### Evidencia final
+
+Windows, Rust 1.98.0, lockfile actual; perfiles de test/dev sin símbolos de depuración
+para no agotar el disco. Comandos y logs locales en `%TEMP%`:
+
+```text
+cargo test --locked -p archie-speech -p archie-voice -- --test-threads=1
+155 aprobadas; 0 fallos; 0 omitidas; salida 0
+archie-speech-review-final.log
+
+cargo test --locked -p archie-core -p archie-cli -p archie-sentry -p archie-lan -p archie-state -p archied -p archie-workstation -- --test-threads=1
+318 aprobadas; 0 fallos; 84 omitidas; salida 0
+archie-nvidia-affected-final.log
+
+cargo test --locked -p archie-bridges --lib -- --test-threads=1
+55 aprobadas; 0 fallos; 0 omitidas; salida 0
+archie-bridges-final.log
+```
+
+Total: 528 aprobadas, 0 fallos, 84 omitidas. Omitidas: 66 requieren el cluster Core,
+16 un fixture PostgreSQL 18 aislado, 1 una fase de crash recovery aislada y 1 FreeCAD
+empaquetado para Arch Linux. PostgreSQL 18 existe, pero faltan los binarios/control
+de TimescaleDB 2.29.2 y pgvector 0.8.6 y no se configuró otro cluster. No se conectó
+a bases existentes ni se instalaron extensiones para simular esa validación.
+
+Pasaron sintaxis Bash de siete scripts (tres de voz y cuatro WSL), AST Python del
+bridge y AST PowerShell del installer. Los scripts WSL solo se analizaron, no se
+ejecutaron. `git diff --check` pasó. Se verificaron configs/cards Piper remotos y
+sus MD5/sample rates; no se descargaron los pesos ni se sintetizó audio real.
+
+La compilación amplia inicial se interrumpió por poco espacio. La limpieza recursiva
+fue rechazada por revisión automática; `cargo clean --target-dir` limpió 2.5 GiB de
+artefactos y permitió verificar con debug=0. No se borraron fuentes o worktrees.
+
+### Relevo
+
+Leer `../docs/HANDOFF-2026-10-11-SPEECH-FLOOR.md`: incluye benchmarks reproducibles,
+límites de pacing sin ACK del navegador, bloqueo del sink, ASR heurístico y pruebas
+native `speech/live/rvc` pendientes del SDK/modelos. No hay cifra TTFT ni latencia
+audible medida para Spark/Halo/Mac mini/GPUs antiguas ni convivencia con Steam.
+
+Operator no empaqueta esta voz todavía ni Observatory. Tiene automount activado y
+interop desactivado; su acceso al host y IRIS en esa imagen no se validaron aquí.
+Claude debe conectar la entrega de voz a su packaging y Xavi probar el entorno real.
+Los pendientes de Sentry siguen en su auditoría: integración no equivale a pairing,
+WorldGraph/pilares completos, instalación de workers o dispositivos verificados.
+
+Push autorizado a origin/main, normal y sin force. Comparar HEAD con el remoto antes
+de avisar; este registro forma parte de la publicación. No volver al repo histórico.

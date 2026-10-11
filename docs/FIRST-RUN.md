@@ -36,3 +36,8 @@ upstream CLI's own store.
 Windows drives are intentionally unavailable inside the runtime. Files enter or leave a
 workspace through the host bridge contract; the privileged Windows bridge itself remains
 an explicit alpha limitation.
+
+The separate [Operator image](WSL-OPERATOR.md) has its own WSL configuration and
+currently omits voice. Its committed config enables automount and disables interop;
+the isolated runtime description above does not describe that image. Importing its
+scripts into main does not establish a tested host bridge or a speech installation.

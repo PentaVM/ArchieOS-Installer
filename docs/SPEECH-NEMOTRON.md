@@ -30,7 +30,8 @@ NaN and infinity become silence, finite values are clamped, and the buffer is ov
 on drop. The speech adapter contains no network client. The existing independent acoustic
 floor estimator receives its own ephemeral features before transcript finalization.
 
-The current alpha is English-only. No accuracy claim is made. Latency must be measured
+The configured ASR model is multilingual. This does not establish measured accuracy
+for Spanish or any other language. Latency must be measured
 on the target GPU/CPU using an ephemeral user-authorized sample; no raw audio fixture is
-kept in Git.
-
+kept in Git. See `HANDOFF-2026-10-11-SPEECH-FLOOR.md` for the tested floor behavior,
+the outstanding native runtime checks and a reproducible benchmark protocol.
