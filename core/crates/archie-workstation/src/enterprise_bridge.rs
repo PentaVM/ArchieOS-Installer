@@ -41,19 +41,16 @@ impl EnterpriseAdapter {
         Ok(self)
     }
 
-    /// Does not grant authority. Legacy unclassified tasks remain compatible;
-    /// explicitly personal or malformed domains can never cross this boundary.
+    /// Does not grant authority. An adapter bound to a project sees that project's tasks
+    /// and no others. One bound to none sees only tasks that carry no domain, as before
+    /// domains existed: it is never the adapter that sees every organisation's work.
     pub fn context_visible(&self, task: &Task) -> bool {
         if task.labels.get("archie.context_kind").map(String::as_str) == Some("personal") {
             return false;
         }
         match task.labels.get("archie.context_domain") {
             Some(raw) => ContextDomain::try_from(raw.clone()).is_ok_and(|domain| {
-                domain.is_work()
-                    && self
-                        .context_domain
-                        .as_ref()
-                        .is_none_or(|bound| bound == &domain)
+                domain.is_work() && self.context_domain.as_ref() == Some(&domain)
             }),
             None => self.context_domain.is_none(),
         }

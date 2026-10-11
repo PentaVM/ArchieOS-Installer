@@ -53,6 +53,7 @@ pub enum AppError {
     Internal(String),
     BadRequest(String),
     Unauthorized,
+    NotImplemented(&'static str),
 }
 
 impl IntoResponse for AppError {
@@ -69,6 +70,7 @@ impl IntoResponse for AppError {
             }
             AppError::BadRequest(err) => (StatusCode::BAD_REQUEST, err),
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()),
+            AppError::NotImplemented(what) => (StatusCode::NOT_IMPLEMENTED, what.to_string()),
         };
         (status, Json(ErrorResponse { error: msg })).into_response()
     }
@@ -235,7 +237,8 @@ async fn sync_board(State(state): State<BoardState>) -> Result<impl IntoResponse
         .await
     {
         Ok(_) => Ok((StatusCode::OK, Json("Sync completed"))),
-        Err(e) => Err(AppError::Internal(e.to_string())),
+        // The only failure there is today: nothing sends cards anywhere yet.
+        Err(_) => Err(AppError::NotImplemented("enterprise transport is not configured")),
     }
 }
 
