@@ -1,0 +1,33 @@
+[Unit]
+Description=ARCHIE REM sleep: nightly pause, skill learning, deletion and resume
+Documentation=file:/usr/share/doc/archie-os/RFC-014-REM-SLEEP.md
+After=archied.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/archie-rem watch
+EnvironmentFile=-/etc/archie/rem.env
+Restart=on-failure
+RestartSec=30s
+# A cycle cut short is finished at the next start: the day's windows are deleted and the
+# paused jobs resumed. Stopping the service must therefore be quick and never clean up.
+TimeoutStopSec=15s
+KillSignal=SIGTERM
+UMask=0077
+Nice=10
+RuntimeDirectory=archie/rem
+RuntimeDirectoryPreserve=no
+StateDirectory=archie/rem
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target

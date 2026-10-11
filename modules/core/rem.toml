@@ -1,0 +1,24 @@
+# REM sleep: what the node does at night with nobody at it (RFC-014).
+#
+# Pauses long jobs at a checkpoint, hands the day's verified windows to the IRIS Foundry
+# trainer, deletes those windows whatever happened, and resumes the jobs. It runs as its
+# own process: it starts and kills programs, which the daemon itself must not do.
+id = "core.rem"
+version = "0.1.0"
+description = "REM sleep: nightly pause, skill learning from the day's verified work, deletion, resume"
+priority = 60
+
+required_capabilities = ["compute.cpu"]
+optional_capabilities = ["compute.cuda"]
+dependencies = ["core.archie"]
+permissions = ["read-telemetry", "spawn-workers"]
+
+[worker]
+kind = "process"
+command = "/usr/bin/archie-rem"
+args = ["watch"]
+
+[health_check]
+kind = "command"
+command = "/usr/bin/archie-rem"
+args = ["status"]
