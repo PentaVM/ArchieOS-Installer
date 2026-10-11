@@ -2,7 +2,8 @@
 //!
 //! ```text
 //! archie-toolpack list     [--catalog FILE] [--keys FILE]
-//! archie-toolpack install  TOOL [--catalog FILE] [--keys FILE] [--root DIR] [--approve]
+//! archie-toolpack list     --catalog-url HTTPS_URL [--keys FILE]
+//! archie-toolpack install  TOOL [--catalog FILE | --catalog-url HTTPS_URL] [--keys FILE] [--root DIR] [--approve]
 //! archie-toolpack rollback TOOL [--root DIR]
 //! archie-toolpack status   [--root DIR]
 //! archie-toolpack keygen   SECRET_FILE PUBLIC_FILE
@@ -22,6 +23,8 @@ use archie_toolpack::{
 };
 use archie_types::{Timestamp, TraceId};
 use ed25519_dalek::SigningKey;
+use futures_util::StreamExt;
+use reqwest::{redirect::Policy, Client, Url};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
@@ -30,6 +33,9 @@ const DEFAULT_CATALOG: &str = "/etc/archie/toolpack/catalog.toml";
 const DEFAULT_KEYS: &str = "/etc/archie/toolpack/trusted-keys";
 const DEFAULT_ROOT: &str = "/opt/archie/tools";
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+const CATALOG_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
+const CATALOG_LIMIT: usize = 1024 * 1024;
+const SIGNATURE_LIMIT: usize = 130;
 
 struct Args {
     words: Vec<String>,
@@ -64,12 +70,94 @@ impl Args {
     }
 }
 
-fn load_catalog(args: &mut Args) -> Result<Catalog, String> {
-    let path = PathBuf::from(
-        args.take("--catalog")
-            .unwrap_or_else(|| DEFAULT_CATALOG.into()),
-    );
+fn catalog_signature_url(value: &str) -> Result<Url, String> {
+    let mut url = Url::parse(value).map_err(|_| "invalid catalog URL".to_string())?;
+    if url.scheme() != "https"
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || !url.path().ends_with(".toml")
+    {
+        return Err(
+            "catalog URL must be an HTTPS .toml URL without credentials, query or fragment".into(),
+        );
+    }
+    let signature_path = format!("{}.sig", url.path());
+    url.set_path(&signature_path);
+    Ok(url)
+}
+
+async fn fetch_bounded(client: &Client, url: &Url, limit: usize) -> Result<Vec<u8>, String> {
+    let response = client
+        .get(url.clone())
+        .send()
+        .await
+        .map_err(|e| format!("{url}: {e}"))?;
+    if response.status().is_redirection() {
+        return Err(format!(
+            "{url}: redirects are not allowed for catalog metadata"
+        ));
+    }
+    if !response.status().is_success() {
+        return Err(format!("{url}: HTTP {}", response.status()));
+    }
+    if response
+        .content_length()
+        .is_some_and(|length| length > limit as u64)
+    {
+        return Err(format!("{url}: response exceeds the {limit}-byte limit"));
+    }
+    let mut stream = response.bytes_stream();
+    let mut bytes = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("{url}: {e}"))?;
+        if bytes.len().saturating_add(chunk.len()) > limit {
+            return Err(format!("{url}: response exceeds the {limit}-byte limit"));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
+}
+
+async fn load_remote_catalog(url: &str, keys: &TrustedKeys) -> Result<Catalog, String> {
+    let catalog_url = Url::parse(url).map_err(|_| "invalid catalog URL".to_string())?;
+    let signature_url = catalog_signature_url(url)?;
+    if catalog_url.host_str() != signature_url.host_str() {
+        return Err("catalog signature must be adjacent to the catalog on the same host".into());
+    }
+    let client = Client::builder()
+        .timeout(CATALOG_FETCH_TIMEOUT)
+        .connect_timeout(Duration::from_secs(10))
+        .redirect(Policy::none())
+        .build()
+        .map_err(|e| format!("cannot configure catalog HTTP client: {e}"))?;
+    let bytes = fetch_bounded(&client, &catalog_url, CATALOG_LIMIT).await?;
+    let signature = fetch_bounded(&client, &signature_url, SIGNATURE_LIMIT).await?;
+    let signature_text = std::str::from_utf8(&signature)
+        .map_err(|_| "catalog signature is not UTF-8".to_string())?;
+    let trimmed = signature_text.trim();
+    if trimmed.len() != 128 || !trimmed.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("catalog signature must contain exactly 128 hexadecimal characters".into());
+    }
+    open_catalog(&bytes, trimmed, keys).map_err(|e| format!("{url}: {e}"))
+}
+
+async fn load_catalog(args: &mut Args) -> Result<Catalog, String> {
+    let local_path = args.take("--catalog");
+    let remote_url = args.take("--catalog-url");
+    if local_path.is_some() && remote_url.is_some() {
+        return Err("choose either --catalog or --catalog-url, not both".into());
+    }
     let keys_path = args.take("--keys").unwrap_or_else(|| DEFAULT_KEYS.into());
+    if let Some(url) = remote_url {
+        let keys_text =
+            std::fs::read_to_string(&keys_path).map_err(|e| format!("{keys_path}: {e}"))?;
+        let keys = TrustedKeys::parse(&keys_text).map_err(|e| format!("{keys_path}: {e}"))?;
+        return load_remote_catalog(&url, &keys).await;
+    }
+    let path = PathBuf::from(local_path.unwrap_or_else(|| DEFAULT_CATALOG.into()));
     let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let signature_path = path.with_file_name(format!(
         "{}.sig",
@@ -84,8 +172,8 @@ fn load_catalog(args: &mut Args) -> Result<Catalog, String> {
     open_catalog(&bytes, &signature, &keys).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-fn list(mut args: Args) -> Result<ExitCode, String> {
-    let catalog = load_catalog(&mut args)?;
+async fn list(mut args: Args) -> Result<ExitCode, String> {
+    let catalog = load_catalog(&mut args).await?;
     println!("{} (signature verified)", catalog.name);
     for tool in &catalog.tools {
         println!(
@@ -104,7 +192,7 @@ async fn install(mut args: Args) -> Result<ExitCode, String> {
     let id = args.positional("the tool to install")?;
     let root = ToolRoot::new(args.take("--root").unwrap_or_else(|| DEFAULT_ROOT.into()));
     let approve = args.flag("--approve");
-    let catalog = load_catalog(&mut args)?;
+    let catalog = load_catalog(&mut args).await?;
 
     let principal = Principal::Human {
         id: "toolpack-cli".into(),
@@ -272,7 +360,7 @@ async fn main() -> ExitCode {
     };
     let args = Args { words };
     let result = match command.as_str() {
-        "list" => list(args),
+        "list" => list(args).await,
         "install" => install(args).await,
         "rollback" => rollback(args),
         "status" => status(args),

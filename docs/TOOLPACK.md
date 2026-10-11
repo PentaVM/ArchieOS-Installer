@@ -108,6 +108,29 @@ archie-toolpack rollback typst
 the person at the keyboard), 4 the download did not verify. Tools land under
 `/opt/archie/tools/<id>/<version>/`, and `<id>/current` names the one in use.
 
+## Remote catalog
+
+The default catalog is local. The list and install commands also accept an explicit
+remote catalog URL:
+
+```bash
+archie-toolpack list --catalog-url https://archieos-hub.vercel.app/registry/v1/toolpack/catalog.toml
+archie-toolpack install ripgrep --catalog-url https://archieos-hub.vercel.app/registry/v1/toolpack/catalog.toml
+```
+
+The client fetches the adjacent signature over HTTPS, refuses redirects, bounds the
+TOML to 1 MiB and the signature response to 130 bytes (128 hexadecimal characters plus
+a line ending). It verifies the signature against /etc/archie/toolpack/trusted-keys
+before parsing the TOML or considering a download. The existing install gate,
+capability checks, size limits and SHA-256 verification still apply. The local-file and
+remote URL options are mutually exclusive; omitting both keeps the local default.
+
+Remote catalogs remain opt-in. The Hub index advertises no Toolpack URL until a
+maintainer has reviewed and signed a catalog and the corresponding public key is
+installed in the image's trusted-key file. The signing private key stays offline;
+neither it nor a generated replacement belongs in the node, source repository, GitHub
+or Vercel.
+
 ## Tested, and how
 
 `cargo test -p archie-toolpack`. Each rule has a test built as the attack or failure it
@@ -131,8 +154,8 @@ guards against:
 - **Only `.tar.gz` and single binaries.** Many releases ship `.tar.xz`, `.tar.zst` or
   `.zip`. Adding them means pure-Rust decoders, or linking liblzma and libzstd, and each
   gets the same entry rules.
-- **No catalog is published, and no release repositories exist.** Creating repositories
-  and publishing releases under the project's name is for the maintainers to decide and do.
+- **No signed catalog is published, and no release repositories exist.** Creating
+  repositories and publishing releases under the project's name is for the maintainers to decide and do.
   The first catalog's candidates are the automatable tools in
   [research/PRELOADED-TOOLS.md](research/PRELOADED-TOOLS.md) that ship static release
   binaries.

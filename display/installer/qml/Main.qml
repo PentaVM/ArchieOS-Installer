@@ -230,6 +230,25 @@ hecho para ti."; color: root.ink; font.pixelSize: 38; font.weight: Font.DemiBold
                                 Note { text: "El descargador reutiliza paquetes verificados, reanuda archivos parciales y comprueba integridad antes de publicarlos. Guarda ruta, tamaño, fuente y SHA-256 en un manifiesto local. Los mirrors adicionales deben servir el mismo paquete verificado." }
                                 Note { text: "El PBF es la fuente comprimida. Su conversión a un índice de teselas para calles y edificios sigue siendo una etapa independiente." }
                             }
+                            Card {
+                                Heading { text: "Catálogos de ArchieOS Hub" }
+                                Note { text: "El Hub centraliza modelos, aplicaciones, paquetes y releases. Estas fichas informan; solo las descargas con una verificación compatible podrán instalarse." }
+                                Repeater {
+                                    model: wizard.catalogCategories
+                                    delegate: ColumnLayout {
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        Note {
+                                            text: modelData.kind.toUpperCase()+" · "+modelData.title+
+                                                  (modelData.version ? " · "+modelData.version : "")+
+                                                  " · "+modelData.status
+                                            font.pixelSize: 13
+                                        }
+                                        Note { text: modelData.description; font.pixelSize: 11 }
+                                        Note { text: modelData.install_note; font.pixelSize: 10 }
+                                    }
+                                }
+                            }
                         }
                         ColumnLayout {
                             visible: root.page===5; spacing: 20; Layout.fillWidth: true
