@@ -30,6 +30,8 @@ qt_add_executable(archie-display
     src/LumenGeometry.h
     src/AppCatalog.cpp
     src/AppCatalog.h
+    src/DisplayControl.cpp
+    src/DisplayControl.h
 )
 
 qt_add_qml_module(archie-display
@@ -66,6 +68,7 @@ qt_add_resources(archie-display "archie-native-assets"
         apps/archie-voice.desktop
         apps/archie-editor.desktop
         apps/archie-lienzo.desktop
+        apps/archie-cli.desktop
 )
 
 target_link_libraries(archie-display PRIVATE

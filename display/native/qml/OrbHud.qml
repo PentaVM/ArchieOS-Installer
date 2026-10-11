@@ -9,6 +9,7 @@ Item {
 
     required property var view
     required property var orbScene
+    property bool labelsVisible: true
 
     function pickAt(x, y) {
         const near = hud.view.mapTo3DScene(Qt.vector3d(x, y, 0))
@@ -67,7 +68,7 @@ Item {
 
     // A name beside the pointer, nothing more.
     Text {
-        visible: !!lumen.hovered.id && hover.hovered
+        visible: hud.labelsVisible && !!lumen.hovered.id && hover.hovered
         x: Math.min(parent.width - width - 12, hover.point.position.x + 18)
         y: Math.max(12, hover.point.position.y - 26)
         text: lumen.hovered.name || ""
@@ -80,6 +81,7 @@ Item {
 
     // The one line: state, then what is lit and why.
     Row {
+        visible: hud.labelsVisible
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 34
@@ -117,7 +119,7 @@ Item {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 14
-        visible: lumen.error.length > 0
+        visible: hud.labelsVisible && lumen.error.length > 0
         text: "Sin conexión con el observador del sistema"
         color: "#c98a8a"
         font.pixelSize: 11
