@@ -66,6 +66,11 @@ existing SpeechSession/FloorPolicy. Bilingual CLI must preserve current RVC wrap
 - Last fetch delivered GUI prototype `4b282cd` after audit merge. It is unfinished
   Phase B work assigned to Claude/Xavi, so it stays on its branch; importing the
   completed audit did not authorize treating that prototype as a finished integration.
+- Task 5 portable verification/integration/publication complete: normal push to
+  origin/main and `git ls-remote` matched `b0e2e77eac8afefc1606917be55a8add11cb724a`.
+  Working tree clean. This follow-up records that observed publication; its own
+  publication is checked again before the final response. Native/hardware follow-up
+  stays explicitly pending and no other worktree is removed.
 
 ## Reviewer declined-to-judge rulings
 

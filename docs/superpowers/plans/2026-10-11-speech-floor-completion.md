@@ -31,4 +31,5 @@
 - [x] Complete pending bilingual patch in piper.rs, language.rs and CLI; preserve current RVC branch. Test language selection and sample-rate validation.
 - [x] Add ASR boundary in asr.rs, adapt native.rs and conversation.rs. Test the actual loop with scripted audio recognition and existing cognitive adapter.
 - [x] Regress and fix recognition grace, held clauses, correction retention, generation receipts, cancellation and playback completion. Test no unrelated speech/tool execution.
-- [ ] Run speech/voice and affected Sentry/Core/CLI/Workstation suites, validate Linux native features when SDK is available, inspect diffs and update handoff/bitácora. Fetch, integrate concurrent commits normally, push and compare remote SHA.
+- [x] Run speech/voice and affected Sentry/Core/CLI/Workstation suites, inspect diffs and update handoff/bitácora. Fetch, integrate completed concurrent commits normally, push and compare remote SHA. First publication verified as `b0e2e77`; GUI prototype remains ongoing with Claude.
+- [ ] Runtime follow-up with Claude/Xavi: validate Linux `speech/live/rvc` using the real installed SDK and models, package voice into Operator, and run the hardware benchmark protocol. SDK was unavailable here; no simulated native validation.

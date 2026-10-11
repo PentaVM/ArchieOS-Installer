@@ -230,3 +230,8 @@ WorldGraph/pilares completos, instalación de workers o dispositivos verificados
 
 Push autorizado a origin/main, normal y sin force. Comparar HEAD con el remoto antes
 de avisar; este registro forma parte de la publicación. No volver al repo histórico.
+
+Publicación observada: push normal y remoto comprobado en
+`b0e2e77eac8afefc1606917be55a8add11cb724a`, working tree limpio. El commit posterior
+solo registra esta evidencia y el estado del plan; también se publica y se compara
+su HEAD con origin/main antes de la respuesta final.
