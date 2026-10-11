@@ -80,6 +80,40 @@ enum Command {
         #[command(subcommand)]
         action: SentryAction,
     },
+    /// Sentry IoT operations: remote keys, app launches, printing, printer diagnosis.
+    ///
+    /// Keys, launches and prints go through the same reviewed-intent
+    /// prepare/approve flow as `sentry-execute`; there is no bypass.
+    Sentry {
+        #[command(subcommand)]
+        action: SentryIoT,
+    },
+    /// Build the local IRIS context feed from watchdog and offline exports.
+    ///
+    /// Works with the daemon down: reads the router watchdog directory, optional
+    /// LAN inventory / passive analysis JSON files, and appends typed events to
+    /// JSONL segments in the output directory. Directories fall back to the
+    /// `[sentry.context_feed]` configuration when the flags are absent.
+    ContextFeed {
+        /// Directory of rotated TShark JSONL exports from the router watchdog.
+        #[arg(long)]
+        watchdog_dir: Option<std::path::PathBuf>,
+        /// Output directory for feed segments and the cursor state file.
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+        /// Optional `archie-lan-inventory-v1` JSON document to ingest.
+        #[arg(long)]
+        lan: Option<std::path::PathBuf>,
+        /// Optional `sentry-network-analyze --json` report to ingest.
+        #[arg(long)]
+        passive: Option<std::path::PathBuf>,
+        /// Poll interval when looping (500..=60000 ms; default from config or 5000).
+        #[arg(long)]
+        poll_ms: Option<u64>,
+        /// One pass instead of a poll loop.
+        #[arg(long)]
+        once: bool,
+    },
     /// Read a durable outcome or ambiguous dispatch fence; never retries an operation.
     SentryReceipt { intent_id: String },
     /// Recent prepared/cancelled physical-operation records (read-only; never dispatches).
@@ -252,6 +286,65 @@ impl SentryAction {
     }
 }
 
+/// Remote keys with a measurable postcondition; the set is exactly the one the
+/// Sentry contracts accept, so an unknown key name fails at the CLI.
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+#[value(rename_all = "snake_case")]
+enum RemoteKeyArg {
+    PowerOn,
+    PowerOff,
+    Home,
+    Play,
+    Pause,
+}
+impl RemoteKeyArg {
+    fn name(&self) -> archie_core::control::SentryRemoteKey {
+        use archie_core::control::SentryRemoteKey;
+        match self {
+            Self::PowerOn => SentryRemoteKey::PowerOn,
+            Self::PowerOff => SentryRemoteKey::PowerOff,
+            Self::Home => SentryRemoteKey::Home,
+            Self::Play => SentryRemoteKey::Play,
+            Self::Pause => SentryRemoteKey::Pause,
+        }
+    }
+}
+
+#[derive(Debug, Subcommand)]
+enum SentryIoT {
+    /// Send one verifiable remote key to a paired Roku resource (reviewed flow).
+    Key {
+        /// Resource ID from the node's Sentry configuration.
+        resource_id: String,
+        #[arg(value_enum)]
+        key: RemoteKeyArg,
+    },
+    /// Launch an application on a paired Roku resource (reviewed flow).
+    Launch {
+        resource_id: String,
+        /// ECP application ID, e.g. `12` for Netflix.
+        app_id: String,
+    },
+    /// Hash, stage and submit one document to a configured printer (reviewed flow).
+    ///
+    /// The file is hashed (SHA-256), its format is sniffed and refused when not
+    /// printable, and it is staged atomically into the printer's configured
+    /// spool directory before any intent is prepared.
+    Print {
+        resource_id: String,
+        /// Local document to print.
+        file: std::path::PathBuf,
+        /// Declared page count, 1..=9999.
+        #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u16).range(1..=9999))]
+        pages: u16,
+    },
+    /// Probe one configured printer and print its driver plan. Read-only: the
+    /// planned command line is data for the operator and is never executed.
+    PrinterDoctor {
+        resource_id: String,
+    },
+}
+
 impl Command {
     /// The daemon request this command makes, or `None` when it makes none.
     ///
@@ -291,6 +384,27 @@ impl Command {
                 resource_id: resource_id.clone(),
                 command: action.command(),
             },
+            Self::Sentry { action } => match action {
+                SentryIoT::Key { resource_id, key } => ControlRequest::SentryPrepare {
+                    resource_id: resource_id.clone(),
+                    command: archie_core::control::SentryCommand::RemoteKey { key: key.name() },
+                },
+                SentryIoT::Launch {
+                    resource_id,
+                    app_id,
+                } => ControlRequest::SentryPrepare {
+                    resource_id: resource_id.clone(),
+                    command: archie_core::control::SentryCommand::AppLaunch {
+                        app_id: app_id.clone(),
+                    },
+                },
+                SentryIoT::PrinterDoctor { resource_id } => ControlRequest::SentryPrinterDoctor {
+                    resource_id: resource_id.clone(),
+                },
+                // `print` needs local staging before the intent exists; main()
+                // builds its request after staging, so there is none here.
+                SentryIoT::Print { .. } => return None,
+            },
             Self::SentryReceipt { intent_id } => ControlRequest::SentryReceipt {
                 intent_id: intent_id.clone(),
             },
@@ -303,7 +417,9 @@ impl Command {
             Self::Metrics => ControlRequest::Metrics,
             Self::Audit { limit } => ControlRequest::Audit { limit: *limit },
             Self::Ping => ControlRequest::Ping,
-            Self::Enrol { .. } | Self::SentryNetworkAnalyze { .. } => return None,
+            Self::Enrol { .. } | Self::SentryNetworkAnalyze { .. } | Self::ContextFeed { .. } => {
+                return None
+            }
         })
     }
 }
@@ -736,11 +852,31 @@ async fn main() -> std::process::ExitCode {
         None => StatePaths::from_env(),
     };
 
+    // `sentry print` stages the document locally before its intent can exist:
+    // the SHA-256 of the staged bytes is part of the prepared command.
+    let request = match &cli.command {
+        Command::Sentry {
+            action:
+                SentryIoT::Print {
+                    resource_id,
+                    file,
+                    pages,
+                },
+        } => match prepare_print_request(&paths, resource_id, file, *pages) {
+            Ok(request) => Some(request),
+            Err(message) => {
+                eprintln!("archie: {message}");
+                return std::process::ExitCode::FAILURE;
+            }
+        },
+        command => command.to_request(),
+    };
+
     // Local commands never reach the daemon, and `enrol` in particular must work with
     // it down: a node that belongs to no fabric is one whose daemon is reporting a
     // degraded boot stage, and telling somebody to start the daemon first would be
     // telling them to fix the thing they are trying to fix.
-    let Some(request) = cli.command.to_request() else {
+    let Some(request) = request else {
         return match &cli.command {
             Command::Enrol { owner_key } => enrol(&paths, owner_key.as_deref(), cli.json),
             Command::SentryNetworkAnalyze {
@@ -748,6 +884,23 @@ async fn main() -> std::process::ExitCode {
                 input,
                 baseline,
             } => analyze_network(scope, input, baseline.as_deref(), cli.json),
+            Command::ContextFeed {
+                watchdog_dir,
+                out,
+                lan,
+                passive,
+                poll_ms,
+                once,
+            } => context_feed(
+                &paths,
+                watchdog_dir.as_deref(),
+                out.as_deref(),
+                lan.as_deref(),
+                passive.as_deref(),
+                *poll_ms,
+                *once,
+                cli.json,
+            ),
             other => local_command(other, &workstation_root(cli.root.as_deref()), cli.json).await,
         };
     };
@@ -760,7 +913,13 @@ async fn main() -> std::process::ExitCode {
         }
     };
 
-    if matches!(cli.command, Command::SentryExecute { .. }) {
+    if matches!(
+        cli.command,
+        Command::SentryExecute { .. }
+            | Command::Sentry {
+                action: SentryIoT::Key { .. } | SentryIoT::Launch { .. } | SentryIoT::Print { .. },
+            }
+    ) {
         return review_and_execute(&mut stream, &request, cli.json).await;
     }
 
@@ -839,6 +998,211 @@ fn analyze_network(
         }
         Err(error) => {
             eprintln!("archie: {error}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+/// Stage the document into the printer's configured spool directory, then build
+/// the prepare request for the reviewed flow. The daemon decides authority; the
+/// CLI only ever hands it a typed intent whose bytes are already in place.
+fn prepare_print_request(
+    paths: &StatePaths,
+    resource_id: &str,
+    file: &std::path::Path,
+    pages: u16,
+) -> Result<ControlRequest, String> {
+    let config = archie_core::config::ArchieConfig::load(paths.main_config())
+        .map_err(|e| format!("cannot load configuration: {e}"))?;
+    let printer = config
+        .sentry
+        .printers
+        .iter()
+        .find(|p| p.resource_id == resource_id)
+        .ok_or_else(|| "printer resource is not configured".to_owned())?;
+    let spool = printer
+        .spool_dir
+        .as_deref()
+        .ok_or_else(|| "printer resource has no spool_dir configured".to_owned())?;
+    let (sha256, format) =
+        archie_core::sentry::stage_print_document(std::path::Path::new(spool), file)?;
+    Ok(ControlRequest::SentryPrepare {
+        resource_id: resource_id.to_owned(),
+        command: archie_core::control::SentryCommand::PrintSubmit {
+            sha256,
+            format,
+            pages,
+        },
+    })
+}
+
+/// One pass (or a poll loop) of context-feed construction. Entirely local: the
+/// watchdog directory, the optional exports and the output segments are files.
+/// Sentry execution receipts would need the daemon's journal, which has no
+/// offline reader; that source is reported as skipped rather than faked.
+fn context_feed(
+    paths: &StatePaths,
+    watchdog_dir: Option<&std::path::Path>,
+    out: Option<&std::path::Path>,
+    lan: Option<&std::path::Path>,
+    passive: Option<&std::path::Path>,
+    poll_ms: Option<u64>,
+    once: bool,
+    json: bool,
+) -> std::process::ExitCode {
+    use archie_core::control::sentry_feed::{
+        dedupe_events, from_lan_inventory, from_passive_network, FeedWriter, WatchdogReader,
+        MAX_INPUT_BYTES,
+    };
+    use std::io::Read;
+
+    fn read_bounded(path: &std::path::Path, what: &str) -> Result<String, String> {
+        let file = std::fs::File::open(path).map_err(|_| format!("cannot open {what}"))?;
+        if !file
+            .metadata()
+            .map_err(|_| format!("cannot inspect {what}"))?
+            .is_file()
+        {
+            return Err(format!("{what} must be a regular file"));
+        }
+        let mut bytes = Vec::new();
+        file.take((MAX_INPUT_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)
+            .map_err(|_| format!("cannot read {what}"))?;
+        if bytes.len() > MAX_INPUT_BYTES {
+            return Err(format!("{what} too large"));
+        }
+        String::from_utf8(bytes).map_err(|_| format!("{what} must be UTF-8"))
+    }
+
+    let run = || -> Result<(), String> {
+        // Flags win; absent flags fall back to [sentry.context_feed] config.
+        let configured = if watchdog_dir.is_none() || out.is_none() || poll_ms.is_none() {
+            Some(
+                archie_core::config::ArchieConfig::load(paths.main_config())
+                    .map_err(|e| format!("cannot load configuration: {e}"))?,
+            )
+        } else {
+            None
+        };
+        let feed_config = configured
+            .as_ref()
+            .and_then(|config| config.sentry.context_feed.as_ref());
+        let watchdog_dir = watchdog_dir
+            .map(std::path::PathBuf::from)
+            .or_else(|| feed_config.map(|c| std::path::PathBuf::from(&c.watchdog_dir)))
+            .ok_or_else(|| {
+                "no watchdog directory: pass --watchdog-dir or configure [sentry.context_feed]"
+                    .to_owned()
+            })?;
+        let out = out
+            .map(std::path::PathBuf::from)
+            .or_else(|| feed_config.map(|c| std::path::PathBuf::from(&c.out_dir)))
+            .ok_or_else(|| {
+                "no output directory: pass --out or configure [sentry.context_feed]".to_owned()
+            })?;
+        let poll_ms = poll_ms
+            .or(feed_config.map(|c| c.poll_ms))
+            .unwrap_or(5000);
+        if !(500..=60000).contains(&poll_ms) {
+            return Err("poll_ms must be within 500..=60000".to_owned());
+        }
+        let lan_text = lan
+            .map(|path| read_bounded(path, "lan inventory"))
+            .transpose()?;
+        let passive_text = passive
+            .map(|path| read_bounded(path, "passive network report"))
+            .transpose()?;
+
+        let mut reader = WatchdogReader::new(&watchdog_dir);
+        let mut writer = FeedWriter::open(&out)
+            .map_err(|_| "cannot open the feed output directory".to_owned())?;
+        // Cross-run replay suppression. WatchdogReader cursors are in-memory,
+        // so a restarted process re-reads unconsumed files; the persisted id
+        // set drops events whose content is identical to one already written.
+        // Seeding file offsets across processes would require feed.rs changes,
+        // which are out of scope.
+        let state_path = out.join("context-feed-state.json");
+        const MAX_REMEMBERED_IDS: usize = 8192;
+        let mut remembered: std::collections::VecDeque<String> = std::fs::read_to_string(&state_path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<Vec<String>>(&text).ok())
+            .unwrap_or_default()
+            .into_iter()
+            .take(MAX_REMEMBERED_IDS)
+            .collect();
+        let mut known: std::collections::BTreeSet<String> = remembered.iter().cloned().collect();
+        let persist_state = |remembered: &std::collections::VecDeque<String>| {
+            let tmp = state_path.with_extension("json.tmp");
+            if let Ok(text) = serde_json::to_string(&remembered) {
+                if std::fs::write(&tmp, text).is_ok() {
+                    let _ = std::fs::rename(&tmp, &state_path);
+                }
+            }
+        };
+        loop {
+            let mut events = reader
+                .poll()
+                .map_err(|_| "cannot read the watchdog directory".to_owned())?;
+            if let Some(text) = &lan_text {
+                events.extend(
+                    from_lan_inventory(text)
+                        .map_err(|e| format!("lan inventory rejected: {e}"))?,
+                );
+            }
+            if let Some(text) = &passive_text {
+                events.extend(
+                    from_passive_network(text)
+                        .map_err(|e| format!("passive network report rejected: {e}"))?,
+                );
+            }
+            let mut written = 0u64;
+            for event in dedupe_events(events) {
+                if !known.insert(event.event_id.clone()) {
+                    continue;
+                }
+                writer
+                    .append(&event)
+                    .map_err(|e| format!("cannot append a feed event: {e}"))?;
+                remembered.push_back(event.event_id.clone());
+                if remembered.len() > MAX_REMEMBERED_IDS {
+                    if let Some(evicted) = remembered.pop_front() {
+                        known.remove(&evicted);
+                    }
+                }
+                written += 1;
+            }
+            persist_state(&remembered);
+            let malformed = reader.malformed_lines();
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "events_written": written,
+                        "malformed_lines": malformed,
+                        "segment": writer.segment_index(),
+                        "out": out.display().to_string(),
+                        "execution_receipts": "skipped: the Sentry journal has no offline reader",
+                    })
+                );
+            } else {
+                println!(
+                    "context feed: {written} events written, {malformed} malformed lines skipped (segment {:06} in {})",
+                    writer.segment_index(),
+                    out.display()
+                );
+                println!("sentry execution receipts: skipped (the journal has no offline reader)");
+            }
+            if once {
+                return Ok(());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(poll_ms));
+        }
+    };
+    match run() {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(message) => {
+            eprintln!("archie: {message}");
             std::process::ExitCode::FAILURE
         }
     }
@@ -942,6 +1306,14 @@ fn render(response: &ControlResponse) -> String {
             "home: {}\nstate: {} {}\navailable: {}\nprovider reported: {}\nsource: HA cache (freshness not guaranteed)\n",
             snapshot.resource_id, snapshot.state, snapshot.unit.as_deref().unwrap_or(""),
             snapshot.available, snapshot.reported_at.as_millis()),
+        ControlResponse::SentryPrinterDoctor {
+            resource_id,
+            tier,
+            detail,
+            planned_command_line,
+        } => format!(
+            "printer-doctor: {resource_id}\ntier: {tier}\ndetail: {detail}\nplan: {planned_command_line}\n(read-only probe; nothing was installed or executed)\n"
+        ),
         ControlResponse::SentryPrepared { intent, digest } => format!("prepared {} for {}\ndigest: {digest}\n", intent.intent_id, intent.resource_id),
         ControlResponse::SentryResult(result) => format!("operation {}: {:?}\nreceipt: {}\n", result.operation_id, result.status, result.intent_id),
         ControlResponse::SentryCancelled => "Sentry operation cancelled\n".into(),
@@ -1685,5 +2057,84 @@ mod tests {
         }
         .to_request()
         .is_none());
+    }
+
+    /// The IoT key/launch commands prepare typed intents; they never carry an
+    /// endpoint and never bypass the reviewed flow.
+    #[test]
+    fn sentry_iot_commands_map_to_typed_intents() {
+        use archie_core::control::SentryCommand;
+        let key = Command::Sentry {
+            action: SentryIoT::Key {
+                resource_id: "living-room-tv".into(),
+                key: RemoteKeyArg::PowerOff,
+            },
+        }
+        .to_request()
+        .unwrap();
+        assert_eq!(key.name(), "sentry-prepare");
+        assert!(key.is_mutating());
+        assert_eq!(
+            key,
+            ControlRequest::SentryPrepare {
+                resource_id: "living-room-tv".into(),
+                command: SentryCommand::RemoteKey {
+                    key: archie_core::control::SentryRemoteKey::PowerOff,
+                },
+            }
+        );
+        let launch = Command::Sentry {
+            action: SentryIoT::Launch {
+                resource_id: "living-room-tv".into(),
+                app_id: "12".into(),
+            },
+        }
+        .to_request()
+        .unwrap();
+        assert_eq!(
+            launch,
+            ControlRequest::SentryPrepare {
+                resource_id: "living-room-tv".into(),
+                command: SentryCommand::AppLaunch { app_id: "12".into() },
+            }
+        );
+        let doctor = Command::Sentry {
+            action: SentryIoT::PrinterDoctor {
+                resource_id: "office-printer".into(),
+            },
+        }
+        .to_request()
+        .unwrap();
+        assert_eq!(doctor.name(), "sentry-printer-doctor");
+        assert!(
+            !doctor.is_mutating(),
+            "printer-doctor is a read-only probe"
+        );
+    }
+
+    /// `print` stages locally before its intent exists, and `context-feed` is a
+    /// purely local command: neither maps directly onto a daemon request.
+    #[test]
+    fn print_and_context_feed_are_not_plain_requests() {
+        assert!(Command::Sentry {
+            action: SentryIoT::Print {
+                resource_id: "office-printer".into(),
+                file: "doc.pdf".into(),
+                pages: 1,
+            },
+        }
+        .to_request()
+        .is_none());
+        assert!(Command::ContextFeed {
+            watchdog_dir: None,
+            out: None,
+            lan: None,
+            passive: None,
+            poll_ms: None,
+            once: true,
+        }
+        .to_request()
+        .is_none());
+    }
     }
 }

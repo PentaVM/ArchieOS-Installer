@@ -39,7 +39,12 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 /// allocate.
 pub const MAX_CONTROL_MESSAGE_BYTES: usize = 1024 * 1024;
 pub use archie_sentry::contracts::Command as SentryCommand;
+pub use archie_sentry::contracts::PrintFormat as SentryPrintFormat;
+pub use archie_sentry::contracts::RemoteKeyName as SentryRemoteKey;
 pub use archie_sentry::engine::ExecutionStatus as SentryExecutionStatus;
+/// The IRIS context-feed builders, re-exported so the CLI can run a feed pass
+/// without a direct archie-sentry dependency.
+pub use archie_sentry::feed as sentry_feed;
 
 /// A bounded, operator-scoped Nmap survey profile. These are inventory operations, not
 /// vulnerability exploitation, credential testing, arbitrary NSE script execution, or
@@ -1356,6 +1361,11 @@ pub enum ControlRequest {
     SentryHomeStatus {
         resource_id: String,
     },
+    /// Read-only Get-Printer-Attributes probe plus driver planning for one
+    /// configured printer. Never installs or executes anything.
+    SentryPrinterDoctor {
+        resource_id: String,
+    },
     /// Prepare one typed operation in an authenticated local operator session.
     SentryPrepare {
         resource_id: String,
@@ -1412,6 +1422,7 @@ impl ControlRequest {
             Self::DeviceOperations { .. } => "device-operations",
             Self::SentryPrinter { .. } => "sentry-printer",
             Self::SentryHomeStatus { .. } => "sentry-home-status",
+            Self::SentryPrinterDoctor { .. } => "sentry-printer-doctor",
             Self::SentryPrepare { .. } => "sentry-prepare",
             Self::SentryApprove { .. } => "sentry-approve",
             Self::SentryCancel => "sentry-cancel",
@@ -1629,6 +1640,14 @@ pub enum ControlResponse {
     },
     SentryHomeStatus {
         snapshot: archie_sentry::adapters::home_assistant::HomeSnapshot,
+    },
+    /// Driver-planning outcome for one configured printer. The command line is
+    /// rendered data for the operator; nothing here executes it.
+    SentryPrinterDoctor {
+        resource_id: String,
+        tier: String,
+        detail: String,
+        planned_command_line: String,
     },
     SentryPrepared {
         intent: Box<archie_sentry::contracts::Intent>,
