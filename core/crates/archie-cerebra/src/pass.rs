@@ -520,6 +520,9 @@ impl Cerebra {
             self.config.capsule_ttl_ms,
         );
         request.references = observation.context_refs.clone();
+        request.domain = observation.context_domain.clone();
+        // A ranker must never hide a cross-domain request by dropping the bad entry.
+        request.validate_domain()?;
         if let Some(model) = &self.context_utility {
             let requested = request
                 .references
@@ -587,6 +590,8 @@ fn sanitise(reason: &str) -> String {
 
 fn gateway_refusal(error: &GatewayError) -> &'static str {
     match error {
+        GatewayError::DomainRequired => "context_domain_required",
+        GatewayError::DomainMismatch => "context_domain_mismatch",
         GatewayError::Undisclosable { .. } => "context_undisclosable_at_destination",
         GatewayError::Retrieval { .. } => "context_retrieval_failed",
         GatewayError::Expired { .. } => "capsule_expired",

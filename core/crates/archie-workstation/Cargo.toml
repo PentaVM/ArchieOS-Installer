@@ -14,6 +14,7 @@ name = "archie-workstation-check"
 path = "src/bin/check.rs"
 
 [dependencies]
+archie-cerebra.workspace = true
 archie-model-runtime.workspace = true
 archie-policy.workspace = true
 archie-types.workspace = true
@@ -30,5 +31,4 @@ axum = "0.7"
 ring.workspace = true
 
 [dev-dependencies]
-archie-cerebra.workspace = true
 tempfile = "3"

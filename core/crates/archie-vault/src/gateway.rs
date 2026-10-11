@@ -100,6 +100,8 @@ pub enum PseudonymPolicy {
 /// What a caller wants context for.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ContextRequest {
+    /// Trusted runtime's retrieval boundary. None preserves historical consumers.
+    pub domain: Option<crate::ContextDomain>,
     pub task_id: String,
     pub trace_id: String,
     /// Why this context is being assembled, for the audit record.
@@ -122,6 +124,7 @@ impl ContextRequest {
         ttl_ms: i64,
     ) -> Self {
         Self {
+            domain: None,
             task_id: task_id.into(),
             trace_id: trace_id.into(),
             purpose: purpose.into(),
@@ -135,6 +138,31 @@ impl ContextRequest {
     pub fn including(mut self, reference: VaultRef) -> Self {
         self.references.push(reference);
         self
+    }
+
+    pub fn in_domain(mut self, domain: crate::ContextDomain) -> Self {
+        self.domain = Some(domain);
+        self
+    }
+
+    /// Check the whole set before ranking or decrypting any entry.
+    pub fn validate_domain(&self) -> Result<(), GatewayError> {
+        if let Some(domain) = &self.domain {
+            if self
+                .references
+                .iter()
+                .any(|reference| !domain.contains(reference))
+            {
+                return Err(GatewayError::DomainMismatch);
+            }
+        } else if self
+            .references
+            .iter()
+            .any(|reference| matches!(reference.scope(), "personal" | "work"))
+        {
+            return Err(GatewayError::DomainRequired);
+        }
+        Ok(())
     }
 }
 
@@ -185,6 +213,7 @@ impl ContextGateway {
         if request.ttl_ms <= 0 {
             return Err(GatewayError::InvalidTtl);
         }
+        request.validate_domain()?;
         let permitted = max_grade_for(request.destination);
         let mut entries = Vec::new();
         let mut credential_refs = Vec::new();
@@ -237,6 +266,7 @@ impl ContextGateway {
         }
 
         Ok(ContextCapsule {
+            domain: request.domain.clone(),
             capsule_id: format!("capsule-{}-{now_ms}", request.trace_id),
             task_id: request.task_id.clone(),
             trace_id: request.trace_id.clone(),
@@ -254,6 +284,7 @@ impl ContextGateway {
 
 /// Scoped, expiring context. Not serialisable, by design.
 pub struct ContextCapsule {
+    domain: Option<crate::ContextDomain>,
     capsule_id: String,
     task_id: String,
     trace_id: String,
@@ -375,6 +406,7 @@ impl ContextCapsule {
     /// What may be written down about this capsule.
     pub fn receipt(&self) -> CapsuleReceipt {
         CapsuleReceipt {
+            domain: self.domain.clone(),
             capsule_id: self.capsule_id.clone(),
             task_id: self.task_id.clone(),
             trace_id: self.trace_id.clone(),
@@ -408,6 +440,8 @@ impl Drop for ContextCapsule {
 /// The serialisable record of a capsule: shape, never content.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CapsuleReceipt {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain: Option<crate::ContextDomain>,
     pub capsule_id: String,
     pub task_id: String,
     pub trace_id: String,
@@ -501,6 +535,10 @@ impl AliasTable {
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum GatewayError {
+    #[error("personal and work context require an explicit domain")]
+    DomainRequired,
+    #[error("context references cross the task's domain boundary")]
+    DomainMismatch,
     #[error("capsule time-to-live must be positive")]
     InvalidTtl,
     #[error("{reference} is graded {grade} and cannot be disclosed to {destination:?}")]
