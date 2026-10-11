@@ -1,0 +1,1339 @@
+# GUI function backlog
+
+Generated from `CAPABILITY_REGISTRY.csv` (114 canonical capabilities, each path and symbol checked against the tree at the base SHA). Every `YES` and `INDIRECT` capability has a `GUI-<SUBSYSTEM>-NNN` item below, grouped by destination surface. `implementation_status` is `TODO` or `BLOCKED`; **nothing is `INTEGRATED` or `TESTED` yet**, and `design_status` is `NOT_STARTED` until the design prototype lands. Owners are `unassigned (crate X)`: the repository records no human owner per component.
+
+## Totals
+
+| ui_required | TODO | BLOCKED | n/a |
+|---|---|---|---|
+| YES | 49 | 4 | 0 |
+| INDIRECT | 32 | 3 | 0 |
+| UNDECIDED | 0 | 2 | 0 |
+| NO_GUI_NEEDED | 0 | 0 | 24 |
+
+Además: **24 ítems GUI-VAULT-001..024** (gestor de archivos, sin backend) están `BLOCKED` y no figuran en la tabla anterior porque no tienen símbolo de código que verificar.
+
+Priority legend: **P0** first vertical slice (honest liveness, privacy indicators, real progress); **P1** core daily surfaces; **P2** management; **P3** developer/advanced.
+
+
+## Surface: CONTROL_CENTER
+
+- [ ] GUI-CORE-001 — SystemSummaryCard: Node identity, hardware, capabilities, peers, modules, models, health, location
+  - Origen: `core/crates/archie-core/src/control.rs::Status` (verificado en el árbol; capacidad CAP-CORE-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: CONTROL_CENTER > SystemSummaryCard
+  - Acción/query/evento: control.status (existing newline JSON)
+  - Entrada y salida: none => StatusView
+  - Permisos: socket group `archie`; efectos: none (read-only)
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: panel fade+8px rise, 160 ms; none under Reduced Motion
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P0; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Only source of active_tasks count
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-CORE-013 — DaemonLivenessChip: Liveness and daemon version
+  - Origen: `core/crates/archie-core/src/control.rs::Ping` (verificado en el árbol; capacidad CAP-CORE-013)
+  - Estado real: IMPLEMENTED
+  - UI destino: CONTROL_CENTER > DaemonLivenessChip
+  - Acción/query/evento: control.ping
+  - Entrada y salida: none => Pong
+  - Permisos: socket group `archie`; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: panel fade+8px rise, 160 ms; none under Reduced Motion
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P0; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Drives offline/degraded/reconnect state of every surface
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-DISPLAY-001 — DisplaydClient: Read-only projection bridge for the native display
+  - Origen: `core/crates/archie-displayd/src/lib.rs::route` (verificado en el árbol; capacidad CAP-DISPLAY-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: CONTROL_CENTER > DisplaydClient
+  - Acción/query/evento: existing HTTP loopback (no mutation)
+  - Entrada y salida: HTTP GET => JSON
+  - Permisos: loopback; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: panel fade+8px rise, 160 ms; none under Reduced Motion
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-CORE-013
+  - Prioridad: P0; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Best first IPC adapter for the shell: typed, read-only, `source` is live or fixture
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-POLICY-002 — PanicPauseButton: Emergency pause: refuse all new authority
+  - Origen: `core/crates/archie-policy/src/lib.rs::set_emergency_pause` (verificado en el árbol; capacidad CAP-POLICY-002)
+  - Estado real: IMPLEMENTED
+  - UI destino: CONTROL_CENTER > PanicPauseButton
+  - Acción/query/evento: BLOCKED: no caller and no ControlRequest exposes it (grep)
+  - Entrada y salida: bool => engine state
+  - Permisos: operator; efectos: blocks all grants
+  - Estados: design-only until unblocked; idle/loading/success/empty/error/offline
+  - Motion: panel fade+8px rise, 160 ms; none under Reduced Motion
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-POLICY-001
+  - Prioridad: P0; implementación: BLOCKED; diseño: NOT_STARTED
+  - Nota: Do not draw a pause button that does nothing; DESIGN_ONLY until IPC exists
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-DISPLAY-002 — ResourceGauges: PSI pressure and thermals read locally; Unavailable{reason} when unmeasured
+  - Origen: `core/crates/archie-displayd/src/kernel.rs::KernelSnapshot` (verificado en el árbol; capacidad CAP-DISPLAY-002)
+  - Estado real: IMPLEMENTED
+  - UI destino: CONTROL_CENTER > ResourceGauges
+  - Acción/query/evento: GET /api/kernel
+  - Entrada y salida: none => KernelSnapshot
+  - Permisos: loopback; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: panel fade+8px rise, 160 ms; none under Reduced Motion
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-DISPLAY-001
+  - Prioridad: P1; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Unmeasured must not look like idle (dashed rule)
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-CORE-002 — FabricTopologyView: Capability to nodes graph and resource totals across the fabric
+  - Origen: `core/crates/archie-core/src/control.rs::Topology` (verificado en el árbol; capacidad CAP-CORE-002)
+  - Estado real: IMPLEMENTED
+  - UI destino: CONTROL_CENTER > FabricTopologyView
+  - Acción/query/evento: control.topology
+  - Entrada y salida: none => capabilities,nodes,totals
+  - Permisos: socket group `archie`; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: panel fade+8px rise, 160 ms; none under Reduced Motion
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-CORE-001
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-CORE-005 — PeerList: Fabric peers with trust and reachability
+  - Origen: `core/crates/archie-core/src/control.rs::Peers` (verificado en el árbol; capacidad CAP-CORE-005)
+  - Estado real: IMPLEMENTED
+  - UI destino: CONTROL_CENTER > PeerList
+  - Acción/query/evento: control.peers
+  - Entrada y salida: none => PeerView[]
+  - Permisos: socket group `archie`; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: panel fade+8px rise, 160 ms; none under Reduced Motion
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-CORE-001
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-CORE-010 — BootStageTimeline: Boot report: stages and degraded reasons
+  - Origen: `core/crates/archie-core/src/control.rs::Boot` (verificado en el árbol; capacidad CAP-CORE-010)
+  - Estado real: IMPLEMENTED
+  - UI destino: CONTROL_CENTER > BootStageTimeline
+  - Acción/query/evento: control.boot
+  - Entrada y salida: none => BootReport
+  - Permisos: socket group `archie`; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: panel fade+8px rise, 160 ms; none under Reduced Motion
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-CORE-001
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-CORE-011 — ResourceGauges: Metrics snapshot
+  - Origen: `core/crates/archie-core/src/control.rs::Metrics` (verificado en el árbol; capacidad CAP-CORE-011)
+  - Estado real: IMPLEMENTED
+  - UI destino: CONTROL_CENTER > ResourceGauges
+  - Acción/query/evento: control.metrics
+  - Entrada y salida: none => MetricSnapshot
+  - Permisos: socket group `archie`; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: panel fade+8px rise, 160 ms; none under Reduced Motion
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-CORE-001
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-CORE-014 — DaemonLivenessChip: Daemon lifecycle: boot, control server, executor reconciliation
+  - Origen: `core/crates/archied/src/main.rs::main` (verificado en el árbol; capacidad CAP-CORE-014)
+  - Estado real: IMPLEMENTED
+  - UI destino: CONTROL_CENTER > DaemonLivenessChip
+  - Acción/query/evento: n/a
+  - Entrada y salida: argv => process
+  - Permisos: root/archie; efectos: serves control socket
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: panel fade+8px rise, 160 ms; none under Reduced Motion
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-CORE-013
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Nota: GUI observes liveness; it does not start/stop archied
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-FABRIC-001 — PeerList: Fabric peers and trust
+  - Origen: `core/crates/archie-fabric/src/discovery.rs::Fabric` (verificado en el árbol; capacidad CAP-FABRIC-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: CONTROL_CENTER > PeerList
+  - Acción/query/evento: CAP-CORE-005
+  - Entrada y salida: peers => events
+  - Permisos: membership cert; efectos: network
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: panel fade+8px rise, 160 ms; none under Reduced Motion
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+
+## Surface: ACTIVITY_CENTER
+
+- [ ] GUI-BRIDGE-002 — JobProgressList: Long bridge jobs: list, status, cancel
+  - Origen: `core/crates/archie-mcp-server/src/jobs.rs::specs` (verificado en el árbol; capacidad CAP-BRIDGE-002)
+  - Estado real: IMPLEMENTED
+  - UI destino: ACTIVITY_CENTER > JobProgressList
+  - Acción/query/evento: MCP tool call or in-process equivalent
+  - Entrada y salida: bridge,job => state
+  - Permisos: Effect::Acts for cancel; efectos: cancel stops after current iteration
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: row insert slide 140 ms; progress bar tied to real progress only
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P0; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Real progress + cancel; best first end-to-end Activity Center candidate
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-POLICY-001 — AuthorizationPrompt: Capability request to Decision (grant/deny/escalate) with expiring Lease
+  - Origen: `core/crates/archie-policy/src/lib.rs::PolicyEngine` (verificado en el árbol; capacidad CAP-POLICY-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: ACTIVITY_CENTER > AuthorizationPrompt
+  - Acción/query/evento: BLOCKED: no control request lets a human answer an escalation
+  - Entrada y salida: CapabilityRequest => DecisionRecord
+  - Permisos: Scope/Resource/Action; efectos: issues leases
+  - Estados: design-only until unblocked; idle/loading/success/empty/error/offline
+  - Motion: row insert slide 140 ms; progress bar tied to real progress only
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-CORE-012
+  - Prioridad: P0; implementación: BLOCKED; diseño: NOT_STARTED
+  - Nota: GUI shows escalations; the answer must return to Policy and never be assumed
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-CORE-012 — AuditTimeline: Recent audit records (decisions, grants, refusals)
+  - Origen: `core/crates/archie-core/src/control.rs::Audit` (verificado en el árbol; capacidad CAP-CORE-012)
+  - Estado real: IMPLEMENTED
+  - UI destino: ACTIVITY_CENTER > AuditTimeline
+  - Acción/query/evento: control.audit
+  - Entrada y salida: limit => events[]
+  - Permisos: socket group `archie`; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: row insert slide 140 ms; progress bar tied to real progress only
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-CORE-001
+  - Prioridad: P1; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Source of truth for Policy decisions; GUI must not synthesize history
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-DESK-002 — JobProgressList: Deliver bridge results to the person's computer
+  - Origen: `core/crates/archie-mcp-server/src/delivery.rs::specs` (verificado en el árbol; capacidad CAP-DESK-002)
+  - Estado real: IMPLEMENTED
+  - UI destino: ACTIVITY_CENTER > JobProgressList
+  - Acción/query/evento: MCP
+  - Entrada y salida: files => delivery
+  - Permisos: key + allowed kinds; efectos: writes remote files
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: row insert slide 140 ms; progress bar tied to real progress only
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-DESK-001
+  - Prioridad: P1; implementación: TODO; diseño: NOT_STARTED
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-EXEC-001 — JobProgressList: Task states known to the executor
+  - Origen: `core/crates/archie-executord/src/supervisor.rs::TaskRecord` (verificado en el árbol; capacidad CAP-EXEC-002)
+  - Estado real: IMPLEMENTED
+  - UI destino: ACTIVITY_CENTER > JobProgressList
+  - Acción/query/evento: BLOCKED: no ControlRequest lists tasks (Status exposes only active_tasks)
+  - Entrada y salida: none => TaskRecord[]
+  - Permisos: archied only; efectos: none
+  - Estados: design-only until unblocked; idle/loading/success/empty/error/offline
+  - Motion: row insert slide 140 ms; progress bar tied to real progress only
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-CORE-001
+  - Prioridad: P1; implementación: BLOCKED; diseño: NOT_STARTED
+  - Nota: Gap: Activity Center cannot list real tasks yet
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-OBS-001 — AuditTimeline: Audit event model with outcomes
+  - Origen: `core/crates/archie-observability/src/audit.rs::AuditEvent` (verificado en el árbol; capacidad CAP-OBS-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: ACTIVITY_CENTER > AuditTimeline
+  - Acción/query/evento: CAP-CORE-012
+  - Entrada y salida: event => log
+  - Permisos: none; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: row insert slide 140 ms; progress bar tied to real progress only
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P1; implementación: TODO; diseño: NOT_STARTED
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-STAGE-003 — AgentActionFeed: Sealed leased input actions (click, drag, scroll, text, key, stroke, snapshot)
+  - Origen: `core/crates/archie-stage/src/action.rs::StageAction` (verificado en el árbol; capacidad CAP-STAGE-003)
+  - Estado real: IMPLEMENTED
+  - UI destino: ACTIVITY_CENTER > AgentActionFeed
+  - Acción/query/evento: stage.events receipts
+  - Entrada y salida: ActRequest => ActOutcome
+  - Permisos: Lease per op; efectos: moves pointer/keys in Stage
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: row insert slide 140 ms; progress bar tied to real progress only
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-STAGE-001
+  - Prioridad: P1; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Feed shows verbs/app ids/counts only, never typed text (STAGE.md rule 6)
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-VOICE-002 — AgentActionFeed: Tools the model may propose; carried out through the Stage gate
+  - Origen: `core/crates/archie-voice/src/tools.rs::os_control` (verificado en el árbol; capacidad CAP-VOICE-002)
+  - Estado real: IMPLEMENTED
+  - UI destino: ACTIVITY_CENTER > AgentActionFeed
+  - Acción/query/evento: stage.events
+  - Entrada y salida: ToolCall => Stage request
+  - Permisos: Stage lease; efectos: via Stage gate
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: row insert slide 140 ms; progress bar tied to real progress only
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-STAGE-003
+  - Prioridad: P1; implementación: TODO; diseño: NOT_STARTED
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-IRIS-002 — AgentActionFeed: IRIS proposal checked against the live stage and turned into a gated Stage request
+  - Origen: `core/crates/archie-iris-bridge/src/lib.rs::ProposedAction` (verificado en el árbol; capacidad CAP-IRIS-003)
+  - Estado real: IMPLEMENTED
+  - UI destino: ACTIVITY_CENTER > AgentActionFeed
+  - Acción/query/evento: stage.events
+  - Entrada y salida: proposal => Stage request
+  - Permisos: Stage lease; efectos: none until Policy admits
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: row insert slide 140 ms; progress bar tied to real progress only
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-STAGE-003
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-MCP-002 — AgentActionFeed: Admission gate every outbound MCP tool call passes
+  - Origen: `core/crates/archie-mcp/src/gate.rs::McpGate` (verificado en el árbol; capacidad CAP-MCP-002)
+  - Estado real: IMPLEMENTED
+  - UI destino: ACTIVITY_CENTER > AgentActionFeed
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: ToolProposal => Admission
+  - Permisos: CallerAuthority; efectos: calls external MCP server
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: row insert slide 140 ms; progress bar tied to real progress only
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-POLICY-001
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Receipts feed the Activity Center; no extra approve button
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-REM-001 — RemStatusCard: Nightly REM: pause jobs, learn from verified work, delete day windows, resume
+  - Origen: `core/crates/archie-rem/src/main.rs::main` (verificado en el árbol; capacidad CAP-REM-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: ACTIVITY_CENTER > RemStatusCard
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: config => report
+  - Permisos: night window; efectos: pauses jobs; shreds buffers
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: row insert slide 140 ms; progress bar tied to real progress only
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Status only in first GUI; no manual trigger until a Policy path exists
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-SEALED-002 — DisclosureReceiptList: Task-bound expiring capsules; the only door from the store to a model
+  - Origen: `core/crates/archie-vault/src/gateway.rs::ContextGateway` (verificado en el árbol; capacidad CAP-SEALED-003)
+  - Estado real: IMPLEMENTED
+  - UI destino: ACTIVITY_CENTER > DisclosureReceiptList
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: ContextRequest => ContextCapsule
+  - Permisos: task + grade; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: row insert slide 140 ms; progress bar tied to real progress only
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-SEALED-002
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Show receipts (what was disclosed, to whom), not contents
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-SEALED-003 — DisclosureReceiptList: Replaces secrets/emails/phones/RUT with stand-ins before cloud egress
+  - Origen: `core/crates/archie-vault/src/veil.rs::Veil` (verificado en el árbol; capacidad CAP-SEALED-004)
+  - Estado real: IMPLEMENTED
+  - UI destino: ACTIVITY_CENTER > DisclosureReceiptList
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: text => Veiled
+  - Permisos: none; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: row insert slide 140 ms; progress bar tied to real progress only
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-SEALED-003
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Nota: The table that reverses stand-ins never leaves the node
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+
+## Surface: DOCK
+
+- [ ] GUI-DISPLAY-003 — DockAppModel: Applications this machine can open, running state, operable-by-Archie flag
+  - Origen: `display/native/src/AppCatalog.h::AppCatalog` (verificado en el árbol; capacidad CAP-DISPLAY-003)
+  - Estado real: IMPLEMENTED
+  - UI destino: DOCK > DockAppModel
+  - Acción/query/evento: reuse C++ class or port logic (QML cannot exec)
+  - Entrada y salida: id => launch
+  - Permisos: person's own action; efectos: starts a process as the user
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: launch bounce replaced by real launched signal; none under Reduced Motion
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P0; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Existing Forge scene; Dock/Launcher reuse its semantics; launch is a person's action, not an agent's
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+
+## Surface: LAUNCHER
+
+- [ ] GUI-SEARCH-001 — UniversalSearchProvider: Web search through the admission gate
+  - Origen: `core/crates/archie-search/src/main.rs::main` (verificado en el árbol; capacidad CAP-SEARCH-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: LAUNCHER > UniversalSearchProvider
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: query => results
+  - Permisos: search capability; efectos: network egress
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: elastic open 180 ms; instant under Reduced Motion
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P3; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Never auto-search from typing in the launcher
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+
+## Surface: WORKSPACE
+
+- [ ] GUI-STAGE-001 — StageWindowList: Window and authority events from the Archie Stage compositor
+  - Origen: `core/crates/archie-stage/src/protocol.rs::StageEvent` (verificado en el árbol; capacidad CAP-STAGE-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: WORKSPACE > StageWindowList
+  - Acción/query/evento: stage.events (existing JSON lines; commands HMAC-sealed)
+  - Entrada y salida: socket stream => StageEvent
+  - Permisos: control.sock owner; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: window open/close mapped to real surface events
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P1; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Read-only mirror (StageWorld); UI is a client of events, never a sealer
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+
+## Surface: ORB_CONTEXT
+
+- [ ] GUI-STAGE-002 — HandoverIndicator: Who holds input: autonomous / operator / paused
+  - Origen: `core/crates/archie-stage/src/protocol.rs::AuthorityMode` (verificado en el árbol; capacidad CAP-STAGE-002)
+  - Estado real: IMPLEMENTED
+  - UI destino: ORB_CONTEXT > HandoverIndicator
+  - Acción/query/evento: stage.events
+  - Entrada y salida: event => mode
+  - Permisos: none; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: non-destructive crossfade; Orb render untouched
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-STAGE-001
+  - Prioridad: P0; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Person always wins; indicator must never imply Archie can take it back
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-VOICE-001 — VoiceSessionControl: Speech-to-speech conversation; live browser page with IRIS eyes
+  - Origen: `core/crates/archie-voice/src/bin/archie-voice.rs::main` (verificado en el árbol; capacidad CAP-VOICE-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: ORB_CONTEXT > VoiceSessionControl
+  - Acción/query/evento: ADAPTER_TODO (process control; no daemon API)
+  - Entrada y salida: audio => audio
+  - Permisos: mic consent; efectos: mic/camera/speaker
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: non-destructive crossfade; Orb render untouched
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P0; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Mic/camera indicator mandatory; live/page.html already exists (PRESERVE)
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-CEREBRA-002 — ContextDomainBadge: Personal vs work context isolation through the loop
+  - Origen: `core/crates/archie-cerebra/src/pillars.rs::PillarContext` (verificado en el árbol; capacidad CAP-CEREBRA-002)
+  - Estado real: IMPLEMENTED
+  - UI destino: ORB_CONTEXT > ContextDomainBadge
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: domain => context
+  - Permisos: ContextDomain; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: non-destructive crossfade; Orb render untouched
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-SEALED-005
+  - Prioridad: P1; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Domain badge must be visible wherever Work data is shown
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-DISPLAY-004 — ObservatoryViewSwitch: Allow-listed view controls for the Observatory
+  - Origen: `display/native/src/DisplayControl.cpp::DisplayControl` (verificado en el árbol; capacidad CAP-DISPLAY-004)
+  - Estado real: IMPLEMENTED
+  - UI destino: ORB_CONTEXT > ObservatoryViewSwitch
+  - Acción/query/evento: existing TCP 7668
+  - Entrada y salida: JSON line => view change
+  - Permisos: loopback; efectos: view only
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: non-destructive crossfade; Orb render untouched
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P1; implementación: TODO; diseño: NOT_STARTED
+  - Nota: PORT CONFLICT: owner-companion and Wizard also use 7668 (see AUDIT)
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-VOICE-003 — VoiceToolReceipts: Live-session tools
+  - Origen: `core/crates/archie-voice/src/live/mod.rs::tools` (verificado en el árbol; capacidad CAP-VOICE-003)
+  - Estado real: IMPLEMENTED
+  - UI destino: ORB_CONTEXT > VoiceToolReceipts
+  - Acción/query/evento: existing TCP 7668 DisplayControl
+  - Entrada y salida: ToolCall => result
+  - Permisos: search capability gate; efectos: view control on 127.0.0.1:7668; memory write; web read
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: non-destructive crossfade; Orb render untouched
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-DISPLAY-004
+  - Prioridad: P1; implementación: TODO; diseño: NOT_STARTED
+  - Nota: identify must never name people from faces (ARCHIE.md)
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+
+## Surface: VAULT
+
+- [ ] GUI-DESK-001 — DeliveriesLocation: Receives delivered results into ~/Archie/<project>/stages/<stage>/ and latest/
+  - Origen: `core/crates/archie-desk/src/lib.rs::Desk` (verificado en el árbol; capacidad CAP-DESK-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: VAULT > DeliveriesLocation
+  - Acción/query/evento: files on disk (index.html + stages.json)
+  - Entrada y salida: HMAC envelope => files
+  - Permisos: paired key + desk.toml; efectos: writes files; may open apps
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: see MOTION_CINEMATICS (folder enter, selection)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P0; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Natural first real Vault content: ~/Archie projects with stages
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-WORKSTATION-006 — PathBoundaryChecker: Confines operations to /archie/workspaces/<id>
+  - Origen: `core/crates/archie-workstation/src/host.rs::workspace_path` (verificado en el árbol; capacidad CAP-WS-008)
+  - Estado real: IMPLEMENTED
+  - UI destino: VAULT > PathBoundaryChecker
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: HostOperation => path or error
+  - Permisos: workspace lease; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: see MOTION_CINEMATICS (folder enter, selection)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P0; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Reuse this boundary check for Vault; do not reimplement path confinement in QML
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-CORE-020 — WorkspaceLocations: Controlled workspaces under /archie/workspaces/<id>
+  - Origen: `core/crates/archie-cli/src/main.rs::WorkspaceCommand` (verificado en el árbol; capacidad CAP-CORE-020)
+  - Estado real: IMPLEMENTED
+  - UI destino: VAULT > WorkspaceLocations
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: id => workspace
+  - Permisos: none; efectos: creates dir
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: see MOTION_CINEMATICS (folder enter, selection)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-WS-008
+  - Prioridad: P1; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Pinned locations in the Vault sidebar
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-SEALED-004 — DomainBadge: Personal vs work domain for every entry
+  - Origen: `core/crates/archie-vault/src/domain.rs::ContextDomain` (verificado en el árbol; capacidad CAP-SEALED-005)
+  - Estado real: IMPLEMENTED
+  - UI destino: VAULT > DomainBadge
+  - Acción/query/evento: n/a
+  - Entrada y salida: name => domain
+  - Permisos: none; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: see MOTION_CINEMATICS (folder enter, selection)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P1; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Vault (files) must carry the same domain notion
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-STATE-002 — SystemLocations: Filesystem layout
+  - Origen: `core/crates/archie-state/src/paths.rs::StatePaths` (verificado en el árbol; capacidad CAP-STATE-002)
+  - Estado real: IMPLEMENTED
+  - UI destino: VAULT > SystemLocations
+  - Acción/query/evento: n/a
+  - Entrada y salida: env => paths
+  - Permisos: none; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: see MOTION_CINEMATICS (folder enter, selection)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P1; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Vault must hide/lock system state paths (identity keys are 0600)
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-TOOLPACK-002 — ArchiveHandler: Safe archive unpacking with Limits
+  - Origen: `core/crates/archie-toolpack/src/unpack.rs::unpack_tar_gz` (verificado en el árbol; capacidad CAP-TOOLPACK-002)
+  - Estado real: IMPLEMENTED
+  - UI destino: VAULT > ArchiveHandler
+  - Acción/query/evento: reuse for Vault archive extract
+  - Entrada y salida: archive => files
+  - Permisos: toolpack root; efectos: writes files
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: see MOTION_CINEMATICS (folder enter, selection)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Reuse its Limits; do not write a second unpacker
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+
+## Surface: SENTRY_CENTER
+
+- [ ] GUI-SENTRY-001 — LanInventoryView: Inventory of devices on the owner's LAN (mDNS, SSDP, UPnP, Roku)
+  - Origen: `core/crates/archie-lan/src/inventory.rs::scan` (verificado en el árbol; capacidad CAP-LAN-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: SENTRY_CENTER > LanInventoryView
+  - Acción/query/evento: file FILE written by watch (existing)
+  - Entrada y salida: seconds => Inventory JSON
+  - Permisos: private CIDR only; efectos: network probes on LAN
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: state-change pulse 1x on real transition; never on a timer
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P0; implementación: TODO; diseño: NOT_STARTED
+  - Nota: modules/sentry/lan.toml worker=process; passive classification, no port scan
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-SENTRY-002 — PrivacyIndicators: Who may use a camera and when (owner-present gating)
+  - Origen: `sentry/include/sentry/camera/authority.hpp::CameraAuthority` (verificado en el árbol; capacidad CAP-SENTRY-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: SENTRY_CENTER > PrivacyIndicators
+  - Acción/query/evento: ADAPTER_TODO (C++ library; no IPC)
+  - Entrada y salida: authority change => status line
+  - Permisos: owner; efectos: gates camera
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: state-change pulse 1x on real transition; never on a timer
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P0; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Camera/mic indicators must derive from this, never from UI state
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-CORE-006 — PairedDeviceList: Locally recorded device pairing inventory (no adapter endpoint)
+  - Origen: `core/crates/archie-core/src/control.rs::Devices` (verificado en el árbol; capacidad CAP-CORE-006)
+  - Estado real: IMPLEMENTED
+  - UI destino: SENTRY_CENTER > PairedDeviceList
+  - Acción/query/evento: control.devices
+  - Entrada y salida: none => DeviceView[]
+  - Permisos: socket group `archie`; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: state-change pulse 1x on real transition; never on a timer
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-CORE-001
+  - Prioridad: P1; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Paired is not connected and not authorised: three separate badges
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-SENTRY-003 — ConsentManager: Consent for identity/association actions
+  - Origen: `sentry/include/sentry/policy/consent.hpp::ConsentLease` (verificado en el árbol; capacidad CAP-SENTRY-002)
+  - Estado real: IMPLEMENTED
+  - UI destino: SENTRY_CENTER > ConsentManager
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: IdentityRequest => verdict
+  - Permisos: owner; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: state-change pulse 1x on real transition; never on a timer
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-SENTRY-001
+  - Prioridad: P1; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Consent is explicit and revocable, never implied by a click elsewhere
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-SENTRY-009 — PrivacyIndicators: Camera worker: frames to detections
+  - Origen: `sentry/include/sentry/runtime/camera_worker.hpp::CameraWorker` (verificado en el árbol; capacidad CAP-SENTRY-008)
+  - Estado real: PARTIAL
+  - UI destino: SENTRY_CENTER > PrivacyIndicators
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: frames => tracks
+  - Permisos: camera authority; efectos: opens camera
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: state-change pulse 1x on real transition; never on a timer
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-SENTRY-001
+  - Prioridad: P1; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Needs GStreamer/ONNX; CI native-contracts job builds only the libraries
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-CORE-007 — OperationHistoryList: Durable prepared/cancelled physical-operation records; never dispatches
+  - Origen: `core/crates/archie-core/src/control.rs::DeviceOperations` (verificado en el árbol; capacidad CAP-CORE-007)
+  - Estado real: IMPLEMENTED
+  - UI destino: SENTRY_CENTER > OperationHistoryList
+  - Acción/query/evento: control.device_operations
+  - Entrada y salida: limit => DeviceOperationView[]
+  - Permisos: socket group `archie`; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: state-change pulse 1x on real transition; never on a timer
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-CORE-006
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Read-only by contract; no approve/cancel in IPC
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-SENTRY-004 — PersonGraphView: Person graph store and CLI
+  - Origen: `sentry/include/sentry/store/graph_store.hpp::GraphStore` (verificado en el árbol; capacidad CAP-SENTRY-003)
+  - Estado real: IMPLEMENTED
+  - UI destino: SENTRY_CENTER > PersonGraphView
+  - Acción/query/evento: ADAPTER_TODO (CLI only)
+  - Entrada y salida: commands => graph
+  - Permisos: owner; efectos: writes graph.tsv
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: state-change pulse 1x on real transition; never on a timer
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Sensitive fields redacted by default (--all reveals), as the CLI does
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-SENTRY-006 — CaptureSourcesView: Decides what becomes of each captured event
+  - Origen: `sentry/include/sentry/capture/activity.hpp::CapturePolicy` (verificado en el árbol; capacidad CAP-SENTRY-005)
+  - Estado real: IMPLEMENTED
+  - UI destino: SENTRY_CENTER > CaptureSourcesView
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: CaptureEvent => CaptureVerdict
+  - Permisos: owner device enrol; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: state-change pulse 1x on real transition; never on a timer
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Android/browser agents live in capture-agents/
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-SENTRY-008 — OwnerOverrideDialog: Owner takes over a decision
+  - Origen: `sentry/include/sentry/policy/override.hpp::OwnerOverride` (verificado en el árbol; capacidad CAP-SENTRY-007)
+  - Estado real: IMPLEMENTED
+  - UI destino: SENTRY_CENTER > OwnerOverrideDialog
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: override => state
+  - Permisos: owner; efectos: changes state
+  - Estados: idle/pending/confirm/progress/success/error/cancelled
+  - Motion: state-change pulse 1x on real transition; never on a timer
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-SENTRY-002
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-SENTRY-005 — HypothesisReview: Social hypotheses for the owner to confirm
+  - Origen: `sentry/include/sentry/identity/wanda.hpp::SocialHypothesis` (verificado en el árbol; capacidad CAP-SENTRY-004)
+  - Estado real: IMPLEMENTED
+  - UI destino: SENTRY_CENTER > HypothesisReview
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: evidence => hypothesis
+  - Permisos: owner; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: state-change pulse 1x on real transition; never on a timer
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P3; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Label as hypothesis, never as fact
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+
+## Surface: FORGE
+
+- [ ] GUI-BRIDGE-001 — BridgeCatalog: One plugin per app (kicad freecad blender office inkscape gimp qgis video audio obs)
+  - Origen: `core/crates/archie-bridges/src/lib.rs::Bridge` (verificado en el árbol; capacidad CAP-BRIDGE-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: FORGE > BridgeCatalog
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: BridgeTool call => Outcome
+  - Permisos: workspace; efectos: runs app automation
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: stage chip transitions on real events
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P1; implementación: TODO; diseño: NOT_STARTED
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-CORE-021 — ToolAdapterList: Inspect professional tool adapters (FreeCAD etc.)
+  - Origen: `core/crates/archie-cli/src/main.rs::ToolsCommand` (verificado en el árbol; capacidad CAP-CORE-021)
+  - Estado real: IMPLEMENTED
+  - UI destino: FORGE > ToolAdapterList
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: id => health
+  - Permisos: none; efectos: runs a smoke test
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: stage chip transitions on real events
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-TOOLPACK-001 — ToolpackManager: Signed tool catalog; verified streaming download; atomic install with rollback
+  - Origen: `core/crates/archie-toolpack/src/bin/archie-toolpack.rs::main` (verificado en el árbol; capacidad CAP-TOOLPACK-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: FORGE > ToolpackManager
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: TOOL => installed
+  - Permisos: lease + --approve; efectos: downloads and installs software
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: stage chip transitions on real events
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-POLICY-001
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Install needs explicit approval dialog showing source host + risk
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-WORKSTATION-002 — HarnessJobView: Loopback client to an external harness (UHP)
+  - Origen: `core/crates/archie-workstation/src/harness.rs::UhpClient` (verificado en el árbol; capacidad CAP-WS-004)
+  - Estado real: IMPLEMENTED
+  - UI destino: FORGE > HarnessJobView
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: UhpRequest => UhpResponse
+  - Permisos: harness; efectos: runs harness task
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: stage chip transitions on real events
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-CORE-019
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-WORKSTATION-004 — BoardView: Work-domain board bridge with egress gating
+  - Origen: `core/crates/archie-workstation/src/enterprise_bridge.rs::EnterpriseAdapter` (verificado en el árbol; capacidad CAP-WS-006)
+  - Estado real: PARTIAL
+  - UI destino: FORGE > BoardView
+  - Acción/query/evento: BLOCKED: depends on board_api mounting
+  - Entrada y salida: task => remote sync
+  - Permisos: Work domain; efectos: remote write
+  - Estados: design-only until unblocked; idle/loading/success/empty/error/offline
+  - Motion: stage chip transitions on real events
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-WS-007
+  - Prioridad: P2; implementación: BLOCKED; diseño: NOT_STARTED
+  - Nota: Santiago Rearte's bridge; do not alter semantics
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-WORKSTATION-005 — BoardView: Kanban-style task board API
+  - Origen: `core/crates/archie-workstation/src/board_api.rs::router` (verificado en el árbol; capacidad CAP-WS-007)
+  - Estado real: PARTIAL
+  - UI destino: FORGE > BoardView
+  - Acción/query/evento: BLOCKED: router referenced only by tests; no binary mounts it (grep)
+  - Entrada y salida: CreateTaskRequest/MoveTaskRequest => tasks
+  - Permisos: bearer hash; efectos: creates/moves tasks
+  - Estados: design-only until unblocked; idle/loading/success/empty/error/offline
+  - Motion: stage chip transitions on real events
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P2; implementación: BLOCKED; diseño: NOT_STARTED
+  - Nota: Do not draw a Kanban UI against an unmounted API
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-CUT-001 — RenderQueueView: Timeline render with melt
+  - Origen: `core/crates/archie-cut/src/bin/archie-cut.rs::main` (verificado en el árbol; capacidad CAP-CUT-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: FORGE > RenderQueueView
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: timeline => mp4
+  - Permisos: media folder; efectos: writes media
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: stage chip transitions on real events
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P3; implementación: TODO; diseño: NOT_STARTED
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-FORGE-001 — ForgeWorkspace: Forge module (diagnosis, patches, rollback)
+  - Origen: `modules/core/forge.toml::core.forge` (verificado en el árbol; capacidad CAP-FORGE-001)
+  - Estado real: STUB
+  - UI destino: FORGE > ForgeWorkspace
+  - Acción/query/evento: BLOCKED: worker.kind="unimplemented"
+  - Entrada y salida: none => none
+  - Permisos: none; efectos: none
+  - Estados: design-only until unblocked; idle/loading/success/empty/error/offline
+  - Motion: stage chip transitions on real events
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P3; implementación: BLOCKED; diseño: NOT_STARTED
+  - Nota: The handoff's FORGE workspace has no backend; the Observatory's Forge scene is an app launcher (CAP-DISPLAY-003)
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+
+## Surface: WATCHER_FEED
+
+- [ ] GUI-CORE-004 — ProviderHealthList: Data-provider manifests with status and known gaps
+  - Origen: `core/crates/archie-core/src/control.rs::Providers` (verificado en el árbol; capacidad CAP-CORE-004)
+  - Estado real: IMPLEMENTED
+  - UI destino: WATCHER_FEED > ProviderHealthList
+  - Acción/query/evento: control.providers
+  - Entrada y salida: none => ProviderView[],active
+  - Permisos: socket group `archie`; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: grouped entry fade 120 ms
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-CORE-001
+  - Prioridad: P1; implementación: TODO; diseño: NOT_STARTED
+  - Nota: known_gaps must be rendered: empty region = unobserved not calm
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-WATCHER-001 — WorldObservationFeed: Watcher is the Observatory's world scene (observations + providers), not a service
+  - Origen: `display/visual/include/archie/visual/scene.hpp::Watcher` (verificado en el árbol; capacidad CAP-WATCHER-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: WATCHER_FEED > WorldObservationFeed
+  - Acción/query/evento: via displayd
+  - Entrada y salida: mode => scene
+  - Permisos: none; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: grouped entry fade 120 ms
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-WORLD-001
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Naming trap: handoff WATCHER (research/alerts) vs repo Watcher (a scene). No alert/feed backend exists
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-WORLD-001 — WorldObservationFeed: Network-isolated world data adapter (seismic)
+  - Origen: `core/crates/archie-worldd/src/main.rs::main` (verificado en el árbol; capacidad CAP-WORLD-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: WATCHER_FEED > WorldObservationFeed
+  - Acción/query/evento: via displayd GET /api/world
+  - Entrada y salida: HTTPS => WorldSnapshot
+  - Permisos: DynamicUser; efectos: public egress to one URL
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: grouped entry fade 120 ms
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-DISPLAY-001
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Records carry provenance and may be fixtures
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-WORLD-002 — ProviderHealthList: 3D geospatial provider graph
+  - Origen: `core/crates/archie-geofabric/src/lib.rs::FabricPlan` (verificado en el árbol; capacidad CAP-WORLD-002)
+  - Estado real: IMPLEMENTED
+  - UI destino: WATCHER_FEED > ProviderHealthList
+  - Acción/query/evento: via displayd
+  - Entrada y salida: none => providers
+  - Permisos: loopback; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: grouped entry fade 120 ms
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P3; implementación: TODO; diseño: NOT_STARTED
+  - Nota: No World Graph exists in the repo (zero matches for world_graph / World Graph)
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+
+## Surface: SETTINGS
+
+- [ ] GUI-CORE-003 — ModuleStateList: Installed modules, state and the reason each did or did not load
+  - Origen: `core/crates/archie-core/src/control.rs::Modules` (verificado en el árbol; capacidad CAP-CORE-003)
+  - Estado real: IMPLEMENTED
+  - UI destino: SETTINGS > ModuleStateList
+  - Acción/query/evento: control.modules
+  - Entrada y salida: none => ModuleView[],load_order
+  - Permisos: socket group `archie`; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-CORE-001
+  - Prioridad: P1; implementación: TODO; diseño: NOT_STARTED
+  - Nota: 31 of 35 module manifests declare worker.kind=unimplemented: show not_implemented never a healthy empty row
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-CORE-009 — ModelRegistryList: Registered models with locality, availability and max privacy grade
+  - Origen: `core/crates/archie-core/src/control.rs::Models` (verificado en el árbol; capacidad CAP-CORE-009)
+  - Estado real: IMPLEMENTED
+  - UI destino: SETTINGS > ModelRegistryList
+  - Acción/query/evento: control.models
+  - Entrada y salida: none => ModelView[]
+  - Permisos: socket group `archie`; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-CORE-001
+  - Prioridad: P1; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Never show keys; env var names only
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-CORE-018 — ProviderManager: Inspect/configure inference providers
+  - Origen: `core/crates/archie-cli/src/main.rs::ProviderCommand` (verificado en el árbol; capacidad CAP-CORE-018)
+  - Estado real: IMPLEMENTED
+  - UI destino: SETTINGS > ProviderManager
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: id => provider state
+  - Permisos: none; efectos: writes providers.toml (env var NAME only)
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-WS-005
+  - Prioridad: P1; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Credential value is never typed in the GUI
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-MODEL-001 — ProviderManager: Provider-neutral inference transport; credentials read from env at request time
+  - Origen: `core/crates/archie-model-runtime/src/lib.rs::ProviderEndpoint` (verificado en el árbol; capacidad CAP-MODEL-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: SETTINGS > ProviderManager
+  - Acción/query/evento: CAP-CORE-018
+  - Entrada y salida: ChatRequest => reply
+  - Permisos: privacy grade; efectos: network egress
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P1; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Missing key: show not_configured never a fake connected state
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-REGISTRY-001 — ProviderHealthList: Declarative manifests for providers, modules and models; refuses display of records whose attribution is missing
+  - Origen: `core/crates/archie-registry/src/providers.rs::ProviderManifest` (verificado en el árbol; capacidad CAP-REGISTRY-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: SETTINGS > ProviderHealthList
+  - Acción/query/evento: CAP-CORE-003 / CAP-CORE-004 / CAP-CORE-009
+  - Entrada y salida: manifests => registry
+  - Permisos: none; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-CORE-004
+  - Prioridad: P1; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Exposed through the control views; attribution rule must carry into any provider card
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-WORKSTATION-003 — ProviderManager: Provider spec (env var name only)
+  - Origen: `core/crates/archie-workstation/src/provider.rs::save_provider` (verificado en el árbol; capacidad CAP-WS-005)
+  - Estado real: IMPLEMENTED
+  - UI destino: SETTINGS > ProviderManager
+  - Acción/query/evento: CAP-CORE-018
+  - Entrada y salida: ProviderSpec => file
+  - Permisos: none; efectos: writes providers.toml
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P1; implementación: TODO; diseño: NOT_STARTED
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-CORE-016 — DiagnosticsPanel: Validate workstation boundary and optional runtimes
+  - Origen: `core/crates/archie-cli/src/main.rs::Doctor` (verificado en el árbol; capacidad CAP-CORE-016)
+  - Estado real: IMPLEMENTED
+  - UI destino: SETTINGS > DiagnosticsPanel
+  - Acción/query/evento: ADAPTER_TODO (call archie_workstation::health::doctor)
+  - Entrada y salida: none => Check[]
+  - Permisos: none; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-CORE-019 — HarnessManager: External agent harnesses under their own login
+  - Origen: `core/crates/archie-cli/src/main.rs::HarnessCommand` (verificado en el árbol; capacidad CAP-CORE-019)
+  - Estado real: IMPLEMENTED
+  - UI destino: SETTINGS > HarnessManager
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: id => harness state
+  - Permisos: harness login; efectos: login delegated to harness
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-WS-004
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Archie never reads the harness login
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-CORE-022 — AudioDiagnostics: Local ASR model status and audio bridge test
+  - Origen: `core/crates/archie-cli/src/main.rs::SpeechCommand` (verificado en el árbol; capacidad CAP-CORE-022)
+  - Estado real: IMPLEMENTED
+  - UI destino: SETTINGS > AudioDiagnostics
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: none => status
+  - Permisos: mic consent; efectos: opens mic for test
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Mic test must show the privacy indicator
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-SEALED-001 — SealedAuditList: Audit log of store/disclose/remove
+  - Origen: `core/crates/archie-vault/src/store.rs::audit_log` (verificado en el árbol; capacidad CAP-SEALED-002)
+  - Estado real: IMPLEMENTED
+  - UI destino: SETTINGS > SealedAuditList
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: none => AuditEntry[]
+  - Permisos: operator; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Shows who accessed what class; never values
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-SENTRY-007 — RetentionPolicyView: Deletion/retention rules
+  - Origen: `sentry/include/sentry/identity/retention.hpp::Retention` (verificado en el árbol; capacidad CAP-SENTRY-006)
+  - Estado real: IMPLEMENTED
+  - UI destino: SETTINGS > RetentionPolicyView
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: record => tombstone
+  - Permisos: owner; efectos: deletes data
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Destructive; needs confirmation flow
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-STAGE-004 — OperableAppsPolicyView: Which apps Archie may operate and which actions per app
+  - Origen: `core/crates/archie-stage/src/policy.rs::StagePolicy` (verificado en el árbol; capacidad CAP-STAGE-004)
+  - Estado real: IMPLEMENTED
+  - UI destino: SETTINGS > OperableAppsPolicyView
+  - Acción/query/evento: ADAPTER_TODO (read file via typed adapter)
+  - Entrada y salida: toml => AppPolicy
+  - Permisos: operator; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Read-only view first; editing is a policy change needing its own design
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-STATE-001 — BackupManager: Logical DB snapshots; restore-verify creates a new database, never replaces
+  - Origen: `core/crates/archie-state/src/snapshots.rs::capture` (verificado en el árbol; capacidad CAP-STATE-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: SETTINGS > BackupManager
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: config => manifest
+  - Permisos: operator; efectos: writes snapshot
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Restore must never overwrite the running node
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-WORKSTATION-001 — DiagnosticsPanel: Workstation health checks
+  - Origen: `core/crates/archie-workstation/src/health.rs::doctor` (verificado en el árbol; capacidad CAP-WS-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: SETTINGS > DiagnosticsPanel
+  - Acción/query/evento: CAP-CORE-016
+  - Entrada y salida: none => Check[]
+  - Permisos: none; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-CORE-015 — FabricEnrolWizard: Start a fabric or join one; the only CLI write; works with daemon down
+  - Origen: `core/crates/archie-cli/src/main.rs::Enrol` (verificado en el árbol; capacidad CAP-CORE-015)
+  - Estado real: IMPLEMENTED
+  - UI destino: SETTINGS > FabricEnrolWizard
+  - Acción/query/evento: ADAPTER_TODO (local file op; no control request)
+  - Entrada y salida: owner key (private) => fabric membership
+  - Permisos: owner key; efectos: writes identity/membership files
+  - Estados: idle/pending/confirm/progress/success/error/cancelled
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-CORE-005
+  - Prioridad: P3; implementación: TODO; diseño: NOT_STARTED
+  - Nota: --owner-key is a PRIVATE key: never via argv/log/QML property; BLOCKED until a secure prompt path exists
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-CORE-017 — SessionControls: Start/stop the ArchieOS workstation target (systemd)
+  - Origen: `core/crates/archie-cli/src/main.rs::Start` (verificado en el árbol; capacidad CAP-CORE-017)
+  - Estado real: IMPLEMENTED
+  - UI destino: SETTINGS > SessionControls
+  - Acción/query/evento: ADAPTER_TODO (privileged helper; never shell-out from QML)
+  - Entrada y salida: none => exit code
+  - Permisos: systemd; efectos: starts/stops services
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P3; implementación: TODO; diseño: NOT_STARTED
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+
+## Surface: DEVTOOLS
+
+- [ ] GUI-CEREBRA-001 — CortexInspector: Turns a model proposal into a StageProposal for the gate
+  - Origen: `core/crates/archie-cerebra/src/pass.rs::propose_stage_action` (verificado en el árbol; capacidad CAP-CEREBRA-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: DEVTOOLS > CortexInspector
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: proposal => StageProposal
+  - Permisos: Policy; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-POLICY-001
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Do not expose private reasoning
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-IRIS-001 — IrisInspector: Bounded scene memory: what IRIS saw, when, and what left
+  - Origen: `core/crates/archie-iris/src/working_memory.rs::WorkingSceneMemory` (verificado en el árbol; capacidad CAP-IRIS-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: DEVTOOLS > IrisInspector
+  - Acción/query/evento: BLOCKED: no read API for IRIS state in the control protocol
+  - Entrada y salida: scene => episodes
+  - Permisos: none; efectos: none
+  - Estados: design-only until unblocked; idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P2; implementación: BLOCKED; diseño: NOT_STARTED
+  - Nota: Inference runs in external archie-iris service (README: not yet inside ArchieOS)
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-ROUTER-001 — RoutingExplainer: Explainable model selection with hard privacy disqualification
+  - Origen: `core/crates/archie-router/src/lib.rs::RoutingOutcome` (verificado en el árbol; capacidad CAP-ROUTER-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: DEVTOOLS > RoutingExplainer
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: RoutingRequest => RoutingOutcome
+  - Permisos: privacy grade; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-CORE-009
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Show why a model was chosen or disqualified
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-SIGHT-001 — IrisInspector: Find a named control through IRIS grounding and act via the Stage gate
+  - Origen: `core/crates/archie-sight/src/lib.rs::Sees` (verificado en el árbol; capacidad CAP-SIGHT-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: DEVTOOLS > IrisInspector
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: Target => Sighting
+  - Permisos: Stage lease; efectos: via Stage gate
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-STAGE-003
+  - Prioridad: P2; implementación: TODO; diseño: NOT_STARTED
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-CORE-008 — CortexInspector: Privacy-minimised Cortex correction trajectories
+  - Origen: `core/crates/archie-core/src/control.rs::CortexTrajectories` (verificado en el árbol; capacidad CAP-CORE-008)
+  - Estado real: IMPLEMENTED
+  - UI destino: DEVTOOLS > CortexInspector
+  - Acción/query/evento: control.cortex_trajectories
+  - Entrada y salida: limit => CortexTrajectoryView[]
+  - Permisos: socket group `archie`; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-CORE-001
+  - Prioridad: P3; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Debug Mode only; opaque refs stay hidden
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-CORE-023 — IrisModelVerifier: Verify IRIS manifest, checkpoint digest and tensor bounds
+  - Origen: `core/crates/archie-cli/src/main.rs::IrisCommand` (verificado en el árbol; capacidad CAP-CORE-023)
+  - Estado real: IMPLEMENTED
+  - UI destino: DEVTOOLS > IrisModelVerifier
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: paths => verdict
+  - Permisos: none; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P3; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Verification only; no retraining
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-CORTEX-001 — CortexInspector: Bounded context compiler: snapshot in, ContextBundle out
+  - Origen: `cortex/include/archie/cortex/contracts.hpp::DeterministicContextCompiler` (verificado en el árbol; capacidad CAP-CORTEX-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: DEVTOOLS > CortexInspector
+  - Acción/query/evento: cortex ipc.hpp kProtocolVersion=1
+  - Entrada y salida: GraphSnapshot+ContextRequest => ContextBundle
+  - Permisos: unix socket owner; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: CAP-CORE-008
+  - Prioridad: P3; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Carries no command, credential or lease by design
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-IRIS-003 — IrisModelVerifier: Loads and verifies the deployed reflex model
+  - Origen: `core/crates/archie-iris/src/foundry.rs::FoundryReflexModel` (verificado en el árbol; capacidad CAP-IRIS-004)
+  - Estado real: IMPLEMENTED
+  - UI destino: DEVTOOLS > IrisModelVerifier
+  - Acción/query/evento: CAP-CORE-023
+  - Entrada y salida: files => model
+  - Permisos: none; efectos: none
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P3; implementación: TODO; diseño: NOT_STARTED
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-MCP-001 — McpToolCatalog: Archie tools over MCP with clearance-filtered listing
+  - Origen: `core/crates/archie-mcp-server/src/archie.rs::ArchieToolbox` (verificado en el árbol; capacidad CAP-MCP-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: DEVTOOLS > McpToolCatalog
+  - Acción/query/evento: MCP stdio
+  - Entrada y salida: tool call => result
+  - Permisos: clearance grade; efectos: per tool
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P3; implementación: TODO; diseño: NOT_STARTED
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-MEMORY-001 — MemoryInspector: What is admitted to memory with provenance
+  - Origen: `core/crates/archie-memory/src/admission.rs::AdmissionPolicy` (verificado en el árbol; capacidad CAP-MEMORY-001)
+  - Estado real: IMPLEMENTED
+  - UI destino: DEVTOOLS > MemoryInspector
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: claim => decision
+  - Permisos: admission policy; efectos: writes memory
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P3; implementación: TODO; diseño: NOT_STARTED
+  - Nota: RFC-011 / RFC-013
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-STAGE-005 — StageConsole: Developer CLI for the Stage
+  - Origen: `core/crates/archie-stage/src/bin/archie-stage-cli.rs::main` (verificado en el árbol; capacidad CAP-STAGE-007)
+  - Estado real: IMPLEMENTED
+  - UI destino: DEVTOOLS > StageConsole
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: args => events
+  - Permisos: key file; efectos: can act on Stage
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P3; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Debug Mode only
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+- [ ] GUI-STAGE-006 — ArenaRunsView: Benchmarks of Archie doing tasks on the Stage
+  - Origen: `core/crates/archie-arena/src/bin/archie-arena.rs::main` (verificado en el árbol; capacidad CAP-STAGE-009)
+  - Estado real: IMPLEMENTED
+  - UI destino: DEVTOOLS > ArenaRunsView
+  - Acción/query/evento: ADAPTER_TODO
+  - Entrada y salida: task.toml => run report
+  - Permisos: key; efectos: drives Stage
+  - Estados: idle/loading/success/empty/error/offline
+  - Motion: none (static)
+  - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
+  - Dependencias: none
+  - Prioridad: P3; implementación: TODO; diseño: NOT_STARTED
+  - Nota: Does not compile on Windows (tokio UnixStream)
+  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+
+## VAULT — gestor de archivos (equivalente funcional a COSMIC Files)
+
+**No existe backend en el repositorio.** `archie-vault` es el almacén cifrado de secretos (ver ADR-GUI-004, se muestra como "Sealed" en la GUI); no lista, mueve ni borra archivos. Todos los ítems siguientes parten de `Origen: NONE (backend nuevo)` y dependen de la decisión ADR-GUI-003 (backend `archie-vaultd`). Sin ese backend, cada ítem queda `BLOCKED`, y la GUI sólo puede ser `DESIGN_ONLY`/`MOCK_PREVIEW`.
+
+La paridad se deriva de las acciones reales de `pop-os/cosmic-files@ac5cef76fa60` (`src/menu.rs::Action`, `src/tab.rs::{Location,View,HeadingOptions}`, `src/config.rs::{Favorite,TypeToSearch,TabConfig,ThumbCfg}`, `src/operation/`, `src/archive.rs`, `src/trash.rs`, `src/dialog.rs`). Se toma como **referencia de comportamiento, sin copiar código** (GPL-3.0 frente a Apache-2.0 de este repositorio).
+
+Cada operación que cambia el sistema de archivos viaja como solicitud tipada con correlation ID a Policy: `Resource::Filesystem{path}` + `Action::{Read,Write,Delete}` + `Scope::OneOperation` (`core/crates/archie-policy/src/lib.rs`), y el confinamiento de rutas reutiliza `archie_workstation::host::workspace_path` (CAP-WS-008). QML nunca toca el sistema de archivos ni ejecuta procesos.
+
+| Id | Capacidad (acción COSMIC Files de referencia) | Operación de autoridad | Reutiliza | Prioridad |
+|---|---|---|---|---|
+| GUI-VAULT-001 | Navegar ubicación y migas de pan (`Location::Path`) | Read | CAP-WS-008, CAP-STATE-002 | P0 |
+| GUI-VAULT-002 | Vistas lista/cuadrícula, orden, carpetas primero, mostrar ocultos, zoom (`TabViewGrid/List`, `SetSort`, `ToggleFoldersFirst`, `ToggleShowHidden`, `Zoom*`) | Read | | P0 |
+| GUI-VAULT-003 | Pestañas y ventanas (`TabNew`, `TabClose`, `OpenInNewTab`, `OpenInNewWindow`, `WindowNew`) | Read | | P1 |
+| GUI-VAULT-004 | Barra lateral: favoritos, recientes, volúmenes y expulsar (`Favorite`, `AddToSidebar`, `RemoveFromRecents`, `Eject`) | Read (+ expulsar: Execute sobre dispositivo) | CAP-CORE-020 | P1 |
+| GUI-VAULT-005 | Abrir y abrir con (`Open`, `OpenWith`, `OpenItemLocation`) | Execute = acción de la persona, no del agente (misma regla que `AppCatalog::launch`) | CAP-DISPLAY-003 | P1 |
+| GUI-VAULT-006 | Copiar, cortar, pegar, copiar a/mover a (`Copy`, `Cut`, `Paste`, `CopyTo`, `MoveTo`) | Read origen + Write destino | | P1 |
+| GUI-VAULT-007 | Renombrar, nuevo archivo, nueva carpeta (`Rename`, `NewFile`, `NewFolder`) | Write | | P1 |
+| GUI-VAULT-008 | Papelera: enviar, restaurar, vaciar, borrar definitivo (`Delete`, `RestoreFromTrash`, `EmptyTrash`, `PermanentlyDelete`) | Delete (confirmación explícita; definitivo exige escala propia) | | P1 |
+| GUI-VAULT-009 | Cola de operaciones con progreso, cancelación e historial (`operation/{controller,reader,recursive}`, `EditHistory`) | Hereda de cada operación | CAP-BRIDGE-002 (patrón de progreso) | P0 |
+| GUI-VAULT-010 | Comprimir y extraer (`Compress`, `ExtractHere`, `ExtractTo`) | Write | CAP-TOOLPACK-002 (límites anti zip-slip/bomba) | P2 |
+| GUI-VAULT-011 | Propiedades, vista previa y galería (`Preview`, `Gallery`, `large_image`) | Read | | P2 |
+| GUI-VAULT-012 | Búsqueda recursiva y escribir-para-buscar (`TypeToSearch`) | Read | | P1 |
+| GUI-VAULT-013 | Miniaturas perezosas con caché (`thumbnailer`, `thumbnail_cacher`, `ThumbCfg`) | Read; decodificación en proceso aislado | | P2 |
+| GUI-VAULT-014 | Arrastrar y soltar entre paneles/pestañas/ventanas | Hereda de copiar/mover | | P2 |
+| GUI-VAULT-015 | Panel dividido (referencia: Dolphin; COSMIC Files no lo tiene como acción) | Read | | P2 |
+| GUI-VAULT-016 | Menú contextual y acciones de entrada (`RunContextAction`, `ExecEntryAction`, `CopyPath`, `OpenTerminal`) | Execute = acción de la persona | CAP-DISPLAY-003 | P2 |
+| GUI-VAULT-017 | Diálogo selector de archivos para apps de ArchieOS (`dialog.rs`) | Read (+ Write al guardar) | | P2 |
+| GUI-VAULT-018 | Ajustes del gestor (`Config`, `TabConfig`, `IconSizes`, tema) | ninguna | | P3 |
+| GUI-VAULT-019 | Extensión ArchieOS: ubicación fija **Entregas** `~/Archie/<proyecto>/stages/<etapa>/` y `latest/` | Read | CAP-DESK-001 | P0 |
+| GUI-VAULT-020 | Extensión ArchieOS: insignia de dominio personal/trabajo por ubicación | ninguna | CAP-SEALED-005, CAP-CEREBRA-002 | P1 |
+| GUI-VAULT-021 | Extensión ArchieOS: procedencia "Archie tocó esto" a partir del audit real (nunca inferida por la GUI) | Read de audit | CAP-CORE-012 | P2 |
+| GUI-VAULT-022 | Extensión ArchieOS: rutas de estado del sistema bloqueadas y claves de identidad ocultas | ninguna (se deniega) | CAP-STATE-002 | P0 |
+| GUI-VAULT-023 | Extensión ArchieOS: el almacén Sealed nunca aparece como carpeta; sólo su estado y su audit | ninguna | CAP-SEALED-002 | P0 |
+| GUI-VAULT-024 | Estados fuera de línea/degradado: `archie-vaultd` caído, volumen desmontado, permiso denegado, lease expirado | n/a | CAP-CORE-013 | P0 |
+
+Excluido a propósito: `DesktopViewOptions` y `CosmicSettings*` (COSMIC Files pinta el escritorio y abre ajustes de COSMIC; ArchieOS no tiene escritorio convencional en el modo principal, RFC-006).
+
+Estado de todos: `implementation_status = BLOCKED` (sin backend), `design_status = NOT_STARTED`.
+Evidencia de terminado de cada uno: commit, captura/vídeo, prueba positiva y al menos una negativa (permiso denegado, ruta fuera de confinamiento, backend caído).
+
+
+## Decisiones pendientes (UNDECIDED)
+
+- CAP-SEALED-001 `core/crates/archie-vault/src/store.rs::store` — BLOCKED: no safe secret-entry path designed. Typing a secret into a GUI field is prohibited-class; design a secure prompt first
+- CAP-NOVA-001 `modules/core/nova.toml::core.nova` — BLOCKED: worker.kind="unimplemented"; protocols/simulation-run.schema.json exists. No simulation UI until a worker exists
+
+## NO_GUI_NEEDED (justificado)
+
+| id | símbolo | por qué no tiene GUI |
+|---|---|---|
+| CAP-POLICY-003 | `core/crates/archie-policy/src/lib.rs::Lease` | Internal authority primitive; outcomes surface via audit timeline |
+| CAP-EXEC-001 | `core/crates/archie-execution/src/protocol.rs::Command` | Privileged internal channel; the GUI must never reach it |
+| CAP-EXEC-003 | `core/crates/archie-task-runner/src/main.rs::main` | Sandbox strength reported honestly by Enforcement::for_abi; surface in Diagnostics only |
+| CAP-SCHED-001 | `core/crates/archie-scheduler/src/lib.rs::Scheduler` | Internal; progress shows via CAP-EXEC-002 |
+| CAP-STAGE-005 | `core/crates/archie-stage/src/seal.rs::Sealer` | The GUI must never hold the stage key |
+| CAP-STAGE-006 | `display/stage/src/StageController.h::StageController` | PRESERVE as is |
+| CAP-STAGE-008 | `core/crates/archie-paint/src/bin/archie-paint.rs::main` | Demo tool; not a product surface |
+| CAP-SIGHT-002 | `core/crates/archie-a11y/src/lib.rs::Control` | Perception input; shown only inside IrisInspector |
+| CAP-SIGHT-003 | `core/crates/archie-reflex/src/bin/archie-reflex.rs::main` | Local model that finds controls in captures |
+| CAP-IRIS-002 | `core/crates/archie-iris/src/acp.rs::AcpCompiler` | Compiles scene checkpoints/deltas for the planner |
+| CAP-SPEECH-001 | `core/crates/archie-speech/src/floor.rs::ConversationalFloorState` | Internal; surface only a listening chip |
+| CAP-ORB-001 | `core/crates/archie-orb/src/signal.rs::Signal` | Orb is finished: PRESERVE. No caller of SignalPublisher found outside archie-orb (grep) |
+| CAP-ORB-002 | `display/native/qml/OrbHud.qml::Item` | PRESERVE: do not modify |
+| CAP-DISPLAY-005 | `display/native/src/ArchieBridge.h::ArchieBridge` | PRESERVE; shell reads displayd directly |
+| CAP-DISPLAY-006 | `display/native/src/LumenField.h::LumenField` | PRESERVE |
+| CAP-INSTALL-001 | `display/installer/Wizard.h::Wizard` | Already a GUI; the shell links to it and does not rebuild it |
+| CAP-OWNER-001 | `tools/owner-companion/server.mjs::httpServer` | README: not yet provisioned by the ISO; port 7668 clash with DisplayControl |
+| CAP-DASH-001 | `tools/engineering-dashboard/README.md::dashboard` | Out of scope for the shell |
+| CAP-CAPTURE-001 | `capture-agents/README.md::NotificationListenerService` | Their status surfaces in CAP-SENTRY-005 |
+| CAP-INSTALL-002 | `core/crates/archie-installer/src/answers.rs::Answers` | Backs the existing wizard; the shell does not touch disks |
+| CAP-STATE-003 | `core/crates/archie-postgres/src/lib.rs::PostgresStore` | Never reachable from the GUI |
+| CAP-SKILL-001 | `core/crates/archie-skill-node/src/main.rs::Node` | Competes with inference for GPU; Quiet/AI-workload motion profile must back off while it trains |
+| CAP-TYPES-001 | `core/crates/archie-types/src/lib.rs::PrivacyGrade` | Library vocabulary; surfaced through every view |
+| CAP-OSM-001 | `display/osm/include/archie/osm/building.hpp::building` | Consumed by the Observatory world scene |
