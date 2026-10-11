@@ -123,9 +123,31 @@ The node chooses a model for a job by the role the job needs, never by name:
 | Embedding | `cognition.embedding` | Recognising the same thing again. |
 | Speech | `speech.*` | Hearing, speaking, telling speakers apart. |
 
-Model manifests live in [`models/`](models). `iris.beta-2-1` holds vision, visual actor and
-embedding. A planner is whichever model holds response or reasoning: a harness, a cloud
-provider, or a small local model, added with `archie provider add`.
+Model manifests live in [`models/`](models), one file per model.
+
+**IRIS is part of Archie, not a choice.** `iris.beta-2-1` holds vision, visual actor and
+embedding, runs on the node, and does not reason: it does what the reasoning model's plan
+asks, frame by frame.
+
+**The reasoning model is a choice.** These are shipped, on Nebius Token Factory, and work
+once `NEBIUS_TOKEN_FACTORY_KEY` is set. The default is a Nemotron; the router falls to the
+next when one does not answer.
+
+| Model | Holds |
+|---|---|
+| `nebius.nemotron-3-super`, `nebius.nemotron-3-ultra` | Response and reasoning. The defaults. |
+| `nebius.nemotron-3-5-lightning`, `nebius.nemotron-3-nano` | Response, cheaply. |
+| `nebius.qwen-3-8-27b` | Response, reasoning and vision. |
+| `nebius.glm-5-3`, `nebius.glm-5-3-flash` | Response and reasoning; the Flash reads images. |
+| `nebius.minimax-m3`, `nebius.deepseek-v4-pro`, `nebius.gpt-oss-120b`, `nebius.hermes-4-405b` | Response and reasoning. |
+| `nebius.kimi-k3` | Response, reasoning and vision. |
+| `nebius.minicpm-v-4-5` | Vision only. |
+
+They are cloud models of unverified retention, so they are given public data only. For
+anything private the node needs a reasoning model of its own: any OpenAI-compatible
+server on the machine (llama.cpp, Ollama, vLLM), described by a manifest with
+`provider = "openai-compatible"`, `locality = "local"` and its `base-url`.
+[`docs/ROUTER.md`](docs/ROUTER.md) shows one.
 
 ## How Archie speaks
 

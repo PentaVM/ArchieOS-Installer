@@ -26,6 +26,7 @@
 #include <QWaylandQuickItem>
 #include <QWaylandSeat>
 
+#include <chrono>
 #include <memory>
 #include <optional>
 
@@ -89,6 +90,10 @@ public:
         /// (Pause, or Ctrl+Alt+Esc) still stops the agent. False: one shared seat, and a
         /// person's input takes the stage from the agent.
         bool shared_seats = false;
+        /// A file rewritten when a person touches the mouse or the keyboard, at most every few
+        /// seconds. Its age is how long the machine has been untouched: the REM supervisor
+        /// starts only after a while of that, and stops when it ends. Empty writes nothing.
+        QString presence_file;
     };
 
     explicit StageController(Options options, QObject *parent = nullptr);
@@ -179,6 +184,7 @@ private:
     void finishCapture(std::uint64_t sequence);
     QString snapshotDirectory() const;
     void noteAuthority(archie::visual::AuthorityMode before);
+    void notePerson();
     /// Lets go of keys a KeyDown left pressed: all of them, or those one connection pressed.
     void releaseHeldKeys(const char *why, const QLocalSocket *owner = nullptr);
     /// The held-list code of a mouse button kept down by ButtonDown (negative: below every key).
@@ -277,6 +283,8 @@ private:
     /// focused application whatever this controller does with the key events, so the agent
     /// does not act while a person's hand is still on the keyboard.
     int m_physicalKeysHeld = 0;
+    /// When the presence file was last rewritten, on the controller's own clock.
+    std::optional<std::chrono::steady_clock::time_point> m_presenceWritten;
 
     archie::visual::StageFrame m_frame{};
     qreal m_viewX = 0;

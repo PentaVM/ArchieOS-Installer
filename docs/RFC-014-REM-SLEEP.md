@@ -6,7 +6,9 @@
   - `archie-rem` is the supervisor: the gate, pausing and resuming registered jobs, the
     activity file the trainer reads, the day's encrypted buffer and its deletion, and
     recovery of a cycle cut short. See [What is built](#what-is-built).
-  - Nothing records windows yet, so a cycle has nothing to train on. Steps 2 and 7 are design.
+  - IRIS records the runs it is asked to (`iris_serve --rem-spool`, `/act?record=`), and
+    the live Arena keeps a run for the night only when its judge counted it a success.
+  - Steps 2 and 7 are design. Nothing yet records a person's own demonstrations.
 - **Scope:** what Archie does while the person sleeps: reconcile memory, benchmark its
   skills in secret, train the ones that need it, promote or discard, then resume paused work.
 - **Runs on:** the person's machine. The smallest supported GPU is an RTX 3060 Ti (8 GB).
@@ -230,12 +232,13 @@ text.
 ## What is built
 
 `archie-rem` (`core/crates/archie-rem`, unit `distro/rem/archie-rem.service`, configuration
-`/etc/archie/rem.toml`) is the supervisor of steps 0, 1, 5, 8 and 9.
+`/etc/archie/rem.toml`) is the supervisor of steps 0, 1, 3, 5, 8 and 9.
 
 | Step | How |
 |---|---|
 | 0 Entering and leaving | `Gate`: night window, mains power, time since a person's input. A touch or a pulled plug stops a cycle; the clock does not. |
 | 1 Pause | A job is a file in `/etc/archie/rem/jobs/`: checkpoint command, resume command, heartbeat file and its maximum age. The resume list is written before the first job is touched. |
+| 3 Admit | A run is sealed into the day's buffer only with a receipt per window, written when its outcome was verified (`record`). |
 | 5 Train | The configured trainer command is started with the day's windows opened under `/run`. It is told of the person's return through the activity file, and killed after a grace period if it stays. |
 | 8 Delete | The windows are sealed under a key made that day (`DayBuffer`). Deleting overwrites and removes the key, then the files. It happens at the end of every cycle, at start-up after a cycle cut short, and for windows older than `retention_hours` when no cycle ran. |
 | 9 Resume | Each job on the list is told to resume and counts as resumed when its heartbeat is rewritten. One that is not stays listed and is reported. |
@@ -243,15 +246,39 @@ text.
 `archie-rem status` says what the machine is doing and whether REM would start now.
 
 The supervisor reads the time since a person's input from the age of a presence file
-(`/run/archie/person-input`). While nothing writes that file, REM never starts: a node that
-cannot tell whether someone is there behaves as if someone is.
+(`/run/archie/person-input`), which the Stage rewrites when a person touches the mouse or
+the keyboard. While nothing writes that file, REM never starts: a node that cannot tell
+whether someone is there behaves as if someone is.
+
+## Recording a run
+
+1. IRIS is started with `--rem-spool /run/archie/rem/spool`. Without it nothing is kept.
+2. A caller that the operator opted in asks for a run to be recorded:
+   `/act?...&record=<run>&app=<skill>`. From the moment IRIS's memory is as full as in
+   training, each decision is written as an `archie-iris-act-window-v1` window: the
+   frames, the inputs before, and the input IRIS chose.
+3. At the end the caller knows whether the run succeeded. `archie-arena-live --record
+   <skill>` asks its judge.
+   - **Verified:** it asks IRIS what was recorded (`POST /act/recorded`), writes one
+     receipt per window, bound to the window's bytes and its input, and seals windows,
+     records and receipts into the day's buffer (`archie_rem::record::keep_run`).
+   - **Not verified:** the spool's copy is deleted (`discard_run`). IRIS's own unverified
+     decisions never reach the buffer.
+4. At night the cycle opens the buffer under `/run` as the trainer reads it
+   (`records/`, `windows/`, `receipts.jsonl`), and the trainer admits only windows whose
+   receipt matches.
+
+The spool is under `/run`, so a reboot before the run ends leaves nothing.
 
 ## Open items
 
-- **The recorder.** Nothing writes windows into the day's buffer, or the records and
-  receipts the trainer admits them by. It belongs where a person's input and a task's verified
-  outcome are both seen: the Stage and the IRIS bridge.
-- **The presence file.** The Stage sees a person's input and does not yet write it.
+- **A person's own demonstrations.** Only runs Archie drove and a judge verified are
+  recorded. Recording while the person drives needs the Stage to report their input as
+  controls, and the exclusion list and face blacking of step 3.
+- **The Stage's service.** The Stage writes the presence file (`--presence-file`, default
+  `/run/archie/person-input`), but the image has no unit for it yet, and `/run/archie`
+  belongs to `archie`.
+- **Verification beyond one judge.** The live Arena verifies `flip_reset` runs only.
 - 8 GB peak on a 3060 Ti with the Beta 2.1 base: not measured.
 - Probation bookkeeping from verification receipts: not written.
 - Cloud aggregation, DP accounting and package signing: design only.

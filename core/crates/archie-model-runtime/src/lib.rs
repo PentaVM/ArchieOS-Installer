@@ -18,6 +18,11 @@ pub use stream::{
     SseAssembler, SseError, StreamEvent, ToolCall, ToolChatMessage, ToolChatRequest, ToolDefinition,
 };
 
+pub mod routed;
+
+/// Nebius Token Factory's OpenAI-compatible API.
+pub const NEBIUS_BASE_URL: &str = "https://api.tokenfactory.nebius.com/v1/";
+
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(90);
 const DEFAULT_MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_MESSAGES: usize = 128;
@@ -122,6 +127,37 @@ impl ProviderEndpoint {
             timeout: DEFAULT_TIMEOUT,
             max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
         })
+    }
+
+    /// The endpoint a model's manifest describes, so that whoever holds a descriptor the
+    /// router chose can call it without knowing which provider it is.
+    ///
+    /// Nebius has one address and one credential. NIM and any other OpenAI-compatible
+    /// server say where they are in the manifest's `base-url` label, and which environment
+    /// variable holds their key in `credential-env`.
+    pub fn for_model(descriptor: &ModelDescriptor) -> Result<Self, RuntimeError> {
+        let label = |name: &str| descriptor.labels.get(name).map(String::as_str);
+        match &descriptor.provider {
+            ProviderKind::NebiusTokenFactory => {
+                Self::nebius(label("base-url").unwrap_or(NEBIUS_BASE_URL))
+            }
+            ProviderKind::NvidiaNim => Self::nvidia_nim(
+                label("base-url").ok_or(RuntimeError::InvalidEndpoint)?,
+                descriptor.locality,
+            ),
+            ProviderKind::OpenAiCompatible => Self::openai_compatible(
+                label("base-url").ok_or(RuntimeError::InvalidEndpoint)?,
+                descriptor.locality,
+                label("credential-env").map(str::to_string),
+            ),
+            _ => Err(RuntimeError::ProviderMismatch),
+        }
+    }
+
+    /// Whether the credential this endpoint needs is present. A cloud model without its
+    /// key is registered and cannot be called.
+    pub fn is_configured(&self) -> bool {
+        self.credential().is_ok()
     }
 
     pub fn with_limits(
@@ -392,7 +428,10 @@ impl InferenceClient {
     ) -> Result<ChatResponse, RuntimeError> {
         request.validate()?;
         self.authorize(descriptor, privacy)?;
-        if request.model != descriptor.id.as_str() {
+        // The provider's own name for the model, as the streaming call already requires: a
+        // Nebius model is `nvidia/nemotron-3-super-120b-a12b` there and `nebius.nemotron-3-super`
+        // here, and only the first means anything to Nebius.
+        if request.model != provider_model_id(descriptor)? {
             return Err(RuntimeError::ProviderMismatch);
         }
         let response = self

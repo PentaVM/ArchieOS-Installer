@@ -25,7 +25,7 @@ pub enum BufferError {
         #[source]
         source: std::io::Error,
     },
-    #[error("a window name is 1 to 128 letters, digits, '-', '_' or '.', and {0:?} is not")]
+    #[error("a name is 1 to 200 letters, digits, '-', '_', '.' or '+' with no part starting with '.', and {0:?} is not")]
     Name(String),
     #[error("the window {0} does not open under the day's key")]
     Unreadable(String),
@@ -76,10 +76,13 @@ impl DayBuffer {
     }
 
     fn path_of(&self, name: &str) -> Result<PathBuf, BufferError> {
+        // `+` stands between the folders a file goes back into when the buffer is opened
+        // for the night, so no part may be empty or start with a dot: `a+..+b` would be a
+        // path out of the work directory.
         let valid = !name.is_empty()
-            && name.len() <= 128
-            && !name.starts_with('.')
-            && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.');
+            && name.len() <= 200
+            && name.split('+').all(|part| !part.is_empty() && !part.starts_with('.'))
+            && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'+'));
         if !valid {
             return Err(BufferError::Name(name.to_string()));
         }
@@ -203,7 +206,9 @@ mod tests {
         buffer.seal("bank.s0", b"excluded").unwrap();
         std::fs::rename(dir.join("bank.s0.sealed"), dir.join("photopea.s0.sealed")).unwrap();
         assert!(matches!(buffer.unseal("photopea.s0"), Err(BufferError::Unreadable(_))));
-        assert!(matches!(buffer.seal("../escape", b"x"), Err(BufferError::Name(_))));
+        for escape in ["../escape", "windows+..+escape", "windows++x", ".hidden"] {
+            assert!(matches!(buffer.seal(escape, b"x"), Err(BufferError::Name(_))), "{escape}");
+        }
     }
 
     #[test]

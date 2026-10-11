@@ -1,0 +1,30 @@
+# MiniMax M3, on Nebius Token Factory.
+#
+# Fast, with a million-token context.
+# It is a cloud model. Requests leave the machine, and Nebius's retention has not been
+# verified for this deployment, so it is cleared for public data only. An operator who has
+# verified it may raise max_privacy_grade to "internal" and set retention = "zero-verified".
+id = "nebius.minimax-m3"
+display_name = "MiniMax M3"
+provider = "nebius-token-factory"
+locality = "cloud"
+
+context_window = 1048576
+max_output_tokens = 8192
+
+capabilities = ["cognition.response", "cognition.reasoning"]
+max_privacy_grade = "public"
+availability = "ready"
+
+# Assigned by hand to order the choices, not measured. latency_ema_ms is the time one
+# 60-second plan took from Chile on 2026-10-11.
+quality_tier = 76
+latency_ema_ms = 1600
+
+# Nebius's list price that day, in millionths of a US dollar per million tokens.
+[cost]
+input_micros_per_mtok = 300000
+output_micros_per_mtok = 1200000
+
+[labels]
+provider-model = "MiniMaxAI/MiniMax-M3"

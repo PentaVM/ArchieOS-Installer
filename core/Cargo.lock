@@ -87,8 +87,10 @@ dependencies = [
 name = "archie-arena"
 version = "0.1.0"
 dependencies = [
+ "archie-model-runtime",
  "archie-paint",
  "archie-policy",
+ "archie-rem",
  "archie-stage",
  "archie-types",
  "axum",
@@ -368,6 +370,8 @@ dependencies = [
 name = "archie-model-runtime"
 version = "0.1.0"
 dependencies = [
+ "archie-registry",
+ "archie-router",
  "archie-types",
  "base64",
  "clap",

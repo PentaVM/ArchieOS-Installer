@@ -1,0 +1,30 @@
+# Qwen 3.8 27B, on Nebius Token Factory.
+#
+# Fast, and it reads images.
+# It is a cloud model. Requests leave the machine, and Nebius's retention has not been
+# verified for this deployment, so it is cleared for public data only. An operator who has
+# verified it may raise max_privacy_grade to "internal" and set retention = "zero-verified".
+id = "nebius.qwen-3-8-27b"
+display_name = "Qwen 3.8 27B"
+provider = "nebius-token-factory"
+locality = "cloud"
+
+context_window = 262144
+max_output_tokens = 8192
+
+capabilities = ["cognition.response", "cognition.reasoning", "cognition.vision"]
+max_privacy_grade = "public"
+availability = "ready"
+
+# Assigned by hand to order the choices, not measured. latency_ema_ms is the time one
+# 60-second plan took from Chile on 2026-10-11.
+quality_tier = 74
+latency_ema_ms = 1500
+
+# Nebius's list price that day, in millionths of a US dollar per million tokens.
+[cost]
+input_micros_per_mtok = 450000
+output_micros_per_mtok = 3000000
+
+[labels]
+provider-model = "Qwen/Qwen3.8-27B"

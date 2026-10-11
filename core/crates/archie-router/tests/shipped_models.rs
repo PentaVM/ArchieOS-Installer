@@ -65,3 +65,27 @@ fn a_local_model_names_the_weights_it_runs_by_hash() {
         );
     }
 }
+
+/// IRIS sees and acts; it does not reason. What to do is asked of a reasoning model, and
+/// among the ones shipped the default is a Nemotron.
+#[test]
+fn thinking_is_asked_of_a_reasoning_model_and_never_of_iris() {
+    let registry = shipped();
+    for role in [ModelRole::ReasoningWorker, ModelRole::CognitiveResponse] {
+        let request = RoutingRequest::new(PrivacyGrade::Public, 400, 2000).requiring(role.capability());
+        let outcome = Router::new(Weights::default()).route(&registry, &request);
+        let chosen = outcome.selected_model().unwrap_or_else(|| panic!("{role}: {}", outcome.explain()));
+        assert!(chosen.as_str().starts_with("nebius.nemotron"), "{role} went to {chosen}");
+    }
+}
+
+/// With only cloud reasoning models installed, a private request is refused. It is not
+/// sent to a cloud model, and it is not handed to IRIS because IRIS happens to be local.
+#[test]
+fn a_private_question_is_refused_when_no_local_model_reasons() {
+    let registry = shipped();
+    let request = RoutingRequest::new(PrivacyGrade::Restricted, 400, 2000)
+        .requiring(ModelRole::ReasoningWorker.capability());
+    let outcome = Router::new(Weights::default()).route(&registry, &request);
+    assert_eq!(outcome.selected_model(), None, "{}", outcome.explain());
+}

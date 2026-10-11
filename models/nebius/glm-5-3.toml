@@ -1,0 +1,30 @@
+# GLM 5.3, on Nebius Token Factory.
+#
+# Z.ai's reasoning model.
+# It is a cloud model. Requests leave the machine, and Nebius's retention has not been
+# verified for this deployment, so it is cleared for public data only. An operator who has
+# verified it may raise max_privacy_grade to "internal" and set retention = "zero-verified".
+id = "nebius.glm-5-3"
+display_name = "GLM 5.3"
+provider = "nebius-token-factory"
+locality = "cloud"
+
+context_window = 1024000
+max_output_tokens = 8192
+
+capabilities = ["cognition.response", "cognition.reasoning"]
+max_privacy_grade = "public"
+availability = "ready"
+
+# Assigned by hand to order the choices, not measured. latency_ema_ms is the time one
+# 60-second plan took from Chile on 2026-10-11.
+quality_tier = 82
+latency_ema_ms = 4000
+
+# Nebius's list price that day, in millionths of a US dollar per million tokens.
+[cost]
+input_micros_per_mtok = 1400000
+output_micros_per_mtok = 4400000
+
+[labels]
+provider-model = "zai-org/GLM-5.3"

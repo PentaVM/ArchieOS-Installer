@@ -12,14 +12,14 @@ state_dir = "/var/lib/archie/rem"
 run_dir = "/run/archie/rem"
 
 # The IRIS Foundry trainer, on a node that has it and the Beta 2.1 weights. {work} is where
-# the day's windows are opened for the cycle, {activity} the file it reads at every step.
+# the day's buffer is opened for the cycle, {activity} the file it reads at every step.
 # IRIS_REM_SEAL, the node's sealing secret, comes from /etc/archie/rem.env.
 #
 # trainer = [
 #   "python", "-m", "archie_iris_foundry.rem_sleep",
-#   "--manifest", "{work}/records.jsonl",
+#   "--manifest", "{work}/records",
 #   "--verified-receipts", "{work}/receipts.jsonl",
-#   "--windows-root", "{work}",
+#   "--windows-root", "{work}/windows",
 #   "--activity-file", "{activity}",
 #   "--weights", "/var/lib/archie/models/iris/iris-beta21-step132000.pt",
 #   "--skills-dir", "/var/lib/archie/iris-skills",

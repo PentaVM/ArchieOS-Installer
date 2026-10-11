@@ -1,0 +1,30 @@
+# GLM 5.3 Flash, on Nebius Token Factory.
+#
+# The cheap GLM; reads images.
+# It is a cloud model. Requests leave the machine, and Nebius's retention has not been
+# verified for this deployment, so it is cleared for public data only. An operator who has
+# verified it may raise max_privacy_grade to "internal" and set retention = "zero-verified".
+id = "nebius.glm-5-3-flash"
+display_name = "GLM 5.3 Flash"
+provider = "nebius-token-factory"
+locality = "cloud"
+
+context_window = 1024000
+max_output_tokens = 8192
+
+capabilities = ["cognition.response", "cognition.vision"]
+max_privacy_grade = "public"
+availability = "ready"
+
+# Assigned by hand to order the choices, not measured. latency_ema_ms is the time one
+# 60-second plan took from Chile on 2026-10-11.
+quality_tier = 66
+latency_ema_ms = 4500
+
+# Nebius's list price that day, in millionths of a US dollar per million tokens.
+[cost]
+input_micros_per_mtok = 150000
+output_micros_per_mtok = 500000
+
+[labels]
+provider-model = "zai-org/GLM-5.3-Flash"
