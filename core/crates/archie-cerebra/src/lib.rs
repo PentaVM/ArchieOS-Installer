@@ -47,6 +47,7 @@ pub mod clarification;
 pub mod observation;
 pub mod parameters;
 pub mod pass;
+pub mod pillars;
 
 pub use clarification::{ClarificationAssessment, ClarificationDecision, ClarificationSession};
 pub use observation::{Observation, Trigger};

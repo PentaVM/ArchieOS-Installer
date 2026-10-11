@@ -36,10 +36,12 @@
 
 #![forbid(unsafe_code)]
 
+pub mod domain;
 pub mod gateway;
 pub mod reference;
 pub mod store;
 
+pub use domain::{ContextDomain, DomainError};
 pub use gateway::{
     max_grade_for, CapsuleEntry, CapsuleReceipt, ContextCapsule, ContextGateway, ContextRequest,
     DisclosedItem, Entity, EntityKind, GatewayError, PseudonymPolicy,

@@ -62,13 +62,15 @@ impl IntoResponse for AppError {
         let (status, msg) = match self {
             AppError::Internal(_err) => {
                 // In a real app: tracing::error!("Internal Board Error: {}", _err);
-                (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error".to_string())
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal Server Error".to_string(),
+                )
             }
             AppError::BadRequest(err) => (StatusCode::BAD_REQUEST, err),
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()),
         };
-        (status, Json(ErrorResponse { error: msg }))
-            .into_response()
+        (status, Json(ErrorResponse { error: msg })).into_response()
     }
 }
 
@@ -126,7 +128,11 @@ fn same_secret(a: &[u8], b: &[u8]) -> bool {
 
 async fn list_tasks(State(state): State<BoardState>) -> Result<impl IntoResponse, AppError> {
     let graph = state.task_graph.read().await;
-    let cards: Vec<KanbanCard> = graph.iter().map(KanbanCard::from).collect();
+    let cards: Vec<KanbanCard> = graph
+        .iter()
+        .filter(|task| state.adapter.context_visible(task))
+        .map(KanbanCard::from)
+        .collect();
     Ok((StatusCode::OK, Json(cards)))
 }
 
@@ -144,18 +150,19 @@ async fn create_task(
     // Privacy Spine Ingress: Force all tasks created via the bridge to be explicitly restricted.
     let effective_grade = match payload.requested_privacy {
         Some(PrivacyGrade::Public) => {
-            task.labels.insert("audit.escalation_attempt".into(), "blocked_public_ingress".into());
+            task.labels.insert(
+                "audit.escalation_attempt".into(),
+                "blocked_public_ingress".into(),
+            );
             PrivacyGrade::Restricted
         }
-        Some(grade) if grade < PrivacyGrade::Restricted => {
-            PrivacyGrade::Restricted
-        }
+        Some(grade) if grade < PrivacyGrade::Restricted => PrivacyGrade::Restricted,
         Some(grade) => grade,
         None => PrivacyGrade::Restricted,
     };
 
     let now_ms = Timestamp::now().as_millis().to_string();
-    
+
     // We format the PrivacyGrade enum in kebab-case style as it's serialized
     let grade_str = match effective_grade {
         PrivacyGrade::Public => "public",
@@ -165,10 +172,20 @@ async fn create_task(
         PrivacyGrade::Secret => "secret",
     };
 
-    task.labels.insert("archie.privacy_grade".into(), grade_str.into());
-    task.labels.insert("archie.quarantine".into(), "true".into());
-    task.labels.insert("archie.ingress_source".into(), "enterprise_bridge".into());
-    task.labels.insert("archie.ingress_timestamp".into(), now_ms);
+    task.labels
+        .insert("archie.privacy_grade".into(), grade_str.into());
+    task.labels
+        .insert("archie.quarantine".into(), "true".into());
+    task.labels
+        .insert("archie.ingress_source".into(), "enterprise_bridge".into());
+    task.labels
+        .insert("archie.context_kind".into(), "work".into());
+    if let Some(domain) = &state.adapter.context_domain {
+        task.labels
+            .insert("archie.context_domain".into(), domain.to_string());
+    }
+    task.labels
+        .insert("archie.ingress_timestamp".into(), now_ms);
 
     if let Some(meta) = payload.metadata {
         for (k, v) in meta {
@@ -192,6 +209,7 @@ async fn move_task(
 
     let task = graph
         .get_mut(&id)
+        .filter(|task| state.adapter.context_visible(task))
         .ok_or_else(|| AppError::BadRequest("Task not found".into()))?;
 
     // DAG Integrity: Respect invariant state machine
@@ -246,8 +264,14 @@ mod tests {
         let wrong = ring::digest::digest(&ring::digest::SHA256, b"correct-tokem");
         assert!(same_secret(right.as_ref(), stored.as_ref()));
         assert!(!same_secret(wrong.as_ref(), stored.as_ref()));
-        assert!(!same_secret(&[], stored.as_ref()), "an empty value is not the secret");
-        assert!(!same_secret(&stored.as_ref()[..16], stored.as_ref()), "nor is half of it");
+        assert!(
+            !same_secret(&[], stored.as_ref()),
+            "an empty value is not the secret"
+        );
+        assert!(
+            !same_secret(&stored.as_ref()[..16], stored.as_ref()),
+            "nor is half of it"
+        );
     }
 
     #[test]

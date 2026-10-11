@@ -2,7 +2,7 @@
 
 use archie_memory::floor::ConversationalFloorState;
 use archie_types::PrivacyGrade;
-use archie_vault::VaultRef;
+use archie_vault::{ContextDomain, VaultRef};
 use serde::{Deserialize, Serialize};
 
 /// Why this pass is happening.
@@ -49,6 +49,8 @@ impl Trigger {
 /// One thing to think about.
 #[derive(Debug, Clone)]
 pub struct Observation {
+    /// Runtime-selected personal or project boundary; not model-selected authority.
+    pub context_domain: Option<ContextDomain>,
     pub trigger: Trigger,
     pub at_ms: i64,
     /// Which task this pass belongs to. Capsules are bound to it.
@@ -79,6 +81,7 @@ impl Observation {
         at_ms: i64,
     ) -> Self {
         Self {
+            context_domain: None,
             trigger,
             at_ms,
             task_id: task_id.into(),
@@ -94,6 +97,11 @@ impl Observation {
 
     pub fn needing(mut self, reference: VaultRef) -> Self {
         self.context_refs.push(reference);
+        self
+    }
+
+    pub fn in_domain(mut self, domain: ContextDomain) -> Self {
+        self.context_domain = Some(domain);
         self
     }
 
