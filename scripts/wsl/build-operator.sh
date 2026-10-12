@@ -39,18 +39,22 @@ install -d "$rootfs"
 # Qt for the Stage, Mesa's software GL (WSLg shares no GPU buffers with a nested
 # compositor), and a font so a page has letters. No TShark: a WSL machine sees only its
 # own virtual network, so archie-netwatch has nothing of the house to listen to here.
+# ARCHIE_PACMAN_CONF: another pacman.conf for the build, for instance one whose
+# XferCommand limits the download rate on a connection that is being used.
+conf=()
+[[ -n ${ARCHIE_PACMAN_CONF:-} ]] && conf=(-C "$ARCHIE_PACMAN_CONF")
 # Packages are downloaded into the root being built and removed after each step, so the
 # build needs room in one place only and never holds every archive at once.
 # libpulse is the microphone and the speaker, through WSLg; dbus and at-spi2-core let
 # the voice read what an application shows.
-pacstrap -K "$rootfs" base ca-certificates curl jq python firefox mesa \
+pacstrap "${conf[@]}" -K "$rootfs" base ca-certificates curl jq python firefox mesa \
   qt6-base qt6-declarative qt6-wayland ttf-dejavu libpulse dbus at-spi2-core
 rm -rf "${rootfs:?}/var/cache/pacman/pkg"/*
 # MLT and FFmpeg for the video bridge, which needs no window, and Kdenlive to edit in the
 # Stage. ARCHIE_OPERATOR_APPS= (empty) leaves Kdenlive out, about 1.5 GB lighter; it is
 # then one pacman command away, which archie-operate says when asked for it.
 read -r -a apps <<<"${ARCHIE_OPERATOR_APPS-kdenlive}"
-pacstrap "$rootfs" mlt ffmpeg "${apps[@]}"
+pacstrap "${conf[@]}" "$rootfs" mlt ffmpeg "${apps[@]}"
 rm -rf "${rootfs:?}/var/cache/pacman/pkg"/*
 
 rm -f "$rootfs/etc/resolv.conf" "$rootfs/boot"/vmlinuz-* "$rootfs/boot"/initramfs-*
