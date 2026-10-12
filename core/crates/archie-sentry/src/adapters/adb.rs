@@ -87,6 +87,7 @@ struct Measured {
     volume: Option<(u32, u32)>,
 }
 
+#[derive(Clone)]
 pub struct Adb {
     edge: String,
     adapter: String,
@@ -398,6 +399,25 @@ impl EdgeAdapter for Adb {
         &mut self,
         resource: &ResourceDescriptor,
     ) -> Result<Observation, AdapterError> {
+        let this = self.clone();
+        let resource = resource.clone();
+        super::process::off_runtime(move || this.observe_now(&resource)).await
+    }
+    async fn apply(
+        &mut self,
+        resource: &ResourceDescriptor,
+        command: &Command,
+    ) -> Result<AdapterAck, AdapterError> {
+        let this = self.clone();
+        let resource = resource.clone();
+        let command = command.clone();
+        super::process::off_runtime(move || this.apply_now(&resource, &command)).await
+    }
+}
+
+/// The blocking halves of the trait methods, run off the async runtime.
+impl Adb {
+    fn observe_now(&self, resource: &ResourceDescriptor) -> Result<Observation, AdapterError> {
         let target = self.target_of(resource)?;
         self.ensure_online(&target)?;
         let measured = self.measure(&target.serial)?;
@@ -423,8 +443,8 @@ impl EdgeAdapter for Adb {
             state,
         })
     }
-    async fn apply(
-        &mut self,
+    fn apply_now(
+        &self,
         resource: &ResourceDescriptor,
         command: &Command,
     ) -> Result<AdapterAck, AdapterError> {

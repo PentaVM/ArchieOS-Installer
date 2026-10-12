@@ -931,3 +931,36 @@ fn adb_devices_and_configuration_are_validated() {
     )
     .is_err());
 }
+
+/// A tool that hangs: it answers only when its own timeout would have killed it.
+struct StalledRunner;
+impl CommandRunner for StalledRunner {
+    fn run(&self, _argv: &[String], timeout: Duration) -> Result<CommandOutput, AdapterError> {
+        std::thread::sleep(timeout.min(Duration::from_secs(3)));
+        Err(AdapterError::Unavailable)
+    }
+}
+
+#[tokio::test]
+async fn a_stalled_tool_does_not_hold_the_engine_past_its_deadline() {
+    // adb's observe is several calls of seconds each. Run inline on the async thread,
+    // a deadline around it could only fire once all of them had finished.
+    let mut adapter = Adb::new(
+        "edge",
+        "adb",
+        adb_path(),
+        adb_targets(true),
+        Arc::new(StalledRunner),
+    )
+    .unwrap();
+    let resource = adb_resource(vec![CommandKind::SessionLock]);
+    let started = std::time::Instant::now();
+    let outcome =
+        tokio::time::timeout(Duration::from_millis(200), adapter.observe(&resource)).await;
+    assert!(outcome.is_err(), "the deadline fires");
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "and fires on time: {:?}",
+        started.elapsed()
+    );
+}

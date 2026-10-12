@@ -944,3 +944,30 @@ async fn probe_neither_channel_reports_nothing() {
     let capabilities = probe_router(None, Some(&channel)).await;
     assert_eq!(capabilities, RouterCapabilities::default());
 }
+
+/// A failing command whose stderr is not ASCII: Spanish firmware, or bytes that are
+/// not UTF-8 and come back as U+FFFD (three bytes each).
+struct GarbledRunner;
+impl CommandRunner for GarbledRunner {
+    fn run(&self, _argv: &[String], _timeout: Duration) -> Result<CommandOutput, AdapterError> {
+        // 100 three-byte characters: byte 200 falls inside the 67th.
+        let mut stderr = "€".repeat(100).into_bytes();
+        stderr.extend(std::iter::repeat_n(0xff, 100));
+        Ok(CommandOutput {
+            status: 1,
+            stdout: vec![],
+            stderr,
+        })
+    }
+}
+
+#[tokio::test]
+async fn a_non_ascii_error_from_the_router_is_unavailable_not_a_crash() {
+    // Logging cut it at byte 200, which can fall inside a character; under
+    // panic = "abort" that ended the whole process.
+    let channel = SshChannel::new(ssh_config(), Arc::new(GarbledRunner));
+    assert_eq!(
+        channel.run_named("ip_neigh"),
+        Err(AdapterError::Unavailable)
+    );
+}

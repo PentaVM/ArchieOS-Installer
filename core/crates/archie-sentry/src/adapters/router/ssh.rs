@@ -286,7 +286,8 @@ impl SshChannel {
                 eprintln!(
                     "archie-sentry router ssh: exit {}: {}",
                     output.status,
-                    &stderr[..stderr.len().min(200)]
+                    // By characters: a byte cut could split one, and that panics.
+                    stderr.chars().take(200).collect::<String>()
                 );
             }
             return Err(AdapterError::Unavailable);

@@ -94,6 +94,19 @@ impl CommandRunner for ProcessRunner {
     }
 }
 
+/// Runs blocking adapter work (subprocesses waited on with `try_wait`) on Tokio's
+/// blocking pool. Called inline from an `async fn`, that work would hold an async
+/// worker for its whole length and finish on the first poll, so the engine's
+/// per-intent deadline could never fire. Here the engine's timeout drops this future
+/// and returns on time; the runner's own timeout still kills the process.
+pub(crate) async fn off_runtime<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, AdapterError> + Send + 'static,
+) -> Result<T, AdapterError> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|_| AdapterError::Unavailable)?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

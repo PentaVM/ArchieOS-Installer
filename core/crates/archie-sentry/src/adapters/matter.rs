@@ -89,6 +89,7 @@ pub struct MatterTarget {
     pub kind: MatterKind,
 }
 
+#[derive(Clone)]
 pub struct Matter {
     edge: String,
     adapter: String,
@@ -357,6 +358,25 @@ impl EdgeAdapter for Matter {
         &mut self,
         resource: &ResourceDescriptor,
     ) -> Result<Observation, AdapterError> {
+        let this = self.clone();
+        let resource = resource.clone();
+        super::process::off_runtime(move || this.observe_now(&resource)).await
+    }
+    async fn apply(
+        &mut self,
+        resource: &ResourceDescriptor,
+        command: &Command,
+    ) -> Result<AdapterAck, AdapterError> {
+        let this = self.clone();
+        let resource = resource.clone();
+        let command = command.clone();
+        super::process::off_runtime(move || this.apply_now(&resource, &command)).await
+    }
+}
+
+/// The blocking halves of the trait methods, run off the async runtime.
+impl Matter {
+    fn observe_now(&self, resource: &ResourceDescriptor) -> Result<Observation, AdapterError> {
         let target = self.target_of(resource)?;
         let state = self.measure(&target)?;
         let report = serde_json::to_vec(&(&resource.resource_id, &state))
@@ -372,8 +392,8 @@ impl EdgeAdapter for Matter {
             state,
         })
     }
-    async fn apply(
-        &mut self,
+    fn apply_now(
+        &self,
         resource: &ResourceDescriptor,
         command: &Command,
     ) -> Result<AdapterAck, AdapterError> {

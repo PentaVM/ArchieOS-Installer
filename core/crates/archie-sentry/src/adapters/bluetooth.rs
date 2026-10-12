@@ -237,6 +237,7 @@ pub fn parse_gatt_value(output: &str) -> Option<Vec<u8>> {
     }
 }
 
+#[derive(Clone)]
 pub struct Bluetooth {
     edge: String,
     adapter: String,
@@ -425,6 +426,25 @@ impl EdgeAdapter for Bluetooth {
         &mut self,
         resource: &ResourceDescriptor,
     ) -> Result<Observation, AdapterError> {
+        let this = self.clone();
+        let resource = resource.clone();
+        super::process::off_runtime(move || this.observe_now(&resource)).await
+    }
+    async fn apply(
+        &mut self,
+        resource: &ResourceDescriptor,
+        command: &Command,
+    ) -> Result<AdapterAck, AdapterError> {
+        let this = self.clone();
+        let resource = resource.clone();
+        let command = command.clone();
+        super::process::off_runtime(move || this.apply_now(&resource, &command)).await
+    }
+}
+
+/// The blocking halves of the trait methods, run off the async runtime.
+impl Bluetooth {
+    fn observe_now(&self, resource: &ResourceDescriptor) -> Result<Observation, AdapterError> {
         let target = self.target_of(resource)?;
         let switch = target.switch.as_ref().ok_or(AdapterError::Unsupported)?;
         let value = self.read_switch(target, &switch.read_uuid)?;
@@ -451,8 +471,8 @@ impl EdgeAdapter for Bluetooth {
             state,
         })
     }
-    async fn apply(
-        &mut self,
+    fn apply_now(
+        &self,
         resource: &ResourceDescriptor,
         command: &Command,
     ) -> Result<AdapterAck, AdapterError> {

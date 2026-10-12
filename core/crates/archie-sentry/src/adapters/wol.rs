@@ -232,7 +232,8 @@ impl EdgeAdapter for Wol {
         } else {
             vec![self.arp_tool.clone(), "neigh".into(), "show".into()]
         };
-        let output = self.runner.run(&argv, ARP_TIMEOUT)?;
+        let runner = Arc::clone(&self.runner);
+        let output = super::process::off_runtime(move || runner.run(&argv, ARP_TIMEOUT)).await?;
         if output.status != 0 {
             return Err(AdapterError::Unavailable);
         }

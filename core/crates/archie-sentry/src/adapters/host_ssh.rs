@@ -81,6 +81,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
+/// The most login sessions whose lock state is read one by one.
+const MAX_LOCK_SESSIONS: usize = 8;
+
 /// Bound on one remote argv element. Static PowerShell `-EncodedCommand`
 /// scripts are the largest entries (a few KB of base64); dynamic values are
 /// digits or allowlisted tokens and stay tiny.
@@ -443,7 +446,8 @@ impl HostChannel {
                 eprintln!(
                     "archie-sentry host ssh: exit {}: {}",
                     output.status,
-                    &stderr[..stderr.len().min(200)]
+                    // By characters: a byte cut could split one, and that panics.
+                    stderr.chars().take(200).collect::<String>()
                 );
             }
             return Err(AdapterError::Unavailable);
@@ -720,7 +724,9 @@ impl HostSsh {
                     .run_async(&["loginctl", "list-sessions", "--no-legend"])
                     .await?;
                 let ids = parse_session_ids(&list);
-                if ids.is_empty() {
+                // One SSH round trip per session: past a handful, the answer would come
+                // long after the intent's deadline, so it is not knowable here.
+                if ids.is_empty() || ids.len() > MAX_LOCK_SESSIONS {
                     return Ok(None);
                 }
                 let mut all_locked = true;
