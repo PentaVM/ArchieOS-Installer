@@ -59,25 +59,37 @@ fixture se reporta como fixture, no como dispositivo real. Un PR por avance, con
 
 **En este orden** (cada punto dice cuándo está hecho):
 
-- [ ] **1. Una sola vista de dispositivos.** Unir `archie-lan` (inventario),
+- [x] **1. Una sola vista de dispositivos.** Unir `archie-lan` (inventario),
   `archie-netwatch` (`state.json`) y `passive_network` en un registro por dispositivo,
   con clave por dirección de hardware y la IP como atributo. *Hecho cuando:* un comando
   (`archie sentry-devices --json`) devuelve cada dispositivo una vez, con qué fuente dijo
   qué, y hay prueba con las tres fuentes describiendo el mismo equipo.
-- [ ] **2. Llevar esa vista al world graph** por `archie-worldd`. *Hecho cuando:* el
+  **Hecho (Kimi, 2026-10-11):** `archie_core::unify` + `archie sentry-devices --json`;
+  prueba con las tres fuentes describiendo el mismo equipo y atribución por fuente.
+- [~] **2. Llevar esa vista al world graph** por `archie-worldd`. *Hecho cuando:* el
   Observatory dibuja los dispositivos de la red real desde el grafo y no desde un archivo.
-- [ ] **3. Alertas → `PillarContext` → Cerebra.** Hoy nada produce un `PillarContext`.
+  **Casi (Kimi, 2026-10-11):** la vista entra al grafo como entidades de medición con
+  procedencia (RFC-008), el snapshot las sirve y la ruta de datos del display las consume
+  desde el grafo (probado sobre socket loopback real). Falta el panel QML que las dibuje.
+- [x] **3. Alertas → `PillarContext` → Cerebra.** Hoy nada produce un `PillarContext`.
   Cada alerta de `archie-netwatch` entra como referencia del pilar Sentry. *Hecho
   cuando:* un escaneo de puertos generado a propósito termina en un pase de Cerebra con
   su traza, y la prueba lo recorre de punta a punta. Ver la sección 4: el pase se
   gradúa `restricted` y sin modelo local se rechaza.
-- [ ] **4. Persistir lo que ya se avisó.** La deduplicación de alertas vive en memoria:
-  tras reiniciar se repiten, y `address-moved` avisa una vez por par y luego calla aunque
-  dos equipos peleen por la IP del router. *Hecho cuando:* reiniciar no repite alertas y
-  un vaivén de ARP produce una alerta que cuenta los cambios.
-- [ ] **5. Límites al cargar el estado.** `state.json` se deserializa sin topes. *Hecho
-  cuando:* un archivo con más dispositivos, nombres o destinos que los máximos se rechaza
-  con error, con prueba.
+  **Hecho (Kimi, 2026-10-11):** `archie_cerebra::sentry_bridge` — la alerta se valida,
+  deduplica, guarda en Vault (Restricted, con su propio timestamp) y entra como referencia
+  Sentry; el pase gradúa `restricted` y sin modelo local queda el rechazo `NoLocalModel`
+  registrado en la traza. La prueba recorre el port-scan de punta a punta (fixture).
+  Falta el llamador en vivo (quien sigue `alerts.jsonl` y dispara el pase).
+- [x] **4. Persistir lo que ya se avisó.** ~~La deduplicación de alertas vive en memoria~~
+  **Hecho (Kimi, 2026-10-11):** `told.json` (0600, atómico, acotado, expulsa las más
+  viejas). Reiniciar no repite alertas; `address-moved` ahora sigue la dirección: un
+  vaivén de ARP produce una alerta que cuenta los cambios y reavisa solo tras una hora
+  de enfriamiento y al menos un cambio más.
+- [x] **5. Límites al cargar el estado.** **Hecho (Kimi, 2026-10-11):** `State::parse`
+  con tope de bytes (256 MiB) antes de deserializar y errores tipados que nombran el
+  límite (dispositivos, nombres, destinos, direcciones). Lo que el programa guarda,
+  siempre recarga; hay prueba de cada tope.
 - [ ] **6. Probar en vivo las tres reglas que faltan**: `dns-tunnel-suspect`,
   `address-moved`, `host-sweep`. En WSL el DNS sale por loopback; hace falta Linux real o
   capturar en `any`. *Hecho cuando:* cada una salta con tráfico generado y queda el
@@ -90,17 +102,24 @@ fixture se reporta como fixture, no como dispositivo real. Un PR por avance, con
   Nelson es un MitraStar GPT-2741GNAC. Sin eso o un puerto espejo, un nodo conmutado
   solo ve su propio tráfico. *Hecho cuando:* la lista de clientes del router entra a la
   vista del punto 1, solo lectura.
-- [ ] **9. Imprimir dentro del motor.** `archie-print` habla IPP directo y se confirma
-  escribiendo `print`. Debe ser un `Command::Print` con policy, journal y aprobación por
-  digest. El motor exige plazo ≤ 30 s y un trabajo tarda más: proponer la postcondición
-  (por ejemplo «la impresora tiene el trabajo N») antes de implementar. *Hecho cuando:*
-  `archie sentry-execute <impresora> print …` deja un recibo durable.
+- [x] **9. Imprimir dentro del motor.** ~~`archie-print` habla IPP directo~~
+  **Hecho (Kimi, 2026-10-11):** `Command::PrintSubmit` con policy, journal y aprobación
+  por digest; la postcondición es la propuesta aquí: «la impresora tiene el trabajo» —
+  una entrada de cola no-completada con nombre `archie-<sha256[0..16]>`, cuyo contenido se
+  verifica por SHA-256 antes de enviar un byte. El formato se comprueba contra
+  `document-format-supported` antes de enviar; el completado queda como observación
+  posterior fuera del plazo de 30 s. CLI: `archie sentry print`. Recibo durable vía el
+  flujo normal de intents. `archie-print` queda como herramienta de operador.
 - [ ] **10. Imprimir en una impresora real.** La Brother DCP-T720DW no respondía. *Hecho
   cuando:* sale una página y el recibo dice `completed`, con el formato que aceptó.
 - [ ] **11. Respuesta.** Hoy todo es observación. Primera respuesta reversible: aviso
   por voz y por el Observatory. Bloqueo o cuarentena solo como `Intent` aprobado.
-- [ ] **12. Control más allá de Home Assistant**: Roku ECP se lee y no se actúa; nada de
-  Matter, MQTT, ONVIF ni Chromecast. Cada uno es un adaptador con su prueba.
+- [~] **12. Control más allá de Home Assistant.** **Parcial (Kimi, 2026-10-11):** Roku
+  ECP actúa (teclas con postcondición medible y lanzamiento de apps, verificado contra el
+  propio dispositivo); MQTT actúa switches/luces/clima con estado medido; ONVIF observa
+  (sin PTZ: sin postcondición medible); Chromecast declara su ausencia (CAST v2 necesita
+  TLS+protobuf que el crate no tiene). Falta Matter. Cada adaptador con su prueba (mocks
+  loopback; falta hardware real).
 - [ ] **13. `archie-netwatch.service` bajo systemd real.** No se sabe si `DynamicUser`
   con capacidades ambientales basta para `dumpcap` en Arch.
 - [ ] 14. IPv6: `address-moved` solo mira ARP; falta Neighbor Discovery.
