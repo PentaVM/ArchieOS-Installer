@@ -1,0 +1,256 @@
+person
+face
+eye
+hand
+finger
+hair
+beard
+glasses
+sunglasses
+hat
+cap
+helmet
+mask
+headphones
+earphones
+shirt
+t-shirt
+jacket
+hoodie
+dress
+pants
+shorts
+shoe
+sneaker
+boot
+sock
+watch
+ring
+necklace
+bracelet
+bag
+backpack
+handbag
+wallet
+umbrella
+tie
+scarf
+glove
+belt
+cell phone
+smartphone
+laptop
+computer
+monitor
+screen
+television
+keyboard
+mouse
+trackpad
+remote control
+game controller
+tablet
+camera
+microphone
+speaker
+charger
+cable
+power outlet
+light switch
+lamp
+ceiling light
+light bulb
+fan
+air conditioner
+router
+printer
+headset
+console
+cup
+mug
+glass
+bottle
+water bottle
+can
+plate
+bowl
+fork
+knife
+spoon
+chopsticks
+napkin
+food
+fruit
+apple
+banana
+orange
+bread
+sandwich
+pizza
+cake
+cookie
+snack
+coffee
+drink
+chair
+office chair
+table
+desk
+sofa
+couch
+bed
+pillow
+blanket
+shelf
+bookshelf
+cabinet
+drawer
+door
+window
+curtain
+wall
+floor
+ceiling
+stairs
+mirror
+picture frame
+painting
+poster
+clock
+plant
+potted plant
+flower
+vase
+box
+cardboard box
+basket
+trash can
+bin
+toy
+doll
+ball
+book
+notebook
+paper
+document
+pen
+pencil
+marker
+scissors
+tape
+sticky note
+whiteboard
+calendar
+text
+sign
+logo
+label
+price tag
+license plate
+barcode
+qr code
+button
+icon
+menu
+window title
+car
+truck
+bus
+van
+motorcycle
+bicycle
+scooter
+train
+airplane
+boat
+wheel
+tire
+engine
+traffic light
+stop sign
+street sign
+road
+sidewalk
+crosswalk
+building
+house
+tree
+grass
+sky
+cloud
+sun
+mountain
+water
+river
+beach
+bench
+fence
+pole
+street lamp
+parking meter
+dog
+cat
+bird
+horse
+cow
+sheep
+fish
+insect
+animal
+sports ball
+soccer ball
+basketball
+tennis racket
+baseball bat
+skateboard
+surfboard
+skis
+goal
+player
+referee
+crowd
+field
+court
+net
+tool
+hammer
+screwdriver
+wrench
+drill
+knife block
+bucket
+broom
+sink
+faucet
+toilet
+bathtub
+towel
+toothbrush
+soap
+refrigerator
+oven
+microwave
+stove
+kettle
+toaster
+dishwasher
+washing machine
+pan
+pot
+cutting board
+robot
+drone
+guitar
+piano
+drum
+headphone case
+key
+keys
+lock
+credit card
+money
+coin
+medicine
+pill bottle
+glasses case
+earbuds case
