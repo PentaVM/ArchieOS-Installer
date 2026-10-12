@@ -146,8 +146,15 @@ fn asking(
     offset: Option<time::UtcOffset>,
     words: bool,
 ) -> Result<Asking, String> {
-    let model =
-        take(&mut args, "--model").unwrap_or_else(|| "nvidia/Nemotron-3_5-Lightning".into());
+    // A reasoning model on this machine (any OpenAI-compatible server on loopback, such as
+    // llama-server) answers instead of Nebius when its address is given. Nothing said then
+    // leaves the machine, and no key is needed. The environment names it too, so the
+    // launcher that starts a conversation need not know.
+    let set = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
+    let local = take(&mut args, "--endpoint").or_else(|| set("ARCHIE_VOICE_ENDPOINT"));
+    let model = take(&mut args, "--model")
+        .or_else(|| set("ARCHIE_VOICE_MODEL"))
+        .unwrap_or_else(|| "nvidia/Nemotron-3_5-Lightning".into());
     let language = take(&mut args, "--language").unwrap_or_else(|| "es-CL".into());
     let budget = match take(&mut args, "--budget").as_deref() {
         None | Some("full") => SpeechBudget::Full,
@@ -183,12 +190,15 @@ fn asking(
         .enable_all()
         .build()
         .map_err(|error| error.to_string())?;
-    let endpoint = ProviderEndpoint::nebius("https://api.tokenfactory.nebius.com/v1")
-        .map_err(|error| error.to_string())?;
+    let endpoint = match &local {
+        None => ProviderEndpoint::nebius("https://api.tokenfactory.nebius.com/v1"),
+        Some(url) => ProviderEndpoint::nvidia_nim(url, Locality::Local),
+    }
+    .map_err(|error| error.to_string())?;
     let client = InferenceClient::new(endpoint).map_err(|error| error.to_string())?;
     let source = NebiusSource::new(
         client,
-        descriptor(&model, "voice", true, PrivacyGrade::Public)?,
+        descriptor(&model, "voice", local.is_none(), grade)?,
         grade,
         runtime.handle().clone(),
     );
