@@ -1,0 +1,81 @@
+{
+  "format": "archie-sentry-devices-v1",
+  "generated_unix": 1790000100,
+  "devices": [
+    {
+      "identity": "54:4e:f0:07:3d:e8",
+      "mac": "54:4e:f0:07:3d:e8",
+      "ips": ["192.168.1.40"],
+      "names": ["Living", "roku-living"],
+      "classes": ["mdns-roku", "television"],
+      "sources": {
+        "lan-scan": {
+          "names": ["Living"],
+          "classes": ["television"],
+          "first_seen_unix": 1790000000,
+          "last_seen_unix": 1790000000,
+          "claims": {"manufacturer": "Roku", "model": "3941X"}
+        },
+        "netwatch": {
+          "names": ["roku-living"],
+          "classes": [],
+          "first_seen_unix": 1789999000,
+          "last_seen_unix": 1790000005,
+          "claims": {"frames": "12", "bytes": "3456"}
+        },
+        "passive-import": {
+          "names": [],
+          "classes": ["mdns-roku"],
+          "first_seen_unix": null,
+          "last_seen_unix": null,
+          "claims": {}
+        }
+      },
+      "first_seen_unix": 1789999000,
+      "last_seen_unix": 1790000005
+    },
+    {
+      "identity": "aa:bb:cc:00:11:22",
+      "mac": "aa:bb:cc:00:11:22",
+      "ips": ["192.168.1.60"],
+      "names": ["Oficina"],
+      "classes": ["printer"],
+      "sources": {
+        "lan-scan": {
+          "names": ["Oficina"],
+          "classes": ["printer"],
+          "first_seen_unix": 1790000000,
+          "last_seen_unix": 1790000000,
+          "claims": {"manufacturer": "Brother", "model": "HL-L2350DW"}
+        },
+        "netwatch": {
+          "names": [],
+          "classes": [],
+          "first_seen_unix": 1789999500,
+          "last_seen_unix": 1790000003,
+          "claims": {"frames": "4", "bytes": "1024"}
+        }
+      },
+      "first_seen_unix": 1789999500,
+      "last_seen_unix": 1790000003
+    },
+    {
+      "identity": "ip:192.168.1.77",
+      "mac": null,
+      "ips": ["192.168.1.77"],
+      "names": [],
+      "classes": [],
+      "sources": {
+        "passive-import": {
+          "names": [],
+          "classes": [],
+          "first_seen_unix": null,
+          "last_seen_unix": null,
+          "claims": {}
+        }
+      },
+      "first_seen_unix": null,
+      "last_seen_unix": null
+    }
+  ]
+}
