@@ -1,23 +1,42 @@
 import QtQuick
 
-// A shell surface: translucent fill, hairline border, soft shadow made of two stacked rects
-// (no shader needed, so it costs nothing on the GPU that IRIS is using).
+// Glass surface: window, panel or dock. Fill + hairline border + 1px inner highlight on top +
+// a soft drop shadow. The handoff's shadows (window 0 18 50 .45, panel 0 24 70 .55, dock
+// 0 8 24 .35) are approximated with stacked translucent layers: no shader, so it costs
+// nothing on the GPU IRIS uses. Background blur is the compositor's job, not the shell's.
 Item {
     id: p
-    property alias contentItem: holder
+    property string kind: "panel"       // window | panel | dock
     default property alias data: holder.data
-    property int radius: Theme.radius
-    property bool elevated: true
-    property color fill: Theme.surface
+    property alias contentItem: holder
+    readonly property int radius: kind === "window" ? Theme.rWindow : kind === "dock" ? Theme.rDock : Theme.rPanel
+    readonly property color fill: kind === "window" ? Theme.win : kind === "dock" ? Theme.dock : Theme.panel
+    readonly property int shY: kind === "window" ? 18 : kind === "dock" ? 8 : 24
+    readonly property int shBlur: kind === "window" ? 50 : kind === "dock" ? 24 : 70
+    readonly property real shA: kind === "window" ? 0.45 : kind === "dock" ? 0.35 : 0.55
 
-    Rectangle {
-        visible: p.elevated
-        anchors.fill: parent; anchors.margins: -1; anchors.topMargin: 4; anchors.bottomMargin: -6
-        radius: p.radius + 2; color: "#000000"; opacity: 0.28
+    // Soft shadow: 8 rings, each a little wider and fainter.
+    Repeater {
+        model: 8
+        Rectangle {
+            readonly property real f: (index + 1) / 8
+            x: -p.shBlur * 0.5 * f; y: p.shY - p.shBlur * 0.5 * f + p.shBlur * 0.15
+            width: p.width + p.shBlur * f; height: p.height + p.shBlur * f
+            radius: p.radius + p.shBlur * 0.5 * f
+            color: Qt.rgba(0, 0, 0, p.shA * 0.22 * (1 - f) + 0.004)
+        }
+    }
+    Rectangle { // tight contact shadow
+        x: 0; y: 2; width: p.width; height: p.height; radius: p.radius
+        color: Qt.rgba(0, 0, 0, p.kind === "dock" ? 0.2 : 0.28)
     }
     Rectangle {
-        anchors.fill: parent; radius: p.radius; color: p.fill
-        border.width: 1; border.color: Theme.line
+        id: body
+        anchors.fill: parent; radius: p.radius
+        color: p.fill; border.width: 1; border.color: Theme.hair
+    }
+    Rectangle { // inner highlight: inset 0 1px 0 var(--inner)
+        x: p.radius * 0.6; y: 1; width: p.width - p.radius * 1.2; height: 1; color: Theme.inner
     }
     Item { id: holder; anchors.fill: parent }
 }

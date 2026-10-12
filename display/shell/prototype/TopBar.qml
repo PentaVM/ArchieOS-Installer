@@ -1,32 +1,56 @@
 import QtQuick
 
+// Top bar, 32 px. Order is frozen: left = brand, app, menus; right = link chip, camera/mic,
+// domain, search, activity count, control center, clock.
 Rectangle {
     id: bar
     height: Theme.barH
-    color: Qt.rgba(0, 0, 0, 0.34)
+    color: Theme.bar
     property string overlay: ""
+    property string app: "Vault"
     property var bridge
     signal toggle(string name)
 
+    Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.inner }
+
+    component MenuItem: Text { leftPadding: 9; rightPadding: 9; color: Theme.t2; font.family: Theme.font; font.pixelSize: 13 }
+    component IconButton: Rectangle {
+        id: ib
+        property string icon
+        property string count: ""
+        property bool active: false
+        signal clicked()
+        width: count === "" ? 28 : cr.implicitWidth + 16; height: 26; radius: 7
+        color: active ? Theme.pressed : (ma.containsMouse ? Theme.hover : "transparent")
+        Row { id: cr; anchors.centerIn: parent; spacing: 6
+            Icon { name: ib.icon; size: 16; color: ib.active || ma.containsMouse || ib.count !== "" ? Theme.t1 : Theme.t2; anchors.verticalCenter: parent.verticalCenter }
+            Text { visible: ib.count !== ""; text: ib.count; color: Theme.t1; font.family: Theme.font; font.pixelSize: 13; font.weight: Font.DemiBold; font.features: { "tnum": 1 }; anchors.verticalCenter: parent.verticalCenter }
+        }
+        MouseArea { id: ma; anchors.fill: parent; hoverEnabled: true; onClicked: ib.clicked() }
+    }
+
     Row {
-        anchors.left: parent.left; anchors.leftMargin: 14; anchors.verticalCenter: parent.verticalCenter; spacing: 14
-        Text { text: "◉  Archie"; color: Theme.ink; font.pixelSize: Theme.fsBody; font.bold: true }
-        Text { text: "Vault"; color: Theme.soft; font.pixelSize: Theme.fsBody }
-        Text { text: "Archivo   Editar   Vista   Ir   Ventana"; color: Theme.dim; font.pixelSize: Theme.fsBody }
+        x: 14; anchors.verticalCenter: parent.verticalCenter; spacing: 4
+        Row { spacing: 8; rightPadding: 14; anchors.verticalCenter: parent.verticalCenter
+            Icon { name: "archie"; size: 18; color: Theme.t1; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: "Archie"; color: Theme.t1; font.family: Theme.font; font.pixelSize: 14; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter } }
+        Text { text: bar.app; rightPadding: 12; color: Theme.t1; font.family: Theme.font; font.pixelSize: 13; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
+        MenuItem { text: "Archivo" } MenuItem { text: "Editar" } MenuItem { text: "Vista" } MenuItem { text: "Ir" } MenuItem { text: "Ventana" }
     }
     Row {
-        anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter; spacing: 12
-        // Link state comes from the bridge. The privacy and domain chips have no source wired yet
-        // (GUI-SENTRY-002, GUI-CEREBRA-002), so they say "sin lectura" instead of claiming a state.
-        LinkChip { bridge: bar.bridge }
-        Chip { text: "Cámara y micro: sin lectura"; glyph: "?"; tone: Theme.unknown }
-        Chip { text: "Dominio: sin lectura"; glyph: "?"; tone: Theme.unknown }
-        Text { text: "⌕"; color: Theme.ink; font.pixelSize: Theme.fsTitle; MouseArea { anchors.fill: parent; anchors.margins: -6; onClicked: bar.toggle("palette") } }
-        // Running long jobs, from the bridge; "—" when no workspace is configured.
-        Text { text: "◔ " + (bar.bridge.jobs.state === "ok" ? bar.bridge.runningJobs : "—"); color: bar.overlay === "activity" ? Theme.accent : Theme.ink; font.pixelSize: Theme.fsBody
-            MouseArea { anchors.fill: parent; anchors.margins: -6; onClicked: bar.toggle("activity") } }
-        Text { text: "☰"; color: bar.overlay === "control" ? Theme.accent : Theme.ink; font.pixelSize: Theme.fsTitle
-            MouseArea { anchors.fill: parent; anchors.margins: -6; onClicked: bar.toggle("control") } }
-        Text { text: "Sáb 11 oct  09:41"; color: Theme.ink; font.pixelSize: Theme.fsBody }
+        anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter; spacing: 6
+        LinkChip { bridge: bar.bridge; anchors.verticalCenter: parent.verticalCenter }
+        // No source is wired for these two yet (GUI-SENTRY-002, GUI-CEREBRA-002): they say so.
+        Chip { text: "Cámara y micro"; sub: "sin lectura"; icon: "unknown"; tone: "unk"; anchors.verticalCenter: parent.verticalCenter }
+        Chip { text: "Dominio"; sub: "sin lectura"; icon: "unknown"; tone: "unk"; anchors.verticalCenter: parent.verticalCenter }
+        Item { width: 13; height: 14; anchors.verticalCenter: parent.verticalCenter
+            Rectangle { anchors.centerIn: parent; width: 1; height: 14; color: Theme.hair } }
+        IconButton { icon: "search"; active: bar.overlay === "palette"; onClicked: bar.toggle("palette"); anchors.verticalCenter: parent.verticalCenter }
+        // Running long jobs from the bridge; "—" when no workspace is configured, never a made-up 0.
+        IconButton { icon: "activity"; count: bar.bridge.jobs.state === "ok" ? String(bar.bridge.runningJobs) : "—"
+            active: bar.overlay === "activity"; onClicked: bar.toggle("activity"); anchors.verticalCenter: parent.verticalCenter }
+        IconButton { icon: "control"; active: bar.overlay === "control"; onClicked: bar.toggle("control"); anchors.verticalCenter: parent.verticalCenter }
+        Text { leftPadding: 8; text: Synthetic.clock; color: Theme.t1; font.family: Theme.font; font.pixelSize: 13; font.weight: Font.Medium
+            font.features: { "tnum": 1 }; anchors.verticalCenter: parent.verticalCenter }
     }
 }

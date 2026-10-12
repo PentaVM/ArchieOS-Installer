@@ -1,0 +1,116 @@
+{
+  "v": 3,
+  "createdOnFiles": {
+    "v": 1,
+    "at": "2026-10-12T08:14:11Z"
+  },
+  "title": "Archie Mac · Rediseño de la shell",
+  "launch": {
+    "view": "canvas"
+  },
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1920,
+      "h": 1080,
+      "title": "1 · Escritorio completo",
+      "radius": 0
+    },
+    "Componentes.dc.html": {
+      "x": 4000,
+      "y": 0,
+      "w": 1920,
+      "h": 3400,
+      "title": "7 · Hoja de componentes",
+      "radius": 0
+    },
+    "Vault-cuadricula.dc.html": {
+      "x": 0,
+      "y": 1200,
+      "w": 1920,
+      "h": 1080,
+      "title": "2 · Vault en cuadrícula",
+      "radius": 0
+    },
+    "Centro-sin-respuesta.dc.html": {
+      "x": 0,
+      "y": 2400,
+      "w": 1920,
+      "h": 1080,
+      "title": "3a · Centro de control, archied no responde",
+      "radius": 0
+    },
+    "Centro-en-vivo.dc.html": {
+      "x": 0,
+      "y": 3600,
+      "w": 1920,
+      "h": 1080,
+      "title": "3b · Centro de control, en vivo",
+      "radius": 0
+    },
+    "Actividad.dc.html": {
+      "x": 2000,
+      "y": 1200,
+      "w": 1920,
+      "h": 1080,
+      "title": "4 · Actividad con trabajos largos",
+      "radius": 0
+    },
+    "Sentry-dispositivos.dc.html": {
+      "x": 2000,
+      "y": 2400,
+      "w": 1920,
+      "h": 1080,
+      "title": "5a · Sentry, red local con dispositivos",
+      "radius": 0
+    },
+    "Sentry-sin-escaner.dc.html": {
+      "x": 2000,
+      "y": 3600,
+      "w": 1920,
+      "h": 1080,
+      "title": "5b · Sentry, el escáner aún no ha corrido",
+      "radius": 0
+    },
+    "Paleta.dc.html": {
+      "x": 2000,
+      "y": 4800,
+      "w": 1920,
+      "h": 1080,
+      "title": "6 · Paleta de comandos abierta",
+      "radius": 0
+    },
+    "Opaca.dc.html": {
+      "x": 2000,
+      "y": 0,
+      "w": 1920,
+      "h": 1080,
+      "title": "8 · Escritorio completo, versión opaca",
+      "radius": 0
+    }
+  },
+  "order": [
+    "Main.dc.html",
+    "Componentes.dc.html",
+    "Vault-cuadricula.dc.html",
+    "Centro-sin-respuesta.dc.html",
+    "Centro-en-vivo.dc.html",
+    "Actividad.dc.html",
+    "Sentry-dispositivos.dc.html",
+    "Sentry-sin-escaner.dc.html",
+    "Paleta.dc.html",
+    "Opaca.dc.html"
+  ],
+  "notes": {
+    "titulo": {
+      "x": 0,
+      "y": -300,
+      "text": "Archie Mac · rediseño visual de la shell",
+      "kind": "title1",
+      "maxW": 5920
+    }
+  },
+  "designSystems": []
+}

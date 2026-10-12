@@ -80,3 +80,7 @@ Casos negativos: nadie escucha (`displayd_offline`), respuesta que no cumple el 
 **Regresión del workspace:** **1 938 pasan** (1 900 + 38), **1 falla** (la misma previa de `INDEX.md`), 78 ignoradas. Sin regresiones.
 
 **No ejecutado:** `archie-lan` contra una red real (generaría tráfico SSDP/mDNS en la red del dueño y sus dispositivos acabarían en los fixtures: no se hizo), un `archie-bridges run-job` real, Quickshell, Linux. Estados: `GUI-SENTRY-001` `INTEGRATED`; `GUI-BRIDGE-002` `IN_PROGRESS` (no hay cancelación).
+
+## Rediseño visual Archie Mac (Claude Design)
+
+Sin cambios en Rust ni en el modelo de datos. `BridgeModelTest.qml`: 21 comprobaciones, 0 fallos. Las 10 pantallas del prototipo y dos a 1440p cargan con 0 avisos de QML (Qt 6.12, render por software). Verificación visual: **contra el código de los mockups, no contra una imagen del diseño** (el paquete declara que no se renderizó nunca y sus `.dc.html` no se pueden abrir sin su runtime). Defectos hallados al renderizar y corregidos: texto que se transparentaba a través de paneles sin desenfoque (ahora `Theme.blur`), barra de progreso de la cola pegada al texto, texto del resumen del sistema que se salía de su caja y falta de aire bajo los chips del centro de control. No verificado: Quickshell, desenfoque real, lectores de pantalla, rendimiento. Ver `DESIGN_ARCHIE_MAC.md` §4–5.

@@ -1,60 +1,82 @@
 pragma Singleton
 import QtQuick
 
-// Design tokens for the ArchieOS professional shell (DESIGN PROTOTYPE).
-// Three explored directions plus the final synthesis; see docs/gui/DESIGN_SYSTEM.md.
-// Base colours come from the existing Observatory (display/native/qml/Main.qml)
-// so the shell and the Orb read as one system.
+// Archie Mac · cristal grafito. Tokens from the Claude Design handoff
+// (archie-mac-handoff/tokens.css). Two surface sets: glass (translucent; real blur comes from
+// the compositor, not from the shell) and opaque (no blur: "reduce transparency" and the Quiet
+// profile). Only a dark theme exists.
 QtObject {
     id: t
-    // frost | workspace | signature | synthesis
-    property string variant: "synthesis"
-    // Real blur depends on the compositor; false = opaque accessible fallback.
-    property bool glass: true
+    property bool opaque: false
+    // True only when the compositor really blurs what is behind a surface. The shell cannot blur:
+    // without it, windows, sidebar and panels use their solid fill (translucency over unblurred
+    // content breaks legibility: text shows through). Bar and dock stay glass over the desktop.
+    property bool blur: false
     property bool reducedMotion: false
 
-    readonly property var table: ({
-        frost:     { bg: "#0d1117", surface: "#161b22", raised: "#1e252e", line: "#2a323d", ink: "#eef2f7", soft: "#aab3c0", dim: "#8691a0",
-                     accent: "#5aa9ff", radius: 14, gap: 12, bar: 34, dock: 64, density: 1.0, wall0: "#1b2a3c", wall1: "#0b0f15" },
-        workspace: { bg: "#0f1214", surface: "#171b1e", raised: "#1f2427", line: "#2c3338", ink: "#e8ecef", soft: "#a3acb2", dim: "#85909a",
-                     accent: "#3ec9a7", radius: 8,  gap: 8,  bar: 30, dock: 52, density: 0.86, wall0: "#12302b", wall1: "#0a0d0d" },
-        signature: { bg: "#04060a", surface: "#0a0d13", raised: "#10141b", line: "#1d232d", ink: "#e9edf3", soft: "#a4acb9", dim: "#7b8596",
-                     accent: "#6fe3f5", radius: 12, gap: 12, bar: 32, dock: 60, density: 1.0, wall0: "#0b2030", wall1: "#04060a" },
-        synthesis: { bg: "#080b10", surface: "#11161d", raised: "#192029", line: "#252d38", ink: "#eaeff5", soft: "#a8b1be", dim: "#8792a2",
-                     accent: "#6fc8f5", radius: 12, gap: 10, bar: 32, dock: 60, density: 0.94, wall0: "#14283c", wall1: "#05070b" }
-    })
-    readonly property var v: table[variant]
+    // Fonts shipped with the shell (display/shell/fonts, SIL OFL 1.1).
+    property FontLoader interFont: FontLoader { source: Qt.resolvedUrl("../fonts/inter/Inter-Variable.ttf") }
+    property FontLoader groteskFont: FontLoader { source: Qt.resolvedUrl("../fonts/space-grotesk/SpaceGrotesk-Variable.ttf") }
+    readonly property string font: interFont.status === FontLoader.Ready ? interFont.font.family : "sans-serif"
+    readonly property string disp: groteskFont.status === FontLoader.Ready ? groteskFont.font.family : font
 
-    readonly property color bg: v.bg
-    readonly property color solid: v.surface
-    readonly property color surface: glass ? Qt.rgba(Qt.color(v.surface).r, Qt.color(v.surface).g, Qt.color(v.surface).b, 0.88) : v.surface
-    readonly property color raised: v.raised
-    readonly property color line: v.line
-    readonly property color ink: v.ink
-    readonly property color soft: v.soft
-    readonly property color dim: v.dim
-    readonly property color accent: v.accent
-    readonly property color wall0: v.wall0
-    readonly property color wall1: v.wall1
-    readonly property int radius: v.radius
-    readonly property int gap: Math.round(v.gap * v.density)
-    readonly property int barH: v.bar
-    readonly property int dockH: v.dock
-    readonly property real density: v.density
+    readonly property color desktop: "#07080c"
 
-    // State colours. Severity is never carried by hue alone: every state also has a glyph and a word.
+    // Surfaces: glass / opaque.
+    readonly property color bar: opaque ? "#101117" : Qt.rgba(16 / 255, 17 / 255, 23 / 255, 0.62)
+    readonly property color dock: opaque ? "#14151c" : Qt.rgba(20 / 255, 21 / 255, 28 / 255, 0.55)
+    readonly property color win: (opaque || !blur) ? "#12131a" : Qt.rgba(18 / 255, 19 / 255, 26 / 255, 0.78)
+    readonly property color side: (opaque || !blur) ? "#1a1b24" : Qt.rgba(26 / 255, 27 / 255, 36 / 255, 0.66)
+    readonly property color panel: (opaque || !blur) ? "#16171f" : Qt.rgba(22 / 255, 23 / 255, 31 / 255, 0.86)
+    readonly property color raised: opaque ? "#22232a" : Qt.rgba(1, 1, 1, 0.05)
+    readonly property color hover: opaque ? "#2a2b32" : Qt.rgba(1, 1, 1, 0.08)
+    readonly property color pressed: opaque ? "#31323a" : Qt.rgba(1, 1, 1, 0.11)
+    readonly property color hair: opaque ? "#2c2d36" : Qt.rgba(1, 1, 1, 0.09)
+    readonly property color inner: opaque ? "#25262e" : Qt.rgba(1, 1, 1, 0.06)
+    readonly property color sel: opaque ? "#1f3a4a" : Qt.rgba(111 / 255, 200 / 255, 245 / 255, 0.16)
+
+    // Text.
+    readonly property color t1: "#f2f1ee"
+    readonly property color t2: "#b9b8c4"
+    readonly property color t3: "#8d8c9c"
+    readonly property color tdis: "#5e5d6b"
+
+    // Accents and states. A state is never colour alone: icon + word always.
+    readonly property color acc: "#6fc8f5"
+    readonly property color arch: "#f0bb78"
     readonly property color ok: "#47d18b"
     readonly property color warn: "#f0b429"
     readonly property color bad: "#f2626b"
     readonly property color info: "#6fe3f5"
-    readonly property color unknown: "#8792a2"
+    readonly property color unk: "#8d8c9c"
 
-    // Motion tokens (ms). Reduced motion collapses spatial movement to instant.
+    // File categories (colour-blind safe, same as the sphere's nodes).
+    readonly property var cat: ({ documents: "#e69f00", media: "#009e73", data: "#f0e442",
+                                  archive: "#cc79a7", executable: "#d55e00", other: "#bbbbbb" })
+    // Dock icons: solid colour under a 165° white→black wash.
+    readonly property var dk: ({ orb: "#1b8fa6", vault: "#3b7fd6", forge: "#b87a0b",
+                                 sentry: "#1f9a62", stage: "#8a5fd6", set: "#6b7686" })
+    // Window controls.
+    readonly property color tlClose: "#d9605a"
+    readonly property color tlMin: "#d9a441"
+    readonly property color tlZoom: "#4fb67b"
+    readonly property color tlOff: Qt.rgba(1, 1, 1, 0.17)
+
+    // Radii.
+    readonly property int rWindow: 14
+    readonly property int rPanel: 16
+    readonly property int rCard: 10
+    readonly property int rRow: 8
+    readonly property int rDock: 22
+    readonly property int rDockIcon: 14
+
+    readonly property int barH: 32
+    readonly property int dockIcon: 56
+
+    // Motion: the handoff defines no motion table yet, so only simple state transitions animate.
     readonly property int fast: reducedMotion ? 0 : 120
     readonly property int base: reducedMotion ? 0 : 180
-    readonly property int slow: reducedMotion ? 0 : 280
 
-    readonly property int fsSmall: Math.round(11 * density + 1)
-    readonly property int fsBody: Math.round(13 * density + 1)
-    readonly property int fsTitle: Math.round(16 * density + 1)
+    // Tinted chip fills: only warn, bad and arch carry a background tint.
+    function tint(c, a) { return Qt.rgba(c.r, c.g, c.b, a) }
 }

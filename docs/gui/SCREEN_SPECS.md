@@ -51,3 +51,7 @@ Capturas `C-*` en `screenshots/`: `C-real-daemon-unreachable` (trama **real**: `
 - **Sentry Center (superficie 11)** pasa de texto a render: capturas `S-real-lan-missing` (trama real: el inventario no existe en este equipo), `S-synthetic-lan-inventory` y `S-synthetic-lan-stale` (bridge real sobre un inventario sintético). Pasivo, sin acciones.
 - **Actividad (superficie 6)**: los trabajos largos son reales; capturas `A-synthetic-jobs` (bridge real sobre un espacio de trabajo sintético) y `A-real-daemon-unreachable` (sin espacios configurados). Cancelar no se ofrece.
 - Cobertura visual: 6 de 15 superficies renderizadas; con datos reales en parte: barra superior, centro de control, Sentry y actividad.
+
+## Actualización: diseño Archie Mac
+
+Las capturas de `screenshots/` y su nomenclatura se sustituyeron por las del diseño Archie Mac (ver `DESIGN_ARCHIE_MAC.md`); los nombres `0x-synthesis`, `C-*`, `S-*` y `A-*` de arriba corresponden al diseño anterior y están en el historial de git. Las posiciones y tamaños de ventanas y paneles son ahora las del diseño.

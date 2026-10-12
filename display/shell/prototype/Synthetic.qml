@@ -1,59 +1,61 @@
 pragma Singleton
 import QtQuick
 
-// SYNTHETIC DESIGN DATA. Nothing here comes from archied, Sentry or the filesystem.
-// Every screen that uses it shows the DESIGN DATA banner. It is replaced by the real
-// adapter in phase C (see docs/gui/INTEGRATION_MATRIX.md).
+// SYNTHETIC DESIGN DATA, taken from the Archie Mac mockups. Nothing here comes from archied,
+// Sentry or the filesystem; every screen that uses it says "Diseño" (the DATOS DE DISEÑO notice
+// and per-section chips). The bridge-fed parts (link, control center, activity jobs, Sentry)
+// do not read from here.
 QtObject {
+    readonly property string clock: "lun 12 oct  14:32"
     readonly property var dock: [
-        { id: "orb",    name: "Orb",     glyph: "◉", color: "#6fe3f5", running: true  },
-        { id: "vault",  name: "Vault",   glyph: "▤", color: "#5aa9ff", running: true  },
-        { id: "forge",  name: "Forge",   glyph: "✱", color: "#f0b429", running: false },
-        { id: "sentry", name: "Sentry",  glyph: "◎", color: "#47d18b", running: false },
-        { id: "stage",  name: "Stage",   glyph: "▣", color: "#c08cff", running: true  },
-        { id: "set",    name: "Ajustes", glyph: "≡", color: "#aab3c0", running: false }
+        { id: "orb",    name: "Orb",     icon: "dkOrb",    running: true  },
+        { id: "vault",  name: "Vault",   icon: "dkVault",  running: true  },
+        { id: "forge",  name: "Forge",   icon: "dkForge",  running: false },
+        { id: "sentry", name: "Sentry",  icon: "dkSentry", running: false },
+        { id: "stage",  name: "Stage",   icon: "dkStage",  running: true  },
+        { id: "set",    name: "Ajustes", icon: "dkSet",    running: false }
     ]
+    readonly property var tabs: ["Entregas", "Workspaces"]
+    readonly property var crumbs: ["Inicio", "Archie", "motor-bracket"]
     readonly property var places: [
-        { name: "Entregas",   icon: "⇩", note: "~/Archie",            domain: "" },
-        { name: "Workspaces", icon: "▦", note: "/archie/workspaces",  domain: "" },
-        { name: "Documentos", icon: "▤", note: "",                    domain: "personal" },
-        { name: "Trabajo",    icon: "▤", note: "",                    domain: "work" },
-        { name: "Recientes",  icon: "◷", note: "",                    domain: "" },
-        { name: "Papelera",   icon: "✕", note: "",                    domain: "" }
+        { name: "Entregas",   icon: "deliveries", domain: "" },
+        { name: "Workspaces", icon: "workspaces", domain: "" },
+        { name: "Documentos", icon: "documents",  domain: "personal" },
+        { name: "Trabajo",    icon: "work",       domain: "work" },
+        { name: "Recientes",  icon: "recents",    domain: "" },
+        { name: "Papelera",   icon: "trash",      domain: "" }
     ]
+    // icon tint: folders t2, otherwise the file category colour.
     readonly property var files: [
-        { name: "motor-bracket",     kind: "folder", size: "",       when: "hoy 09:14", domain: "",         archie: true  },
-        { name: "soporte-v3.step",   kind: "cad",    size: "2,4 MB", when: "hoy 09:12", domain: "",         archie: true  },
-        { name: "informe-q3.docx",   kind: "doc",    size: "148 KB", when: "ayer",      domain: "work",     archie: false },
-        { name: "render-final.mp4",  kind: "video",  size: "86 MB",  when: "ayer",      domain: "",         archie: true  },
-        { name: "fotos-viaje",       kind: "folder", size: "",       when: "lun",       domain: "personal", archie: false },
-        { name: "presupuesto.xlsx",  kind: "sheet",  size: "62 KB",  when: "lun",       domain: "work",     archie: false },
-        { name: "notas.md",          kind: "text",   size: "3 KB",   when: "dom",       domain: "personal", archie: false },
-        { name: "esquema.kicad_pcb", kind: "cad",    size: "910 KB", when: "dom",       domain: "",         archie: true  },
-        { name: "boceto.svg",        kind: "image",  size: "44 KB",  when: "sáb",       domain: "",         archie: false }
+        { name: "motor-bracket",     icon: "folder", cat: "",          size: "—",      kind: "carpeta", when: "hoy 14:21",    domain: "",         archie: "" },
+        { name: "soporte-v3.step",   icon: "cad",    cat: "other",     size: "2,4 MB", kind: "",        when: "hoy 14:18",    domain: "",         archie: "14:18" },
+        { name: "informe-q3.docx",   icon: "doc",    cat: "documents", size: "148 KB", kind: "",        when: "ayer 18:40",   domain: "work",     archie: "" },
+        { name: "render-final.mp4",  icon: "video",  cat: "media",     size: "86 MB",  kind: "",        when: "10 oct 09:12", domain: "",         archie: "", loading: true },
+        { name: "fotos-viaje",       icon: "folder", cat: "",          size: "—",      kind: "carpeta", when: "3 oct 21:05",  domain: "personal", archie: "" },
+        { name: "presupuesto.xlsx",  icon: "sheet",  cat: "data",      size: "62 KB",  kind: "",        when: "8 oct 11:30",  domain: "work",     archie: "" },
+        { name: "notas.md",          icon: "doc",    cat: "documents", size: "3 KB",   kind: "",        when: "11 oct 22:47", domain: "personal", archie: "" },
+        { name: "esquema.kicad_pcb", icon: "cad",    cat: "other",     size: "910 KB", kind: "",        when: "hoy 13:56",    domain: "",         archie: "13:56" },
+        { name: "boceto.svg",        icon: "image",  cat: "media",     size: "44 KB",  kind: "",        when: "5 oct 16:02",  domain: "",         archie: "", loading: true }
     ]
-    readonly property var jobs: [
-        { name: "Barrido FreeCAD · soporte",  state: "running", progress: 0.62, detail: "iteración 31 de 50" },
-        { name: "Copiar a Entregas",          state: "running", progress: 0.35, detail: "3 de 9 archivos" },
-        { name: "Render timeline",            state: "done",    progress: 1.0,  detail: "render-final.mp4" },
-        { name: "Instalar herramienta kicad", state: "needs",   progress: 0.0,  detail: "espera tu aprobación" }
-    ]
+    readonly property var queue: ({ title: "Copiando a Entregas", detail: "3 de 9 archivos", progress: 1 / 3,
+                                    permission: "Permiso concedido · lectura de /archie/workspaces/motor-bracket",
+                                    undoWhy: "Deshacer: aún no hay nada que deshacer", updated: "actualizado hace 12 s" })
+    readonly property var authorization: ({ title: "Archie pide escribir en motor-bracket", path: "/archie/workspaces/motor-bracket" })
     readonly property var audit: [
-        { t: "09:14", text: "Policy concedió lectura de /archie/workspaces/motor-bracket (1 operación)", kind: "ok"   },
-        { t: "09:12", text: "Policy rechazó una escritura fuera del espacio de trabajo",              kind: "bad"  },
-        { t: "09:10", text: "Stage: Archie hizo clic en KiCad (recibo: executed)",                    kind: "info" }
+        { t: "14:09:12", text: "Policy concedió lectura de /archie/workspaces/motor-bracket (1 operación)", kind: "done" },
+        { t: "14:08:40", text: "Policy rechazó una escritura fuera del espacio de trabajo", kind: "bad" },
+        { t: "14:07:55", text: "Stage: Archie hizo clic en KiCad (recibo: executed)", kind: "archie" }
     ]
     readonly property var quick: [
-        { name: "Wi-Fi",      state: "Conectado",               on: true  },
-        { name: "Bluetooth",  state: "Apagado",                 on: false },
-        { name: "Silencio",   state: "Desactivado",             on: false },
-        { name: "Privacidad", state: "Cámara y micro inactivos", on: true }
+        { name: "Wi-Fi", icon: "wifi" }, { name: "Bluetooth", icon: "bt" },
+        { name: "Silencio", icon: "moon" }, { name: "Privacidad", icon: "eye" }
     ]
+    readonly property string query: "s"
     readonly property var results: [
-        { kind: "App",     name: "Vault",                       hint: "Abrir gestor de archivos" },
-        { kind: "App",     name: "KiCad",                       hint: "Archie puede operarla" },
-        { kind: "Archivo", name: "soporte-v3.step",             hint: "Entregas / motor-bracket" },
-        { kind: "Acción",  name: "Mostrar actividad de Archie", hint: "Centro de actividad" },
-        { kind: "Acción",  name: "Cambiar al Orbe",             hint: "Volver al modo principal" }
+        { group: "Apps",     icon: "dkSentry", name: "Sentry",   hint: "Red local · inventario de dispositivos", kind: "App" },
+        { group: "Apps",     icon: "dkStage",  name: "Stage",    hint: "Ventana de composición",                kind: "App" },
+        { group: "Archivos", icon: "file",     name: "soporte-v3.step", hint: "Vault · Diseño / Mecánica · modificado hoy 13:56", kind: "Archivo" },
+        { group: "Acciones", icon: "activity", name: "Mostrar actividad de Archie", hint: "Abre el panel de trabajos y autorizaciones", kind: "Acción" },
+        { group: "Acciones", icon: "dkOrb",    name: "Cambiar al Orbe", hint: "Volver al modo principal", kind: "Acción", why: "sin contrato todavía" }
     ]
 }

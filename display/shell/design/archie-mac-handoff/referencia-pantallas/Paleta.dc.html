@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Archie Mac · Paleta de comandos</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.root,.root *{box-sizing:border-box}
+.root{--disp:'Space Grotesk','Inter',system-ui,sans-serif;--desktop:#07080c;--bar:rgba(16,17,23,.62);--bar-blur:blur(30px) saturate(1.4);--dock:rgba(20,21,28,.55);--dock-blur:blur(36px);--panel:rgba(22,23,31,.86);--panel-blur:blur(44px);--raised:rgba(255,255,255,.05);--hover:rgba(255,255,255,.08);--pressed:rgba(255,255,255,.11);--hair:rgba(255,255,255,.09);--inner:rgba(255,255,255,.06);--t1:#f2f1ee;--t2:#b9b8c4;--t3:#8d8c9c;--tdis:#5e5d6b;--acc:#6fc8f5;--arch:#f0bb78;--ok:#47d18b;--warn:#f0b429;--bad:#f2626b;--info:#6fe3f5;--unk:#8d8c9c;--sel:rgba(111,200,245,.16);font-family:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;font-size:13px;line-height:18px;color:var(--t1);font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+.root.opaque{--bar:#101117;--bar-blur:none;--dock:#14151c;--dock-blur:none;--panel:#16171f;--panel-blur:none;--raised:#22232a;--hover:#2a2b32;--pressed:#31323a;--hair:#2c2d36;--inner:#25262e;--sel:#1f3a4a}
+.root button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:default;text-align:inherit}
+.root button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.ico{flex:none;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:var(--sw,1.5)}
+.ico .dot{stroke-width:calc(var(--sw,1.5) * 2.2)}
+.i12{width:12px;height:12px;--sw:3}
+.i14{width:14px;height:14px;--sw:2.6}
+.i16{width:16px;height:16px;--sw:2.25}
+.i18{width:18px;height:18px;--sw:2}
+.i20{width:20px;height:20px;--sw:1.8}
+.i28{width:28px;height:28px;--sw:1.4}
+.bg{position:absolute;left:0;top:0;right:0;bottom:0;background:radial-gradient(900px 620px at 52% 46%,rgba(86,120,140,.20),transparent 70%),radial-gradient(700px 500px at 18% 78%,rgba(60,70,110,.14),transparent 70%),radial-gradient(600px 420px at 86% 22%,rgba(90,110,100,.10),transparent 70%),#07080c}
+.bar{position:absolute;left:0;right:0;top:0;height:32px;display:flex;align-items:center;justify-content:space-between;padding:0 12px 0 14px;background:var(--bar);backdrop-filter:var(--bar-blur);-webkit-backdrop-filter:var(--bar-blur);border-bottom:1px solid var(--inner)}
+.bl,.br{display:flex;align-items:center}
+.bl{gap:4px}
+.br{gap:6px}
+.brand{display:inline-flex;align-items:center;gap:8px;font-weight:600;font-size:13.5px;margin-right:14px}
+.app{font-weight:600;margin-right:12px}
+.mi{padding:3px 9px;border-radius:6px;color:var(--t2);font-size:13px}
+.ibtn{display:inline-flex;align-items:center;justify-content:center;width:28px;height:26px;border-radius:7px;color:var(--t2)}
+.ibtn.cnt{width:auto;padding:0 8px;gap:6px;font-weight:600;font-size:12.5px;color:var(--t1)}
+.sep{width:1px;height:14px;background:var(--hair);margin:0 6px}
+.clock{margin-left:8px;font-size:13px;font-weight:500;color:var(--t1);white-space:nowrap}
+.chip{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 9px 0 7px;border-radius:999px;font-size:11.5px;line-height:16px;font-weight:500;color:var(--t2);background:var(--raised);border:1px solid var(--hair);white-space:nowrap}
+.chip.sm{height:20px;font-size:11px;padding:0 8px 0 6px;gap:5px}
+.chip .sub{color:var(--t3);font-weight:400}
+.chip.ok .ico{color:var(--ok)}
+.chip.unk{border-style:dashed;border-color:rgba(141,140,156,.6);background:transparent}
+.chip.unk .ico{color:var(--unk)}
+.chip.src{font-family:var(--disp);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:600;color:var(--t2)}
+.notice{position:absolute;left:14px;top:42px;display:inline-flex;align-items:center;gap:8px;height:26px;padding:0 12px 0 9px;border-radius:999px;background:var(--bar);backdrop-filter:var(--bar-blur);-webkit-backdrop-filter:var(--bar-blur);border:1px dashed rgba(240,180,41,.6);font-family:var(--disp);font-size:10.5px;font-weight:600;letter-spacing:.1em;color:var(--t1);text-transform:uppercase}
+.notice .ico{color:var(--warn)}
+.panel{position:absolute;border-radius:16px;background:var(--panel);backdrop-filter:var(--panel-blur);-webkit-backdrop-filter:var(--panel-blur);border:1px solid var(--hair);box-shadow:inset 0 1px 0 var(--inner),0 24px 70px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.3);padding:22px 24px 24px}
+.ptitle{font-family:var(--disp);font-size:22px;line-height:28px;font-weight:600;letter-spacing:-.015em}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 18px}
+.dgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.dv{background:var(--raised);border:1px solid var(--hair);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.dv .hd{display:flex;align-items:center;gap:10px}
+.dv .gl{width:36px;height:36px;border-radius:9px;background:rgba(255,255,255,.05);border:1px solid var(--hair);display:flex;align-items:center;justify-content:center;color:var(--t2);flex:none}
+.dv .nm{min-width:0}
+.dv .nm b{display:block;font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dv .nm span{display:block;font-size:11px;color:var(--t3)}
+.dv .hd .chip{margin-left:auto}
+.dv .l2{font-size:12px;color:var(--t2)}
+.dv .kv{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11px;color:var(--t3)}
+.dv .kv b{font-weight:500;color:var(--t2)}
+.dv .seen{display:flex;gap:6px;align-items:center;font-size:11px;color:var(--t3)}
+.foot{display:flex;align-items:flex-start;gap:8px;margin-top:18px;padding-top:14px;border-top:1px solid var(--hair);font-size:12px;line-height:17px;color:var(--t3)}
+.foot .ico{margin-top:1px}
+.dock{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:flex;gap:14px;padding:10px 12px 16px;border-radius:22px;background:var(--dock);backdrop-filter:var(--dock-blur);-webkit-backdrop-filter:var(--dock-blur);border:1px solid var(--hair);box-shadow:inset 0 1px 0 var(--inner),0 8px 24px rgba(0,0,0,.35)}
+.dk{position:relative;width:56px;height:56px;border-radius:14px;display:flex;align-items:center;justify-content:center;color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14),0 1px 2px rgba(0,0,0,.35)}
+.dk.orb{background:linear-gradient(165deg,rgba(255,255,255,.10),rgba(0,0,0,.14)),#1b8fa6}
+.dk.vault{background:linear-gradient(165deg,rgba(255,255,255,.10),rgba(0,0,0,.14)),#3b7fd6}
+.dk.forge{background:linear-gradient(165deg,rgba(255,255,255,.10),rgba(0,0,0,.14)),#b87a0b}
+.dk.sentry{background:linear-gradient(165deg,rgba(255,255,255,.10),rgba(0,0,0,.14)),#1f9a62}
+.dk.stage{background:linear-gradient(165deg,rgba(255,255,255,.10),rgba(0,0,0,.14)),#8a5fd6}
+.dk.set{background:linear-gradient(165deg,rgba(255,255,255,.10),rgba(0,0,0,.14)),#6b7686}
+.dk.act{outline:1.5px solid var(--acc);outline-offset:3px}
+.dk .run{position:absolute;left:50%;bottom:-11px;width:4px;height:4px;margin-left:-2px;border-radius:50%;background:var(--t1)}
+.pal{padding:0;overflow:hidden}
+.sf{display:flex;align-items:center;gap:10px;height:52px;padding:0 16px;border-bottom:1px solid var(--hair);color:var(--t2)}
+.sf .q{font-size:17px;color:var(--t1);display:inline-flex;align-items:center}
+.sf .caret{display:inline-block;width:1.5px;height:19px;margin-left:1px;background:var(--acc)}
+.sf .ph{flex:1;color:var(--tdis);font-size:13px}
+.kbd{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;margin-right:4px;border-radius:5px;font-size:11px;font-weight:500;color:var(--t2);background:var(--raised);border:1px solid var(--hair)}
+.grp{padding:12px 20px 4px;font-family:var(--disp);font-size:10.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--t3)}
+.pr{display:flex;align-items:center;gap:12px;height:52px;margin:2px 8px;padding:0 12px;border-radius:8px;border:1px solid transparent}
+.pr.sel{background:var(--sel);border-color:rgba(111,200,245,.35)}
+.pr .pg{width:32px;height:32px;border-radius:8px;background:rgba(255,255,255,.05);border:1px solid var(--hair);display:flex;align-items:center;justify-content:center;color:var(--t2);flex:none}
+.pr .pn{flex:1;min-width:0}
+.pr .pn b{display:block;font-size:13.5px;font-weight:500;line-height:18px}
+.pr .pn span{display:block;font-size:11.5px;color:var(--t3)}
+.pr .why{font-size:11px;color:var(--warn)}
+.pr.dis .pn b{color:var(--tdis)}
+.pr.dis .pg{color:var(--tdis)}
+.pf{display:flex;align-items:center;gap:18px;height:40px;margin-top:10px;padding:0 20px;border-top:1px solid var(--hair);font-size:11.5px;color:var(--t3)}
+.pf .sp{flex:1}
+</style>
+</helmet>
+<div class="root {{themeClass}}" style="position:relative;width:1920px;height:1080px;overflow:hidden">
+
+<div class="bg"></div>
+<svg width="1920" height="1080" viewBox="0 0 1920 1080" aria-hidden="true" style="position:absolute;left:0;top:0">
+<path d="M260 140 520 90 840 120 1120 70 1460 130 1740 90M260 140 430 330 700 300 980 250 1280 310 1590 260 1820 380M430 330 160 420M700 300 620 520 900 470 1180 520 1450 480 1700 610M980 250 900 470M1280 310 1180 520M1590 260 1450 480M160 420 380 620 120 700M380 620 620 520M620 520 580 820 300 900M580 820 860 760 1140 820 1420 760 1680 880 1840 1000M900 470 860 760M1180 520 1140 820M1450 480 1420 760M1700 610 1680 880M860 760 1000 1000 1140 820M520 90 430 330M840 120 700 300M1120 70 980 250M1460 130 1280 310M1740 90 1590 260" fill="none" stroke="rgba(170,200,215,0.14)" stroke-width="1"/>
+<path d="M260 140h.01M520 90h.01M840 120h.01M1120 70h.01M1460 130h.01M1740 90h.01M160 420h.01M430 330h.01M700 300h.01M980 250h.01M1280 310h.01M1590 260h.01M1820 380h.01M120 700h.01M380 620h.01M620 520h.01M900 470h.01M1180 520h.01M1450 480h.01M1700 610h.01M300 900h.01M580 820h.01M860 760h.01M1140 820h.01M1420 760h.01M1680 880h.01M1840 1000h.01M1000 1000h.01" fill="none" stroke="rgba(190,215,225,0.42)" stroke-width="5" stroke-linecap="round"/>
+</svg>
+
+<div class="bar">
+  <div class="bl">
+    <span class="brand"><svg class="ico i18" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.archie}}"/><path class="dot" d="{{ic.archieD}}"/></svg>Archie</span>
+    <span class="app">Archie</span>
+    <button class="mi">Archivo</button>
+    <button class="mi">Editar</button>
+    <button class="mi">Vista</button>
+    <button class="mi">Ir</button>
+    <button class="mi">Ventana</button>
+  </div>
+  <div class="br">
+    <span class="chip ok"><svg class="ico i12" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.ok}}"/><path class="dot" d="{{ic.okD}}"/></svg>archied en vivo</span>
+    <span class="chip unk"><svg class="ico i12" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.unknown}}"/><path class="dot" d="{{ic.unknownD}}"/></svg>Cámara y micro <span class="sub">sin lectura</span></span>
+    <span class="chip unk"><svg class="ico i12" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.unknown}}"/><path class="dot" d="{{ic.unknownD}}"/></svg>Dominio <span class="sub">sin lectura</span></span>
+    <span class="sep"></span>
+    <button class="ibtn" style="background:var(--pressed);color:var(--t1)" aria-label="Buscar (paleta abierta)"><svg class="ico i16" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.search}}"/></svg></button>
+    <button class="ibtn cnt" aria-label="Actividad: 2 trabajos en curso"><svg class="ico i16" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.activity}}"/></svg>2</button>
+    <button class="ibtn" aria-label="Centro de control"><svg class="ico i16" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.control}}"/><path class="dot" d="{{ic.controlD}}"/></svg></button>
+    <span class="clock">lun 12 oct  14:32</span>
+  </div>
+</div>
+
+<div class="notice"><svg class="ico i14" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.sample}}"/></svg>Datos de diseño</div>
+
+<div class="panel pal" style="left:600px;top:140px;width:720px">
+  <div class="sf"><svg class="ico i18" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.search}}"/></svg><span class="q">s<span class="caret"></span></span><span class="ph">Buscar apps, archivos y acciones</span><span class="kbd">esc</span></div>
+  <div class="grp">Apps</div>
+<div class="pr sel"><span class="pg"><svg class="ico i20" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.dkSentry}}"/><path class="dot" d="{{ic.dkSentryD}}"/></svg></span><div class="pn"><b>Sentry</b><span>Red local · inventario de dispositivos</span></div><span class="chip sm">App</span><span class="kbd">↵</span></div>
+<div class="pr"><span class="pg"><svg class="ico i20" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.dkStage}}"/></svg></span><div class="pn"><b>Stage</b><span>Ventana de composición</span></div><span class="chip sm">App</span></div>
+  <div class="grp">Archivos</div>
+<div class="pr"><span class="pg"><svg class="ico i20" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.file}}"/></svg></span><div class="pn"><b>soporte-v3.step</b><span>Vault · Diseño / Mecánica · modificado hoy 13:56</span></div><span class="chip sm">Archivo</span></div>
+  <div class="grp">Acciones</div>
+<div class="pr"><span class="pg"><svg class="ico i20" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.activity}}"/></svg></span><div class="pn"><b>Mostrar actividad de Archie</b><span>Abre el panel de trabajos y autorizaciones</span></div><span class="chip sm">Acción</span></div>
+<div class="pr dis"><span class="pg"><svg class="ico i20" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.dkOrb}}"/><path class="dot" d="{{ic.dkOrbD}}"/></svg></span><div class="pn"><b>Cambiar al Orbe</b><span>Cambia el dominio activo</span></div><span class="why">sin contrato todavía</span><span class="chip sm">Acción</span></div>
+  <div class="pf"><span><span class="kbd">↑</span><span class="kbd">↓</span> elegir</span><span><span class="kbd">↵</span> abrir</span><span><span class="kbd">esc</span> cerrar</span><span class="sp"></span><span class="ct">5 resultados</span></div>
+</div>
+
+<div class="dock">
+  <button class="dk orb" aria-label="Orb"><svg class="ico i28" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.dkOrb}}"/><path class="dot" d="{{ic.dkOrbD}}"/></svg><span class="run"></span></button>
+  <button class="dk vault" aria-label="Vault"><svg class="ico i28" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.dkVault}}"/><path class="dot" d="{{ic.dkVaultD}}"/></svg><span class="run"></span></button>
+  <button class="dk forge" aria-label="Forge"><svg class="ico i28" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.dkForge}}"/></svg></button>
+  <button class="dk sentry" aria-label="Sentry (activa)"><svg class="ico i28" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.dkSentry}}"/><path class="dot" d="{{ic.dkSentryD}}"/></svg></button>
+  <button class="dk stage" aria-label="Stage"><svg class="ico i28" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.dkStage}}"/></svg><span class="run"></span></button>
+  <button class="dk set" aria-label="Ajustes"><svg class="ico i28" viewBox="0 0 24 24" aria-hidden="true"><path d="{{ic.dkSet}}"/></svg></button>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"opaque":{"editor":"boolean","default":false},"$preview":{"width":1920,"height":1080}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const ic = {
+      archie: 'M12 2.75a9.25 9.25 0 1 0 0 18.5a9.25 9.25 0 1 0 0-18.5zM12 7.6 7.9 14.4M12 7.6l4.4 6.8M7.9 14.4h8.5',
+      archieD: 'M12 7.6h.01M7.9 14.4h.01M16.4 14.4h.01',
+      ok: 'M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16z',
+      okD: 'M12 12h.01',
+      done: 'M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16zM8.5 12.3l2.5 2.5 4.6-5',
+      unknown: 'M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16zM9.6 9.7a2.4 2.4 0 1 1 3.4 2.2c-.7.4-1 .9-1 1.6',
+      unknownD: 'M12 16.4h.01',
+      sample: 'M9.5 4h5M10.5 4v5.2L5.6 17.3A1.9 1.9 0 0 0 7.2 20.2h9.6a1.9 1.9 0 0 0 1.6-2.9L13.5 9.2V4',
+      search: 'M10.75 4.25a6.5 6.5 0 1 0 0 13a6.5 6.5 0 1 0 0-13zM15.4 15.4l4.35 4.35',
+      activity: 'M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16zM12 12V4a8 8 0 0 1 8 8z',
+      control: 'M6.5 5h11a3 3 0 0 1 0 6h-11a3 3 0 0 1 0-6zM6.5 13h11a3 3 0 0 1 0 6h-11a3 3 0 0 1 0-6z',
+      controlD: 'M17.5 8h.01M6.5 16h.01',
+      lock: 'M7 10.5V8a5 5 0 0 1 10 0v2.5M6.5 10.5h11a1.5 1.5 0 0 1 1.5 1.5v6.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 18.5V12a1.5 1.5 0 0 1 1.5-1.5z',
+      lockD: 'M12 15.2h.01',
+      file: 'M7 3.5h6.5L18 8v11.5a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1zM13.5 3.5V8H18',
+      camera: 'M3.5 8.5a2 2 0 0 1 2-2h2.5l1.1-1.8h5.8l1.1 1.8h2.5a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2zM12 9.4a3.2 3.2 0 1 0 0 6.4a3.2 3.2 0 1 0 0-6.4z',
+      tv: 'M4.5 6h15A1.5 1.5 0 0 1 21 7.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 15.5v-8A1.5 1.5 0 0 1 4.5 6zM9 20h6',
+      printer: 'M7 9V4.5h10V9M7 17H5.5A1.5 1.5 0 0 1 4 15.5v-5A1.5 1.5 0 0 1 5.5 9h13a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 1-1.5 1.5H17M7 14h10v6H7z',
+      speaker: 'M8 3.5h8A1.5 1.5 0 0 1 17.5 5v14a1.5 1.5 0 0 1-1.5 1.5H8A1.5 1.5 0 0 1 6.5 19V5A1.5 1.5 0 0 1 8 3.5zM12 12.5a3 3 0 1 0 0 6a3 3 0 1 0 0-6z',
+      speakerD: 'M12 7.6h.01',
+      devunk: 'M5.5 4.5h13a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-13a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1zM9.8 9.6a2.3 2.3 0 1 1 3.3 2.1c-.6.3-1 .8-1 1.5',
+      devunkD: 'M12 16.4h.01',
+      dkOrb: 'M12 2.75a9.25 9.25 0 1 0 0 18.5a9.25 9.25 0 1 0 0-18.5zM12 6.8 6.9 10.6 9 16.6h6l2.1-6zM6.9 10.6h10.2',
+      dkOrbD: 'M12 6.8h.01M6.9 10.6h.01M17.1 10.6h.01M9 16.6h.01M15 16.6h.01',
+      dkVault: 'M3.8 8.3a1.8 1.8 0 0 1 1.8-1.8h3.4l1.9 2.1h6.9a1.8 1.8 0 0 1 1.8 1.8v7.1a1.8 1.8 0 0 1-1.8 1.8H5.6a1.8 1.8 0 0 1-1.8-1.8zM12 14.4v2.2',
+      dkVaultD: 'M12 14.4h.01',
+      dkForge: 'M4 8h14.5c.6 0 1 .4 1 1v.5c0 1.4-1.1 2.5-2.5 2.5h-2.2l.8 3H9.4l.8-3H8.4C5.9 12 4 10.3 4 8zM7.5 18.5h9',
+      dkSentry: 'M12 3.5 5 6.2v5.2c0 4.1 2.8 7.2 7 9.1 4.2-1.9 7-5 7-9.1V6.2z',
+      dkSentryD: 'M12 11.6h.01',
+      dkStage: 'M6 5.5h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2zM10.4 9.6v3.8l3.2-1.9zM9 20.5h6',
+      dkSet: 'M4 7h5M13 7h7M4 12h9M17 12h3M4 17h3M11 17h9M11 5a2 2 0 1 0 0 4a2 2 0 1 0 0-4zM15 10a2 2 0 1 0 0 4a2 2 0 1 0 0-4zM9 15a2 2 0 1 0 0 4a2 2 0 1 0 0-4z'
+    };
+    return { themeClass: this.props.opaque ? 'opaque' : '', ic: ic };
+  }
+}
+</script>
+</body>
+</html>

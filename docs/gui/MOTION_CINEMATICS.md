@@ -43,3 +43,7 @@ Animaciones de Qt Quick (`Behavior`, `NumberAnimation`, `Transition`) sobre `tra
 ## Medición pendiente (no hay números)
 
 p50/p95/p99 de tiempo de fotograma, jank, RAM/VRAM, latencia entrada→pantalla aproximada y consumo en reposo, en 1080p/1440p y con IRIS ocupando la GPU (RTX 3070 8 GB). Objetivo a probar, no resultado: 60 FPS estables en 1080p, 120 Hz si compositor y hardware lo permiten. Los presupuestos de la tabla son propuestos hasta tener línea base.
+
+## Nota sobre el diseño Archie Mac
+
+El paquete de Claude Design **no incluye tabla de movimiento** y pide que, hasta que se defina, nada se anime salvo hover, pulsado y foco, respetando «movimiento reducido». El prototipo sólo anima el escalado del dock (120 ms) y el deslizamiento del conmutador lista/cuadrícula; el catálogo de arriba sigue siendo especificación.
