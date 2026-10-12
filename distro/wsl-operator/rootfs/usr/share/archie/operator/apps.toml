@@ -8,3 +8,13 @@ allow = ["move", "click", "key", "hold", "focus", "snapshot"]
 max_text_grade = "public"
 max_text_chars = 8
 aliases = ["browser", "photopea", "car soccer"]
+
+[[app]]
+app_id = "org.kde.kdenlive"
+display_name = "Kdenlive"
+allow = ["move", "click", "key", "hold", "focus", "snapshot"]
+max_text_grade = "public"
+max_text_chars = 8
+# Delete removes clips from a timeline; undo exists, but a person should see it.
+approval_keys = ["delete"]
+aliases = ["editor de video", "video"]

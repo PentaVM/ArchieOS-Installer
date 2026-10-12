@@ -33,14 +33,18 @@ install -d "$rootfs"
 # compositor), and a font so a page has letters. No TShark: a WSL machine sees only its
 # own virtual network, so archie-netwatch has nothing of the house to listen to here.
 pacstrap -K -c "$rootfs" base ca-certificates curl jq python firefox mesa \
-  qt6-base qt6-declarative qt6-wayland ttf-dejavu
+  qt6-base qt6-declarative qt6-wayland ttf-dejavu \
+  kdenlive mlt ffmpeg
 
 rm -f "$rootfs/etc/resolv.conf" "$rootfs/boot"/vmlinuz-* "$rootfs/boot"/initramfs-*
 cp -a "$repo_root/distro/wsl-operator/rootfs/." "$rootfs/"
 chmod 0755 "$rootfs/usr/bin/archie-setup" "$rootfs/usr/bin/archie-session" "$rootfs/usr/bin/archie-operate"
 
 install -m 0755 "$stage" "$rootfs/usr/bin/archie-stage"
-for binary in archie-arena-live archie-stage-cli archie-ask archie-lan archie-netwatch archie-print archie-sentry-probe; do
+# archie-bridges and archie-mcp-server serve the video bridge: timelines rendered by MLT
+# without a window, each with a project Kdenlive opens.
+for binary in archie-arena-live archie-stage-cli archie-ask archie-lan archie-netwatch archie-print archie-sentry-probe \
+  archie-bridges archie-mcp-server; do
   install -m 0755 "$bin/$binary" "$rootfs/usr/bin/$binary"
 done
 
@@ -50,6 +54,8 @@ while IFS= read -r -d '' manifest; do
   install -Dm 0644 "$manifest" "$rootfs/etc/archie/models/$family/$(basename "$manifest")"
 done < <(find "$repo_root/models/nebius" "$repo_root/models/iris" -maxdepth 1 -name '*.toml' -type f -print0)
 install -Dm 0644 "$repo_root/ARCHIE.md" "$rootfs/usr/share/doc/archie-os/ARCHIE.md"
+install -Dm 0644 "$repo_root/bridges/video/bridge.toml" "$rootfs/usr/share/archie/bridges/video/bridge.toml"
+install -Dm 0644 "$repo_root/bridges/video/SKILL.md" "$rootfs/usr/share/archie/bridges/video/SKILL.md"
 install -Dm 0644 "$repo_root/docs/WSL-OPERATOR.md" "$rootfs/usr/share/doc/archie-os/WSL-OPERATOR.md"
 
 # IRIS's code. It is Python, the one part of Archie that is; its licence travels with it.
