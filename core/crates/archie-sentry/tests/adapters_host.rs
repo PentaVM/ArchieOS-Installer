@@ -92,12 +92,20 @@ fn ssh_path() -> &'static str {
         "/usr/bin/ssh"
     }
 }
+// `Path::is_absolute` is per-platform: `C:/…` is relative on Unix.
+fn key_path() -> &'static str {
+    if cfg!(windows) {
+        "C:/keys/host_ed25519"
+    } else {
+        "/etc/archie/keys/host_ed25519"
+    }
+}
 fn ssh_config() -> SshConfig {
     SshConfig::new(
         ssh_path(),
         "archie",
         Ipv4Addr::new(192, 168, 1, 40),
-        Some("C:/keys/host_ed25519".into()),
+        Some(key_path().into()),
     )
     .unwrap()
 }
@@ -342,7 +350,7 @@ fn assert_ssh_prefix(call: &[String]) {
     assert_eq!(call[0], ssh_path());
     assert!(call[1..].windows(2).any(|w| w == ["-o", "BatchMode=yes"]));
     assert!(call.iter().any(|a| a == "archie@192.168.1.40"));
-    assert!(call.iter().any(|a| a == "C:/keys/host_ed25519"));
+    assert!(call.iter().any(|a| a == key_path()));
 }
 
 #[tokio::test]

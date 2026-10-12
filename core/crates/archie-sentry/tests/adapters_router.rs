@@ -39,12 +39,27 @@ fn resource(caps: &[CommandKind]) -> ResourceDescriptor {
     }
 }
 
+// `Path::is_absolute` is per-platform: `C:/…` is relative on Unix.
+fn ssh_path() -> &'static str {
+    if cfg!(windows) {
+        "C:/tools/ssh.exe"
+    } else {
+        "/usr/bin/ssh"
+    }
+}
+fn key_path() -> &'static str {
+    if cfg!(windows) {
+        "C:/keys/router_ed25519"
+    } else {
+        "/etc/archie/keys/router_ed25519"
+    }
+}
 fn ssh_config() -> SshConfig {
     SshConfig::new(
-        "C:/tools/ssh.exe",
+        ssh_path(),
         "admin",
         Ipv4Addr::new(192, 168, 1, 1),
-        Some("C:/keys/router_ed25519".into()),
+        Some(key_path().into()),
     )
     .unwrap()
 }
@@ -656,7 +671,7 @@ async fn wifi_on_runs_exact_wl_argv_and_radio_state_verifies() {
     assert_eq!(
         calls[0],
         vec![
-            "C:/tools/ssh.exe",
+            ssh_path(),
             "-o",
             "BatchMode=yes",
             "-o",
@@ -666,7 +681,7 @@ async fn wifi_on_runs_exact_wl_argv_and_radio_state_verifies() {
             "-p",
             "22",
             "-i",
-            "C:/keys/router_ed25519",
+            key_path(),
             "admin@192.168.1.1",
             "wl",
             "-i",
