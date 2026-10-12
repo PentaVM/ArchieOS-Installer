@@ -4,25 +4,33 @@
 #
 #   archie-talk                 the microphone goes quiet while Archie speaks
 #   archie-talk --headphones    keeps listening while it speaks, so it can be interrupted
-#   archie-talk --local         the reasoning model on this machine (archie-local) answers
+#   archie-talk --local         the reasoning model on this machine answers (archie-local)
+#   archie-talk --cloud         Nemotron on Nebius answers
 #
-# What you say is recognised on this machine. The words of what you ask go to the
-# reasoning model on Nebius, so this is for things you would say in public. With
-# --local nothing leaves the machine; that model is experimental and much weaker.
+# What you say is recognised on this machine. Which model answers: the one on this
+# machine once its GPU runtime is built (archie-local gpu), and nothing then leaves;
+# otherwise Nemotron on Nebius, which is sent the words of what you ask.
 set -euo pipefail
 KEY=$HOME/.config/archie/nebius.key
 grade=public
+where=auto
 for option in "$@"; do
   case "$option" in
     --headphones) export HEADPHONES=1 ;;
-    --local)
-      archie-local up
-      export ARCHIE_VOICE_ENDPOINT=http://127.0.0.1:8081/v1 ARCHIE_VOICE_MODEL=bonsai
-      grade=internal
-      ;;
-    *) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
+    --local) where=local ;;
+    --cloud) where=cloud ;;
+    *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
   esac
 done
+if [ "$where" = auto ]; then
+  if archie-local ready; then where=local; else where=cloud; fi
+fi
+if [ "$where" = local ]; then
+  archie-local up
+  export ARCHIE_VOICE_ENDPOINT=http://127.0.0.1:8081/v1 ARCHIE_VOICE_MODEL=bonsai
+  grade=internal
+  echo 'archie-talk: the model on this machine answers (archie-talk --cloud for Nebius)' >&2
+fi
 if [ -z "${ARCHIE_VOICE_ENDPOINT:-}" ] && [ -z "${NEBIUS_TOKEN_FACTORY_KEY:-}" ]; then
   [ -s "$KEY" ] || { echo 'archie-talk: run archie-setup first' >&2; exit 1; }
   NEBIUS_TOKEN_FACTORY_KEY=$(cat "$KEY")

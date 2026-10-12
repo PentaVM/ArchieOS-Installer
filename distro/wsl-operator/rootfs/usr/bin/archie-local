@@ -1,27 +1,50 @@
 #!/usr/bin/env bash
 # A reasoning model on this machine: Bonsai (PrismML, Apache 2.0), run by PrismML's
-# llama.cpp on the CPU. With it, what is said to Archie does not leave the machine.
+# llama.cpp. With it, what is said to Archie does not leave the machine.
 #
 #   archie-local setup [4b|1.7b]   fetch the model (572 MB, or 248 MB)
+#   archie-local gpu               build the runtime for the NVIDIA GPU (as root; about 8 GB
+#                                  of CUDA toolkit and a quarter of an hour, once)
 #   archie-local up | down | status
 #
-# Experimental. On the six-core laptop it was built on, the 4B model took 40 to 60 s to
-# answer and chose tools badly; the 1.7B answered in 1 to 3 s and was often wrong. A
-# faster processor will do better, and a CUDA build would do much better. `archie-talk`
-# uses Nebius unless `--local` is given.
+# On the GPU it is meant to be quick. On the CPU alone it is not: on a six-core laptop the
+# 4B model took 40 to 60 s to answer. Once the GPU runtime is built, `archie-talk` uses
+# this model; `archie-talk --cloud` goes back to Nebius.
 set -euo pipefail
 dir=/var/lib/archie/models/local
 run=$HOME/.archie/local
-mkdir -p "$run"
-url() { echo "https://huggingface.co/prism-ml/$1/resolve/main/$2"; }
+cpu=/opt/archie/llama
+gpu=/opt/archie/llama-cuda
+# The revision of PrismML-Eng/llama.cpp (branch prism) the CPU runtime in the image is.
+revision=e8fd209c975c80aa7fb36a8423571ff3b1b7e955
 
 fetch() { # repository, file, sha256
   local out=$dir/$2
   if [ -f "$out" ] && printf '%s  %s\n' "$3" "$out" | sha256sum --check --status; then return 0; fi
   mkdir -p "$dir"
-  curl --fail --location --proto '=https' --tlsv1.2 "$(url "$1" "$2")" -o "$out.part"
+  curl --fail --location --proto '=https' --tlsv1.2 "https://huggingface.co/prism-ml/$1/resolve/main/$2" -o "$out.part"
   printf '%s  %s\n' "$3" "$out.part" | sha256sum --check --status || { rm -f "$out.part"; echo 'archie-local: the model did not arrive whole' >&2; exit 1; }
   mv "$out.part" "$out"
+}
+
+build_gpu() {
+  [ "$(id -u)" -eq 0 ] || { echo 'archie-local gpu: run it as root, from Windows: wsl -d ArchieOS-Operator -u root archie-local gpu' >&2; exit 1; }
+  command -v nvidia-smi >/dev/null && nvidia-smi >/dev/null 2>&1 || { echo 'archie-local gpu: no NVIDIA GPU is visible here; install the current driver on Windows' >&2; exit 1; }
+  pacman -Sy --noconfirm --needed cuda cmake ninja git gcc
+  export PATH=/opt/cuda/bin:$PATH CUDACXX=/opt/cuda/bin/nvcc
+  local work=/var/tmp/archie-llama-cuda
+  rm -rf "${work:?}"
+  git clone --quiet --branch prism https://github.com/PrismML-Eng/llama.cpp "$work/source"
+  git -C "$work/source" checkout --quiet "$revision"
+  cmake -S "$work/source" -B "$work/build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=ON \
+    -DLLAMA_CURL=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF
+  cmake --build "$work/build" --target llama-server
+  rm -rf "${gpu:?}"
+  install -Dm 0755 "$work/build/bin/llama-server" "$gpu/bin/llama-server"
+  install -d "$gpu/lib"
+  cp -a "$work/build/bin"/*.so* "$gpu/lib/"
+  rm -rf "${work:?}"
+  echo 'archie-local: the GPU runtime is built'
 }
 
 case "${1:-status}" in
@@ -33,11 +56,15 @@ case "${1:-status}" in
     esac
     echo "archie-local: $(readlink "$dir/current.gguf") is ready"
     ;;
+  gpu) build_gpu ;;
+  ready) [ -e "$dir/current.gguf" ] && [ -x "$gpu/bin/llama-server" ] ;;
   up)
     [ -e "$dir/current.gguf" ] || { echo 'archie-local: no model yet; run archie-local setup' >&2; exit 1; }
     if curl -fsS -m 2 http://127.0.0.1:8081/health >/dev/null 2>&1; then exit 0; fi
-    LD_LIBRARY_PATH=/opt/archie/llama/lib /opt/archie/llama/bin/llama-server -m "$dir/current.gguf" \
-      --host 127.0.0.1 --port 8081 --jinja -c 8192 -t "$(nproc)" --alias bonsai > "$run/server.log" 2>&1 &
+    mkdir -p "$run"
+    if [ -x "$gpu/bin/llama-server" ]; then runtime=$gpu; layers=(-ngl 99); else runtime=$cpu; layers=(); fi
+    LD_LIBRARY_PATH=$runtime/lib:/opt/cuda/lib64 "$runtime/bin/llama-server" -m "$dir/current.gguf" \
+      --host 127.0.0.1 --port 8081 --jinja -c 8192 -t "$(nproc)" --alias bonsai "${layers[@]}" > "$run/server.log" 2>&1 &
     echo $! > "$run/server.pid"
     printf 'archie-local: loading the model' >&2
     for _ in $(seq 1 300); do
@@ -52,8 +79,9 @@ case "${1:-status}" in
     if [ -f "$run/server.pid" ]; then kill "$(cat "$run/server.pid")" 2>/dev/null || true; rm -f "${run:?}/server.pid"; fi
     ;;
   status)
-    if [ -e "$dir/current.gguf" ]; then echo "model:  $(readlink "$dir/current.gguf")"; else echo 'model:  none (archie-local setup)'; fi
-    if curl -fsS -m 2 http://127.0.0.1:8081/health >/dev/null 2>&1; then echo 'server: running on 127.0.0.1:8081'; else echo 'server: stopped'; fi
+    if [ -e "$dir/current.gguf" ]; then echo "model:   $(readlink "$dir/current.gguf")"; else echo 'model:   none (archie-local setup)'; fi
+    if [ -x "$gpu/bin/llama-server" ]; then echo 'runtime: GPU'; else echo 'runtime: CPU only (archie-local gpu builds the GPU one)'; fi
+    if curl -fsS -m 2 http://127.0.0.1:8081/health >/dev/null 2>&1; then echo 'server:  running on 127.0.0.1:8081'; else echo 'server:  stopped'; fi
     ;;
-  *) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
+  *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
 esac

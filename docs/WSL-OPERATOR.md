@@ -61,19 +61,27 @@ the words of what you ask go to the reasoning model on Nebius, so talk as you wo
 public. It answers with the essential first, in a sentence or two, and says more when
 the conversation calls for it or you ask.
 
-### A reasoning model on the machine (experimental)
+### A reasoning model on the machine
+
+The installer offers to set up Bonsai 4B (PrismML, Apache 2.0) on your GPU. Say yes and it
+fetches the model (572 MB), installs the CUDA toolkit (about 8 GB) and builds the runtime,
+a quarter of an hour in all. From then on `archie-talk` uses it, nothing said leaves the
+machine and no Nebius credit is spent on talking; `archie-talk --cloud` goes back to
+Nemotron on Nebius. Later, or again:
 
 ```bash
-archie-local setup 4b      # Bonsai 4B, 572 MB; or: archie-local setup 1.7b (248 MB)
-archie-talk --local
+archie-local setup 4b                                  # in the image
+wsl -d ArchieOS-Operator -u root archie-local gpu      # from Windows
+archie-local status
 ```
 
-Bonsai (PrismML, Apache 2.0) runs on the CPU and nothing said leaves the machine. It
-is not the default because of what it did on the six-core laptop this image was built
-on: the 4B took 40 to 60 seconds to answer and chose tools badly (asked what two plus
-two is, it proposed typing text); the 1.7B answered in 1 to 3 seconds and was often
-wrong ("dos más dos es dos"). A faster processor will do better. A CUDA build of the
-runtime, which this image does not have, is what would make it quick.
+**This is the least tested part.** The GPU runtime was never built or run: the machine
+the image was made on has no NVIDIA GPU. What was run is the same model on a six-core
+CPU, through the voice's own path, and there it took 40 to 60 seconds to answer and
+handled tools badly: asked what two plus two is, it proposed typing text, and its tool
+calls came out as words to be spoken. The GPU fixes the speed. It may not fix the tools,
+so "Archie, abre Kdenlive" may not open it with this model; if it does not, use
+`archie-talk --cloud`.
 
 ## Operate a screen
 

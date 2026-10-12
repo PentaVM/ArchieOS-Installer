@@ -48,6 +48,19 @@ Write-Host "Shared folder: $shared"
 Write-Host 'First-time setup (PyTorch is about 3 GB, the voice about 1 GB)...'
 wsl.exe -d $Name -u archie -- archie-setup
 if ($LASTEXITCODE -ne 0) { throw "Setup did not finish. Run it again with: wsl -d $Name archie-setup" }
+
+# A reasoning model on this machine, on the GPU: Bonsai 4B. Optional, because it adds
+# about 8 GB (the CUDA toolkit) and a quarter of an hour of building.
+Write-Host ''
+$answer = Read-Host 'Install Bonsai, a reasoning model that runs on your GPU, so Archie answers without Nebius? [Y/n]'
+if ($answer -notmatch '^[nN]') {
+    wsl.exe -d $Name -u archie -- archie-local setup 4b
+    wsl.exe -d $Name -u root -- archie-local gpu
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host 'The GPU runtime did not build; Archie will use Nebius. Try again with:'
+        Write-Host "  wsl -d $Name -u root archie-local gpu"
+    }
+}
 Write-Host ''
 Write-Host "Done. Open it with:  wsl -d $Name"
 Write-Host 'Then:               archie-talk    (say "Archie" first)'
