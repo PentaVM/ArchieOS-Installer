@@ -25,11 +25,11 @@ deja commiteada y empujada en `claude/sentry-ola3-cast-focos-servidores` (PR #36
 - [x] **Sentry 11 — primera respuesta reversible.** Aviso por voz/Observatory de una
   alerta, sin bloquear nada. Bloqueo o cuarentena sólo como `Intent` aprobado.
 - [x] **Sentry 14 — IPv6.** `address-moved` con Neighbor Discovery (NA/NS) además de ARP.
-- [ ] **Sentry 7 — baselines por dispositivo.** Mecanismo (volumen y destinos habituales,
+- [x] **Sentry 7 — baselines por dispositivo.** Mecanismo (volumen y destinos habituales,
   alerta por desviación) con prueba; la tasa de falsos positivos queda sin medir.
-- [ ] **Sentry 13 — unidad systemd.** `systemd-analyze verify` y endurecimiento de
+- [x] **Sentry 13 — unidad systemd.** `systemd-analyze verify` y endurecimiento de
   `archie-netwatch.service`; documentar lo que sólo puede comprobarse en Arch real.
-- [ ] **Endurecimiento general.** Revisar `unwrap`/`expect` en rutas de producción de
+- [~] **Endurecimiento general.** Revisar `unwrap`/`expect` en rutas de producción de
   `archie-sentry` y `archie-cerebra`, timeouts y límites de tamaño en E/S de red.
 
 ## Hecho
@@ -40,3 +40,7 @@ deja commiteada y empujada en `claude/sentry-ola3-cast-focos-servidores` (PR #36
 - IPv6 en `address-moved` por Neighbor Advertisement (`e41b83d`).
 - Avisos al dueño: `archie-notices`, follower, `sentry-notices`, `/api/notices`, lock
   entre escritores, `[sentry.response]`; `docs/SENTRY-RESPUESTA.md`.
+- `traffic-surge` (`b1501fc`): baseline de volumen por dispositivo, persistida.
+- Unidad de netwatch (`1154eca`): cuenta estática, `wireshark`, 0640; exposición 5.1→3.5.
+- Follower (`0e05975`): sin `alerts.jsonl` (nodo nuevo o rotación) ya no muere.
+- `archie-sentry-follow.service` (`01e61e3`): exposición 2.4; tablón 0640 para displayd.

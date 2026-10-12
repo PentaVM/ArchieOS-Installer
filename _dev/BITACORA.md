@@ -310,3 +310,53 @@ agotó el disco (22 GiB de `target`); `cargo clean` y se repitió completa.
   genuino» y no sólo «el mismo equipo».
 - Los perfiles de foco son criterio; ajustarlos con uso real del dueño.
 - No se tocó la GUI Quickshell/Vault, la generación WSL ni `archie-iris-runtime`.
+
+## 2026-10-12 — Día autónomo (Claude)
+
+Nelson pidió trabajar solo durante el día: expandir el dominio y llevarlo hacia
+producción. La cola y el protocolo están en `_dev/AUTONOMO.md`. Una rutina horaria
+(`trig_01WLVcpbjBBHdU3DqZjsvKxK`, minuto 38) despierta esta sesión; se disparó a mano
+una vez para comprobar que entrega.
+
+### CI del PR #36
+
+Estaba rojo también en `main`:
+
+- `cargo fmt --check`: 130 archivos sin formato.
+- clippy `-D warnings` con 1.88: unos 30 avisos en orb, paint, arena, displayd, voice,
+  lan, desk, skill-node, types, sentry y cli.
+- `native-contracts`: faltaba `#include <array>` en `sentry/src/cli/main.cpp`.
+- Dos pruebas rotas:
+  - `archie-model-runtime`: `Content-Length: 32` para un cuerpo de 30 bytes.
+  - `archie-observability`: `0::/` (cgroup raíz) se trataba como ruta inválida y no
+    como `Unsupported`.
+- `cargo test --workspace` se quedaba sin disco en el runner. Se resolvió con
+  `CARGO_PROFILE_*_DEBUG=0` en el job: el `target` baja de unos 30 GiB a 5 GiB y las
+  pruebas no cambian.
+
+Local, con 1.88: fmt y clippy limpios; `cargo test --workspace`, 2329 aprobadas antes de
+las dos correcciones y 0 fallos después en los crates tocados; `ctest` de cortex,
+sentry, visual y osm, 40/40.
+
+### Dominio
+
+- **IPv6** (`e41b83d`): `address-moved` también por Neighbor Advertisement.
+- **Avisos al dueño** (`f16aef5`): crate `archie-notices`, follower, `archie
+  sentry-notices`, `GET /api/notices` y `[sentry.response]`. Lock exclusivo entre
+  escritores: 8 hilos, 80 avisos, ninguno perdido. Frase hablable sin datos de la red.
+  Ver `docs/SENTRY-RESPUESTA.md`.
+- **`traffic-surge`** (`b1501fc`): baseline de volumen por dispositivo. Umbrales de
+  criterio; sin tasa de falsos positivos medida.
+- **Unidad de netwatch** (`1154eca`): como `DynamicUser` no podía funcionar en Arch,
+  porque `dumpcap` es `root:wireshark` 0754 y el estado quedaba en `/var/lib/private`.
+- **Follower**: sin `alerts.jsonl` moría (`0e05975`); ahora tiene unidad propia
+  (`01e61e3`).
+
+Humo con el binario real: `sentry-follow --once` sobre dos alertas sintéticas publica 1
+aviso (el `new-device` queda por debajo del umbral); `sentry-notices` lista, acusa por
+prefijo y rechaza un id que no existe con salida 1. El archivo queda 0600 en esa prueba,
+y 0640 desde `01e61e3`.
+
+**Nada se probó en hardware ni en una red real.** El modo `live` de `archie-voice` no
+compila aquí (necesita el SDK de NeMo): la voz no dice los avisos todavía, y el contrato
+está en `docs/SENTRY-RESPUESTA.md`.
