@@ -8,6 +8,8 @@
 //!   Cerebra pass per batch of new alerts.
 //! - [`watch_exports_once`] / [`ingest_export_file`] feed chat exports to the
 //!   Wanda bridge.
+//! - [`focus_once`] runs the unified feeder over everything those two sealed,
+//!   under one focus profile, and one Cerebra pass over what it admits.
 //!
 //! The passes run against an empty model registry: on a node with no registered
 //! local model, every restricted pass is refused with `NoLocalModel` — the
@@ -77,4 +79,102 @@ pub fn ingest_export_file(
         salt,
         "wanda-manual",
     )
+}
+
+/// What one focused pass admitted, dropped and came to. References and
+/// numbers only; no record content.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FocusReport {
+    pub profile: String,
+    pub domain: String,
+    pub admitted: Vec<FocusAdmitted>,
+    /// Drop reason → count.
+    pub dropped: std::collections::BTreeMap<String, usize>,
+    /// `nothing`, `reasoning`, or `refused:<code>`.
+    pub outcome: String,
+    pub trace_id: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FocusAdmitted {
+    pub source: &'static str,
+    pub reference: String,
+    pub priority: u8,
+    pub weight: u8,
+    pub at_ms: i64,
+}
+
+/// One pass of the unified feeder over the followers' vault: collect every
+/// alert, device and Wanda record of `domain` sealed at or after `since_ms`,
+/// plan it under the named profile, and consider the plan once. Like the
+/// followers, it runs with no registered local model, so a restricted pass is
+/// refused and reported as such.
+pub fn focus_once(
+    vault_dir: &Path,
+    profile: &str,
+    domain: &str,
+    since_ms: i64,
+    now_ms: i64,
+) -> Result<FocusReport, String> {
+    use archie_cerebra::feeder::{collect_from_vault, consider_plan, plan, FeedOutcome};
+    let profile = archie_cerebra::focus::FocusProfile::preset(profile).map_err(|e| {
+        format!(
+            "{e}; known: {}",
+            archie_cerebra::focus::FocusProfile::PRESETS.join(", ")
+        )
+    })?;
+    let domain =
+        archie_vault::ContextDomain::try_from(domain.to_owned()).map_err(|e| e.to_string())?;
+    let mut vault = vault_io::open_vault(vault_dir).map_err(|e| e.to_string())?;
+    let items = collect_from_vault(&mut vault, &domain, since_ms, now_ms);
+    let planned = plan(
+        &profile,
+        &domain,
+        &format!("focus-{}", profile.name),
+        &items,
+    )
+    .map_err(|e| e.to_string())?;
+    let admitted = planned
+        .admitted()
+        .iter()
+        .map(|a| FocusAdmitted {
+            source: a.source.label(),
+            reference: a.reference.path().to_owned(),
+            priority: a.priority,
+            weight: a.weight,
+            at_ms: a.at_ms,
+        })
+        .collect();
+    let mut dropped = std::collections::BTreeMap::new();
+    for d in planned.dropped() {
+        *dropped.entry(format!("{:?}", d.reason)).or_insert(0) += 1;
+    }
+    let outcome = consider_plan(
+        &archie_cerebra::alert_follower::local_cerebra(),
+        &mut vault,
+        &archie_cerebra::alert_follower::no_local_models(),
+        planned,
+        archie_types::TraceId::new(),
+        now_ms,
+    )
+    .map_err(|e| e.to_string())?;
+    let (outcome, trace_id) = match &outcome {
+        FeedOutcome::Nothing { .. } => ("nothing".to_owned(), None),
+        FeedOutcome::Reasoning { pass, .. } => (
+            "reasoning".to_owned(),
+            Some(pass.trace.trace_id.to_string()),
+        ),
+        FeedOutcome::Refused { pass, refusal, .. } => (
+            format!("refused:{refusal:?}"),
+            Some(pass.trace.trace_id.to_string()),
+        ),
+    };
+    Ok(FocusReport {
+        profile: profile.name,
+        domain: domain.to_string(),
+        admitted,
+        dropped,
+        outcome,
+        trace_id,
+    })
 }

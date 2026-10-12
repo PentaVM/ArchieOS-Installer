@@ -270,7 +270,7 @@ struct AlertContent<'a> {
 /// a dedup key and a path component, and a collision is caught by comparing the full
 /// stored content rather than trusted. It is stable across compiler versions, which a
 /// persisted reference must be.
-fn content_id(bytes: &[u8]) -> String {
+pub(crate) fn content_id(bytes: &[u8]) -> String {
     const fn fnv1a(bytes: &[u8], basis: u64) -> u64 {
         let mut hash = basis;
         let mut index = 0;
@@ -536,7 +536,7 @@ impl AlertPassOutcome {
     }
 }
 
-fn classify(reason: &'static str) -> PassRefusal {
+pub(crate) fn classify(reason: &'static str) -> PassRefusal {
     match reason {
         "no_model_permitted" => PassRefusal::NoLocalModel,
         "escalation_required" => PassRefusal::EscalationRequired,

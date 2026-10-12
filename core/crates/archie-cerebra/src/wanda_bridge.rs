@@ -342,7 +342,7 @@ fn normalize_text(raw: &str) -> String {
 
 /// The fixed dimensions of a [`ContextVector`]. Order is the tie-break priority of
 /// [`ContextVector::dominant`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Category {
     Social,
     Urgency,

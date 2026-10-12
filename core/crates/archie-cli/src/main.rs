@@ -123,6 +123,20 @@ enum Command {
     /// refused and the refusal is reported, which is the designed outcome.
     /// The state directory falls back to `[sentry.netwatch]` when the flag is
     /// absent.
+    /// One pass of the unified feeder: every netwatch alert, device change and
+    /// Wanda record already sealed in the local vault, filtered and ordered by
+    /// a focus profile (`pantalla-1`, `trabajo`, `personal`, `red`), then one
+    /// restricted Cerebra pass. Local; never crosses personal/work domains.
+    Focus {
+        /// Profile name.
+        profile: String,
+        /// Context domain: `personal/<owner>` or `work/<organisation>/<project>`.
+        #[arg(long, default_value = "personal/owner")]
+        domain: String,
+        /// Only records sealed at or after this time (ms since the epoch).
+        #[arg(long, default_value_t = 0)]
+        since_ms: i64,
+    },
     SentryFollow {
         /// Netwatch state directory (holds `alerts.jsonl` and `told.json`).
         #[arg(long)]
@@ -598,7 +612,7 @@ impl Command {
             Self::Metrics => ControlRequest::Metrics,
             Self::Audit { limit } => ControlRequest::Audit { limit: *limit },
             Self::Ping => ControlRequest::Ping,
-            Self::Enrol { .. } | Self::SentryNetworkAnalyze { .. } | Self::SentryDevices { .. } | Self::ContextFeed { .. } | Self::SentryFollow { .. } | Self::WandaIngest { .. } | Self::WandaWatch { .. } => {
+            Self::Enrol { .. } | Self::SentryNetworkAnalyze { .. } | Self::SentryDevices { .. } | Self::ContextFeed { .. } | Self::SentryFollow { .. } | Self::Focus { .. } | Self::WandaIngest { .. } | Self::WandaWatch { .. } => {
                 return None
             }
         })
@@ -1119,6 +1133,11 @@ async fn main() -> std::process::ExitCode {
             Command::Sentry {
                 action: SentryIoT::CastProbe { address, port },
             } => cast_probe(*address, *port, cli.json).await,
+            Command::Focus {
+                profile,
+                domain,
+                since_ms,
+            } => focus(&paths, profile, domain, *since_ms, cli.json),
             Command::WandaIngest { file, salt } => {
                 wanda_ingest(&paths, file, salt.as_deref(), cli.json)
             }
@@ -1604,6 +1623,46 @@ fn sentry_follow(
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(message) => {
             eprintln!("archie: {message}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+fn focus(
+    paths: &StatePaths,
+    profile: &str,
+    domain: &str,
+    since_ms: i64,
+    json: bool,
+) -> std::process::ExitCode {
+    let vault_dir = archie_workstation::live::cerebra_vault_dir(&paths.state_dir);
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64);
+    match archie_workstation::live::focus_once(&vault_dir, profile, domain, since_ms, now_ms) {
+        Ok(report) => {
+            if json {
+                println!("{}", serde_json::to_string(&report).unwrap_or_default());
+            } else {
+                println!(
+                    "focus {} in {}: {} admitted, dropped {:?}, outcome {}",
+                    report.profile,
+                    report.domain,
+                    report.admitted.len(),
+                    report.dropped,
+                    report.outcome
+                );
+                for item in &report.admitted {
+                    println!(
+                        "  p{:<3} w{:<3} {:<18} {}",
+                        item.priority, item.weight, item.source, item.reference
+                    );
+                }
+            }
+            std::process::ExitCode::SUCCESS
+        }
+        Err(message) => {
+            eprintln!("archie: focus: {message}");
             std::process::ExitCode::FAILURE
         }
     }
@@ -2755,6 +2814,17 @@ mod tests {
         // Volume is bounded at the CLI, before any intent exists.
         assert!(Cli::try_parse_from(["archie", "sentry-node", "volume", "pixel", "101"]).is_err());
         assert!(Cli::try_parse_from(["archie", "sentry-node", "wake"]).is_err());
+    }
+
+    /// `focus` is a local command over the vault; it never reaches the daemon.
+    #[test]
+    fn focus_is_local_and_defaults_to_the_personal_domain() {
+        let cli = Cli::try_parse_from(["archie", "focus", "pantalla-1"]).unwrap();
+        assert!(cli.command.to_request().is_none());
+        let Command::Focus { profile, domain, since_ms } = cli.command else {
+            panic!("focus parses to Focus");
+        };
+        assert_eq!((profile.as_str(), domain.as_str(), since_ms), ("pantalla-1", "personal/owner", 0));
     }
 
     /// Chromecast verbs prepare reviewed intents; the probe is local.
