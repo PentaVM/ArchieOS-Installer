@@ -51,6 +51,10 @@ port-scan, un túnel DNS o alguien reclamando la dirección del router, sí.
 El modo `live` de `archie-voice` necesita el SDK de NeMo y no compila en el entorno
 donde se hizo esto, así que no se tocó. Lo que la voz tiene que hacer:
 
+Lo más simple es `archie sentry-notices --claim`. Imprime como JSON el siguiente aviso
+que hay que decir (o `null`) y lo marca como dicho bajo el lock: dos voces nunca dicen
+el mismo. La voz dice su campo `spoken` y nada más. Desde Rust es lo mismo:
+
 1. `Board::load(<state>/cerebra/notices.json)` y `board.unspoken()`: los pendientes no
    dichos, primero los más graves.
 2. Decir `notice.spoken`, **y nada más**, respetando el turno de palabra y el silencio.
@@ -67,6 +71,7 @@ archie sentry-notices                       # pendientes
 archie sentry-notices --all                 # también los acusados
 archie sentry-notices --ack 657cc778        # prefijo único de 6+ caracteres
 archie sentry-notices --ack-all
+archie sentry-notices --claim               # para la voz: el siguiente que decir, marcado dicho
 curl 127.0.0.1:7666/api/notices             # lo que lee el Observatory
 ```
 

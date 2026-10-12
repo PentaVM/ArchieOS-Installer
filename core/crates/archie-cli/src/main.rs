@@ -163,6 +163,11 @@ enum Command {
         /// Acknowledge every pending notice.
         #[arg(long)]
         ack_all: bool,
+        /// For the voice: print the next notice to say (pending, unsaid, most
+        /// serious first) as JSON, and mark it said. Prints `null` when there is
+        /// none. Say its `spoken` field and nothing else.
+        #[arg(long, conflicts_with_all = ["ack", "ack_all", "all"])]
+        claim: bool,
     },
     /// Ingest one chat export file into Wanda's context: WhatsApp `.txt`,
     /// Instagram `.json` or notification-dump `.jsonl`. Local and idempotent:
@@ -1178,9 +1183,12 @@ async fn main() -> std::process::ExitCode {
             Command::Sentry {
                 action: SentryIoT::CastProbe { address, port },
             } => cast_probe(*address, *port, cli.json).await,
-            Command::SentryNotices { all, ack, ack_all } => {
-                sentry_notices(&paths, *all, ack.as_deref(), *ack_all, cli.json)
-            }
+            Command::SentryNotices {
+                all,
+                ack,
+                ack_all,
+                claim,
+            } => sentry_notices(&paths, *all, ack.as_deref(), *ack_all, *claim, cli.json),
             Command::Focus {
                 profile,
                 domain,
@@ -1668,6 +1676,7 @@ fn sentry_notices(
     all: bool,
     ack: Option<&str>,
     ack_all: bool,
+    claim: bool,
     json: bool,
 ) -> std::process::ExitCode {
     use archie_workstation::live::notices::Board;
@@ -1677,6 +1686,19 @@ fn sentry_notices(
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_millis() as u64);
+        if claim {
+            let mut said = None;
+            Board::update(&path, |board| {
+                said = board.claim_unspoken(now_ms);
+                said.is_some()
+            })
+            .map_err(|e| e.to_string())?;
+            println!(
+                "{}",
+                serde_json::to_string(&said).map_err(|e| e.to_string())?
+            );
+            return Ok(());
+        }
         if ack.is_some() || ack_all {
             let mut changed = 0;
             Board::update(&path, |board| {

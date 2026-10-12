@@ -398,6 +398,15 @@ impl Board {
         count
     }
 
+    /// Takes the next notice the voice should say (pending, unspoken, most serious
+    /// first) and marks it said. Run inside [`Board::update`], two voices claiming at
+    /// once never say the same notice twice.
+    pub fn claim_unspoken(&mut self, now_ms: u64) -> Option<Notice> {
+        let id = self.unspoken().first().map(|n| n.id.clone())?;
+        self.mark_spoken(&id, now_ms);
+        self.notices.iter().find(|n| n.id == id).cloned()
+    }
+
     /// Records that the voice said a notice. Returns whether it was found unspoken.
     pub fn mark_spoken(&mut self, id: &str, now_ms: u64) -> bool {
         match self
@@ -490,6 +499,36 @@ mod tests {
         assert!(board.mark_spoken(&first, 10));
         assert!(!board.mark_spoken(&first, 11), "said once");
         assert_eq!(board.unspoken().len(), 2);
+    }
+
+    #[test]
+    fn claiming_hands_out_each_notice_once_most_serious_first() {
+        let dir = dir("claim");
+        let path = dir.join("notices.json");
+        let policy = Policy {
+            min_severity: Severity::Notice,
+        };
+        Board::update(&path, |board| {
+            board.post(&raised(1, Severity::Notice, "new-device", "a"), policy);
+            board.post(&raised(2, Severity::High, "address-moved", "b"), policy)
+        })
+        .unwrap();
+        let claim = || {
+            let mut said = None;
+            Board::update(&path, |board| {
+                said = board.claim_unspoken(9);
+                said.is_some()
+            })
+            .unwrap();
+            said
+        };
+        assert_eq!(claim().unwrap().rule, "address-moved");
+        assert_eq!(claim().unwrap().rule, "new-device");
+        assert!(claim().is_none());
+        let board = Board::load(&path).unwrap();
+        assert!(board.notices.iter().all(|n| n.spoken_ms == Some(9)));
+        assert_eq!(board.pending().count(), 2, "said is not acknowledged");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
