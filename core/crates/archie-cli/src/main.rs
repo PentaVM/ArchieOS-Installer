@@ -458,7 +458,8 @@ impl SentryNodeAction {
 }
 
 #[derive(Debug, Subcommand)]
-enum SentryIoT {    /// Send one verifiable remote key to a paired Roku resource (reviewed flow).
+enum SentryIoT {
+    /// Send one verifiable remote key to a paired Roku resource (reviewed flow).
     Key {
         /// Resource ID from the node's Sentry configuration.
         resource_id: String,
@@ -510,9 +511,7 @@ enum SentryIoT {    /// Send one verifiable remote key to a paired Roku resource
     },
     /// Probe one configured printer and print its driver plan. Read-only: the
     /// planned command line is data for the operator and is never executed.
-    PrinterDoctor {
-        resource_id: String,
-    },
+    PrinterDoctor { resource_id: String },
 }
 
 impl Command {
@@ -612,9 +611,14 @@ impl Command {
             Self::Metrics => ControlRequest::Metrics,
             Self::Audit { limit } => ControlRequest::Audit { limit: *limit },
             Self::Ping => ControlRequest::Ping,
-            Self::Enrol { .. } | Self::SentryNetworkAnalyze { .. } | Self::SentryDevices { .. } | Self::ContextFeed { .. } | Self::SentryFollow { .. } | Self::Focus { .. } | Self::WandaIngest { .. } | Self::WandaWatch { .. } => {
-                return None
-            }
+            Self::Enrol { .. }
+            | Self::SentryNetworkAnalyze { .. }
+            | Self::SentryDevices { .. }
+            | Self::ContextFeed { .. }
+            | Self::SentryFollow { .. }
+            | Self::Focus { .. }
+            | Self::WandaIngest { .. }
+            | Self::WandaWatch { .. } => return None,
         })
     }
 }
@@ -1107,7 +1111,12 @@ async fn main() -> std::process::ExitCode {
                 inventory,
                 netwatch_state,
                 passive,
-            } => sentry_devices(inventory.as_deref(), netwatch_state.as_deref(), passive.as_deref(), cli.json),
+            } => sentry_devices(
+                inventory.as_deref(),
+                netwatch_state.as_deref(),
+                passive.as_deref(),
+                cli.json,
+            ),
             Command::ContextFeed {
                 watchdog_dir,
                 out,
@@ -1146,7 +1155,14 @@ async fn main() -> std::process::ExitCode {
                 salt,
                 once,
                 poll_ms,
-            } => wanda_watch(&paths, dir.as_deref(), salt.as_deref(), *poll_ms, *once, cli.json),
+            } => wanda_watch(
+                &paths,
+                dir.as_deref(),
+                salt.as_deref(),
+                *poll_ms,
+                *once,
+                cli.json,
+            ),
             other => local_command(other, &workstation_root(cli.root.as_deref()), cli.json).await,
         };
     };
@@ -1269,7 +1285,11 @@ fn sentry_devices_render(
     use std::io::Read;
     fn read(path: &std::path::Path, what: &str, maximum: usize) -> Result<String, String> {
         let file = std::fs::File::open(path).map_err(|_| format!("cannot open {what}"))?;
-        if !file.metadata().map_err(|_| format!("cannot inspect {what}"))?.is_file() {
+        if !file
+            .metadata()
+            .map_err(|_| format!("cannot inspect {what}"))?
+            .is_file()
+        {
             return Err(format!("{what} must be a regular file"));
         }
         let mut bytes = Vec::new();
@@ -1285,17 +1305,35 @@ fn sentry_devices_render(
         return Err("no sources: pass --inventory, --netwatch-state and/or --passive".to_owned());
     }
     let inventory = inventory
-        .map(|path| read(path, "lan inventory", archie_core::unify::MAX_INVENTORY_BYTES))
+        .map(|path| {
+            read(
+                path,
+                "lan inventory",
+                archie_core::unify::MAX_INVENTORY_BYTES,
+            )
+        })
         .transpose()?
-        .map(|text| archie_core::unify::parse_inventory(&text).map_err(|e| format!("lan inventory rejected: {e}")))
+        .map(|text| {
+            archie_core::unify::parse_inventory(&text)
+                .map_err(|e| format!("lan inventory rejected: {e}"))
+        })
         .transpose()?;
     let netwatch = netwatch_state
         .map(|path| read(path, "netwatch state", archie_core::unify::MAX_STATE_BYTES))
         .transpose()?
-        .map(|text| archie_core::unify::parse_netwatch_state(&text).map_err(|e| format!("netwatch state rejected: {e}")))
+        .map(|text| {
+            archie_core::unify::parse_netwatch_state(&text)
+                .map_err(|e| format!("netwatch state rejected: {e}"))
+        })
         .transpose()?;
     let passive = passive
-        .map(|path| read(path, "passive network export", archie_core::passive_network::MAX_EXPORT_BYTES))
+        .map(|path| {
+            read(
+                path,
+                "passive network export",
+                archie_core::passive_network::MAX_EXPORT_BYTES,
+            )
+        })
         .transpose()?
         .map(|text| archie_core::passive_network::observations(&text).map_err(str::to_owned))
         .transpose()?
@@ -1303,8 +1341,13 @@ fn sentry_devices_render(
     let generated_unix = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
-    let view = archie_core::unify::unify(inventory.as_ref(), netwatch.as_ref(), &passive, generated_unix)
-        .map_err(|e| format!("cannot unify the sources: {e}"))?;
+    let view = archie_core::unify::unify(
+        inventory.as_ref(),
+        netwatch.as_ref(),
+        &passive,
+        generated_unix,
+    )
+    .map_err(|e| format!("cannot unify the sources: {e}"))?;
     if json {
         return serde_json::to_string_pretty(&view).map_err(|e| format!("cannot render JSON: {e}"));
     }
@@ -1316,9 +1359,19 @@ fn sentry_devices_render(
         view.devices.len() - keyed
     );
     for device in &view.devices {
-        let ips = device.ips.iter().map(ToString::to_string).collect::<Vec<_>>().join(",");
+        let ips = device
+            .ips
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
         let name = device.names.first().map(String::as_str).unwrap_or("-");
-        let sources = device.sources.keys().map(|s| s.as_str()).collect::<Vec<_>>().join("+");
+        let sources = device
+            .sources
+            .keys()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join("+");
         let ips = if ips.is_empty() { "-".to_owned() } else { ips };
         out.push_str(&format!("{}  {ips}  {name}  {sources}\n", device.identity));
     }
@@ -1380,6 +1433,7 @@ fn prepare_print_request(
 /// watchdog directory, the optional exports and the output segments are files.
 /// Sentry execution receipts would need the daemon's journal, which has no
 /// offline reader; that source is reported as skipped rather than faked.
+#[allow(clippy::too_many_arguments)]
 fn context_feed(
     paths: &StatePaths,
     watchdog_dir: Option<&std::path::Path>,
@@ -1441,9 +1495,7 @@ fn context_feed(
             .ok_or_else(|| {
                 "no output directory: pass --out or configure [sentry.context_feed]".to_owned()
             })?;
-        let poll_ms = poll_ms
-            .or(feed_config.map(|c| c.poll_ms))
-            .unwrap_or(5000);
+        let poll_ms = poll_ms.or(feed_config.map(|c| c.poll_ms)).unwrap_or(5000);
         if !(500..=60000).contains(&poll_ms) {
             return Err("poll_ms must be within 500..=60000".to_owned());
         }
@@ -1464,13 +1516,14 @@ fn context_feed(
         // which are out of scope.
         let state_path = out.join("context-feed-state.json");
         const MAX_REMEMBERED_IDS: usize = 8192;
-        let mut remembered: std::collections::VecDeque<String> = std::fs::read_to_string(&state_path)
-            .ok()
-            .and_then(|text| serde_json::from_str::<Vec<String>>(&text).ok())
-            .unwrap_or_default()
-            .into_iter()
-            .take(MAX_REMEMBERED_IDS)
-            .collect();
+        let mut remembered: std::collections::VecDeque<String> =
+            std::fs::read_to_string(&state_path)
+                .ok()
+                .and_then(|text| serde_json::from_str::<Vec<String>>(&text).ok())
+                .unwrap_or_default()
+                .into_iter()
+                .take(MAX_REMEMBERED_IDS)
+                .collect();
         let mut known: std::collections::BTreeSet<String> = remembered.iter().cloned().collect();
         let persist_state = |remembered: &std::collections::VecDeque<String>| {
             let tmp = state_path.with_extension("json.tmp");
@@ -1486,8 +1539,7 @@ fn context_feed(
                 .map_err(|_| "cannot read the watchdog directory".to_owned())?;
             if let Some(text) = &lan_text {
                 events.extend(
-                    from_lan_inventory(text)
-                        .map_err(|e| format!("lan inventory rejected: {e}"))?,
+                    from_lan_inventory(text).map_err(|e| format!("lan inventory rejected: {e}"))?,
                 );
             }
             if let Some(text) = &passive_text {
@@ -1586,8 +1638,9 @@ fn sentry_follow(
             let now_ms = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_millis() as i64);
-            let report = archie_workstation::live::follow_alerts_once(&state_dir, &vault_dir, now_ms)
-                .map_err(|e| format!("alert follower failed: {e}"))?;
+            let report =
+                archie_workstation::live::follow_alerts_once(&state_dir, &vault_dir, now_ms)
+                    .map_err(|e| format!("alert follower failed: {e}"))?;
             let refused = report.refused_no_local_model();
             if json {
                 println!(
@@ -1750,7 +1803,9 @@ fn wanda_watch(
         } else {
             None
         };
-        let chat = configured.as_ref().and_then(|c| c.sentry.chat_exports.as_ref());
+        let chat = configured
+            .as_ref()
+            .and_then(|c| c.sentry.chat_exports.as_ref());
         let dir = dir
             .map(std::path::PathBuf::from)
             .or_else(|| chat.map(|c| std::path::PathBuf::from(&c.watch_dir)))
@@ -1760,9 +1815,9 @@ fn wanda_watch(
         let salt = match salt {
             Some(salt) if !salt.is_empty() && salt.len() <= 128 => salt.to_owned(),
             Some(_) => return Err("the salt must be 1..=128 bytes".to_owned()),
-            None => chat
-                .map(|c| c.salt.clone())
-                .ok_or_else(|| "no salt: pass --salt or configure [sentry.chat_exports]".to_owned())?,
+            None => chat.map(|c| c.salt.clone()).ok_or_else(|| {
+                "no salt: pass --salt or configure [sentry.chat_exports]".to_owned()
+            })?,
         };
         let poll_ms = poll_ms.unwrap_or(5000);
         if !(500..=60000).contains(&poll_ms) {
@@ -1855,7 +1910,7 @@ async fn review_and_execute(
 
 fn exit_code(response: &ControlResponse) -> std::process::ExitCode {
     let unverified = matches!(response, ControlResponse::SentryResult(result) if result.status != archie_core::control::SentryExecutionStatus::Verified);
-    let uncertain_receipt = matches!(response, ControlResponse::SentryReceipt(record) if record.result.as_ref().map_or(true, |result| result.status != archie_core::control::SentryExecutionStatus::Verified));
+    let uncertain_receipt = matches!(response, ControlResponse::SentryReceipt(record) if record.result.as_ref().is_none_or(|result| result.status != archie_core::control::SentryExecutionStatus::Verified));
     if response.is_error() || unverified || uncertain_receipt {
         std::process::ExitCode::FAILURE
     } else {
@@ -2675,7 +2730,9 @@ mod tests {
             launch,
             ControlRequest::SentryPrepare {
                 resource_id: "living-room-tv".into(),
-                command: SentryCommand::AppLaunch { app_id: "12".into() },
+                command: SentryCommand::AppLaunch {
+                    app_id: "12".into()
+                },
             }
         );
         let doctor = Command::Sentry {
@@ -2686,10 +2743,7 @@ mod tests {
         .to_request()
         .unwrap();
         assert_eq!(doctor.name(), "sentry-printer-doctor");
-        assert!(
-            !doctor.is_mutating(),
-            "printer-doctor is a read-only probe"
-        );
+        assert!(!doctor.is_mutating(), "printer-doctor is a read-only probe");
     }
 
     /// `print` stages locally before its intent exists, and `context-feed` is a
@@ -2733,7 +2787,8 @@ mod tests {
     /// device are fixtures, not a real network), merged without any daemon.
     #[test]
     fn sentry_devices_merges_fixture_files_into_one_device() {
-        let dir = std::env::temp_dir().join(format!("archie-sentry-devices-test-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("archie-sentry-devices-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let inventory = dir.join("lan.json");
         let state = dir.join("state.json");
@@ -2748,21 +2803,40 @@ mod tests {
             r#"{"format":"archie-netwatch-state-v1","started_ms":1789999000000,"devices":{"54:4e:f0:07:3d:e8":{"first_seen_ms":1789999000000,"last_seen_ms":1790000005000,"addresses":["192.168.1.40"],"hostname":"roku-living","frames":12,"bytes":3456,"asked":["api.roku.com"],"sent_to":{"api.roku.com":3456}}},"owners":{"192.168.1.40":"54:4e:f0:07:3d:e8"}}"#,
         )
         .unwrap();
-        std::fs::write(&passive, "192.168.1.40\t5353\tLiving._roku-ecp._tcp.local\n").unwrap();
+        std::fs::write(
+            &passive,
+            "192.168.1.40\t5353\tLiving._roku-ecp._tcp.local\n",
+        )
+        .unwrap();
 
-        let json = sentry_devices_render(Some(&inventory), Some(&state), Some(&passive), true).unwrap();
+        let json =
+            sentry_devices_render(Some(&inventory), Some(&state), Some(&passive), true).unwrap();
         let view: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(view["devices"].as_array().unwrap().len(), 1, "one device, told by three sources");
+        assert_eq!(
+            view["devices"].as_array().unwrap().len(),
+            1,
+            "one device, told by three sources"
+        );
         let device = &view["devices"][0];
         assert_eq!(device["mac"], "54:4e:f0:07:3d:e8");
-        let sources: Vec<&str> = device["sources"].as_object().unwrap().keys().map(String::as_str).collect();
+        let sources: Vec<&str> = device["sources"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
         assert_eq!(sources, ["lan-scan", "netwatch", "passive-import"]);
 
-        let human = sentry_devices_render(Some(&inventory), Some(&state), Some(&passive), false).unwrap();
+        let human =
+            sentry_devices_render(Some(&inventory), Some(&state), Some(&passive), false).unwrap();
         assert!(human.contains("devices: 1 (1 by hardware address, 0 by address only)"));
-        assert!(human.contains("54:4e:f0:07:3d:e8  192.168.1.40  Living  lan-scan+netwatch+passive-import"));
+        assert!(human
+            .contains("54:4e:f0:07:3d:e8  192.168.1.40  Living  lan-scan+netwatch+passive-import"));
 
-        assert!(sentry_devices_render(None, None, None, false).is_err(), "at least one source is required");
+        assert!(
+            sentry_devices_render(None, None, None, false).is_err(),
+            "at least one source is required"
+        );
         assert!(sentry_devices_render(Some(&dir.join("missing.json")), None, None, false).is_err());
 
         std::fs::remove_dir_all(&dir).unwrap();
@@ -2774,7 +2848,10 @@ mod tests {
         use archie_core::control::{ControlRequest, SentryCommand};
 
         let cli = Cli::try_parse_from(["archie", "sentry-node", "wake", "living-pc"]).unwrap();
-        let Some(ControlRequest::SentryPrepare { resource_id, command }) = cli.command.to_request()
+        let Some(ControlRequest::SentryPrepare {
+            resource_id,
+            command,
+        }) = cli.command.to_request()
         else {
             panic!("wake prepares an intent");
         };
@@ -2799,8 +2876,14 @@ mod tests {
         };
         assert_eq!(command, SentryCommand::VolumeSet { percent: 40 });
 
-        let cli =
-            Cli::try_parse_from(["archie", "sentry-node", "launch", "pixel", "com.example.app"]).unwrap();
+        let cli = Cli::try_parse_from([
+            "archie",
+            "sentry-node",
+            "launch",
+            "pixel",
+            "com.example.app",
+        ])
+        .unwrap();
         let Some(ControlRequest::SentryPrepare { command, .. }) = cli.command.to_request() else {
             panic!("launch prepares an intent");
         };
@@ -2821,10 +2904,18 @@ mod tests {
     fn focus_is_local_and_defaults_to_the_personal_domain() {
         let cli = Cli::try_parse_from(["archie", "focus", "pantalla-1"]).unwrap();
         assert!(cli.command.to_request().is_none());
-        let Command::Focus { profile, domain, since_ms } = cli.command else {
+        let Command::Focus {
+            profile,
+            domain,
+            since_ms,
+        } = cli.command
+        else {
             panic!("focus parses to Focus");
         };
-        assert_eq!((profile.as_str(), domain.as_str(), since_ms), ("pantalla-1", "personal/owner", 0));
+        assert_eq!(
+            (profile.as_str(), domain.as_str(), since_ms),
+            ("pantalla-1", "personal/owner", 0)
+        );
     }
 
     /// Chromecast verbs prepare reviewed intents; the probe is local.
@@ -2833,17 +2924,30 @@ mod tests {
         use archie_core::control::{ControlRequest, SentryCommand};
         for (argv, expected) in [
             (vec!["stop", "living-cast"], SentryCommand::AppStop),
-            (vec!["volume", "living-cast", "35"], SentryCommand::VolumeSet { percent: 35 }),
-            (vec!["mute", "living-cast"], SentryCommand::MuteSet { muted: true }),
-            (vec!["unmute", "living-cast"], SentryCommand::MuteSet { muted: false }),
+            (
+                vec!["volume", "living-cast", "35"],
+                SentryCommand::VolumeSet { percent: 35 },
+            ),
+            (
+                vec!["mute", "living-cast"],
+                SentryCommand::MuteSet { muted: true },
+            ),
+            (
+                vec!["unmute", "living-cast"],
+                SentryCommand::MuteSet { muted: false },
+            ),
             (
                 vec!["launch", "living-cast", "CC1AD845"],
-                SentryCommand::AppLaunch { app_id: "CC1AD845".into() },
+                SentryCommand::AppLaunch {
+                    app_id: "CC1AD845".into(),
+                },
             ),
         ] {
             let cli = Cli::try_parse_from(["archie", "sentry"].into_iter().chain(argv)).unwrap();
-            let Some(ControlRequest::SentryPrepare { resource_id, command }) =
-                cli.command.to_request()
+            let Some(ControlRequest::SentryPrepare {
+                resource_id,
+                command,
+            }) = cli.command.to_request()
             else {
                 panic!("cast verbs prepare an intent");
             };
@@ -2851,7 +2955,8 @@ mod tests {
             assert_eq!(command, expected);
         }
         assert!(Cli::try_parse_from(["archie", "sentry", "volume", "c", "101"]).is_err());
-        let probe = Cli::try_parse_from(["archie", "sentry", "cast-probe", "192.168.1.30"]).unwrap();
+        let probe =
+            Cli::try_parse_from(["archie", "sentry", "cast-probe", "192.168.1.30"]).unwrap();
         assert!(probe.command.to_request().is_none());
     }
 

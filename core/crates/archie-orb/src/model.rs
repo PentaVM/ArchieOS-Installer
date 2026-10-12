@@ -221,6 +221,9 @@ struct EntityState {
     last_seen_ms: i64,
 }
 
+/// A Stage claim as the Orb last saw it: app, window, status and when.
+type StageEntry = (String, Option<u32>, StageStatus, i64);
+
 /// The deterministic, renderer-independent TFOG projection.
 ///
 /// Producers only supply facts and short-lived state. This model assigns geometry from
@@ -232,7 +235,7 @@ pub struct OrbModel {
     focus: BTreeMap<String, (f32, i64)>,
     working_set: BTreeMap<String, (f32, i64)>,
     speaking_features: Vec<f32>,
-    stage: BTreeMap<(String, u32), (String, Option<u32>, StageStatus, i64)>,
+    stage: BTreeMap<(String, u32), StageEntry>,
     selected: Option<(String, u32, String, i64)>,
     workflows: BTreeMap<WorkflowComponent, (WorkflowPhase, bool, u16, i64)>,
     targets: OrbState,
@@ -283,7 +286,7 @@ impl OrbModel {
         match signal.kind {
             SignalKind::EntityUpsert { entity } => {
                 if !self.entities.contains_key(&entity.id)
-                    && self.entities.len() >= self.config.max_entities.min(MAX_ENTITIES).max(1)
+                    && self.entities.len() >= self.config.max_entities.clamp(1, MAX_ENTITIES)
                 {
                     return Err(crate::SignalError::Invalid);
                 }
@@ -801,8 +804,8 @@ impl OrbModel {
             .map(|_| BTreeMap::<u8, Vec<usize>>::new())
             .collect::<Vec<_>>();
         for (i, sig) in signatures.iter().enumerate() {
-            for band in 0..4 {
-                by_bucket[band]
+            for (band, buckets) in by_bucket.iter_mut().enumerate() {
+                buckets
                     .entry((sig >> (band * 8)) as u8)
                     .or_default()
                     .push(i);
@@ -811,8 +814,8 @@ impl OrbModel {
         for i in 0..ids.len() {
             let sig = signatures[i];
             let mut candidates = BTreeSet::new();
-            for band in 0..4 {
-                if let Some(bucket) = by_bucket[band].get(&((sig >> (band * 8)) as u8)) {
+            for (band, buckets) in by_bucket.iter().enumerate() {
+                if let Some(bucket) = buckets.get(&((sig >> (band * 8)) as u8)) {
                     // A degenerate cohort (for example zero-feature placeholders) must
                     // not turn the sparse lookup into a quadratic scan.
                     let stride = bucket.len().div_ceil(96).max(1);
@@ -939,7 +942,7 @@ impl OrbModel {
                 add(source.clone(), target.clone(), Relation::Focus);
             }
         }
-        for ((app, surface), _) in &self.stage {
+        for (app, surface) in self.stage.keys() {
             let window = format!("window:{app}:{surface}");
             if self.entities.contains_key(app) && self.entities.contains_key(&window) {
                 add(window, app.clone(), Relation::Action);
@@ -1401,9 +1404,9 @@ fn spectral_directions(
         .iter()
         .filter_map(|id| Some((raw.get(id)?, previous.get(id)?)))
         .fold([[0.0_f32; 3]; 3], |mut matrix, (new, old)| {
-            for row in 0..3 {
-                for column in 0..3 {
-                    matrix[row][column] += new[row] * old[column];
+            for (cells, n) in matrix.iter_mut().zip(new) {
+                for (cell, o) in cells.iter_mut().zip(old) {
+                    *cell += n * o;
                 }
             }
             matrix
@@ -1440,10 +1443,8 @@ fn procrustes_rotation(covariance: [[f32; 3]; 3]) -> [f32; 4] {
     let mut quaternion = [1.0_f32, 0.0, 0.0, 0.0];
     for _ in 0..32 {
         let mut next = [0.0_f32; 4];
-        for row in 0..4 {
-            for column in 0..4 {
-                next[row] += matrix[row][column] * quaternion[column];
-            }
+        for (out, cells) in next.iter_mut().zip(&matrix) {
+            *out = cells.iter().zip(&quaternion).map(|(m, q)| m * q).sum();
         }
         let norm = next.iter().map(|v| v * v).sum::<f32>().sqrt();
         if norm <= 1e-8 {

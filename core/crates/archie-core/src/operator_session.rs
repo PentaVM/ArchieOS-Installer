@@ -97,10 +97,8 @@ impl OperatorSession {
                 resource_id: roku.resource_id.clone(),
                 edge_id: "local-core".into(),
                 adapter_id: "roku".into(),
-                paired: self.paired_device(
-                    &roku.resource_id,
-                    archie_state::DeviceClass::Television,
-                )?,
+                paired: self
+                    .paired_device(&roku.resource_id, archie_state::DeviceClass::Television)?,
                 capabilities: crate::sentry_config::RokuBinding::capabilities(),
             })?;
         }
@@ -109,10 +107,8 @@ impl OperatorSession {
                 resource_id: cast.resource_id.clone(),
                 edge_id: "local-core".into(),
                 adapter_id: "cast".into(),
-                paired: self.paired_device(
-                    &cast.resource_id,
-                    archie_state::DeviceClass::Television,
-                )?,
+                paired: self
+                    .paired_device(&cast.resource_id, archie_state::DeviceClass::Television)?,
                 capabilities: archie_sentry::adapters::chromecast::Chromecast::CAPABILITIES
                     .to_vec(),
             })?;
@@ -136,10 +132,8 @@ impl OperatorSession {
                     resource_id: resource_id.clone(),
                     edge_id: "local-core".into(),
                     adapter_id: "mqtt".into(),
-                    paired: self.paired_device(
-                        resource_id,
-                        archie_state::DeviceClass::HomeAssistant,
-                    )?,
+                    paired: self
+                        .paired_device(resource_id, archie_state::DeviceClass::HomeAssistant)?,
                     capabilities: crate::sentry_config::mqtt_capabilities(binding),
                 })?;
             }
@@ -150,10 +144,8 @@ impl OperatorSession {
                     resource_id: node.resource_id.clone(),
                     edge_id: "local-core".into(),
                     adapter_id: "wol".into(),
-                    paired: self.paired_device(
-                        &node.resource_id,
-                        archie_state::DeviceClass::Host,
-                    )?,
+                    paired: self
+                        .paired_device(&node.resource_id, archie_state::DeviceClass::Host)?,
                     capabilities: vec![CommandKind::WakeHost],
                 })?;
             }
@@ -164,10 +156,8 @@ impl OperatorSession {
                     resource_id: node.resource_id.clone(),
                     edge_id: "local-core".into(),
                     adapter_id: "adb".into(),
-                    paired: self.paired_device(
-                        &node.resource_id,
-                        archie_state::DeviceClass::Mobile,
-                    )?,
+                    paired: self
+                        .paired_device(&node.resource_id, archie_state::DeviceClass::Mobile)?,
                     capabilities: vec![
                         CommandKind::AppLaunch,
                         CommandKind::SessionLock,
@@ -182,10 +172,8 @@ impl OperatorSession {
                     resource_id: router.resource_id.clone(),
                     edge_id: "local-core".into(),
                     adapter_id: "router".into(),
-                    paired: self.paired_device(
-                        &router.resource_id,
-                        archie_state::DeviceClass::Router,
-                    )?,
+                    paired: self
+                        .paired_device(&router.resource_id, archie_state::DeviceClass::Router)?,
                     capabilities,
                 })?;
             }

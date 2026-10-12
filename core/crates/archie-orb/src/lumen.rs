@@ -472,8 +472,11 @@ impl<'a> Tree<'a> {
                 node: Some(node),
             });
         }
-        let index: HashMap<String, usize> =
-            raw.iter().enumerate().map(|(i, r)| (r.id.clone(), i)).collect();
+        let index: HashMap<String, usize> = raw
+            .iter()
+            .enumerate()
+            .map(|(i, r)| (r.id.clone(), i))
+            .collect();
         let mut tree = Self {
             raw,
             index,
@@ -601,7 +604,11 @@ pub fn compose(frame: &OrbFrame, view: &LumenView) -> LumenScene {
         .unwrap_or_else(|| tree.root.clone());
     scene.focus_id = focus.clone();
     let mut up = focus.clone();
-    while let Some(parent) = tree.index.get(&up).and_then(|&i| tree.raw[i].parent.clone()) {
+    while let Some(parent) = tree
+        .index
+        .get(&up)
+        .and_then(|&i| tree.raw[i].parent.clone())
+    {
         scene.focus_path.push(LumenLink {
             source: parent.clone(),
             target: up,
@@ -634,8 +641,11 @@ pub fn compose(frame: &OrbFrame, view: &LumenView) -> LumenScene {
 
     let positions = layout(&entries, &shape, scene.source_count);
     scene.radius = positions.radius;
-    let visible: HashMap<&str, usize> =
-        entries.iter().enumerate().map(|(i, e)| (e.id.as_str(), i)).collect();
+    let visible: HashMap<&str, usize> = entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| (e.id.as_str(), i))
+        .collect();
 
     // Which drawn node stands for each observed entity.
     let mut owner: HashMap<&str, usize> = HashMap::new();
@@ -653,7 +663,10 @@ pub fn compose(frame: &OrbFrame, view: &LumenView) -> LumenScene {
             if let Some(&i) = owner.get(at) {
                 return Some(i);
             }
-            let parent = tree.index.get(at).and_then(|&i| tree.raw[i].parent.as_deref())?;
+            let parent = tree
+                .index
+                .get(at)
+                .and_then(|&i| tree.raw[i].parent.as_deref())?;
             at = parent;
         }
     };
@@ -818,9 +831,17 @@ pub fn compose(frame: &OrbFrame, view: &LumenView) -> LumenScene {
                 || (view.lens == LumenLens::Folders
                     && entry.kind == LumenKind::Module
                     && entry.depth <= 1),
-            signals: signal_list.into_iter().take(8).map(|(k, _)| k.to_string()).collect(),
+            signals: signal_list
+                .into_iter()
+                .take(8)
+                .map(|(k, _)| k.to_string())
+                .collect(),
         });
-        if let Some(parent) = entry.parent.as_ref().filter(|p| visible.contains_key(p.as_str())) {
+        if let Some(parent) = entry
+            .parent
+            .as_ref()
+            .filter(|p| visible.contains_key(p.as_str()))
+        {
             scene.links.push(LumenLink {
                 source: parent.clone(),
                 target: entry.id.clone(),
@@ -830,7 +851,12 @@ pub fn compose(frame: &OrbFrame, view: &LumenView) -> LumenScene {
     scene.collapsed_count = scene.source_count.saturating_sub(
         entries
             .iter()
-            .filter(|e| matches!(e.kind, LumenKind::Entity | LumenKind::Module | LumenKind::Root))
+            .filter(|e| {
+                matches!(
+                    e.kind,
+                    LumenKind::Entity | LumenKind::Module | LumenKind::Root
+                )
+            })
             .count(),
     );
     scene
@@ -973,7 +999,10 @@ fn architecture_entries(
         }
         let parent_depth = parent.depth - base_depth;
         let siblings = tree.kids(&parent.id);
-        for &at in siblings.iter().filter(|&&at| tree.is_branch(&tree.raw[at].id)) {
+        for &at in siblings
+            .iter()
+            .filter(|&&at| tree.is_branch(&tree.raw[at].id))
+        {
             let item = &tree.raw[at];
             let members = subtree_members(&item.id);
             let hidden: Vec<usize> = if open.contains(&item.id) {
@@ -1006,7 +1035,10 @@ fn architecture_entries(
             queue.push_back(at);
         }
         let mut groups: BTreeMap<LumenCategory, Vec<usize>> = BTreeMap::new();
-        for &at in siblings.iter().filter(|&&at| !tree.is_branch(&tree.raw[at].id)) {
+        for &at in siblings
+            .iter()
+            .filter(|&&at| !tree.is_branch(&tree.raw[at].id))
+        {
             groups.entry(tree.raw[at].category).or_default().push(at);
         }
         for (category, leaves) in groups {
@@ -1024,14 +1056,15 @@ fn architecture_entries(
                 category,
                 role: category.label().into(),
                 depth: parent_depth + 1,
-                size: leaves
-                    .iter()
-                    .map(|&l| tree.raw[l].size)
-                    .fold(0.0, f32::max),
+                size: leaves.iter().map(|&l| tree.raw[l].size).fold(0.0, f32::max),
                 member_count: leaves.len(),
                 direction: mean_direction(&leaves),
                 source: None,
-                members: if open_group { Vec::new() } else { leaves.clone() },
+                members: if open_group {
+                    Vec::new()
+                } else {
+                    leaves.clone()
+                },
             });
             if open_group {
                 for &at in &leaves {
@@ -1072,9 +1105,15 @@ pub fn group_id(parent: &str, category: LumenCategory) -> String {
 
 const DIMS: usize = 8 + 4;
 const AXES: [[f32; DIMS]; 3] = [
-    [1.2, -0.85, 0.52, -0.52, 0.96, -1.06, 0.16, -0.34, 0.16, 0.28, -0.2, 0.12],
-    [-0.4, 0.88, -1.2, 0.46, 0.82, 0.2, -0.62, 0.58, -0.17, 0.1, 0.26, 0.08],
-    [0.8, 0.42, -0.24, -1.14, -0.15, 1.14, -0.58, -0.44, 0.12, 0.11, -0.12, 0.31],
+    [
+        1.2, -0.85, 0.52, -0.52, 0.96, -1.06, 0.16, -0.34, 0.16, 0.28, -0.2, 0.12,
+    ],
+    [
+        -0.4, 0.88, -1.2, 0.46, 0.82, 0.2, -0.62, 0.58, -0.17, 0.1, 0.26, 0.08,
+    ],
+    [
+        0.8, 0.42, -0.24, -1.14, -0.15, 1.14, -0.58, -0.44, 0.12, 0.11, -0.12, 0.31,
+    ],
 ];
 const GOLDEN_ANGLE: f32 = 2.399_963_2;
 
@@ -1128,8 +1167,11 @@ fn layout(entries: &[Entry], shape: &LumenShape, total: usize) -> Placed {
     if count == 0 {
         return Placed { at, radius };
     }
-    let index: HashMap<&str, usize> =
-        entries.iter().enumerate().map(|(i, e)| (e.id.as_str(), i)).collect();
+    let index: HashMap<&str, usize> = entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| (e.id.as_str(), i))
+        .collect();
     let mut children: HashMap<Option<usize>, Vec<usize>> = HashMap::new();
     for (i, entry) in entries.iter().enumerate() {
         let parent = entry.parent.as_deref().and_then(|p| index.get(p).copied());
@@ -1164,8 +1206,8 @@ fn layout(entries: &[Entry], shape: &LumenShape, total: usize) -> Placed {
         for &k in kids {
             let w = if entries[k].branch { 1.5 } else { 1.0 };
             weight_sum += w;
-            for d in 0..DIMS {
-                aggregate[d] += signature[k][d] * w;
+            for (sum, value) in aggregate.iter_mut().zip(&signature[k]) {
+                *sum += value * w;
             }
         }
         if weight_sum > 0.0 {
@@ -1179,8 +1221,8 @@ fn layout(entries: &[Entry], shape: &LumenShape, total: usize) -> Placed {
     let leaves: Vec<usize> = (0..count).filter(|&i| !entries[i].branch).collect();
     let mut centroid = [0.0; DIMS];
     for &i in &leaves {
-        for d in 0..DIMS {
-            centroid[d] += signature[i][d];
+        for (sum, value) in centroid.iter_mut().zip(&signature[i]) {
+            *sum += value;
         }
     }
     if !leaves.is_empty() {
@@ -1264,10 +1306,11 @@ fn layout(entries: &[Entry], shape: &LumenShape, total: usize) -> Placed {
             let size_term = entry.size * shape.size_influence;
             let wobble = ((seed >> 24) as f32 / 255.0) - 0.5;
             let shell = match shape.layout {
-                LumenLayout::Legacy => (0.22 + depth_fraction * shape.radial_layers + size_term
-                    + wobble * 0.05
-                    - if entry.branch { 0.06 } else { 0.0 })
-                .clamp(0.16, 0.94),
+                LumenLayout::Legacy => {
+                    (0.22 + depth_fraction * shape.radial_layers + size_term + wobble * 0.05
+                        - if entry.branch { 0.06 } else { 0.0 })
+                    .clamp(0.16, 0.94)
+                }
                 LumenLayout::Regions => (0.19
                     + depth_fraction.sqrt() * shape.radial_layers * 0.57
                     + size_term * 0.2
@@ -1380,7 +1423,7 @@ mod tests {
             id: id.into(),
             parent_id: parent.map(Into::into),
             kind,
-            label: id.split(':').last().unwrap_or(id).into(),
+            label: id.split(':').next_back().unwrap_or(id).into(),
             direction: normalize([seed.sin(), (seed * 0.7).cos(), (seed * 1.3).sin()]),
             position: [0.0; 3],
             velocity: [0.0; 3],
@@ -1419,8 +1462,16 @@ mod tests {
             node("process:2", Some("process:1"), EntityKind::Process),
         ];
         for i in 0..6 {
-            nodes.push(node(&format!("process:a{i}"), Some("service:a"), EntityKind::Process));
-            nodes.push(node(&format!("process:b{i}"), Some("service:b"), EntityKind::Process));
+            nodes.push(node(
+                &format!("process:a{i}"),
+                Some("service:a"),
+                EntityKind::Process,
+            ));
+            nodes.push(node(
+                &format!("process:b{i}"),
+                Some("service:b"),
+                EntityKind::Process,
+            ));
         }
         OrbFrame {
             generated_at_ms: 1,
@@ -1457,9 +1508,15 @@ mod tests {
         let ids = ids(&scene);
         assert!(ids.contains("system:archieos"));
         assert!(ids.contains("service:a") && ids.contains("service:b"));
-        assert!(ids.contains("process:1"), "a process with a child is a module");
+        assert!(
+            ids.contains("process:1"),
+            "a process with a child is a module"
+        );
         assert!(ids.contains(group_id("system:archieos", LumenCategory::Devices).as_str()));
-        assert!(!ids.contains("process:a1"), "a folded service hides its processes");
+        assert!(
+            !ids.contains("process:a1"),
+            "a folded service hides its processes"
+        );
         let service = scene.nodes.iter().find(|n| n.id == "service:a").unwrap();
         assert_eq!(service.kind, LumenKind::Module);
         assert_eq!(service.member_count, 7);
@@ -1471,7 +1528,11 @@ mod tests {
             .unwrap();
         assert_eq!(devices.name, "Dispositivos · 2");
         assert_eq!(scene.source_count, 19);
-        assert_eq!(scene.collapsed_count, 19 - 4, "root, two services and one parent process are drawn alone");
+        assert_eq!(
+            scene.collapsed_count,
+            19 - 4,
+            "root, two services and one parent process are drawn alone"
+        );
     }
 
     #[test]
@@ -1503,7 +1564,11 @@ mod tests {
         };
         let scene = compose(&frame(), &view);
         assert_eq!(scene.nodes.len(), 19);
-        assert_eq!(scene.links.len(), 18, "every entity but the root hangs from its parent");
+        assert_eq!(
+            scene.links.len(),
+            18,
+            "every entity but the root hangs from its parent"
+        );
         assert_eq!(scene.collapsed_count, 0);
     }
 
@@ -1517,12 +1582,18 @@ mod tests {
             .collect();
         assert_eq!(observed.len(), 1, "{observed:?}");
         let relation = observed[0];
-        assert_eq!((relation.source.as_str(), relation.target.as_str()), ("service:a", "service:b"));
+        assert_eq!(
+            (relation.source.as_str(), relation.target.as_str()),
+            ("service:a", "service:b")
+        );
         assert_eq!(relation.count, 2);
         assert!(relation.relations.contains(&Relation::Runtime));
         assert!(relation.relations.contains(&Relation::Dependency));
         // The hierarchy edge is the tree itself, and both devices sit in one group.
-        assert!(scene.relations.iter().all(|r| !r.relations.contains(&Relation::Hierarchy)));
+        assert!(scene
+            .relations
+            .iter()
+            .all(|r| !r.relations.contains(&Relation::Hierarchy)));
         let service = scene.nodes.iter().find(|n| n.id == "service:a").unwrap();
         assert!(service.signals.iter().any(|s| s == "ejecución"));
     }
@@ -1540,7 +1611,10 @@ mod tests {
             .filter(|r| r.kind == LumenRelationKind::Semantic)
             .collect();
         assert_eq!(semantic.len(), 1);
-        assert_eq!((semantic[0].source.as_str(), semantic[0].target.as_str()), ("device:disk", "device:gpu"));
+        assert_eq!(
+            (semantic[0].source.as_str(), semantic[0].target.as_str()),
+            ("device:disk", "device:gpu")
+        );
     }
 
     #[test]
@@ -1565,7 +1639,9 @@ mod tests {
         let scene = compose(&frame(), &view);
         assert_eq!(scene.focus_id, "service:a");
         assert_eq!(scene.source_count, 7);
-        assert!(ids(&scene).iter().all(|id| *id == "service:a" || id.contains("service:a")));
+        assert!(ids(&scene)
+            .iter()
+            .all(|id| *id == "service:a" || id.contains("service:a")));
         assert_eq!(scene.focus_path.len(), 1);
         assert_eq!(scene.focus_path[0].source, "system:archieos");
     }
@@ -1573,8 +1649,12 @@ mod tests {
     #[test]
     fn a_cycle_in_reported_parents_is_cut_rather_than_followed() {
         let mut frame = frame();
-        frame.nodes.push(node("process:x", Some("process:y"), EntityKind::Process));
-        frame.nodes.push(node("process:y", Some("process:x"), EntityKind::Process));
+        frame
+            .nodes
+            .push(node("process:x", Some("process:y"), EntityKind::Process));
+        frame
+            .nodes
+            .push(node("process:y", Some("process:x"), EntityKind::Process));
         let view = LumenView {
             lens: LumenLens::Entities,
             ..LumenView::default()
@@ -1607,6 +1687,9 @@ mod tests {
         assert_eq!(view.limit, 12);
         assert_eq!(view.focus.as_deref(), Some("service:b"));
         assert_eq!(view.shape.layout, LumenLayout::Legacy);
-        assert_eq!(LumenView::from_query("&&=&lens=nonsense"), LumenView::default());
+        assert_eq!(
+            LumenView::from_query("&&=&lens=nonsense"),
+            LumenView::default()
+        );
     }
 }

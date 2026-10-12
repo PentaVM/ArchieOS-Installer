@@ -127,7 +127,8 @@ fn attribute_tail<'a>(output: &'a str, name: &str) -> Option<&'a str> {
     let mut rest = output;
     while let Some(pos) = rest.find(&needle) {
         let boundary = pos == 0
-            || !rest.as_bytes()[pos - 1].is_ascii_alphanumeric() && rest.as_bytes()[pos - 1] != b'_';
+            || !rest.as_bytes()[pos - 1].is_ascii_alphanumeric()
+                && rest.as_bytes()[pos - 1] != b'_';
         if boundary {
             return Some(rest[pos + needle.len()..].trim_start());
         }
@@ -157,10 +158,7 @@ pub fn parse_int_attribute(output: &str, name: &str) -> Option<i64> {
         Some(rest) => (-1i64, rest),
         None => (1i64, tail),
     };
-    let text: String = digits
-        .chars()
-        .take_while(|c| c.is_ascii_digit())
-        .collect();
+    let text: String = digits.chars().take_while(|c| c.is_ascii_digit()).collect();
     if text.is_empty() {
         return None;
     }
@@ -170,9 +168,13 @@ pub fn parse_int_attribute(output: &str, name: &str) -> Option<i64> {
 /// chip-tool confirms commissioning with one of these markers. A zero exit
 /// status without a marker is not success.
 pub fn pairing_succeeded(output: &str) -> bool {
-    ["Commissioning complete", "Secure Pairing Success", "Pairing Success"]
-        .iter()
-        .any(|marker| output.contains(marker))
+    [
+        "Commissioning complete",
+        "Secure Pairing Success",
+        "Pairing Success",
+    ]
+    .iter()
+    .any(|marker| output.contains(marker))
 }
 
 /// A pairing code is either the QR payload (base38 alphabet plus `MT:` prefix
@@ -183,7 +185,10 @@ fn valid_pairing_code(code: &str) -> bool {
         && code.len() <= 64
         && code.bytes().all(|b| {
             b.is_ascii_alphanumeric()
-                || matches!(b, b':' | b'-' | b'.' | b'$' | b'%' | b'*' | b'+' | b'/' | b'=' | b'?')
+                || matches!(
+                    b,
+                    b':' | b'-' | b'.' | b'$' | b'%' | b'*' | b'+' | b'/' | b'=' | b'?'
+                )
         })
 }
 
@@ -330,8 +335,8 @@ impl Matter {
                     self.read_attribute(target, "thermostat", "occupied-heating-setpoint")?;
                 let centi = parse_int_attribute(&report, "OccupiedHeatingSetpoint")
                     .ok_or(AdapterError::Protocol)?;
-                let target_milli_celsius = i32::try_from(centi.saturating_mul(10))
-                    .map_err(|_| AdapterError::Protocol)?;
+                let target_milli_celsius =
+                    i32::try_from(centi.saturating_mul(10)).map_err(|_| AdapterError::Protocol)?;
                 Ok(ResourceState::Climate {
                     target_milli_celsius,
                 })

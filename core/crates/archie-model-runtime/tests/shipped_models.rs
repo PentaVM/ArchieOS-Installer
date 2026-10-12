@@ -24,12 +24,17 @@ fn every_shipped_reasoning_model_has_an_endpoint_and_a_provider_name() {
         if model.provider == ProviderKind::ArchieRuntime {
             continue;
         }
-        let endpoint = ProviderEndpoint::for_model(model).unwrap_or_else(|e| panic!("{}: {e}", model.id));
+        let endpoint =
+            ProviderEndpoint::for_model(model).unwrap_or_else(|e| panic!("{}: {e}", model.id));
         assert_eq!(endpoint.locality(), model.locality, "{}", model.id);
         if model.locality == Locality::Cloud {
             cloud += 1;
             assert_eq!(endpoint.base_url().scheme(), "https", "{}", model.id);
-            assert!(provider_model_id(model).unwrap().contains('/'), "{} names no provider model", model.id);
+            assert!(
+                provider_model_id(model).unwrap().contains('/'),
+                "{} names no provider model",
+                model.id
+            );
             assert!(
                 !model.permits_privacy(PrivacyGrade::Internal),
                 "{} is a cloud model of unverified retention and must see public data only",
@@ -61,18 +66,37 @@ async fn the_routed_planner_answers_with_a_plan_for_iris() {
         timeout: Duration::from_secs(120),
     };
     let candidates = routed.candidates(&question).unwrap();
-    println!("candidates, best first: {}", candidates.iter().map(|m| m.to_string()).collect::<Vec<_>>().join(", "));
-    assert!(candidates[0].as_str().starts_with("nebius.nemotron"), "Nemotron is the default planner");
+    println!(
+        "candidates, best first: {}",
+        candidates
+            .iter()
+            .map(|m| m.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    assert!(
+        candidates[0].as_str().starts_with("nebius.nemotron"),
+        "Nemotron is the default planner"
+    );
 
     let answered = routed.ask(&question).await.unwrap();
-    println!("{} answered in {:.1} s:\n{}", answered.model, answered.seconds, answered.text);
-    let (start, end) = (answered.text.find('{').unwrap(), answered.text.rfind('}').unwrap());
+    println!(
+        "{} answered in {:.1} s:\n{}",
+        answered.model, answered.seconds, answered.text
+    );
+    let (start, end) = (
+        answered.text.find('{').unwrap(),
+        answered.text.rfind('}').unwrap(),
+    );
     let plan: serde_json::Value = serde_json::from_str(&answered.text[start..=end]).unwrap();
     assert!(plan["skill"].is_string());
     assert!(!plan["steps"].as_array().unwrap().is_empty());
 
     // Private data has no local reasoning model to go to here, so it is refused, not sent.
-    let private = Question { privacy: PrivacyGrade::Restricted, ..question };
+    let private = Question {
+        privacy: PrivacyGrade::Restricted,
+        ..question
+    };
     assert!(routed.candidates(&private).is_err());
 }
 
@@ -88,7 +112,10 @@ mod private {
 
     /// The shipped models with their key present: cloud only.
     fn cloud_only() -> Routed {
-        std::env::set_var("NEBIUS_TOKEN_FACTORY_KEY", "a-key-for-tests-that-call-nothing");
+        std::env::set_var(
+            "NEBIUS_TOKEN_FACTORY_KEY",
+            "a-key-for-tests-that-call-nothing",
+        );
         Routed::from_dir(shipped_models()).unwrap()
     }
 
@@ -106,17 +133,32 @@ mod private {
 
     #[test]
     fn sensitive_text_goes_to_a_cloud_model_only_with_its_secrets_left_behind() {
-        let text = format!("Write the .env for Camila Rojas's service. API key {KEY}, alerts to camila@acme.cl.");
+        let text = format!(
+            "Write the .env for Camila Rojas's service. API key {KEY}, alerts to camila@acme.cl."
+        );
         let veil = Veil::new().knowing(EntityKind::Person, "Camila Rojas");
-        match cloud_only().disclosure(&question(PrivacyGrade::Sensitive, &text), &veil).unwrap() {
+        match cloud_only()
+            .disclosure(&question(PrivacyGrade::Sensitive, &text), &veil)
+            .unwrap()
+        {
             Disclosure::Veiled { models, veiled } => {
                 assert!(models[0].as_str().starts_with("nebius.nemotron"));
                 let leaving = veiled.texts.join("\n");
                 for kept_here in [KEY, "camila@acme.cl", "Camila Rojas"] {
-                    assert!(!leaving.contains(kept_here), "{kept_here} would have left: {leaving}");
+                    assert!(
+                        !leaving.contains(kept_here),
+                        "{kept_here} would have left: {leaving}"
+                    );
                 }
-                assert!(leaving.contains("SECRET_1") && leaving.contains("EMAIL_1") && leaving.contains("PERSON_1"));
-                assert_eq!(veiled.unveil.restore("KEY=SECRET_1\nTO=EMAIL_1"), format!("KEY={KEY}\nTO=camila@acme.cl"));
+                assert!(
+                    leaving.contains("SECRET_1")
+                        && leaving.contains("EMAIL_1")
+                        && leaving.contains("PERSON_1")
+                );
+                assert_eq!(
+                    veiled.unveil.restore("KEY=SECRET_1\nTO=EMAIL_1"),
+                    format!("KEY={KEY}\nTO=camila@acme.cl")
+                );
             }
             other => panic!("sensitive text must be veiled for the cloud, got {other:?}"),
         }
@@ -126,8 +168,13 @@ mod private {
     #[test]
     fn even_public_text_is_veiled_before_a_cloud_model_sees_it() {
         let text = format!("Why does curl -H 'Authorization: Bearer {KEY}' return 401?");
-        match cloud_only().disclosure(&question(PrivacyGrade::Public, &text), &Veil::new()).unwrap() {
-            Disclosure::Veiled { veiled, .. } => assert!(!veiled.texts[1].contains(KEY), "{}", veiled.texts[1]),
+        match cloud_only()
+            .disclosure(&question(PrivacyGrade::Public, &text), &Veil::new())
+            .unwrap()
+        {
+            Disclosure::Veiled { veiled, .. } => {
+                assert!(!veiled.texts[1].contains(KEY), "{}", veiled.texts[1])
+            }
             other => panic!("{other:?}"),
         }
     }
@@ -138,7 +185,10 @@ mod private {
         let veil = Veil::new();
         for grade in [PrivacyGrade::Restricted, PrivacyGrade::Secret] {
             let refused = routed.disclosure(&question(grade, "my diary, in full"), &veil);
-            assert!(matches!(refused, Err(RoutedError::Withheld(_))), "{grade}: {refused:?}");
+            assert!(
+                matches!(refused, Err(RoutedError::Withheld(_))),
+                "{grade}: {refused:?}"
+            );
         }
         let png = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0];
         let mut with_picture = question(PrivacyGrade::Internal, "what is on my screen?");
@@ -148,13 +198,19 @@ mod private {
             width: 1,
             height: 1,
         });
-        assert!(matches!(routed.disclosure(&with_picture, &veil), Err(RoutedError::Withheld(_))));
+        assert!(matches!(
+            routed.disclosure(&with_picture, &veil),
+            Err(RoutedError::Withheld(_))
+        ));
     }
 
     /// With a model on the machine, private text is given to it as it is, and to nothing else.
     #[test]
     fn a_local_model_is_asked_unveiled_and_the_cloud_is_not_asked_at_all() {
-        std::env::set_var("NEBIUS_TOKEN_FACTORY_KEY", "a-key-for-tests-that-call-nothing");
+        std::env::set_var(
+            "NEBIUS_TOKEN_FACTORY_KEY",
+            "a-key-for-tests-that-call-nothing",
+        );
         let mut registry = ModelRegistry::load_from_dir(shipped_models()).unwrap();
         registry
             .register(ModelDescriptor {
@@ -173,14 +229,26 @@ mod private {
                 latency_ema_ms: Some(900),
                 quality_tier: 40,
                 required_accelerator_bytes: None,
-                labels: BTreeMap::from([("base-url".to_string(), "http://127.0.0.1:11434/v1/".to_string())]),
+                labels: BTreeMap::from([(
+                    "base-url".to_string(),
+                    "http://127.0.0.1:11434/v1/".to_string(),
+                )]),
             })
             .unwrap();
         let routed = Routed::new(registry);
         let text = format!("Rotate this key: {KEY}");
-        for grade in [PrivacyGrade::Public, PrivacyGrade::Sensitive, PrivacyGrade::Restricted] {
-            match routed.disclosure(&question(grade, &text), &Veil::new()).unwrap() {
-                Disclosure::Kept { models } => assert_eq!(models, [ModelId::parse("local.qwen").unwrap()], "{grade}"),
+        for grade in [
+            PrivacyGrade::Public,
+            PrivacyGrade::Sensitive,
+            PrivacyGrade::Restricted,
+        ] {
+            match routed
+                .disclosure(&question(grade, &text), &Veil::new())
+                .unwrap()
+            {
+                Disclosure::Kept { models } => {
+                    assert_eq!(models, [ModelId::parse("local.qwen").unwrap()], "{grade}")
+                }
                 other => panic!("{grade}: {other:?}"),
             }
         }
@@ -202,11 +270,24 @@ mod private {
             println!("what leaves the machine:\n{}\n", veiled.texts[1]);
         }
         let answer = routed.ask_private(&asked, &veil).await.unwrap();
-        println!("{} answered in {:.1} s; covered {:?}\n{}", answer.answered.model, answer.answered.seconds, answer.covered, answer.answered.text);
+        println!(
+            "{} answered in {:.1} s; covered {:?}\n{}",
+            answer.answered.model, answer.answered.seconds, answer.covered, answer.answered.text
+        );
         assert!(answer.left_the_machine);
-        assert_eq!(answer.covered, BTreeMap::from([("EMAIL".to_string(), 1), ("PERSON".to_string(), 1), ("SECRET".to_string(), 1)]));
+        assert_eq!(
+            answer.covered,
+            BTreeMap::from([
+                ("EMAIL".to_string(), 1),
+                ("PERSON".to_string(), 1),
+                ("SECRET".to_string(), 1)
+            ])
+        );
         for restored in [KEY, "camila@acme.cl", "Camila Rojas"] {
-            assert!(answer.answered.text.contains(restored), "{restored} is missing from the answer");
+            assert!(
+                answer.answered.text.contains(restored),
+                "{restored} is missing from the answer"
+            );
         }
     }
 }

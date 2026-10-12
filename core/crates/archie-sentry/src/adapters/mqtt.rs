@@ -386,9 +386,12 @@ fn render(binding: &MqttBinding, command: &Command) -> Result<Vec<u8>, AdapterEr
         (MqttKind::Light, Command::LightSetBrightness { percent }) => binding
             .brightness_template
             .replace("{percent}", &percent.to_string()),
-        (MqttKind::Climate, Command::ClimateSetTemperature { milli_celsius }) => binding
-            .temperature_template
-            .replace("{celsius}", &format!("{:.1}", *milli_celsius as f64 / 1000.0)),
+        (MqttKind::Climate, Command::ClimateSetTemperature { milli_celsius }) => {
+            binding.temperature_template.replace(
+                "{celsius}",
+                &format!("{:.1}", *milli_celsius as f64 / 1000.0),
+            )
+        }
         _ => return Err(AdapterError::Unsupported),
     };
     payload(&text)?;
@@ -505,7 +508,11 @@ impl EdgeAdapter for Mqtt {
             if body[2] != 0 {
                 return Err(AdapterError::Unavailable);
             }
-            write_packet(&mut stream, &encode_publish(&binding.command_topic, &payload)?).await?;
+            write_packet(
+                &mut stream,
+                &encode_publish(&binding.command_topic, &payload)?,
+            )
+            .await?;
             // Wait, bounded, for a live (not retained) report on the state
             // topic. It only synchronizes: whatever it says, the engine's own
             // observation afterwards is the evidence. No report in time is

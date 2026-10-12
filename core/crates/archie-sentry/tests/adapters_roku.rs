@@ -1,9 +1,4 @@
-use archie_sentry::{
-    adapters::roku::Roku,
-    contracts::*,
-    engine::*,
-    registry::*,
-};
+use archie_sentry::{adapters::roku::Roku, contracts::*, engine::*, registry::*};
 use std::collections::BTreeMap;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -166,7 +161,12 @@ async fn keypress_posts_named_key_with_empty_body() {
     let (url, task) = server(vec![("200 OK", vec![])]).await;
     let mut adapter = adapter(&url).unwrap();
     let ack = adapter
-        .apply(&resource(), &Command::RemoteKey { key: RemoteKeyName::Home })
+        .apply(
+            &resource(),
+            &Command::RemoteKey {
+                key: RemoteKeyName::Home,
+            },
+        )
         .await
         .unwrap();
     assert!(ack.accepted);
@@ -183,7 +183,12 @@ async fn launch_posts_app_id_as_path_segment() {
     let mut adapter = adapter(&url).unwrap();
     assert!(
         adapter
-            .apply(&resource(), &Command::AppLaunch { app_id: "12".into() })
+            .apply(
+                &resource(),
+                &Command::AppLaunch {
+                    app_id: "12".into()
+                }
+            )
             .await
             .unwrap()
             .accepted
@@ -200,7 +205,9 @@ async fn forbidden_and_other_failures_map_to_authentication_and_unavailable() {
     ])
     .await;
     let mut adapter = adapter(&url).unwrap();
-    let home = Command::RemoteKey { key: RemoteKeyName::Home };
+    let home = Command::RemoteKey {
+        key: RemoteKeyName::Home,
+    };
     assert_eq!(
         adapter.apply(&resource(), &home).await,
         Err(AdapterError::Authentication)
@@ -218,7 +225,9 @@ async fn connection_refused_is_transport() {
     let address = listener.local_addr().unwrap();
     drop(listener);
     let mut adapter = adapter(&format!("http://{address}")).unwrap();
-    let home = Command::RemoteKey { key: RemoteKeyName::Home };
+    let home = Command::RemoteKey {
+        key: RemoteKeyName::Home,
+    };
     assert_eq!(
         adapter.apply(&resource(), &home).await,
         Err(AdapterError::Transport)
@@ -246,14 +255,21 @@ async fn unsupported_commands_and_resources_never_send_a_request() {
     // A contract-invalid app id is a protocol error, not a dispatch.
     assert_eq!(
         adapter
-            .apply(&resource(), &Command::AppLaunch { app_id: "bad id!".into() })
+            .apply(
+                &resource(),
+                &Command::AppLaunch {
+                    app_id: "bad id!".into()
+                }
+            )
             .await,
         Err(AdapterError::Protocol)
     );
     // Unpaired or unconfigured resources are unsupported.
     let mut other = resource();
     other.paired = false;
-    let home = Command::RemoteKey { key: RemoteKeyName::Home };
+    let home = Command::RemoteKey {
+        key: RemoteKeyName::Home,
+    };
     assert_eq!(
         adapter.apply(&other, &home).await,
         Err(AdapterError::Unsupported)
@@ -272,19 +288,13 @@ async fn oversized_and_malformed_xml_are_bounded_and_rejected() {
     let oversized = vec![b'x'; 1_048_577];
     let (url, task) = server(vec![(XML, oversized)]).await;
     let mut roku = adapter(&url).unwrap();
-    assert_eq!(
-        roku.observe(&resource()).await,
-        Err(AdapterError::Protocol)
-    );
+    assert_eq!(roku.observe(&resource()).await, Err(AdapterError::Protocol));
     task.await.unwrap();
 
     let malformed: &[u8] = b"<device-info><model-name>Roku</model-name></device-info>";
     let (url, task) = server(vec![(XML, malformed.into())]).await;
     let mut roku = adapter(&url).unwrap();
-    assert_eq!(
-        roku.observe(&resource()).await,
-        Err(AdapterError::Protocol)
-    );
+    assert_eq!(roku.observe(&resource()).await, Err(AdapterError::Protocol));
     task.await.unwrap();
 
     let garbage_active_app: &[u8] = b"this is not xml at all";
@@ -294,10 +304,7 @@ async fn oversized_and_malformed_xml_are_bounded_and_rejected() {
     ])
     .await;
     let mut roku = adapter(&url).unwrap();
-    assert_eq!(
-        roku.observe(&resource()).await,
-        Err(AdapterError::Protocol)
-    );
+    assert_eq!(roku.observe(&resource()).await, Err(AdapterError::Protocol));
     task.await.unwrap();
 }
 
@@ -316,9 +323,11 @@ fn constructor_rejects_public_endpoints_paths_and_injection() {
         );
     }
     // A bare private IP is accepted (ECP's 8060 is the default port).
-    assert!(
-        Roku::new("edge", "roku", BTreeMap::from([("tv".into(), "http://127.0.0.1".into())]))
-            .is_ok()
-    );
+    assert!(Roku::new(
+        "edge",
+        "roku",
+        BTreeMap::from([("tv".into(), "http://127.0.0.1".into())])
+    )
+    .is_ok());
     assert!(Roku::new("edge", "roku", BTreeMap::new()).is_err());
 }

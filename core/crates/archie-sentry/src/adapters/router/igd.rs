@@ -234,8 +234,8 @@ impl IgdClient {
                 let connected = match status.as_str() {
                     "Connected" => true,
                     // Known non-connected states are a valid "no".
-                    "Disconnected" | "Connecting" | "Disconnecting"
-                    | "Authenticating" | "Unconfigured" => false,
+                    "Disconnected" | "Connecting" | "Disconnecting" | "Authenticating"
+                    | "Unconfigured" => false,
                     _ => return Err(AdapterError::Protocol),
                 };
                 let uptime_seconds = leaf_required(&text, "NewUptime")?
@@ -325,7 +325,11 @@ async fn soap_body(response: Response) -> Result<(String, bool), AdapterError> {
         .and_then(|s| s.split(';').next())
         .unwrap_or("")
         .trim();
-    if actual != "text/xml" || response.content_length().is_some_and(|n| n > MAX_BODY as u64) {
+    if actual != "text/xml"
+        || response
+            .content_length()
+            .is_some_and(|n| n > MAX_BODY as u64)
+    {
         return Err(AdapterError::Protocol);
     }
     let mut bytes = Vec::new();

@@ -37,8 +37,20 @@ pub const SNAPLEN: &str = "768";
 
 /// The arguments that make TShark print [`FIELDS`], after the ones that say where from.
 pub fn field_arguments() -> Vec<String> {
-    let mut arguments: Vec<String> =
-        ["-n", "-l", "-Q", "-T", "fields", "-E", "separator=/t", "-E", "occurrence=f"].iter().map(|s| s.to_string()).collect();
+    let mut arguments: Vec<String> = [
+        "-n",
+        "-l",
+        "-Q",
+        "-T",
+        "fields",
+        "-E",
+        "separator=/t",
+        "-E",
+        "occurrence=f",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
     for field in FIELDS {
         arguments.push("-e".into());
         arguments.push(field.into());
@@ -73,7 +85,10 @@ fn flag(text: &str) -> bool {
 /// A hardware address of one device: not broadcast, not a multicast group.
 fn mac(text: &str) -> Option<String> {
     let text = text.to_ascii_lowercase();
-    let bytes: Vec<u8> = text.split(':').filter_map(|part| u8::from_str_radix(part, 16).ok()).collect();
+    let bytes: Vec<u8> = text
+        .split(':')
+        .filter_map(|part| u8::from_str_radix(part, 16).ok())
+        .collect();
     (bytes.len() == 6 && text.len() == 17 && bytes[0] & 1 == 0 && bytes != [0; 6]).then_some(text)
 }
 
@@ -106,11 +121,20 @@ pub fn parse(line: &str) -> Option<Packet> {
         source_mac: mac(fields[2]),
         source: address(fields[4], fields[6]),
         destination: address(fields[5], fields[7]),
-        arp: mac(fields[8]).zip(fields[9].parse::<Ipv4Addr>().ok().filter(|ip| !ip.is_unspecified())),
+        arp: mac(fields[8]).zip(
+            fields[9]
+                .parse::<Ipv4Addr>()
+                .ok()
+                .filter(|ip| !ip.is_unspecified()),
+        ),
         tcp,
         opening: tcp.is_some() && flag(fields[12]) && !flag(fields[13]),
         udp: ports(fields[14], fields[15]),
-        dns_question: if flag(fields[16]) { None } else { name(fields[17]) },
+        dns_question: if flag(fields[16]) {
+            None
+        } else {
+            name(fields[17])
+        },
         dhcp_hostname: name(fields[18]),
         server_name: name(fields[19]),
     })
@@ -122,7 +146,15 @@ pub(crate) mod tests {
 
     /// A line as TShark prints it, from the fields that are not empty.
     pub(crate) fn line(set: &[(&str, &str)]) -> String {
-        FIELDS.iter().map(|field| set.iter().find(|(name, _)| name == field).map_or("", |(_, value)| value)).collect::<Vec<_>>().join("\t")
+        FIELDS
+            .iter()
+            .map(|field| {
+                set.iter()
+                    .find(|(name, _)| name == field)
+                    .map_or("", |(_, value)| value)
+            })
+            .collect::<Vec<_>>()
+            .join("\t")
     }
 
     #[test]
@@ -152,9 +184,15 @@ pub(crate) mod tests {
     #[test]
     fn only_a_syn_without_ack_opens_a_connection() {
         let segment = |syn: &'static str, ack: &'static str| {
-            parse(&line(&[("frame.time_epoch", "10.5"), ("tcp.srcport", "5000"), ("tcp.dstport", "23"), ("tcp.flags.syn", syn), ("tcp.flags.ack", ack)]))
-                .unwrap()
-                .opening
+            parse(&line(&[
+                ("frame.time_epoch", "10.5"),
+                ("tcp.srcport", "5000"),
+                ("tcp.dstport", "23"),
+                ("tcp.flags.syn", syn),
+                ("tcp.flags.ack", ack),
+            ]))
+            .unwrap()
+            .opening
         };
         assert!(segment("1", "0") && segment("True", "False"));
         assert!(!segment("1", "1") && !segment("0", "1"));
@@ -162,7 +200,11 @@ pub(crate) mod tests {
 
     #[test]
     fn broadcast_and_group_addresses_are_nobody_s_and_junk_is_not_a_frame() {
-        let from = |mac: &str| parse(&line(&[("frame.time_epoch", "1"), ("eth.src", mac)])).unwrap().source_mac;
+        let from = |mac: &str| {
+            parse(&line(&[("frame.time_epoch", "1"), ("eth.src", mac)]))
+                .unwrap()
+                .source_mac
+        };
         assert_eq!(from("ff:ff:ff:ff:ff:ff"), None);
         assert_eq!(from("01:00:5e:00:00:fb"), None);
         assert_eq!(from("00:00:00:00:00:00"), None);
@@ -170,14 +212,35 @@ pub(crate) mod tests {
         assert_eq!(parse("Capturing on 'eth0'"), None);
         assert_eq!(parse(&line(&[("frame.time_epoch", "soon")])), None);
         // A name with a control character in it is not kept.
-        assert_eq!(parse(&line(&[("frame.time_epoch", "1"), ("dhcp.option.hostname", "tv\u{7}")])).unwrap().dhcp_hostname, None);
+        assert_eq!(
+            parse(&line(&[
+                ("frame.time_epoch", "1"),
+                ("dhcp.option.hostname", "tv\u{7}")
+            ]))
+            .unwrap()
+            .dhcp_hostname,
+            None
+        );
     }
 
     #[test]
     fn an_arp_frame_names_who_claims_an_address() {
-        let packet = parse(&line(&[("frame.time_epoch", "2"), ("arp.src.hw_mac", "e4:ab:89:6e:1a:18"), ("arp.src.proto_ipv4", "192.168.1.1")])).unwrap();
-        assert_eq!(packet.arp, Some(("e4:ab:89:6e:1a:18".into(), "192.168.1.1".parse().unwrap())));
-        let probe = parse(&line(&[("frame.time_epoch", "2"), ("arp.src.hw_mac", "e4:ab:89:6e:1a:18"), ("arp.src.proto_ipv4", "0.0.0.0")])).unwrap();
+        let packet = parse(&line(&[
+            ("frame.time_epoch", "2"),
+            ("arp.src.hw_mac", "e4:ab:89:6e:1a:18"),
+            ("arp.src.proto_ipv4", "192.168.1.1"),
+        ]))
+        .unwrap();
+        assert_eq!(
+            packet.arp,
+            Some(("e4:ab:89:6e:1a:18".into(), "192.168.1.1".parse().unwrap()))
+        );
+        let probe = parse(&line(&[
+            ("frame.time_epoch", "2"),
+            ("arp.src.hw_mac", "e4:ab:89:6e:1a:18"),
+            ("arp.src.proto_ipv4", "0.0.0.0"),
+        ]))
+        .unwrap();
         assert_eq!(probe.arp, None);
     }
 }

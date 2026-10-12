@@ -209,8 +209,16 @@ pub fn base64_encode(data: &[u8]) -> String {
         let n = (b0 << 16) | (b1 << 8) | b2;
         out.push(B64[(n >> 18) as usize & 63] as char);
         out.push(B64[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 { B64[(n >> 6) as usize & 63] as char } else { '=' });
-        out.push(if chunk.len() > 2 { B64[n as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            B64[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            B64[n as usize & 63] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -317,7 +325,9 @@ pub fn parse_process_name(output: &str) -> Option<String> {
 pub fn parse_session_ids(list: &str) -> Vec<String> {
     list.lines()
         .filter_map(|line| line.split_whitespace().next())
-        .filter(|field| !field.is_empty() && field.len() <= 16 && field.bytes().all(|b| b.is_ascii_digit()))
+        .filter(|field| {
+            !field.is_empty() && field.len() <= 16 && field.bytes().all(|b| b.is_ascii_digit())
+        })
         .map(String::from)
         .collect()
 }
@@ -535,16 +545,17 @@ pub async fn probe_host(config: SshConfig, runner: Arc<dyn CommandRunner>) -> Ho
             let open = has_tool(&channel, os, "open").await;
             // test -x with the table's pre-quoted path: CGSession exists on
             // every macOS, but honesty costs one round trip.
-            let cgsession = channel
-                .run_async(&["test", "-x", CGSESSION])
-                .await
-                .is_ok();
+            let cgsession = channel.run_async(&["test", "-x", CGSESSION]).await.is_ok();
             caps.lock = if cgsession && osascript {
                 LockSupport::LockOnly
             } else {
                 LockSupport::None
             };
-            caps.volume = if osascript { Some(VolumeTool::Osascript) } else { None };
+            caps.volume = if osascript {
+                Some(VolumeTool::Osascript)
+            } else {
+                None
+            };
             caps.foreground = osascript;
             caps.app_launch = open && osascript;
             caps.power = has_tool(&channel, os, "shutdown").await;
@@ -639,7 +650,11 @@ impl HostSsh {
                     .run_async(&["pactl", "get-sink-volume", "@DEFAULT_SINK@"])
                     .await?
             }
-            VolumeTool::Amixer => self.channel.run_async(&["amixer", "sget", "Master"]).await?,
+            VolumeTool::Amixer => {
+                self.channel
+                    .run_async(&["amixer", "sget", "Master"])
+                    .await?
+            }
             VolumeTool::Osascript => {
                 self.channel
                     .run_async(&["osascript", "-e", "'get volume settings'"])
@@ -730,7 +745,9 @@ impl HostSsh {
     }
     async fn apply_lock(&self, locked: bool) -> Result<(), AdapterError> {
         let argv: Vec<String> = match (self.os()?, locked) {
-            (HostOs::Windows, true) => vec!["rundll32.exe".into(), "user32.dll,LockWorkStation".into()],
+            (HostOs::Windows, true) => {
+                vec!["rundll32.exe".into(), "user32.dll,LockWorkStation".into()]
+            }
             // Windows and macOS expose no remote unlock; saying so beats
             // pretending (no simulated input, ever).
             (HostOs::Windows, false) | (HostOs::MacOs, false) => {
@@ -758,7 +775,12 @@ impl HostSsh {
                 nircmd_volume(percent).to_string(),
             ],
             VolumeTool::PowerShell => {
-                vec!["powershell.exe".into(), "-NoProfile".into(), "-EncodedCommand".into(), ps_audio_set(percent)]
+                vec![
+                    "powershell.exe".into(),
+                    "-NoProfile".into(),
+                    "-EncodedCommand".into(),
+                    ps_audio_set(percent),
+                ]
             }
             VolumeTool::Pactl => vec![
                 "pactl".into(),
@@ -846,7 +868,10 @@ impl EdgeAdapter for HostSsh {
     /// was not probed, or whose output did not parse, is None — unknown
     /// verifies nothing. A host that does not answer ssh is `Unavailable`,
     /// not an invented `reachable: false`.
-    async fn observe(&mut self, resource: &ResourceDescriptor) -> Result<Observation, AdapterError> {
+    async fn observe(
+        &mut self,
+        resource: &ResourceDescriptor,
+    ) -> Result<Observation, AdapterError> {
         self.resource_check(resource)?;
         let session_locked = if self.capabilities.lock != LockSupport::None {
             self.session_locked().await?

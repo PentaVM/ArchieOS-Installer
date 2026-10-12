@@ -108,16 +108,28 @@ pub enum LoadError {
     /// A format marker written by another version.
     UnknownFormat { found: String },
     /// More of one thing than the audit keeps.
-    OverCap { what: &'static str, found: usize, cap: usize },
+    OverCap {
+        what: &'static str,
+        found: usize,
+        cap: usize,
+    },
 }
 
 impl std::fmt::Display for LoadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            LoadError::TooLarge { bytes, cap } => write!(f, "the file is {bytes} bytes; the most it may hold is {cap}"),
+            LoadError::TooLarge { bytes, cap } => write!(
+                f,
+                "the file is {bytes} bytes; the most it may hold is {cap}"
+            ),
             LoadError::Malformed(error) => write!(f, "not the JSON this program writes: {error}"),
-            LoadError::UnknownFormat { found } => write!(f, "the format {found:?} is not one this version reads"),
-            LoadError::OverCap { what, found, cap } => write!(f, "{found} {what} is more than the {cap} this program keeps"),
+            LoadError::UnknownFormat { found } => {
+                write!(f, "the format {found:?} is not one this version reads")
+            }
+            LoadError::OverCap { what, found, cap } => write!(
+                f,
+                "{found} {what} is more than the {cap} this program keeps"
+            ),
         }
     }
 }
@@ -125,7 +137,11 @@ impl std::fmt::Display for LoadError {
 impl std::error::Error for LoadError {}
 
 fn over(cap: usize, found: usize, what: &'static str) -> Result<(), LoadError> {
-    if found > cap { Err(LoadError::OverCap { what, found, cap }) } else { Ok(()) }
+    if found > cap {
+        Err(LoadError::OverCap { what, found, cap })
+    } else {
+        Ok(())
+    }
 }
 
 impl State {
@@ -138,24 +154,47 @@ impl State {
     /// The same, against other limits — for proving the limits hold.
     pub fn parse_within(bytes: &[u8], limits: &Limits) -> Result<State, LoadError> {
         if bytes.len() as u64 > limits.state_bytes {
-            return Err(LoadError::TooLarge { bytes: bytes.len() as u64, cap: limits.state_bytes });
+            return Err(LoadError::TooLarge {
+                bytes: bytes.len() as u64,
+                cap: limits.state_bytes,
+            });
         }
-        let state: State = serde_json::from_slice(bytes).map_err(|e| LoadError::Malformed(e.to_string()))?;
+        let state: State =
+            serde_json::from_slice(bytes).map_err(|e| LoadError::Malformed(e.to_string()))?;
         state.check(limits)?;
         Ok(state)
     }
 
     fn check(&self, limits: &Limits) -> Result<(), LoadError> {
         if !self.format.is_empty() && self.format != STATE_FORMAT {
-            return Err(LoadError::UnknownFormat { found: self.format.clone() });
+            return Err(LoadError::UnknownFormat {
+                found: self.format.clone(),
+            });
         }
         over(limits.devices, self.devices.len(), "devices")?;
         over(limits.devices, self.owners.len(), "addresses with an owner")?;
         for device in self.devices.values() {
-            over(limits.addresses, device.addresses.len(), "addresses of one device")?;
-            over(limits.names, device.asked.len(), "names asked by one device")?;
-            over(limits.peers, device.sent_to.len(), "outside peers of one device")?;
-            for name in device.asked.iter().chain(device.sent_to.keys()).chain(device.hostname.iter()) {
+            over(
+                limits.addresses,
+                device.addresses.len(),
+                "addresses of one device",
+            )?;
+            over(
+                limits.names,
+                device.asked.len(),
+                "names asked by one device",
+            )?;
+            over(
+                limits.peers,
+                device.sent_to.len(),
+                "outside peers of one device",
+            )?;
+            for name in device
+                .asked
+                .iter()
+                .chain(device.sent_to.keys())
+                .chain(device.hostname.iter())
+            {
                 over(limits.name_chars, name.len(), "characters in one name")?;
             }
         }
@@ -182,7 +221,10 @@ pub struct Told {
 
 impl Default for Told {
     fn default() -> Self {
-        Self { format: TOLD_FORMAT.into(), records: BTreeMap::new() }
+        Self {
+            format: TOLD_FORMAT.into(),
+            records: BTreeMap::new(),
+        }
     }
 }
 
@@ -195,9 +237,13 @@ impl Told {
     /// The same, against other limits — for proving the limits hold.
     pub fn parse_within(bytes: &[u8], limits: &Limits) -> Result<Told, LoadError> {
         if bytes.len() as u64 > limits.told_bytes {
-            return Err(LoadError::TooLarge { bytes: bytes.len() as u64, cap: limits.told_bytes });
+            return Err(LoadError::TooLarge {
+                bytes: bytes.len() as u64,
+                cap: limits.told_bytes,
+            });
         }
-        let told: Told = serde_json::from_slice(bytes).map_err(|e| LoadError::Malformed(e.to_string()))?;
+        let told: Told =
+            serde_json::from_slice(bytes).map_err(|e| LoadError::Malformed(e.to_string()))?;
         if !told.format.is_empty() && told.format != TOLD_FORMAT {
             return Err(LoadError::UnknownFormat { found: told.format });
         }
@@ -211,7 +257,8 @@ impl Told {
             return false;
         }
         self.make_room();
-        self.records.insert(key.to_string(), ToldRecord { at_ms, count: 1 });
+        self.records
+            .insert(key.to_string(), ToldRecord { at_ms, count: 1 });
         true
     }
 
@@ -233,7 +280,8 @@ impl Told {
             }
             None => {
                 self.make_room();
-                self.records.insert(key.to_string(), ToldRecord { at_ms, count: 1 });
+                self.records
+                    .insert(key.to_string(), ToldRecord { at_ms, count: 1 });
                 Some(1)
             }
         }
@@ -244,7 +292,11 @@ impl Told {
         if self.records.len() < MAX_REMEMBERED {
             return;
         }
-        let oldest = self.records.iter().min_by_key(|(key, record)| (record.at_ms, *key)).map(|(key, _)| key.clone());
+        let oldest = self
+            .records
+            .iter()
+            .min_by_key(|(key, record)| (record.at_ms, *key))
+            .map(|(key, _)| key.clone());
         if let Some(oldest) = oldest {
             self.records.remove(&oldest);
         }
@@ -301,24 +353,54 @@ fn entropy(label: &str) -> f64 {
         counts[byte as usize] += 1;
     }
     let total = label.len() as f64;
-    counts.iter().filter(|&&n| n > 0).map(|&n| n as f64 / total).map(|p| -p * p.log2()).sum()
+    counts
+        .iter()
+        .filter(|&&n| n > 0)
+        .map(|&n| n as f64 / total)
+        .map(|p| -p * p.log2())
+        .sum()
 }
 
 /// Whether a DNS question looks like data in disguise: very long, or one long label of
 /// near-random characters. A CDN's hashed host name is long; it is not this random.
 fn carries_data(question: &str) -> bool {
-    question.len() > 180 || question.split('.').any(|label| label.len() >= 40 && entropy(label) >= 4.0)
+    question.len() > 180
+        || question
+            .split('.')
+            .any(|label| label.len() >= 40 && entropy(label) >= 4.0)
 }
 
 impl Audit {
     pub fn new(mut state: State, settings: Settings) -> Self {
         state.format = STATE_FORMAT.into();
-        Self { state, settings, openings: HashMap::new(), named: HashMap::new(), told: Told::default() }
+        Self {
+            state,
+            settings,
+            openings: HashMap::new(),
+            named: HashMap::new(),
+            told: Told::default(),
+        }
     }
 
-    fn tell(&mut self, alerts: &mut Vec<Alert>, key: String, at_ms: u64, severity: Severity, rule: &str, device: &str, detail: String) {
+    #[allow(clippy::too_many_arguments)]
+    fn tell(
+        &mut self,
+        alerts: &mut Vec<Alert>,
+        key: String,
+        at_ms: u64,
+        severity: Severity,
+        rule: &str,
+        device: &str,
+        detail: String,
+    ) {
         if self.told.is_new(&key, at_ms) {
-            alerts.push(Alert { at_ms, severity, rule: rule.into(), device: device.into(), detail });
+            alerts.push(Alert {
+                at_ms,
+                severity,
+                rule: rule.into(),
+                device: device.into(),
+                detail,
+            });
         }
     }
 
@@ -333,7 +415,12 @@ impl Audit {
         }
         // A frame from outside the LAN was put on the wire by the router: its hardware
         // address is the router's, and the traffic is not the router's own.
-        let Some((mac, source)) = packet.source_mac.as_deref().zip(packet.source).filter(|(_, ip)| is_lan(*ip)) else {
+        let Some((mac, source)) = packet
+            .source_mac
+            .as_deref()
+            .zip(packet.source)
+            .filter(|(_, ip)| is_lan(*ip))
+        else {
             return alerts;
         };
         if !self.state.devices.contains_key(mac) {
@@ -341,17 +428,34 @@ impl Audit {
                 return alerts;
             }
             if packet.at_ms.saturating_sub(self.state.started_ms) >= self.settings.learn_ms {
-                self.tell(&mut alerts, format!("new {mac}"), packet.at_ms, Severity::Notice, "new-device", mac, format!("first seen, at {source}"));
+                self.tell(
+                    &mut alerts,
+                    format!("new {mac}"),
+                    packet.at_ms,
+                    Severity::Notice,
+                    "new-device",
+                    mac,
+                    format!("first seen, at {source}"),
+                );
             }
         }
-        let outside = packet.destination.filter(|ip| !is_lan(*ip) && !ip.is_multicast() && !ip.is_loopback());
+        let outside = packet
+            .destination
+            .filter(|ip| !is_lan(*ip) && !ip.is_multicast() && !ip.is_loopback());
         if let Some((peer, name)) = outside.zip(packet.server_name.clone()) {
             if self.named.len() >= MAX_REMEMBERED {
                 self.named.clear();
             }
             self.named.insert(peer, name);
         }
-        let device = self.state.devices.entry(mac.to_string()).or_insert_with(|| Device { first_seen_ms: packet.at_ms, ..Device::default() });
+        let device = self
+            .state
+            .devices
+            .entry(mac.to_string())
+            .or_insert_with(|| Device {
+                first_seen_ms: packet.at_ms,
+                ..Device::default()
+            });
         device.last_seen_ms = packet.at_ms;
         device.frames += 1;
         device.bytes += packet.length;
@@ -362,7 +466,11 @@ impl Audit {
             device.hostname = Some(hostname.clone());
         }
         if let Some(peer) = outside {
-            let label = self.named.get(&peer).cloned().unwrap_or_else(|| peer.to_string());
+            let label = self
+                .named
+                .get(&peer)
+                .cloned()
+                .unwrap_or_else(|| peer.to_string());
             if device.sent_to.len() < MAX_PEERS || device.sent_to.contains_key(&label) {
                 *device.sent_to.entry(label).or_default() += packet.length;
             }
@@ -376,7 +484,15 @@ impl Audit {
                 let labels: Vec<&str> = question.split('.').collect();
                 let zone = labels[labels.len().saturating_sub(2)..].join(".");
                 let shown: String = question.chars().take(80).collect();
-                self.tell(&mut alerts, format!("tunnel {mac} {zone}"), packet.at_ms, Severity::Warning, "dns-tunnel-suspect", mac, format!("asked for {shown} under {zone}"));
+                self.tell(
+                    &mut alerts,
+                    format!("tunnel {mac} {zone}"),
+                    packet.at_ms,
+                    Severity::Warning,
+                    "dns-tunnel-suspect",
+                    mac,
+                    format!("asked for {shown} under {zone}"),
+                );
             }
         }
         if packet.opening {
@@ -397,7 +513,10 @@ impl Audit {
                 let (severity, what) = if gateway {
                     (Severity::High, "the router's address is now claimed by another device; traffic may be passing through it")
                 } else {
-                    (Severity::Notice, "address now claimed by another device; usually a new DHCP lease")
+                    (
+                        Severity::Notice,
+                        "address now claimed by another device; usually a new DHCP lease",
+                    )
                 };
                 // One alert per address, not one per pair of claimants: it is raised
                 // again only after a quiet hour, and it counts every move seen.
@@ -407,7 +526,13 @@ impl Audit {
                     } else {
                         format!("{address}: {what}; it has now changed hands {count} times, most lately from {before}")
                     };
-                    alerts.push(Alert { at_ms, severity, rule: "address-moved".into(), device: mac.into(), detail });
+                    alerts.push(Alert {
+                        at_ms,
+                        severity,
+                        rule: "address-moved".into(),
+                        device: mac.into(),
+                        detail,
+                    });
                 }
                 self.state.owners.insert(address, mac.to_string());
             }
@@ -419,17 +544,37 @@ impl Audit {
         }
     }
 
-    fn opened(&mut self, alerts: &mut Vec<Alert>, at_ms: u64, mac: &str, destination: IpAddr, port: u16) {
+    fn opened(
+        &mut self,
+        alerts: &mut Vec<Alert>,
+        at_ms: u64,
+        mac: &str,
+        destination: IpAddr,
+        port: u16,
+    ) {
         if matches!(port, 21 | 23) {
             let protocol = if port == 23 { "Telnet" } else { "FTP" };
-            self.tell(alerts, format!("clear {mac} {destination} {port}"), at_ms, Severity::Warning, "cleartext-login", mac, format!("opened {protocol} to {destination}; its passwords are readable on the wire"));
+            self.tell(
+                alerts,
+                format!("clear {mac} {destination} {port}"),
+                at_ms,
+                Severity::Warning,
+                "cleartext-login",
+                mac,
+                format!(
+                    "opened {protocol} to {destination}; its passwords are readable on the wire"
+                ),
+            );
         }
         if self.openings.len() >= MAX_DEVICES && !self.openings.contains_key(mac) {
             return;
         }
         let window = self.openings.entry(mac.to_string()).or_default();
         if at_ms.saturating_sub(window.since_ms) > WINDOW_MS {
-            *window = Openings { since_ms: at_ms, ..Openings::default() };
+            *window = Openings {
+                since_ms: at_ms,
+                ..Openings::default()
+            };
         }
         let ports = window.ports_of.entry(destination).or_default();
         let scanned = ports.insert(port) && ports.len() == SCAN_PORTS;
@@ -439,10 +584,26 @@ impl Audit {
         };
         let since = window.since_ms;
         if scanned {
-            self.tell(alerts, format!("scan {mac} {destination} {since}"), at_ms, Severity::High, "port-scan", mac, format!("opened {SCAN_PORTS} ports of {destination} within a minute"));
+            self.tell(
+                alerts,
+                format!("scan {mac} {destination} {since}"),
+                at_ms,
+                Severity::High,
+                "port-scan",
+                mac,
+                format!("opened {SCAN_PORTS} ports of {destination} within a minute"),
+            );
         }
         if swept {
-            self.tell(alerts, format!("sweep {mac} {port} {since}"), at_ms, Severity::High, "host-sweep", mac, format!("opened port {port} on {SWEEP_HOSTS} hosts of the network within a minute"));
+            self.tell(
+                alerts,
+                format!("sweep {mac} {port} {since}"),
+                at_ms,
+                Severity::High,
+                "host-sweep",
+                mac,
+                format!("opened port {port} on {SWEEP_HOSTS} hosts of the network within a minute"),
+            );
         }
     }
 }
@@ -455,12 +616,21 @@ mod tests {
     const ROUTER: &str = "e4:ab:89:6e:1a:18";
 
     fn from(mac: &str, source: &str, at_ms: u64) -> Packet {
-        Packet { at_ms, length: 100, source_mac: Some(mac.into()), source: Some(source.parse().unwrap()), ..Packet::default() }
+        Packet {
+            at_ms,
+            length: 100,
+            source_mac: Some(mac.into()),
+            source: Some(source.parse().unwrap()),
+            ..Packet::default()
+        }
     }
 
     /// A network whose devices are all taken as known, to look at one rule at a time.
     fn learned() -> Settings {
-        Settings { learn_ms: u64::MAX, gateway: None }
+        Settings {
+            learn_ms: u64::MAX,
+            gateway: None,
+        }
     }
 
     fn rules(alerts: &[Alert]) -> Vec<&str> {
@@ -469,11 +639,22 @@ mod tests {
 
     #[test]
     fn a_device_is_learned_quietly_at_first_and_announced_afterwards() {
-        let mut audit = Audit::new(State::default(), Settings { learn_ms: 60_000, gateway: None });
+        let mut audit = Audit::new(
+            State::default(),
+            Settings {
+                learn_ms: 60_000,
+                gateway: None,
+            },
+        );
         assert!(audit.see(&from(TV, "192.168.1.84", 1_000)).is_empty());
         let late = audit.see(&from("aa:bb:cc:00:11:22", "192.168.1.90", 70_000));
         assert_eq!(rules(&late), ["new-device"]);
-        assert!(audit.see(&from("aa:bb:cc:00:11:22", "192.168.1.90", 71_000)).is_empty(), "told once");
+        assert!(
+            audit
+                .see(&from("aa:bb:cc:00:11:22", "192.168.1.90", 71_000))
+                .is_empty(),
+            "told once"
+        );
         assert_eq!(audit.state.devices.len(), 2);
         assert_eq!(audit.state.devices[TV].bytes, 100);
     }
@@ -489,14 +670,30 @@ mod tests {
     #[test]
     fn another_device_claiming_the_router_s_address_is_the_serious_case() {
         let gateway: Ipv4Addr = "192.168.1.1".parse().unwrap();
-        let mut audit = Audit::new(State::default(), Settings { learn_ms: u64::MAX, gateway: Some(gateway) });
-        let claim = |mac: &str, ip: &str, at_ms| Packet { at_ms, arp: Some((mac.into(), ip.parse().unwrap())), ..Packet::default() };
+        let mut audit = Audit::new(
+            State::default(),
+            Settings {
+                learn_ms: u64::MAX,
+                gateway: Some(gateway),
+            },
+        );
+        let claim = |mac: &str, ip: &str, at_ms| Packet {
+            at_ms,
+            arp: Some((mac.into(), ip.parse().unwrap())),
+            ..Packet::default()
+        };
         assert!(audit.see(&claim(ROUTER, "192.168.1.1", 1_000)).is_empty());
         assert!(audit.see(&claim(TV, "192.168.1.84", 1_100)).is_empty());
         let spoofed = audit.see(&claim("de:ad:be:ef:00:02", "192.168.1.1", 2_000));
-        assert_eq!((spoofed[0].rule.as_str(), spoofed[0].severity), ("address-moved", Severity::High));
+        assert_eq!(
+            (spoofed[0].rule.as_str(), spoofed[0].severity),
+            ("address-moved", Severity::High)
+        );
         let lease = audit.see(&claim("aa:bb:cc:00:11:22", "192.168.1.84", 3_000));
-        assert_eq!((lease[0].rule.as_str(), lease[0].severity), ("address-moved", Severity::Notice));
+        assert_eq!(
+            (lease[0].rule.as_str(), lease[0].severity),
+            ("address-moved", Severity::Notice)
+        );
     }
 
     #[test]
@@ -512,11 +709,19 @@ mod tests {
         for port in 1000..1150u16 {
             seen.extend(audit.see(&open("192.168.1.1".into(), port, 10_000 + u64::from(port))));
         }
-        assert_eq!(rules(&seen), ["port-scan"], "once, when the hundredth port is opened");
+        assert_eq!(
+            rules(&seen),
+            ["port-scan"],
+            "once, when the hundredth port is opened"
+        );
 
         let mut seen = Vec::new();
         for host in 2..80u8 {
-            seen.extend(audit.see(&open(format!("192.168.1.{host}"), 445, 200_000 + u64::from(host))));
+            seen.extend(audit.see(&open(
+                format!("192.168.1.{host}"),
+                445,
+                200_000 + u64::from(host),
+            )));
         }
         assert_eq!(rules(&seen), ["host-sweep"]);
 
@@ -532,7 +737,12 @@ mod tests {
     #[test]
     fn telnet_is_told_once_and_https_never() {
         let mut audit = Audit::new(State::default(), learned());
-        let open = |port: u16, at_ms| Packet { destination: Some("192.168.1.1".parse().unwrap()), tcp: Some((50_000, port)), opening: true, ..from(TV, "192.168.1.84", at_ms) };
+        let open = |port: u16, at_ms| Packet {
+            destination: Some("192.168.1.1".parse().unwrap()),
+            tcp: Some((50_000, port)),
+            opening: true,
+            ..from(TV, "192.168.1.84", at_ms)
+        };
         assert_eq!(rules(&audit.see(&open(23, 1_000))), ["cleartext-login"]);
         assert!(audit.see(&open(23, 2_000)).is_empty());
         assert!(audit.see(&open(443, 3_000)).is_empty());
@@ -541,44 +751,81 @@ mod tests {
     #[test]
     fn a_question_that_carries_data_is_told_and_an_ordinary_long_one_is_not() {
         let mut audit = Audit::new(State::default(), learned());
-        let ask = |name: &str, at_ms| Packet { dns_question: Some(name.into()), ..from(TV, "192.168.1.84", at_ms) };
-        assert!(audit.see(&ask("d3a1b2c4e5f6a7.cloudfront.net", 1_000)).is_empty());
-        assert!(audit.see(&ask("connectivity-check.ubuntu.com", 1_100)).is_empty());
+        let ask = |name: &str, at_ms| Packet {
+            dns_question: Some(name.into()),
+            ..from(TV, "192.168.1.84", at_ms)
+        };
+        assert!(audit
+            .see(&ask("d3a1b2c4e5f6a7.cloudfront.net", 1_000))
+            .is_empty());
+        assert!(audit
+            .see(&ask("connectivity-check.ubuntu.com", 1_100))
+            .is_empty());
         let label = "q7x2mzk9v4p1tc8w0hjy3ns6bfd5rgae4lu7o2iq9xk";
-        assert_eq!(rules(&audit.see(&ask(&format!("{label}.t.example.com"), 2_000))), ["dns-tunnel-suspect"]);
-        assert!(audit.see(&ask(&format!("a{label}.t.example.com"), 2_100)).is_empty(), "one alert for the zone");
+        assert_eq!(
+            rules(&audit.see(&ask(&format!("{label}.t.example.com"), 2_000))),
+            ["dns-tunnel-suspect"]
+        );
+        assert!(
+            audit
+                .see(&ask(&format!("a{label}.t.example.com"), 2_100))
+                .is_empty(),
+            "one alert for the zone"
+        );
         assert_eq!(audit.state.devices[TV].asked.len(), 4);
     }
 
     #[test]
     fn what_a_device_sends_outside_is_counted_under_the_server_s_name() {
         let mut audit = Audit::new(State::default(), learned());
-        let to = |name: Option<&str>, at_ms| Packet { destination: Some("52.1.2.3".parse().unwrap()), server_name: name.map(String::from), ..from(TV, "192.168.1.84", at_ms) };
+        let to = |name: Option<&str>, at_ms| Packet {
+            destination: Some("52.1.2.3".parse().unwrap()),
+            server_name: name.map(String::from),
+            ..from(TV, "192.168.1.84", at_ms)
+        };
         audit.see(&to(Some("api.roku.com"), 1_000));
         audit.see(&to(None, 1_100));
-        assert_eq!(audit.state.devices[TV].sent_to.get("api.roku.com"), Some(&200));
+        assert_eq!(
+            audit.state.devices[TV].sent_to.get("api.roku.com"),
+            Some(&200)
+        );
         let saved = serde_json::to_string(&audit.state).unwrap();
         assert_eq!(serde_json::from_str::<State>(&saved).unwrap(), audit.state);
     }
 
     fn claim(mac: &str, ip: &str, at_ms: u64) -> Packet {
-        Packet { at_ms, arp: Some((mac.into(), ip.parse().unwrap())), ..Packet::default() }
+        Packet {
+            at_ms,
+            arp: Some((mac.into(), ip.parse().unwrap())),
+            ..Packet::default()
+        }
     }
 
     #[test]
     fn an_address_fought_over_is_one_alert_whose_count_grows() {
         let mut audit = Audit::new(State::default(), learned());
-        assert!(audit.see(&claim(ROUTER, "192.168.1.1", 1_000)).is_empty(), "the first claimer is just learned");
+        assert!(
+            audit.see(&claim(ROUTER, "192.168.1.1", 1_000)).is_empty(),
+            "the first claimer is just learned"
+        );
         let first = audit.see(&claim(TV, "192.168.1.1", 2_000));
         assert_eq!(rules(&first), ["address-moved"]);
-        assert!(first[0].detail.contains("(was"), "the first move is told plainly: {}", first[0].detail);
+        assert!(
+            first[0].detail.contains("(was"),
+            "the first move is told plainly: {}",
+            first[0].detail
+        );
         // The fight goes on inside the quiet hour: counted, not told again.
         assert!(audit.see(&claim(ROUTER, "192.168.1.1", 3_000)).is_empty());
         assert!(audit.see(&claim(TV, "192.168.1.1", 4_000)).is_empty());
         // After the hour, one alert — counting every move seen, not one per move.
         let again = audit.see(&claim(ROUTER, "192.168.1.1", 2_000 + MOVED_COOLDOWN_MS));
         assert_eq!(rules(&again), ["address-moved"]);
-        assert!(again[0].detail.contains("4 times"), "every change counted: {}", again[0].detail);
+        assert!(
+            again[0].detail.contains("4 times"),
+            "every change counted: {}",
+            again[0].detail
+        );
         // And the number keeps growing rather than the alert going silent.
         let later = audit.see(&claim(TV, "192.168.1.1", 2_000 + 2 * MOVED_COOLDOWN_MS));
         assert_eq!(rules(&later), ["address-moved"]);
@@ -594,29 +841,52 @@ mod tests {
         assert_eq!(told.records.len(), MAX_REMEMBERED);
         assert!(told.is_new("alert new", MAX_REMEMBERED as u64));
         assert_eq!(told.records.len(), MAX_REMEMBERED, "the bound holds");
-        assert!(!told.records.contains_key("alert 0"), "the oldest went first");
+        assert!(
+            !told.records.contains_key("alert 0"),
+            "the oldest went first"
+        );
         assert!(told.records.contains_key("alert 1"));
         assert!(!told.is_new("alert 1", 99_000), "still told");
     }
 
     #[test]
     fn what_was_told_is_still_told_after_a_restart() {
-        let settings = || Settings { learn_ms: 0, gateway: None };
-        let telnet = Packet { destination: Some("192.168.1.1".parse().unwrap()), tcp: Some((50_000, 23)), opening: true, ..from(TV, "192.168.1.84", 2_000) };
+        let settings = || Settings {
+            learn_ms: 0,
+            gateway: None,
+        };
+        let telnet = Packet {
+            destination: Some("192.168.1.1".parse().unwrap()),
+            tcp: Some((50_000, 23)),
+            opening: true,
+            ..from(TV, "192.168.1.84", 2_000)
+        };
         let mut first = Audit::new(State::default(), settings());
-        assert_eq!(rules(&first.see(&from(TV, "192.168.1.84", 1_000))), ["new-device"]);
+        assert_eq!(
+            rules(&first.see(&from(TV, "192.168.1.84", 1_000))),
+            ["new-device"]
+        );
         assert_eq!(rules(&first.see(&telnet)), ["cleartext-login"]);
         // The process stops and starts: the state and what was told come back from disk.
         let state = serde_json::to_vec(&first.state).unwrap();
         let told = serde_json::to_vec(&first.told).unwrap();
         let mut second = Audit::new(State::parse(&state).unwrap(), settings());
         second.told = Told::parse(&told).unwrap();
-        assert!(second.see(&telnet).is_empty(), "not told again after the restart");
+        assert!(
+            second.see(&telnet).is_empty(),
+            "not told again after the restart"
+        );
     }
 
     #[test]
     fn a_saved_state_and_a_saved_told_load_again() {
-        let mut audit = Audit::new(State::default(), Settings { learn_ms: 0, gateway: None });
+        let mut audit = Audit::new(
+            State::default(),
+            Settings {
+                learn_ms: 0,
+                gateway: None,
+            },
+        );
         let packet = Packet {
             dns_question: Some("connectivity-check.ubuntu.com".into()),
             destination: Some("52.1.2.3".parse().unwrap()),
@@ -627,76 +897,153 @@ mod tests {
         audit.see(&claim(TV, "192.168.1.84", 1_100));
         audit.see(&claim(ROUTER, "192.168.1.84", 1_200));
         let state = serde_json::to_vec(&audit.state).unwrap();
-        assert_eq!(State::parse(&state).unwrap(), audit.state, "a saved state loads");
+        assert_eq!(
+            State::parse(&state).unwrap(),
+            audit.state,
+            "a saved state loads"
+        );
         let told = serde_json::to_vec(&audit.told).unwrap();
-        assert_eq!(Told::parse(&told).unwrap(), audit.told, "a saved told loads");
+        assert_eq!(
+            Told::parse(&told).unwrap(),
+            audit.told,
+            "a saved told loads"
+        );
     }
 
     #[test]
     fn a_state_beyond_each_cap_is_refused_naming_the_cap() {
         let mut audit = Audit::new(State::default(), learned());
-        for (i, mac) in [TV, "aa:bb:cc:00:11:01", "aa:bb:cc:00:11:02"].into_iter().enumerate() {
+        for (i, mac) in [TV, "aa:bb:cc:00:11:01", "aa:bb:cc:00:11:02"]
+            .into_iter()
+            .enumerate()
+        {
             audit.see(&from(mac, "192.168.1.84", 1_000 + i as u64));
         }
         let bytes = serde_json::to_vec(&audit.state).unwrap();
 
-        let tiny = Limits { state_bytes: 10, ..Limits::default() };
-        assert_eq!(State::parse_within(&bytes, &tiny), Err(LoadError::TooLarge { bytes: bytes.len() as u64, cap: 10 }));
+        let tiny = Limits {
+            state_bytes: 10,
+            ..Limits::default()
+        };
+        assert_eq!(
+            State::parse_within(&bytes, &tiny),
+            Err(LoadError::TooLarge {
+                bytes: bytes.len() as u64,
+                cap: 10
+            })
+        );
 
-        let few_devices = Limits { devices: 2, ..Limits::default() };
+        let few_devices = Limits {
+            devices: 2,
+            ..Limits::default()
+        };
         assert_eq!(
             State::parse_within(&bytes, &few_devices),
-            Err(LoadError::OverCap { what: "devices", found: 3, cap: 2 })
+            Err(LoadError::OverCap {
+                what: "devices",
+                found: 3,
+                cap: 2
+            })
         );
 
         let mut named = audit.state.clone();
-        named.devices.get_mut(TV).unwrap().asked = (0..4).map(|i| format!("name-{i}.example.com")).collect();
+        named.devices.get_mut(TV).unwrap().asked =
+            (0..4).map(|i| format!("name-{i}.example.com")).collect();
         let bytes = serde_json::to_vec(&named).unwrap();
-        let few_names = Limits { names: 3, ..Limits::default() };
+        let few_names = Limits {
+            names: 3,
+            ..Limits::default()
+        };
         assert_eq!(
             State::parse_within(&bytes, &few_names),
-            Err(LoadError::OverCap { what: "names asked by one device", found: 4, cap: 3 })
+            Err(LoadError::OverCap {
+                what: "names asked by one device",
+                found: 4,
+                cap: 3
+            })
         );
 
         let mut peering = audit.state.clone();
-        peering.devices.get_mut(TV).unwrap().sent_to = (0..3).map(|i| (format!("peer-{i}.example.com"), 100)).collect();
+        peering.devices.get_mut(TV).unwrap().sent_to = (0..3)
+            .map(|i| (format!("peer-{i}.example.com"), 100))
+            .collect();
         let bytes = serde_json::to_vec(&peering).unwrap();
-        let few_peers = Limits { peers: 2, ..Limits::default() };
+        let few_peers = Limits {
+            peers: 2,
+            ..Limits::default()
+        };
         assert_eq!(
             State::parse_within(&bytes, &few_peers),
-            Err(LoadError::OverCap { what: "outside peers of one device", found: 3, cap: 2 })
+            Err(LoadError::OverCap {
+                what: "outside peers of one device",
+                found: 3,
+                cap: 2
+            })
         );
 
         let mut addressed = audit.state.clone();
-        addressed.devices.get_mut(TV).unwrap().addresses = (0..17u8).map(|i| IpAddr::from([10, 0, 0, i])).collect();
+        addressed.devices.get_mut(TV).unwrap().addresses =
+            (0..17u8).map(|i| IpAddr::from([10, 0, 0, i])).collect();
         let bytes = serde_json::to_vec(&addressed).unwrap();
         assert_eq!(
             State::parse(&bytes),
-            Err(LoadError::OverCap { what: "addresses of one device", found: 17, cap: 16 })
+            Err(LoadError::OverCap {
+                what: "addresses of one device",
+                found: 17,
+                cap: 16
+            })
         );
 
         let mut foreign = audit.state.clone();
         foreign.format = "archie-netwatch-state-v0".into();
         let bytes = serde_json::to_vec(&foreign).unwrap();
-        assert_eq!(State::parse(&bytes), Err(LoadError::UnknownFormat { found: "archie-netwatch-state-v0".into() }));
+        assert_eq!(
+            State::parse(&bytes),
+            Err(LoadError::UnknownFormat {
+                found: "archie-netwatch-state-v0".into()
+            })
+        );
 
-        assert!(matches!(State::parse(b"{ not json"), Err(LoadError::Malformed(_))), "malformed is typed too");
+        assert!(
+            matches!(State::parse(b"{ not json"), Err(LoadError::Malformed(_))),
+            "malformed is typed too"
+        );
     }
 
     #[test]
     fn a_told_file_over_the_cap_is_refused_naming_the_cap() {
         let mut told = Told::default();
         for i in 0..3 {
-            told.records.insert(format!("alert {i}"), ToldRecord { at_ms: i, count: 1 });
+            told.records
+                .insert(format!("alert {i}"), ToldRecord { at_ms: i, count: 1 });
         }
         let bytes = serde_json::to_vec(&told).unwrap();
-        let small = Limits { told: 2, ..Limits::default() };
+        let small = Limits {
+            told: 2,
+            ..Limits::default()
+        };
         assert_eq!(
             Told::parse_within(&bytes, &small),
-            Err(LoadError::OverCap { what: "remembered alerts", found: 3, cap: 2 })
+            Err(LoadError::OverCap {
+                what: "remembered alerts",
+                found: 3,
+                cap: 2
+            })
         );
-        let tiny = Limits { told_bytes: 10, ..Limits::default() };
-        assert_eq!(Told::parse_within(&bytes, &tiny), Err(LoadError::TooLarge { bytes: bytes.len() as u64, cap: 10 }));
-        assert!(matches!(Told::parse(b"{ not json"), Err(LoadError::Malformed(_))));
+        let tiny = Limits {
+            told_bytes: 10,
+            ..Limits::default()
+        };
+        assert_eq!(
+            Told::parse_within(&bytes, &tiny),
+            Err(LoadError::TooLarge {
+                bytes: bytes.len() as u64,
+                cap: 10
+            })
+        );
+        assert!(matches!(
+            Told::parse(b"{ not json"),
+            Err(LoadError::Malformed(_))
+        ));
     }
 }

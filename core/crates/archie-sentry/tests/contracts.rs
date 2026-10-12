@@ -161,7 +161,12 @@ fn verification_requires_fresh_measurement_from_exact_target_after_dispatch() {
     assert!(!Command::MediaPlay.matches(&value.state));
 }
 
-fn tv(power_on: bool, showing_home: bool, active_app: Option<&str>, playing: Option<bool>) -> ResourceState {
+fn tv(
+    power_on: bool,
+    showing_home: bool,
+    active_app: Option<&str>,
+    playing: Option<bool>,
+) -> ResourceState {
     ResourceState::Tv {
         power_on,
         showing_home,
@@ -337,17 +342,33 @@ fn host_and_router_commands_match_only_their_measurable_postcondition() {
     };
     assert!(bad.validate().is_err());
 
-    assert!(Command::WifiSet { on: false }.matches(&ResourceState::Router {
-        mapping_present: None,
-        wifi_enabled: Some(false),
-    }));
-    assert!(!Command::WifiSet { on: true }.matches(&ResourceState::Router {
-        mapping_present: None,
-        wifi_enabled: Some(false),
-    }));
+    assert!(
+        Command::WifiSet { on: false }.matches(&ResourceState::Router {
+            mapping_present: None,
+            wifi_enabled: Some(false),
+        })
+    );
+    assert!(
+        !Command::WifiSet { on: true }.matches(&ResourceState::Router {
+            mapping_present: None,
+            wifi_enabled: Some(false),
+        })
+    );
 
-    assert!(Command::SessionLock { locked: true }.matches(&host(true, None, Some(true), None, None)));
-    assert!(!Command::SessionLock { locked: true }.matches(&host(true, None, Some(false), None, None)));
+    assert!(Command::SessionLock { locked: true }.matches(&host(
+        true,
+        None,
+        Some(true),
+        None,
+        None
+    )));
+    assert!(!Command::SessionLock { locked: true }.matches(&host(
+        true,
+        None,
+        Some(false),
+        None,
+        None
+    )));
     assert!(!Command::SessionLock { locked: true }.matches(&host(true, None, None, None, None)));
 
     assert!(Command::VolumeSet { percent: 40 }.matches(&host(true, None, None, Some(40), None)));
@@ -369,7 +390,13 @@ fn host_and_router_commands_match_only_their_measurable_postcondition() {
 fn measured_host_observations_are_bounded() {
     let request = intent();
     let good = Observation {
-        state: host(true, Some(true), Some(false), Some(65), Some("com.whatsapp")),
+        state: host(
+            true,
+            Some(true),
+            Some(false),
+            Some(65),
+            Some("com.whatsapp"),
+        ),
         ..observation()
     };
     assert!(good

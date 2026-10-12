@@ -66,7 +66,10 @@ fn load_or_create_key(dir: &Path) -> Result<VaultKey, VaultIoError> {
     let path = dir.join(KEY_FILE);
     match std::fs::read(&path) {
         Ok(bytes) => {
-            let raw: [u8; 32] = bytes.as_slice().try_into().map_err(|_| VaultIoError::BadKey)?;
+            let raw: [u8; 32] = bytes
+                .as_slice()
+                .try_into()
+                .map_err(|_| VaultIoError::BadKey)?;
             Ok(VaultKey::from_bytes(raw))
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {

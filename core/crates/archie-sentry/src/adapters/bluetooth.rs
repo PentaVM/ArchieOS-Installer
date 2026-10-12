@@ -298,13 +298,7 @@ impl Bluetooth {
                 }
                 None => None,
             };
-            normalized.insert(
-                resource,
-                BleTarget {
-                    address,
-                    switch,
-                },
-            );
+            normalized.insert(resource, BleTarget { address, switch });
         }
         Ok(Self {
             edge: edge.into(),
@@ -336,10 +330,7 @@ impl Bluetooth {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     }
     fn info(&self, address: &str) -> Result<LinkInfo, AdapterError> {
-        let report = self.run(
-            &["info".to_string(), address.to_string()],
-            BT_SHORT,
-        )?;
+        let report = self.run(&["info".to_string(), address.to_string()], BT_SHORT)?;
         Ok(parse_info(&report))
     }
     /// A configured address is the only address the connection helpers serve.
@@ -361,10 +352,7 @@ impl Bluetooth {
         if info.connected == Some(true) {
             return Ok(());
         }
-        self.run(
-            &["connect".to_string(), address.to_string()],
-            BT_CONNECT,
-        )?;
+        self.run(&["connect".to_string(), address.to_string()], BT_CONNECT)?;
         match self.info(address)?.connected {
             Some(true) => Ok(()),
             _ => Err(AdapterError::Unavailable),

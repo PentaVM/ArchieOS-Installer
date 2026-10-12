@@ -283,13 +283,10 @@ impl EdgeAdapter for Wol {
                 socket
                     .set_broadcast(true)
                     .map_err(|_| AdapterError::Transport)?;
-                tokio::time::timeout(
-                    SEND_TIMEOUT,
-                    socket.send_to(&packet, &self.broadcast),
-                )
-                .await
-                .map_err(|_| AdapterError::Unavailable)?
-                .map_err(|_| AdapterError::Transport)?;
+                tokio::time::timeout(SEND_TIMEOUT, socket.send_to(&packet, &self.broadcast))
+                    .await
+                    .map_err(|_| AdapterError::Unavailable)?
+                    .map_err(|_| AdapterError::Transport)?;
                 // Fire-and-forget: accepted means the packet left the socket.
                 // The engine's after-observe is the only wake-up evidence.
                 Ok(AdapterAck { accepted: true })

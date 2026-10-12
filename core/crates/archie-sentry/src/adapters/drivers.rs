@@ -14,7 +14,10 @@ const MAX_PACKAGES: usize = 64;
 fn valid_package(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
-        && name.bytes().next().is_some_and(|b| b.is_ascii_alphanumeric())
+        && name
+            .bytes()
+            .next()
+            .is_some_and(|b| b.is_ascii_alphanumeric())
         && name.bytes().all(|b| {
             b.is_ascii_lowercase()
                 || b.is_ascii_digit()
@@ -29,7 +32,10 @@ pub enum DriverTier {
     Driverless,
     /// Legacy hardware: named Arch packages would be required. `reason`
     /// explains each inclusion for an operator; it is not a receipt.
-    NeedsPackages { packages: Vec<String>, reason: String },
+    NeedsPackages {
+        packages: Vec<String>,
+        reason: String,
+    },
     /// The attributes match no known case. `considered` lists the exact
     /// attribute values the decision was based on, for manual review.
     Unknown { considered: Vec<String> },
@@ -84,10 +90,7 @@ impl DriverPlan {
 }
 
 fn push_package(packages: &mut Vec<String>, name: &str) {
-    if packages.len() < MAX_PACKAGES
-        && valid_package(name)
-        && !packages.iter().any(|p| p == name)
-    {
+    if packages.len() < MAX_PACKAGES && valid_package(name) && !packages.iter().any(|p| p == name) {
         packages.push(name.to_owned());
     }
 }
@@ -131,7 +134,12 @@ pub fn analyze(attributes: &PrinterSnapshot) -> DriverPlan {
     let mut packages = vec![];
     let mut reasons = vec![];
     if legacy_pdl {
-        for package in ["cups-filters", "gutenprint", "foomatic-db", "foomatic-db-engine"] {
+        for package in [
+            "cups-filters",
+            "gutenprint",
+            "foomatic-db",
+            "foomatic-db-engine",
+        ] {
             push_package(&mut packages, package);
         }
         reasons.push("legacy page description language requires CUPS filters".to_owned());
@@ -144,8 +152,7 @@ pub fn analyze(attributes: &PrinterSnapshot) -> DriverPlan {
         // Driverless was already ruled out above; hplip is the HP fallback.
         push_package(&mut packages, "hplip");
         reasons.push(
-            "hplip is optional; prefer driverless operation where the printer allows it"
-                .to_owned(),
+            "hplip is optional; prefer driverless operation where the printer allows it".to_owned(),
         );
     }
     if packages.is_empty() {

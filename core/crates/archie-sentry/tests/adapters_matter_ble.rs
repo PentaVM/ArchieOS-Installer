@@ -4,8 +4,8 @@
 use archie_sentry::{
     adapters::{
         bluetooth::{
-            parse_address, parse_gatt_value, parse_hex_payload, parse_info, parse_scan,
-            valid_uuid, BleSwitch, BleTarget, Bluetooth,
+            parse_address, parse_gatt_value, parse_hex_payload, parse_info, parse_scan, valid_uuid,
+            BleSwitch, BleTarget, Bluetooth,
         },
         matter::{
             level_for_percent, pairing_succeeded, parse_bool_attribute, parse_int_attribute,
@@ -173,10 +173,7 @@ fn matter_target(kind: MatterKind) -> MatterTarget {
         kind,
     }
 }
-fn matter_adapter(
-    runner: Arc<FakeRunner>,
-    kind: MatterKind,
-) -> Matter {
+fn matter_adapter(runner: Arc<FakeRunner>, kind: MatterKind) -> Matter {
     Matter::new(
         "edge",
         "matter",
@@ -232,7 +229,10 @@ fn chip_bool_attribute_parsing() {
 
 #[test]
 fn chip_int_attribute_parsing() {
-    assert_eq!(parse_int_attribute(CHIP_LEVEL_127, "CurrentLevel"), Some(127));
+    assert_eq!(
+        parse_int_attribute(CHIP_LEVEL_127, "CurrentLevel"),
+        Some(127)
+    );
     assert_eq!(parse_int_attribute(CHIP_LEVEL_0, "CurrentLevel"), Some(0));
     assert_eq!(
         parse_int_attribute(CHIP_SETPOINT_2250, "OccupiedHeatingSetpoint"),
@@ -240,10 +240,16 @@ fn chip_int_attribute_parsing() {
     );
     // Negative setpoints (a cold-room thermostat) parse signed.
     assert_eq!(
-        parse_int_attribute("  OccupiedHeatingSetpoint: -500\n", "OccupiedHeatingSetpoint"),
+        parse_int_attribute(
+            "  OccupiedHeatingSetpoint: -500\n",
+            "OccupiedHeatingSetpoint"
+        ),
         Some(-500)
     );
-    assert_eq!(parse_int_attribute("  CurrentLevel: big\n", "CurrentLevel"), None);
+    assert_eq!(
+        parse_int_attribute("  CurrentLevel: big\n", "CurrentLevel"),
+        None
+    );
     assert_eq!(parse_int_attribute("no markers", "CurrentLevel"), None);
 }
 
@@ -282,13 +288,56 @@ fn matter_configuration_is_validated() {
     let runner = FakeRunner::with(vec![]);
     let one = |t: MatterTarget| BTreeMap::from([("lamp".into(), t)]);
     // Relative tool path.
-    assert!(Matter::new("edge", "matter", "chip-tool", one(matter_target(MatterKind::Switch)), runner.clone()).is_err());
+    assert!(Matter::new(
+        "edge",
+        "matter",
+        "chip-tool",
+        one(matter_target(MatterKind::Switch)),
+        runner.clone()
+    )
+    .is_err());
     // Node id 0 and endpoint 0 are never actuable devices.
-    assert!(Matter::new("edge", "matter", chip_path(), one(MatterTarget { node_id: 0, endpoint: 1, kind: MatterKind::Switch }), runner.clone()).is_err());
-    assert!(Matter::new("edge", "matter", chip_path(), one(MatterTarget { node_id: 1, endpoint: 0, kind: MatterKind::Switch }), runner.clone()).is_err());
+    assert!(Matter::new(
+        "edge",
+        "matter",
+        chip_path(),
+        one(MatterTarget {
+            node_id: 0,
+            endpoint: 1,
+            kind: MatterKind::Switch
+        }),
+        runner.clone()
+    )
+    .is_err());
+    assert!(Matter::new(
+        "edge",
+        "matter",
+        chip_path(),
+        one(MatterTarget {
+            node_id: 1,
+            endpoint: 0,
+            kind: MatterKind::Switch
+        }),
+        runner.clone()
+    )
+    .is_err());
     // Empty target set, bad resource id.
-    assert!(Matter::new("edge", "matter", chip_path(), BTreeMap::new(), runner.clone()).is_err());
-    assert!(Matter::new("edge", "matter", chip_path(), BTreeMap::from([("bad id!".into(), matter_target(MatterKind::Switch))]), runner).is_err());
+    assert!(Matter::new(
+        "edge",
+        "matter",
+        chip_path(),
+        BTreeMap::new(),
+        runner.clone()
+    )
+    .is_err());
+    assert!(Matter::new(
+        "edge",
+        "matter",
+        chip_path(),
+        BTreeMap::from([("bad id!".into(), matter_target(MatterKind::Switch))]),
+        runner
+    )
+    .is_err());
 }
 
 // ---------------------------------------------------------------------------
@@ -435,7 +484,10 @@ async fn climate_temperature_uses_hundredths_of_a_degree() {
             target_milli_celsius: 22500
         }
     );
-    assert!(Command::ClimateSetTemperature { milli_celsius: 22500 }.matches(&observation.state));
+    assert!(Command::ClimateSetTemperature {
+        milli_celsius: 22500
+    }
+    .matches(&observation.state));
 }
 
 #[tokio::test]
@@ -522,7 +574,10 @@ async fn matter_refuses_unsupported_and_unpaired_without_acting() {
     // Not declared in the resource's capabilities.
     assert_eq!(
         adapter
-            .apply(&matter_resource(CommandKind::LightSetBrightness), &Command::SwitchSet { on: true })
+            .apply(
+                &matter_resource(CommandKind::LightSetBrightness),
+                &Command::SwitchSet { on: true }
+            )
             .await
             .unwrap_err(),
         AdapterError::Unsupported
@@ -584,16 +639,13 @@ async fn matter_unparsable_readback_verifies_nothing() {
 fn ble_address_uuid_and_payload_validation() {
     assert_eq!(parse_address(MAC), Some(MAC.to_string()));
     // Lowercase input normalizes to BlueZ's canonical uppercase.
-    assert_eq!(
-        parse_address("aa:bb:cc:dd:ee:ff"),
-        Some(MAC.to_string())
-    );
+    assert_eq!(parse_address("aa:bb:cc:dd:ee:ff"), Some(MAC.to_string()));
     for bad in [
-        "AA:BB:CC:DD:EE",      // too short
+        "AA:BB:CC:DD:EE",       // too short
         "AA:BB:CC:DD:EE:FF:00", // too long
-        "AA-BB-CC-DD-EE-FF",   // hyphens
-        "GG:BB:CC:DD:EE:FF",   // not hex
-        "AA:BB:CC:DD:EE:F",    // single digit octet
+        "AA-BB-CC-DD-EE-FF",    // hyphens
+        "GG:BB:CC:DD:EE:FF",    // not hex
+        "AA:BB:CC:DD:EE:F",     // single digit octet
         "",
     ] {
         assert_eq!(parse_address(bad), None, "{bad} must be rejected");
@@ -633,7 +685,10 @@ fn ble_info_parsing_both_directions() {
 fn ble_scan_parsing_dedups_and_bounds() {
     let devices = parse_scan(SCAN_OUTPUT);
     assert_eq!(devices.len(), 2, "duplicate address collapses");
-    assert_eq!(devices[0], ("AA:BB:CC:DD:EE:01".to_string(), "BLE Bulb".to_string()));
+    assert_eq!(
+        devices[0],
+        ("AA:BB:CC:DD:EE:01".to_string(), "BLE Bulb".to_string())
+    );
     assert_eq!(devices[1].0, "AA:BB:CC:DD:EE:02");
     assert_eq!(devices[1].1, "", "a nameless device keeps an empty name");
     assert!(parse_scan("").is_empty());
@@ -678,7 +733,11 @@ async fn ble_connect_disconnect_and_pair_verify_through_info() {
     assert_eq!(calls.len(), 3);
     assert_eq!(
         calls[1],
-        vec![bluetoothctl_path().to_string(), "connect".into(), MAC.into()]
+        vec![
+            bluetoothctl_path().to_string(),
+            "connect".into(),
+            MAC.into()
+        ]
     );
 
     // Connect that does not confirm is Unavailable.
@@ -700,11 +759,18 @@ async fn ble_connect_disconnect_and_pair_verify_through_info() {
     adapter.disconnect(MAC).unwrap();
     assert_eq!(
         runner.calls()[1],
-        vec![bluetoothctl_path().to_string(), "disconnect".into(), MAC.into()]
+        vec![
+            bluetoothctl_path().to_string(),
+            "disconnect".into(),
+            MAC.into()
+        ]
     );
 
     // Pair verifies Paired: yes; an unchanged report is Unavailable.
-    let runner = FakeRunner::with(vec![FakeRunner::ok(""), FakeRunner::ok(INFO_PAIRED_CONNECTED)]);
+    let runner = FakeRunner::with(vec![
+        FakeRunner::ok(""),
+        FakeRunner::ok(INFO_PAIRED_CONNECTED),
+    ]);
     let adapter = ble_adapter(runner.clone(), true);
     adapter.pair(MAC).unwrap();
     assert_eq!(
@@ -872,7 +938,11 @@ async fn ble_observe_reads_the_configured_characteristic_back() {
         adapter.observe(&resource).await.unwrap_err(),
         AdapterError::Unavailable
     );
-    assert_eq!(runner.calls().len(), 1, "no implicit pairing, no GATT traffic");
+    assert_eq!(
+        runner.calls().len(),
+        1,
+        "no implicit pairing, no GATT traffic"
+    );
 }
 
 #[tokio::test]
@@ -930,7 +1000,10 @@ async fn ble_refuses_unsupported_without_acting() {
             .unwrap_err(),
         AdapterError::Unsupported
     );
-    assert!(runner.calls().is_empty(), "refusals never spawn bluetoothctl");
+    assert!(
+        runner.calls().is_empty(),
+        "refusals never spawn bluetoothctl"
+    );
 }
 
 #[test]
@@ -938,7 +1011,14 @@ fn ble_configuration_is_validated() {
     let runner = FakeRunner::with(vec![]);
     let one = |t: BleTarget| BTreeMap::from([("bulb".into(), t)]);
     // Relative tool path.
-    assert!(Bluetooth::new("edge", "ble", "bluetoothctl", one(ble_target(true)), runner.clone()).is_err());
+    assert!(Bluetooth::new(
+        "edge",
+        "ble",
+        "bluetoothctl",
+        one(ble_target(true)),
+        runner.clone()
+    )
+    .is_err());
     // Bad address.
     assert!(Bluetooth::new(
         "edge",
@@ -954,11 +1034,25 @@ fn ble_configuration_is_validated() {
     // Bad UUID.
     let mut target = ble_target(true);
     target.switch.as_mut().unwrap().read_uuid = "not-a-uuid".into();
-    assert!(Bluetooth::new("edge", "ble", bluetoothctl_path(), one(target), runner.clone()).is_err());
+    assert!(Bluetooth::new(
+        "edge",
+        "ble",
+        bluetoothctl_path(),
+        one(target),
+        runner.clone()
+    )
+    .is_err());
     // Identical on/off payloads could never be told apart.
     let mut target = ble_target(true);
     target.switch.as_mut().unwrap().off = "01".into();
-    assert!(Bluetooth::new("edge", "ble", bluetoothctl_path(), one(target), runner.clone()).is_err());
+    assert!(Bluetooth::new(
+        "edge",
+        "ble",
+        bluetoothctl_path(),
+        one(target),
+        runner.clone()
+    )
+    .is_err());
     // Empty targets.
     assert!(Bluetooth::new("edge", "ble", bluetoothctl_path(), BTreeMap::new(), runner).is_err());
 }

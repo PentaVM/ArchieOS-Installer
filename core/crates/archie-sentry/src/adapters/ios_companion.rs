@@ -90,10 +90,7 @@ impl IosAction {
             }
             Self::Shortcut(name) => name,
         };
-        if value.is_empty()
-            || value.len() > 512
-            || value.bytes().any(|b| b < 0x20 || b == 0x7f)
-        {
+        if value.is_empty() || value.len() > 512 || value.bytes().any(|b| b < 0x20 || b == 0x7f) {
             return Err(AdapterError::Protocol);
         }
         Ok(())
@@ -208,9 +205,7 @@ impl IosCompanion {
             }
             // HTTPS to a non-loopback peer without a pinned certificate is
             // refused; http off-loopback is already refused by `endpoint`.
-            None if base.scheme() == "https" && !loopback => {
-                return Err(AdapterError::Protocol)
-            }
+            None if base.scheme() == "https" && !loopback => return Err(AdapterError::Protocol),
             None => {}
         }
         let client = builder.build().map_err(|_| AdapterError::Transport)?;
@@ -324,7 +319,10 @@ impl EdgeAdapter for IosCompanion {
     /// reachable/awake mean the app answered; `session_locked` is always
     /// None (iOS never tells us, and we never guess); `foreground_app` is
     /// the app's last completed intent, not the real foreground app.
-    async fn observe(&mut self, resource: &ResourceDescriptor) -> Result<Observation, AdapterError> {
+    async fn observe(
+        &mut self,
+        resource: &ResourceDescriptor,
+    ) -> Result<Observation, AdapterError> {
         self.device(resource)?;
         let report = self.report().await?;
         let state = ResourceState::Host {
@@ -336,8 +334,9 @@ impl EdgeAdapter for IosCompanion {
         };
         let now = Timestamp::now();
         self.observations = self.observations.saturating_add(1);
-        let evidence = serde_json::to_vec(&(&resource.resource_id, &report, now.0, self.observations))
-            .map_err(|_| AdapterError::Protocol)?;
+        let evidence =
+            serde_json::to_vec(&(&resource.resource_id, &report, now.0, self.observations))
+                .map_err(|_| AdapterError::Protocol)?;
         Ok(Observation {
             resource_id: resource.resource_id.clone(),
             adapter_id: self.adapter.clone(),

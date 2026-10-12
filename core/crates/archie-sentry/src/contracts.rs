@@ -79,12 +79,26 @@ impl PrintFormat {
 pub enum Command {
     MediaPause,
     MediaPlay,
-    SwitchSet { on: bool },
-    LightSetBrightness { percent: u8 },
-    ClimateSetTemperature { milli_celsius: i32 },
-    RemoteKey { key: RemoteKeyName },
-    AppLaunch { app_id: String },
-    PrintSubmit { sha256: String, format: PrintFormat, pages: u16 },
+    SwitchSet {
+        on: bool,
+    },
+    LightSetBrightness {
+        percent: u8,
+    },
+    ClimateSetTemperature {
+        milli_celsius: i32,
+    },
+    RemoteKey {
+        key: RemoteKeyName,
+    },
+    AppLaunch {
+        app_id: String,
+    },
+    PrintSubmit {
+        sha256: String,
+        format: PrintFormat,
+        pages: u16,
+    },
     /// Wake a host with a magic packet. The postcondition is the host
     /// answering on the network afterwards - the packet itself proves nothing.
     WakeHost,
@@ -97,19 +111,27 @@ pub enum Command {
     },
     /// Toggle a router's wireless radios. The postcondition is the router
     /// reporting the radios in the requested state.
-    WifiSet { on: bool },
+    WifiSet {
+        on: bool,
+    },
     /// Lock or unlock a workstation session. The postcondition is the session
     /// manager reporting the requested lock state.
-    SessionLock { locked: bool },
+    SessionLock {
+        locked: bool,
+    },
     /// Set a node's output volume. The postcondition is the mixer reporting
     /// the requested level.
-    VolumeSet { percent: u8 },
+    VolumeSet {
+        percent: u8,
+    },
     /// Stop whatever application a receiver is running. The postcondition is
     /// the receiver reporting no application other than its idle screen.
     AppStop,
     /// Mute or unmute a receiver. The postcondition is the receiver reporting
     /// the requested mute flag.
-    MuteSet { muted: bool },
+    MuteSet {
+        muted: bool,
+    },
 }
 
 /// Transport protocol of a router port mapping.
@@ -155,7 +177,9 @@ impl Command {
                 .bytes()
                 .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
         {
-            return Err(ContractError("print content must be a lowercase sha256 hex"));
+            return Err(ContractError(
+                "print content must be a lowercase sha256 hex",
+            ));
         }
         Ok(format!("archie-{}", &sha256[..16]))
     }
@@ -237,11 +261,9 @@ impl Command {
                     ..
                 },
             ) => *power_on && active_app.as_deref() == Some(app_id.as_str()),
-            (
-                Self::PrintSubmit { sha256, .. },
-                ResourceState::Printer { job_present, .. },
-            ) => job_present.as_deref()
-                == Self::print_job_name(sha256).ok().as_deref(),
+            (Self::PrintSubmit { sha256, .. }, ResourceState::Printer { job_present, .. }) => {
+                job_present.as_deref() == Self::print_job_name(sha256).ok().as_deref()
+            }
             (Self::WakeHost, ResourceState::Host { reachable, .. }) => *reachable,
             (
                 Self::PortMapping { present, .. },
@@ -249,18 +271,15 @@ impl Command {
                     mapping_present, ..
                 },
             ) => *mapping_present == Some(*present),
-            (
-                Self::WifiSet { on },
-                ResourceState::Router { wifi_enabled, .. },
-            ) => *wifi_enabled == Some(*on),
-            (
-                Self::SessionLock { locked },
-                ResourceState::Host { session_locked, .. },
-            ) => *session_locked == Some(*locked),
-            (
-                Self::VolumeSet { percent },
-                ResourceState::Host { volume_percent, .. },
-            ) => *volume_percent == Some(*percent),
+            (Self::WifiSet { on }, ResourceState::Router { wifi_enabled, .. }) => {
+                *wifi_enabled == Some(*on)
+            }
+            (Self::SessionLock { locked }, ResourceState::Host { session_locked, .. }) => {
+                *session_locked == Some(*locked)
+            }
+            (Self::VolumeSet { percent }, ResourceState::Host { volume_percent, .. }) => {
+                *volume_percent == Some(*percent)
+            }
             // An Android app launch is verified through the foreground app the
             // device itself reports; `awake` plays the role `power_on` does on a TV.
             (
@@ -290,10 +309,19 @@ impl Command {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ResourceState {
-    Media { playing: bool },
-    Switch { on: bool },
-    Light { on: bool, brightness_percent: u8 },
-    Climate { target_milli_celsius: i32 },
+    Media {
+        playing: bool,
+    },
+    Switch {
+        on: bool,
+    },
+    Light {
+        on: bool,
+        brightness_percent: u8,
+    },
+    Climate {
+        target_milli_celsius: i32,
+    },
     Tv {
         power_on: bool,
         showing_home: bool,
@@ -435,9 +463,11 @@ impl Observation {
             } if !(5000..=35000).contains(&target_milli_celsius) => {
                 Err(ContractError("invalid measured temperature"))
             }
-            ResourceState::Tv {
-                ref active_app, ..
-            } if active_app.as_deref().is_some_and(|a| validate_id(a).is_err()) => {
+            ResourceState::Tv { ref active_app, .. }
+                if active_app
+                    .as_deref()
+                    .is_some_and(|a| validate_id(a).is_err()) =>
+            {
                 Err(ContractError("invalid measured application id"))
             }
             ResourceState::Printer {

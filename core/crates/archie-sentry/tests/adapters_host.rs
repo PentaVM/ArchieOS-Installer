@@ -7,7 +7,7 @@ use archie_sentry::{
             base64_encode, nircmd_volume, parse_amixer_volume, parse_locked_hint,
             parse_osascript_volume, parse_pactl_volume, parse_process_name, parse_ps_bool,
             parse_ps_volume, parse_session_ids, probe_host, ps_audio_get, ps_audio_set,
-            ps_foreground, ps_lock_state, ps_encoded_command, HostCapabilities, HostOs, HostSsh,
+            ps_encoded_command, ps_foreground, ps_lock_state, HostCapabilities, HostOs, HostSsh,
             HostTarget, LockSupport, VolumeTool,
         },
         process::{CommandOutput, CommandRunner},
@@ -163,7 +163,15 @@ fn macos_caps() -> HostCapabilities {
     }
 }
 fn mk_adapter(caps: HostCapabilities, runner: Arc<FakeRunner>, allow_power: bool) -> HostSsh {
-    HostSsh::new("edge", "host-ssh", "workstation", target(allow_power), caps, runner).unwrap()
+    HostSsh::new(
+        "edge",
+        "host-ssh",
+        "workstation",
+        target(allow_power),
+        caps,
+        runner,
+    )
+    .unwrap()
 }
 
 // ---------- fixtures (recorded shapes, labeled as fixtures) ----------
@@ -179,7 +187,8 @@ const AMIXER_VOLUME: &str = "Simple mixer control 'Master',0\n\
      Limits: Playback 0 - 65536\n\
      Front Left: Playback 39322 [60%] [on]\n\
      Front Right: Playback 39322 [60%] [on]\n";
-const OSASCRIPT_VOLUME: &str = "output volume:35, input volume:74, alert volume:100, output muted:false\n";
+const OSASCRIPT_VOLUME: &str =
+    "output volume:35, input volume:74, alert volume:100, output muted:false\n";
 
 // ---------- parsers ----------
 
@@ -194,7 +203,9 @@ fn base64_and_encoded_command_are_exact() {
     assert_eq!(ps_encoded_command("A"), "QQA=");
     // The encoded payload never needs shell quoting.
     let encoded = ps_encoded_command("Add-Type -TypeDefinition 'x \"y\"';[A]::B(1)");
-    assert!(encoded.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/' || b == b'='));
+    assert!(encoded
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/' || b == b'='));
 }
 
 #[test]
@@ -206,7 +217,11 @@ fn powershell_parsers() {
     assert_eq!(parse_ps_volume("53\r\n"), Some(53));
     assert_eq!(parse_ps_volume("0"), Some(0));
     assert_eq!(parse_ps_volume("100"), Some(100));
-    assert_eq!(parse_ps_volume("121"), None, "over-amplification is unknown, not clamped");
+    assert_eq!(
+        parse_ps_volume("121"),
+        None,
+        "over-amplification is unknown, not clamped"
+    );
     assert_eq!(parse_ps_volume("loud"), None);
 }
 
@@ -218,26 +233,42 @@ fn linux_parsers() {
     assert_eq!(parse_locked_hint("LockedHint=no\n"), Some(false));
     assert_eq!(parse_locked_hint("LockedHint=maybe\n"), None);
     assert_eq!(parse_pactl_volume(PACTL_VOLUME), Some(60));
-    assert_eq!(parse_pactl_volume("Volume: mono: 65536 / 100%\n"), Some(100));
+    assert_eq!(
+        parse_pactl_volume("Volume: mono: 65536 / 100%\n"),
+        Some(100)
+    );
     assert_eq!(parse_pactl_volume("Volume: mono: 98304 / 150%\n"), None);
     assert_eq!(parse_pactl_volume("no volume here"), None);
     assert_eq!(parse_amixer_volume(AMIXER_VOLUME), Some(60));
-    assert_eq!(parse_amixer_volume("Front Left: Playback 0 [0%] [off]\n"), Some(0));
+    assert_eq!(
+        parse_amixer_volume("Front Left: Playback 0 [0%] [off]\n"),
+        Some(0)
+    );
     assert_eq!(parse_amixer_volume("junk [x%]"), None);
 }
 
 #[test]
 fn macos_and_name_parsers() {
     assert_eq!(parse_osascript_volume(OSASCRIPT_VOLUME), Some(35));
-    assert_eq!(parse_osascript_volume("output volume:0, output muted:true"), Some(0));
+    assert_eq!(
+        parse_osascript_volume("output volume:0, output muted:true"),
+        Some(0)
+    );
     assert_eq!(
         parse_osascript_volume("output volume:missing value, input volume:74"),
         None
     );
     assert_eq!(parse_osascript_volume("no fields"), None);
     assert_eq!(parse_process_name("firefox\n"), Some("firefox".to_string()));
-    assert_eq!(parse_process_name("loginwindow\n"), Some("loginwindow".to_string()));
-    assert_eq!(parse_process_name("Visual Studio Code\n"), None, "spaces are not a contract id");
+    assert_eq!(
+        parse_process_name("loginwindow\n"),
+        Some("loginwindow".to_string())
+    );
+    assert_eq!(
+        parse_process_name("Visual Studio Code\n"),
+        None,
+        "spaces are not a contract id"
+    );
     assert_eq!(parse_process_name("\n"), None);
 }
 
@@ -254,10 +285,22 @@ fn nircmd_scale() {
 async fn probe_windows_full() {
     let runner = FakeRunner::new(vec![
         (&["cmd.exe", "/c", "ver"], 0, WINDOWS_VER),
-        (&["where.exe", "rundll32.exe"], 0, "C:\\Windows\\System32\\rundll32.exe\r\n"),
-        (&["where.exe", "powershell.exe"], 0, "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\r\n"),
+        (
+            &["where.exe", "rundll32.exe"],
+            0,
+            "C:\\Windows\\System32\\rundll32.exe\r\n",
+        ),
+        (
+            &["where.exe", "powershell.exe"],
+            0,
+            "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\r\n",
+        ),
         (&["where.exe", "nircmd.exe"], 0, "C:\\Tools\\nircmd.exe\r\n"),
-        (&["where.exe", "shutdown.exe"], 0, "C:\\Windows\\System32\\shutdown.exe\r\n"),
+        (
+            &["where.exe", "shutdown.exe"],
+            0,
+            "C:\\Windows\\System32\\shutdown.exe\r\n",
+        ),
     ]);
     let caps = probe_host(ssh_config(), runner.clone()).await;
     assert_eq!(caps, windows_caps());
@@ -277,7 +320,11 @@ async fn probe_windows_without_powershell_offers_nothing_measurable() {
     ]);
     let caps = probe_host(ssh_config(), runner).await;
     assert_eq!(caps.os, Some(HostOs::Windows));
-    assert_eq!(caps.lock, LockSupport::None, "lock without its read-back is not offered");
+    assert_eq!(
+        caps.lock,
+        LockSupport::None,
+        "lock without its read-back is not offered"
+    );
     assert_eq!(caps.volume, None);
     assert!(!caps.foreground);
     assert!(!caps.app_launch);
@@ -290,7 +337,11 @@ async fn probe_linux_full() {
         (&["uname", "-s"], 0, "Linux\n"),
         (&["command", "-v", "loginctl"], 0, "/usr/bin/loginctl\n"),
         (&["command", "-v", "pactl"], 0, "/usr/bin/pactl\n"),
-        (&["command", "-v", "systemd-run"], 0, "/usr/bin/systemd-run\n"),
+        (
+            &["command", "-v", "systemd-run"],
+            0,
+            "/usr/bin/systemd-run\n",
+        ),
         (&["command", "-v", "xdotool"], 0, "/usr/bin/xdotool\n"),
         (&["command", "-v", "shutdown"], 0, "/usr/bin/shutdown\n"),
     ]);
@@ -298,7 +349,11 @@ async fn probe_linux_full() {
     assert_eq!(caps, linux_caps());
     assert_eq!(
         caps.command_kinds(),
-        vec![CommandKind::SessionLock, CommandKind::VolumeSet, CommandKind::AppLaunch]
+        vec![
+            CommandKind::SessionLock,
+            CommandKind::VolumeSet,
+            CommandKind::AppLaunch
+        ]
     );
 }
 
@@ -313,7 +368,10 @@ async fn probe_linux_amixer_fallback_and_no_foreground() {
     let caps = probe_host(ssh_config(), runner).await;
     assert_eq!(caps.volume, Some(VolumeTool::Amixer));
     assert!(!caps.foreground);
-    assert!(!caps.app_launch, "launch without a foreground read-back is not offered");
+    assert!(
+        !caps.app_launch,
+        "launch without a foreground read-back is not offered"
+    );
     assert_eq!(caps.lock, LockSupport::LockUnlock);
 }
 
@@ -384,7 +442,12 @@ async fn windows_lock_and_unlock_honesty() {
 async fn windows_volume_via_nircmd_with_powershell_readback() {
     let runner = FakeRunner::script(&[
         &["nircmd.exe", "setsysvolume", "32768"],
-        &["powershell.exe", "-NoProfile", "-EncodedCommand", &ps_audio_get()],
+        &[
+            "powershell.exe",
+            "-NoProfile",
+            "-EncodedCommand",
+            &ps_audio_get(),
+        ],
     ]);
     let mut adapter = mk_adapter(windows_caps(), runner.clone(), false);
     let resource = mk_resource(&[CommandKind::VolumeSet]);
@@ -403,12 +466,43 @@ async fn windows_volume_via_nircmd_with_powershell_readback() {
 #[tokio::test]
 async fn windows_observe_measures_lock_volume_and_foreground() {
     let runner = FakeRunner::new(vec![
-        (&["powershell.exe", "-NoProfile", "-EncodedCommand", &ps_lock_state()], 0, "True\r\n"),
-        (&["powershell.exe", "-NoProfile", "-EncodedCommand", &ps_audio_get()], 0, "53\r\n"),
-        (&["powershell.exe", "-NoProfile", "-EncodedCommand", &ps_foreground()], 0, "notepad\r\n"),
+        (
+            &[
+                "powershell.exe",
+                "-NoProfile",
+                "-EncodedCommand",
+                &ps_lock_state(),
+            ],
+            0,
+            "True\r\n",
+        ),
+        (
+            &[
+                "powershell.exe",
+                "-NoProfile",
+                "-EncodedCommand",
+                &ps_audio_get(),
+            ],
+            0,
+            "53\r\n",
+        ),
+        (
+            &[
+                "powershell.exe",
+                "-NoProfile",
+                "-EncodedCommand",
+                &ps_foreground(),
+            ],
+            0,
+            "notepad\r\n",
+        ),
     ]);
     let mut adapter = mk_adapter(windows_caps(), runner.clone(), false);
-    let resource = mk_resource(&[CommandKind::SessionLock, CommandKind::VolumeSet, CommandKind::AppLaunch]);
+    let resource = mk_resource(&[
+        CommandKind::SessionLock,
+        CommandKind::VolumeSet,
+        CommandKind::AppLaunch,
+    ]);
     let observation = adapter.observe(&resource).await.unwrap();
     assert_eq!(
         observation.state,
@@ -435,33 +529,85 @@ async fn linux_lock_unlock_volume_and_launch_argv() {
         &["systemd-run", "--user", "'/usr/bin/firefox'"],
     ]);
     let mut adapter = mk_adapter(linux_caps(), runner.clone(), false);
-    let resource = mk_resource(&[CommandKind::SessionLock, CommandKind::VolumeSet, CommandKind::AppLaunch]);
-    adapter.apply(&resource, &Command::SessionLock { locked: true }).await.unwrap();
-    adapter.apply(&resource, &Command::SessionLock { locked: false }).await.unwrap();
-    adapter.apply(&resource, &Command::VolumeSet { percent: 50 }).await.unwrap();
+    let resource = mk_resource(&[
+        CommandKind::SessionLock,
+        CommandKind::VolumeSet,
+        CommandKind::AppLaunch,
+    ]);
     adapter
-        .apply(&resource, &Command::AppLaunch { app_id: "firefox".into() })
+        .apply(&resource, &Command::SessionLock { locked: true })
+        .await
+        .unwrap();
+    adapter
+        .apply(&resource, &Command::SessionLock { locked: false })
+        .await
+        .unwrap();
+    adapter
+        .apply(&resource, &Command::VolumeSet { percent: 50 })
+        .await
+        .unwrap();
+    adapter
+        .apply(
+            &resource,
+            &Command::AppLaunch {
+                app_id: "firefox".into(),
+            },
+        )
         .await
         .unwrap();
     let tails = runner.remote_tails();
     assert_eq!(tails[0], vec!["loginctl", "lock-session"]);
     assert_eq!(tails[1], vec!["loginctl", "unlock-session"]);
-    assert_eq!(tails[2], vec!["pactl", "set-sink-volume", "@DEFAULT_SINK@", "50%"]);
-    assert_eq!(tails[3], vec!["systemd-run", "--user", "'/usr/bin/firefox'"]);
+    assert_eq!(
+        tails[2],
+        vec!["pactl", "set-sink-volume", "@DEFAULT_SINK@", "50%"]
+    );
+    assert_eq!(
+        tails[3],
+        vec!["systemd-run", "--user", "'/usr/bin/firefox'"]
+    );
 }
 
 #[tokio::test]
 async fn linux_observe_agrees_across_sessions() {
     let runner = FakeRunner::new(vec![
-        (&["loginctl", "list-sessions", "--no-legend"], 0, LOGINCTL_LIST),
-        (&["loginctl", "show-session", "3", "-p", "LockedHint"], 0, "LockedHint=no\n"),
-        (&["loginctl", "show-session", "7", "-p", "LockedHint"], 0, "LockedHint=no\n"),
-        (&["pactl", "get-sink-volume", "@DEFAULT_SINK@"], 0, PACTL_VOLUME),
-        (&["xdotool", "getactivewindow", "getwindowname"], 0, "ignored"),
-        (&["xdotool", "getactivewindow", "getwindowclassname"], 0, "firefox\n"),
+        (
+            &["loginctl", "list-sessions", "--no-legend"],
+            0,
+            LOGINCTL_LIST,
+        ),
+        (
+            &["loginctl", "show-session", "3", "-p", "LockedHint"],
+            0,
+            "LockedHint=no\n",
+        ),
+        (
+            &["loginctl", "show-session", "7", "-p", "LockedHint"],
+            0,
+            "LockedHint=no\n",
+        ),
+        (
+            &["pactl", "get-sink-volume", "@DEFAULT_SINK@"],
+            0,
+            PACTL_VOLUME,
+        ),
+        (
+            &["xdotool", "getactivewindow", "getwindowname"],
+            0,
+            "ignored",
+        ),
+        (
+            &["xdotool", "getactivewindow", "getwindowclassname"],
+            0,
+            "firefox\n",
+        ),
     ]);
     let mut adapter = mk_adapter(linux_caps(), runner.clone(), false);
-    let resource = mk_resource(&[CommandKind::SessionLock, CommandKind::VolumeSet, CommandKind::AppLaunch]);
+    let resource = mk_resource(&[
+        CommandKind::SessionLock,
+        CommandKind::VolumeSet,
+        CommandKind::AppLaunch,
+    ]);
     let observation = adapter.observe(&resource).await.unwrap();
     assert_eq!(
         observation.state,
@@ -473,16 +619,39 @@ async fn linux_observe_agrees_across_sessions() {
             foreground_app: Some("firefox".into()),
         }
     );
-    assert!(Command::AppLaunch { app_id: "firefox".into() }.matches(&observation.state));
+    assert!(Command::AppLaunch {
+        app_id: "firefox".into()
+    }
+    .matches(&observation.state));
     assert!(Command::SessionLock { locked: false }.matches(&observation.state));
 
     // A session that cannot say leaves the lock state unknown, not guessed.
     let runner = FakeRunner::new(vec![
-        (&["loginctl", "list-sessions", "--no-legend"], 0, LOGINCTL_LIST),
-        (&["loginctl", "show-session", "3", "-p", "LockedHint"], 0, "LockedHint=yes\n"),
-        (&["loginctl", "show-session", "7", "-p", "LockedHint"], 0, "garbage\n"),
-        (&["pactl", "get-sink-volume", "@DEFAULT_SINK@"], 0, PACTL_VOLUME),
-        (&["xdotool", "getactivewindow", "getwindowclassname"], 0, "firefox\n"),
+        (
+            &["loginctl", "list-sessions", "--no-legend"],
+            0,
+            LOGINCTL_LIST,
+        ),
+        (
+            &["loginctl", "show-session", "3", "-p", "LockedHint"],
+            0,
+            "LockedHint=yes\n",
+        ),
+        (
+            &["loginctl", "show-session", "7", "-p", "LockedHint"],
+            0,
+            "garbage\n",
+        ),
+        (
+            &["pactl", "get-sink-volume", "@DEFAULT_SINK@"],
+            0,
+            PACTL_VOLUME,
+        ),
+        (
+            &["xdotool", "getactivewindow", "getwindowclassname"],
+            0,
+            "firefox\n",
+        ),
     ]);
     let mut adapter = mk_adapter(linux_caps(), runner, false);
     let observation = adapter.observe(&resource).await.unwrap();
@@ -494,7 +663,8 @@ async fn linux_observe_agrees_across_sessions() {
 
 #[tokio::test]
 async fn macos_lock_is_measured_via_loginwindow_frontmost() {
-    let cgsession = "'/System/Library/CoreServices/Menu Extras/User.menu/Contents/Resources/CGSession'";
+    let cgsession =
+        "'/System/Library/CoreServices/Menu Extras/User.menu/Contents/Resources/CGSession'";
     let runner = FakeRunner::new(vec![
         (&[cgsession, "-suspend"], 0, ""),
         (
@@ -506,7 +676,10 @@ async fn macos_lock_is_measured_via_loginwindow_frontmost() {
     ]);
     let mut adapter = mk_adapter(macos_caps(), runner.clone(), false);
     let resource = mk_resource(&[CommandKind::SessionLock, CommandKind::VolumeSet]);
-    adapter.apply(&resource, &Command::SessionLock { locked: true }).await.unwrap();
+    adapter
+        .apply(&resource, &Command::SessionLock { locked: true })
+        .await
+        .unwrap();
     assert_eq!(runner.remote_tails()[0], vec![cgsession, "-suspend"]);
     let observation = adapter.observe(&resource).await.unwrap();
     assert_eq!(
@@ -523,7 +696,10 @@ async fn macos_lock_is_measured_via_loginwindow_frontmost() {
     assert!(Command::VolumeSet { percent: 35 }.matches(&observation.state));
     // macOS cannot be unlocked remotely either.
     assert_eq!(
-        adapter.apply(&resource, &Command::SessionLock { locked: false }).await.unwrap_err(),
+        adapter
+            .apply(&resource, &Command::SessionLock { locked: false })
+            .await
+            .unwrap_err(),
         AdapterError::Unsupported
     );
 }
@@ -533,11 +709,17 @@ async fn macos_lock_is_measured_via_loginwindow_frontmost() {
 #[tokio::test]
 async fn app_launch_is_allowlisted_per_os() {
     // Windows token, quoted for cmd.
-    let runner = FakeRunner::script(&[&["cmd.exe", "/c", "start", "\"\"", "\"C:\\Tools\\notes.exe\""]]);
+    let runner =
+        FakeRunner::script(&[&["cmd.exe", "/c", "start", "\"\"", "\"C:\\Tools\\notes.exe\""]]);
     let mut adapter = mk_adapter(windows_caps(), runner.clone(), false);
     let resource = mk_resource(&[CommandKind::AppLaunch]);
     adapter
-        .apply(&resource, &Command::AppLaunch { app_id: "notes".into() })
+        .apply(
+            &resource,
+            &Command::AppLaunch {
+                app_id: "notes".into(),
+            },
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -547,7 +729,12 @@ async fn app_launch_is_allowlisted_per_os() {
     // An app_id outside the table never reaches a process.
     assert_eq!(
         adapter
-            .apply(&resource, &Command::AppLaunch { app_id: "notepad".into() })
+            .apply(
+                &resource,
+                &Command::AppLaunch {
+                    app_id: "notepad".into()
+                }
+            )
             .await
             .unwrap_err(),
         AdapterError::Unsupported
@@ -569,14 +756,26 @@ async fn unprobed_capabilities_are_unsupported_without_acting() {
     };
     let runner = FakeRunner::new(vec![]);
     let mut adapter = mk_adapter(caps, runner.clone(), false);
-    let resource = mk_resource(&[CommandKind::VolumeSet, CommandKind::AppLaunch, CommandKind::SessionLock]);
+    let resource = mk_resource(&[
+        CommandKind::VolumeSet,
+        CommandKind::AppLaunch,
+        CommandKind::SessionLock,
+    ]);
     assert_eq!(
-        adapter.apply(&resource, &Command::VolumeSet { percent: 50 }).await.unwrap_err(),
+        adapter
+            .apply(&resource, &Command::VolumeSet { percent: 50 })
+            .await
+            .unwrap_err(),
         AdapterError::Unsupported
     );
     assert_eq!(
         adapter
-            .apply(&resource, &Command::AppLaunch { app_id: "firefox".into() })
+            .apply(
+                &resource,
+                &Command::AppLaunch {
+                    app_id: "firefox".into()
+                }
+            )
             .await
             .unwrap_err(),
         AdapterError::Unsupported
@@ -602,17 +801,26 @@ async fn power_actions_are_doubly_gated() {
     // Config gate off: refused without spawning.
     let runner = FakeRunner::new(vec![]);
     let adapter = mk_adapter(windows_caps(), runner.clone(), false);
-    assert_eq!(adapter.shutdown().await.unwrap_err(), AdapterError::Unsupported);
+    assert_eq!(
+        adapter.shutdown().await.unwrap_err(),
+        AdapterError::Unsupported
+    );
     assert!(runner.calls().is_empty());
     // Probe gate off: refused without spawning.
     let mut caps = windows_caps();
     caps.power = false;
     let runner = FakeRunner::new(vec![]);
     let adapter = mk_adapter(caps, runner.clone(), true);
-    assert_eq!(adapter.reboot().await.unwrap_err(), AdapterError::Unsupported);
+    assert_eq!(
+        adapter.reboot().await.unwrap_err(),
+        AdapterError::Unsupported
+    );
     assert!(runner.calls().is_empty());
     // Both gates open: exact argv per OS.
-    let runner = FakeRunner::script(&[&["shutdown.exe", "/s", "/t", "0"], &["shutdown.exe", "/r", "/t", "0"]]);
+    let runner = FakeRunner::script(&[
+        &["shutdown.exe", "/s", "/t", "0"],
+        &["shutdown.exe", "/r", "/t", "0"],
+    ]);
     let adapter = mk_adapter(windows_caps(), runner.clone(), true);
     adapter.shutdown().await.unwrap();
     adapter.reboot().await.unwrap();
@@ -635,18 +843,37 @@ async fn unreachable_host_and_bad_output_are_honest_errors() {
     let runner = FakeRunner::new(vec![]);
     let mut adapter = mk_adapter(linux_caps(), runner.clone(), false);
     let resource = mk_resource(&[CommandKind::SessionLock]);
-    assert_eq!(adapter.observe(&resource).await.unwrap_err(), AdapterError::Unavailable);
+    assert_eq!(
+        adapter.observe(&resource).await.unwrap_err(),
+        AdapterError::Unavailable
+    );
 
     // Unparseable lock read-back: the field is unknown, volume still measured.
     let runner = FakeRunner::new(vec![
-        (&["loginctl", "list-sessions", "--no-legend"], 0, "not a session list\n"),
-        (&["pactl", "get-sink-volume", "@DEFAULT_SINK@"], 0, PACTL_VOLUME),
-        (&["xdotool", "getactivewindow", "getwindowclassname"], 0, "firefox\n"),
+        (
+            &["loginctl", "list-sessions", "--no-legend"],
+            0,
+            "not a session list\n",
+        ),
+        (
+            &["pactl", "get-sink-volume", "@DEFAULT_SINK@"],
+            0,
+            PACTL_VOLUME,
+        ),
+        (
+            &["xdotool", "getactivewindow", "getwindowclassname"],
+            0,
+            "firefox\n",
+        ),
     ]);
     let mut adapter = mk_adapter(linux_caps(), runner, false);
     let observation = adapter.observe(&resource).await.unwrap();
     match observation.state {
-        ResourceState::Host { session_locked, volume_percent, .. } => {
+        ResourceState::Host {
+            session_locked,
+            volume_percent,
+            ..
+        } => {
             assert_eq!(session_locked, None);
             assert_eq!(volume_percent, Some(60));
         }
@@ -660,13 +887,37 @@ async fn configuration_is_validated() {
     // Bad app token (quote would escape the remote quoting).
     let mut bad = target(false);
     bad.apps.insert("evil".into(), "x'; rm -rf /; '".into());
-    assert!(HostSsh::new("edge", "host-ssh", "workstation", bad, linux_caps(), runner.clone()).is_err());
+    assert!(HostSsh::new(
+        "edge",
+        "host-ssh",
+        "workstation",
+        bad,
+        linux_caps(),
+        runner.clone()
+    )
+    .is_err());
     let mut bad = target(false);
     bad.apps.insert("evil".into(), "C:\\%PATH%\\x.exe".into());
-    assert!(HostSsh::new("edge", "host-ssh", "workstation", bad, linux_caps(), runner.clone()).is_err());
+    assert!(HostSsh::new(
+        "edge",
+        "host-ssh",
+        "workstation",
+        bad,
+        linux_caps(),
+        runner.clone()
+    )
+    .is_err());
     let mut bad = target(false);
     bad.apps.insert("bad id".into(), "fine".into());
-    assert!(HostSsh::new("edge", "host-ssh", "workstation", bad, linux_caps(), runner.clone()).is_err());
+    assert!(HostSsh::new(
+        "edge",
+        "host-ssh",
+        "workstation",
+        bad,
+        linux_caps(),
+        runner.clone()
+    )
+    .is_err());
     // Unpaired resource is refused before anything runs.
     let mut adapter = mk_adapter(linux_caps(), runner.clone(), false);
     let mut unpaired = mk_resource(&[CommandKind::SessionLock]);
@@ -685,12 +936,25 @@ async fn configuration_is_validated() {
 async fn windows_volume_set_via_powershell_when_nircmd_absent() {
     let mut caps = windows_caps();
     caps.volume = Some(VolumeTool::PowerShell);
-    let runner = FakeRunner::script(&[&["powershell.exe", "-NoProfile", "-EncodedCommand", &ps_audio_set(80)]]);
+    let runner = FakeRunner::script(&[&[
+        "powershell.exe",
+        "-NoProfile",
+        "-EncodedCommand",
+        &ps_audio_set(80),
+    ]]);
     let mut adapter = mk_adapter(caps, runner.clone(), false);
     let resource = mk_resource(&[CommandKind::VolumeSet]);
-    adapter.apply(&resource, &Command::VolumeSet { percent: 80 }).await.unwrap();
+    adapter
+        .apply(&resource, &Command::VolumeSet { percent: 80 })
+        .await
+        .unwrap();
     assert_eq!(
         runner.remote_tails()[0],
-        vec!["powershell.exe", "-NoProfile", "-EncodedCommand", &ps_audio_set(80)]
+        vec![
+            "powershell.exe",
+            "-NoProfile",
+            "-EncodedCommand",
+            &ps_audio_set(80)
+        ]
     );
 }

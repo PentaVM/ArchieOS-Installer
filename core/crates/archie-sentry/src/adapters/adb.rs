@@ -60,13 +60,7 @@ use archie_types::Timestamp;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{
-    collections::BTreeMap,
-    net::IpAddr,
-    path::Path,
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::BTreeMap, net::IpAddr, path::Path, sync::Arc, time::Duration};
 
 /// Short adb calls: connect, devices, monkey, keyevent, volume set.
 const ADB_SHORT: Duration = Duration::from_secs(4);
@@ -202,8 +196,7 @@ pub fn parse_foreground(dumpsys_window: &str) -> Option<String> {
             let Some((package, _)) = token.split_once('/') else {
                 continue;
             };
-            let package =
-                package.trim_start_matches(|c: char| !c.is_ascii_alphanumeric());
+            let package = package.trim_start_matches(|c: char| !c.is_ascii_alphanumeric());
             if validate_id(package).is_ok() {
                 return Some(package.to_string());
             }
@@ -294,9 +287,9 @@ impl Adb {
             let serial = &target.serial;
             if serial.is_empty()
                 || serial.len() > 64
-                || !serial.bytes().all(|b| {
-                    b.is_ascii_alphanumeric() || matches!(b, b'.' | b':' | b'-' | b'_')
-                })
+                || !serial
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b':' | b'-' | b'_'))
             {
                 return Err(AdapterError::Protocol);
             }
@@ -340,7 +333,12 @@ impl Adb {
         }
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     }
-    fn shell(&self, serial: &str, command: &[&str], timeout: Duration) -> Result<String, AdapterError> {
+    fn shell(
+        &self,
+        serial: &str,
+        command: &[&str],
+        timeout: Duration,
+    ) -> Result<String, AdapterError> {
         let mut args = vec!["-s", serial, "shell"];
         args.extend_from_slice(command);
         self.run(&args, timeout)

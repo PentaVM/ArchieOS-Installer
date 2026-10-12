@@ -242,7 +242,10 @@ impl EdgeAdapter for Roku {
     fn adapter_id(&self) -> &str {
         &self.adapter
     }
-    async fn observe(&mut self, resource: &ResourceDescriptor) -> Result<Observation, AdapterError> {
+    async fn observe(
+        &mut self,
+        resource: &ResourceDescriptor,
+    ) -> Result<Observation, AdapterError> {
         let base = self.endpoint_of(resource)?.clone();
         let info = self.get_xml(&base, "query/device-info").await?;
         let power_on = parse_power(&info)?;

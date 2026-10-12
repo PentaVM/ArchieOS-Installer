@@ -4,10 +4,9 @@ use archie_sentry::{
     contracts::{Observation, ObservationOrigin, ResourceState},
     engine::{ExecutionResult, ExecutionStatus, Stage},
     feed::{
-        dedupe_events, diff_snapshots, from_execution_result, from_lan_inventory,
-        from_observation, from_passive_network, parse_event, EventKind,
-        EventPayload, EventSource, FeedError, FeedWriter, ReaderLimits, Snapshot,
-        WatchdogReader, MAX_FACT_VALUE_LEN,
+        dedupe_events, diff_snapshots, from_execution_result, from_lan_inventory, from_observation,
+        from_passive_network, parse_event, EventKind, EventPayload, EventSource, FeedError,
+        FeedWriter, ReaderLimits, Snapshot, WatchdogReader, MAX_FACT_VALUE_LEN,
     },
 };
 use archie_types::Timestamp;
@@ -325,7 +324,10 @@ fn reordered_facts_are_not_a_change() {
     };
     manual_a.devices.insert(
         "dev-1".into(),
-        BTreeMap::from([("a".to_string(), "1".to_string()), ("b".to_string(), "2".to_string())]),
+        BTreeMap::from([
+            ("a".to_string(), "1".to_string()),
+            ("b".to_string(), "2".to_string()),
+        ]),
     );
     let mut manual_b = Snapshot {
         taken_at: Some(Timestamp::from_millis(2)),
@@ -349,7 +351,10 @@ fn one_changed_fact_is_exactly_one_state_changed() {
     assert_eq!(event.subject, "192.168.1.40");
     assert_eq!(event.observed_at, after.taken_at);
     match &event.payload {
-        EventPayload::DeviceFacts { facts, changed_keys } => {
+        EventPayload::DeviceFacts {
+            facts,
+            changed_keys,
+        } => {
             assert_eq!(changed_keys, &["state.showing".to_string()]);
             assert_eq!(facts["state.showing"], "YouTube");
         }
@@ -487,11 +492,8 @@ fn watchdog_reads_only_complete_lines() {
     let mut reader = WatchdogReader::new(&dir);
     assert!(reader.poll().unwrap().is_empty(), "partial tail must wait");
     use std::io::Write;
-    let mut handle = fs::OpenOptions::new()
-        .append(true)
-        .open(&file)
-        .unwrap();
-    write!(handle, "{}\n", &complete[split..]).unwrap();
+    let mut handle = fs::OpenOptions::new().append(true).open(&file).unwrap();
+    writeln!(handle, "{}", &complete[split..]).unwrap();
     drop(handle);
     let events = reader.poll().unwrap();
     assert_eq!(events.len(), 1);
@@ -553,7 +555,10 @@ fn watchdog_reduces_unknown_names_to_a_count() {
     let file = dir.join("watch.jsonl");
     let line = watchdog_line(
         "192.168.1.20",
-        &["Printer._ipp._tcp.local", "Alice's iPhone._apple-mobdev2._tcp.local"],
+        &[
+            "Printer._ipp._tcp.local",
+            "Alice's iPhone._apple-mobdev2._tcp.local",
+        ],
         Some(1_790_000_001.0),
     );
     fs::write(&file, format!("{line}\n")).unwrap();
@@ -561,7 +566,10 @@ fn watchdog_reduces_unknown_names_to_a_count() {
     let events = reader.poll().unwrap();
     assert_eq!(events.len(), 1);
     let serialized = serde_json::to_string(&events[0]).unwrap();
-    assert!(!serialized.contains("Alice"), "personal names never enter the feed");
+    assert!(
+        !serialized.contains("Alice"),
+        "personal names never enter the feed"
+    );
     match &events[0].payload {
         EventPayload::WatchdogTraffic {
             services,
@@ -586,7 +594,11 @@ fn watchdog_handles_rotation_to_a_new_file() {
     assert_eq!(reader.poll().unwrap().len(), 1);
     // Rotate: the watchdog moves the old file away and starts a new one.
     fs::rename(&file, dir.join("watch.1.jsonl")).unwrap();
-    let second = watchdog_line("192.168.1.31", &["Hub._home-assistant._tcp.local"], Some(2.0));
+    let second = watchdog_line(
+        "192.168.1.31",
+        &["Hub._home-assistant._tcp.local"],
+        Some(2.0),
+    );
     fs::write(&file, format!("{second}\n")).unwrap();
     let events = reader.poll().unwrap();
     let subjects: Vec<_> = events.iter().map(|e| e.subject.as_str()).collect();
@@ -615,7 +627,11 @@ fn watchdog_enforces_the_byte_bound_across_polls() {
             )
         })
         .collect();
-    fs::write(&file, lines.iter().map(|l| format!("{l}\n")).collect::<String>()).unwrap();
+    fs::write(
+        &file,
+        lines.iter().map(|l| format!("{l}\n")).collect::<String>(),
+    )
+    .unwrap();
     // One complete line plus a few bytes per poll.
     let cap = lines[0].len() + 6;
     let limits = ReaderLimits {

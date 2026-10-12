@@ -35,45 +35,94 @@ async fn run() -> Result<bool, String> {
     let (Some(printer), true) = (printer, text.is_some() != (arguments.len() == 1)) else {
         return Err("usage: archie-print --printer ipp://ADDRESS/ipp/print [--expect-uuid UUID] (FILE | --text TEXT)".into());
     };
-    let client = IppClient::new(&printer).map_err(|_| "the printer must be an ipp:// or ipps:// address on the local network, with a path".to_string())?;
-    let snapshot = client.get_printer_attributes(1).await.map_err(|e| format!("the printer did not answer ({e})"))?;
+    let client = IppClient::new(&printer).map_err(|_| {
+        "the printer must be an ipp:// or ipps:// address on the local network, with a path"
+            .to_string()
+    })?;
+    let snapshot = client
+        .get_printer_attributes(1)
+        .await
+        .map_err(|e| format!("the printer did not answer ({e})"))?;
     if expected.is_some() && snapshot.uuid != expected {
-        return Err(format!("this is not the expected printer: it says it is {}", snapshot.uuid.as_deref().unwrap_or("nothing")));
+        return Err(format!(
+            "this is not the expected printer: it says it is {}",
+            snapshot.uuid.as_deref().unwrap_or("nothing")
+        ));
     }
     if snapshot.state == PrinterState::Stopped || snapshot.accepting_jobs == Some(false) {
-        return Err(format!("the printer is not taking jobs: {:?}, {}", snapshot.state, snapshot.reasons.join(", ")));
+        return Err(format!(
+            "the printer is not taking jobs: {:?}, {}",
+            snapshot.state,
+            snapshot.reasons.join(", ")
+        ));
     }
     let accepts = |format: &str| snapshot.document_formats.iter().any(|f| f == format);
 
     let (name, format, documents): (String, &str, Vec<Vec<u8>>) = match (&text, arguments.first()) {
         (None, Some(path)) => {
             let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
-            let name = std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or("document").to_string();
+            let name = std::path::Path::new(path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("document")
+                .to_string();
             match format_of(&bytes) {
                 Some(format) if accepts(format) => (name, format, vec![bytes]),
-                Some(format) => return Err(format!("{path} is {format}, and this printer takes only {}", snapshot.document_formats.join(", "))),
+                Some(format) => {
+                    return Err(format!(
+                        "{path} is {format}, and this printer takes only {}",
+                        snapshot.document_formats.join(", ")
+                    ))
+                }
                 None => match String::from_utf8(bytes) {
-                    Ok(written) => (name, "image/jpeg", page::pages(&written).map_err(|e| e.to_string())?),
-                    Err(_) => return Err(format!("{path} is neither text nor a PDF, JPEG, PWG or URF document")),
+                    Ok(written) => (
+                        name,
+                        "image/jpeg",
+                        page::pages(&written).map_err(|e| e.to_string())?,
+                    ),
+                    Err(_) => {
+                        return Err(format!(
+                            "{path} is neither text nor a PDF, JPEG, PWG or URF document"
+                        ))
+                    }
                 },
             }
         }
-        (Some(written), _) => ("Archie".to_string(), "image/jpeg", page::pages(written).map_err(|e| e.to_string())?),
+        (Some(written), _) => (
+            "Archie".to_string(),
+            "image/jpeg",
+            page::pages(written).map_err(|e| e.to_string())?,
+        ),
         (None, None) => unreachable!("checked above"),
     };
     if !accepts(format) {
-        return Err(format!("this printer does not take {format}; it takes {}", snapshot.document_formats.join(", ")));
+        return Err(format!(
+            "this printer does not take {format}; it takes {}",
+            snapshot.document_formats.join(", ")
+        ));
     }
     let mut digest = Sha256::new();
-    documents.iter().for_each(|document| digest.update(document));
+    documents
+        .iter()
+        .for_each(|document| digest.update(document));
     let digest = format!("{:x}", digest.finalize());
 
-    eprintln!("printer:  {} ({})", snapshot.name.as_deref().unwrap_or("unnamed"), snapshot.uuid.as_deref().unwrap_or("no UUID"));
-    eprintln!("document: {name}, {} page job(s) as {format}, sha256 {digest}", documents.len());
+    eprintln!(
+        "printer:  {} ({})",
+        snapshot.name.as_deref().unwrap_or("unnamed"),
+        snapshot.uuid.as_deref().unwrap_or("no UUID")
+    );
+    eprintln!(
+        "document: {name}, {} page job(s) as {format}, sha256 {digest}",
+        documents.len()
+    );
     eprint!("Type print to send it: ");
     std::io::stderr().flush().ok();
     let mut answer = String::new();
-    std::io::stdin().lock().read_line(&mut answer).map_err(|e| e.to_string())?;
+    std::io::stdin()
+        .lock()
+        .read_line(&mut answer)
+        .map_err(|e| e.to_string())?;
     if answer.trim() != "print" {
         return Err("not sent".into());
     }
@@ -83,8 +132,20 @@ async fn run() -> Result<bool, String> {
     let mut all_completed = true;
     for (index, document) in documents.iter().enumerate() {
         request_id += 1;
-        let job_name = if documents.len() == 1 { name.clone() } else { format!("{name} ({}/{})", index + 1, documents.len()) };
-        let mut job = client.print_job(request_id, &job_name, format, document).await.map_err(|e| format!("job {} was not accepted ({e}); it is not sent again", index + 1))?;
+        let job_name = if documents.len() == 1 {
+            name.clone()
+        } else {
+            format!("{name} ({}/{})", index + 1, documents.len())
+        };
+        let mut job = client
+            .print_job(request_id, &job_name, format, document)
+            .await
+            .map_err(|e| {
+                format!(
+                    "job {} was not accepted ({e}); it is not sent again",
+                    index + 1
+                )
+            })?;
         let started = std::time::Instant::now();
         while !job.state.ended() && started.elapsed() < FOLLOW_FOR {
             tokio::time::sleep(Duration::from_secs(2)).await;
@@ -107,7 +168,10 @@ async fn run() -> Result<bool, String> {
         "jobs": jobs,
         "completed": all_completed,
     });
-    println!("{}", serde_json::to_string_pretty(&receipt).expect("a receipt serializes"));
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&receipt).expect("a receipt serializes")
+    );
     Ok(all_completed)
 }
 

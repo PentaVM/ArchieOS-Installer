@@ -1,4 +1,6 @@
 //! Trusted operator configuration; secret contents never serialize into this type.
+/// Re-exported for `archie sentry cast-probe`: a handshake that only reports.
+pub use archie_sentry::adapters::chromecast::probe_certificate as probe_cast_certificate;
 use archie_sentry::{
     adapters::{
         adb::{Adb, AndroidTarget},
@@ -15,8 +17,6 @@ use archie_sentry::{
     contracts::{validate_id, CommandKind},
     engine::AdapterError,
 };
-/// Re-exported for `archie sentry cast-probe`: a handshake that only reports.
-pub use archie_sentry::adapters::chromecast::probe_certificate as probe_cast_certificate;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -265,12 +265,9 @@ pub struct ContextFeedSection {
 }
 impl ContextFeedSection {
     fn validate(&self) -> Result<(), AdapterError> {
-        let dir = |value: &str| {
-            value.len() <= 512 && !value.is_empty() && Path::new(value).is_absolute()
-        };
-        if !dir(&self.watchdog_dir)
-            || !dir(&self.out_dir)
-            || !(500..=60000).contains(&self.poll_ms)
+        let dir =
+            |value: &str| value.len() <= 512 && !value.is_empty() && Path::new(value).is_absolute();
+        if !dir(&self.watchdog_dir) || !dir(&self.out_dir) || !(500..=60000).contains(&self.poll_ms)
         {
             return Err(AdapterError::Protocol);
         }
@@ -359,12 +356,8 @@ impl RouterBinding {
                     "/usr/bin/ssh"
                 };
                 let binary = binding.binary.as_deref().unwrap_or(default_binary);
-                let mut config = SshConfig::new(
-                    binary,
-                    &binding.user,
-                    host,
-                    binding.identity_file.clone(),
-                )?;
+                let mut config =
+                    SshConfig::new(binary, &binding.user, host, binding.identity_file.clone())?;
                 if let Some(port) = binding.port {
                     config = config.with_port(port)?;
                 }
@@ -748,7 +741,11 @@ impl SentrySection {
         if self.roku.iter().any(|r| r.resource_id == resource_id) {
             return Some(("roku", RokuBinding::capabilities()));
         }
-        if self.chromecasts.iter().any(|c| c.resource_id == resource_id) {
+        if self
+            .chromecasts
+            .iter()
+            .any(|c| c.resource_id == resource_id)
+        {
             return Some(("cast", Chromecast::CAPABILITIES.to_vec()));
         }
         if self

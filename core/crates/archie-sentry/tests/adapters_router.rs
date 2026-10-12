@@ -213,14 +213,16 @@ fn igd_handle(state: &Arc<Mutex<IgdState>>, request: &[u8]) -> (&'static str, St
         let proto = field(body, "NewProtocol").unwrap();
         if state.mappings.contains_key(&(port, proto.clone())) {
             let fields = specific_fields(&state, port, &proto);
-            ("200 OK", soap_ok("GetSpecificPortMappingEntryResponse", &fields))
+            (
+                "200 OK",
+                soap_ok("GetSpecificPortMappingEntryResponse", &fields),
+            )
         } else {
             ("500 Internal Server Error", soap_fault(714))
         }
     } else if lower.contains("#getgenericportmappingentry") {
         let index: usize = field(body, "NewPortMappingIndex").unwrap().parse().unwrap();
-        if let Some(((port, proto), (internal, client, enabled))) =
-            state.mappings.iter().nth(index)
+        if let Some(((port, proto), (internal, client, enabled))) = state.mappings.iter().nth(index)
         {
             let fields = format!(
                 "<NewRemoteHost></NewRemoteHost>\
@@ -233,7 +235,10 @@ fn igd_handle(state: &Arc<Mutex<IgdState>>, request: &[u8]) -> (&'static str, St
                  <NewLeaseDuration>0</NewLeaseDuration>",
                 if *enabled { 1 } else { 0 }
             );
-            ("200 OK", soap_ok("GetGenericPortMappingEntryResponse", &fields))
+            (
+                "200 OK",
+                soap_ok("GetGenericPortMappingEntryResponse", &fields),
+            )
         } else {
             ("500 Internal Server Error", soap_fault(713))
         }
@@ -377,10 +382,11 @@ async fn add_port_mapping_request_body_is_correct_and_mapping_readback_verifies(
 #[tokio::test]
 async fn delete_port_mapping_readback_reports_absent() {
     let state = Arc::new(Mutex::new(IgdState::default()));
-    state.lock().unwrap().mappings.insert(
-        (9090, "UDP".to_string()),
-        (9090, LAN_CLIENT, true),
-    );
+    state
+        .lock()
+        .unwrap()
+        .mappings
+        .insert((9090, "UDP".to_string()), (9090, LAN_CLIENT, true));
     let (url, task) = igd_server(2, state).await;
     let mut adapter = igd_adapter(&url, true);
     let command = Command::PortMapping {
@@ -410,7 +416,10 @@ async fn delete_port_mapping_readback_reports_absent() {
 async fn fresh_observe_reports_unknown_and_sends_nothing() {
     let (url, task) = igd_server(0, Arc::new(Mutex::new(IgdState::default()))).await;
     let mut adapter = igd_adapter(&url, true);
-    let observation = adapter.observe(&resource(&[CommandKind::PortMapping])).await.unwrap();
+    let observation = adapter
+        .observe(&resource(&[CommandKind::PortMapping]))
+        .await
+        .unwrap();
     assert_eq!(
         observation.state,
         ResourceState::Router {
@@ -418,7 +427,10 @@ async fn fresh_observe_reports_unknown_and_sends_nothing() {
             wifi_enabled: None,
         }
     );
-    assert!(task.await.unwrap().is_empty(), "no watch target, no traffic");
+    assert!(
+        task.await.unwrap().is_empty(),
+        "no watch target, no traffic"
+    );
 }
 
 #[tokio::test]
@@ -545,7 +557,9 @@ async fn non_router_commands_are_unsupported_without_traffic() {
         Command::WakeHost,
     ] {
         assert_eq!(
-            adapter.apply(&resource(&[CommandKind::PortMapping]), &command).await,
+            adapter
+                .apply(&resource(&[CommandKind::PortMapping]), &command)
+                .await,
             Err(AdapterError::Unsupported)
         );
     }
@@ -574,10 +588,11 @@ async fn unpaired_or_foreign_resource_is_rejected() {
 #[tokio::test]
 async fn specific_entry_fields_parse_and_714_means_absent() {
     let state = Arc::new(Mutex::new(IgdState::default()));
-    state.lock().unwrap().mappings.insert(
-        (8080, "TCP".to_string()),
-        (8080, LAN_CLIENT, true),
-    );
+    state
+        .lock()
+        .unwrap()
+        .mappings
+        .insert((8080, "TCP".to_string()), (8080, LAN_CLIENT, true));
     let (url, task) = igd_server(2, state).await;
     let igd = IgdClient::new(&format!("{url}/upnp/control/WANIPConnection1")).unwrap();
     let entry = igd
@@ -621,17 +636,16 @@ async fn generic_enumeration_is_bounded_and_ends_on_713() {
     assert_eq!(entries[0].protocol, PortProtocol::Tcp);
     assert_eq!(entries[1].external_port, 9090);
     assert_eq!(entries[1].protocol, PortProtocol::Udp);
-    assert!(entries.iter().all(|e| e.enabled && e.internal_client == LAN_CLIENT));
+    assert!(entries
+        .iter()
+        .all(|e| e.enabled && e.internal_client == LAN_CLIENT));
     // Two entries plus the terminating 713: exactly three requests.
     assert_eq!(task.await.unwrap().len(), 3);
 }
 
 // ---------- SSH channel ----------
 
-fn ssh_adapter(
-    runner: Arc<FakeRunner>,
-    capabilities: RouterCapabilities,
-) -> RouterAdapter {
+fn ssh_adapter(runner: Arc<FakeRunner>, capabilities: RouterCapabilities) -> RouterAdapter {
     RouterAdapter::new(
         "edge",
         "router",
@@ -723,11 +737,17 @@ async fn wifi_without_probed_radio_tool_is_unsupported_and_spawns_nothing() {
     let mut adapter = ssh_adapter(runner.clone(), caps(false, true, &[]));
     assert_eq!(
         adapter
-            .apply(&resource(&[CommandKind::WifiSet]), &Command::WifiSet { on: true })
+            .apply(
+                &resource(&[CommandKind::WifiSet]),
+                &Command::WifiSet { on: true }
+            )
             .await,
         Err(AdapterError::Unsupported)
     );
-    let observation = adapter.observe(&resource(&[CommandKind::WifiSet])).await.unwrap();
+    let observation = adapter
+        .observe(&resource(&[CommandKind::WifiSet]))
+        .await
+        .unwrap();
     assert_eq!(
         observation.state,
         ResourceState::Router {
@@ -742,7 +762,10 @@ async fn wifi_without_probed_radio_tool_is_unsupported_and_spawns_nothing() {
 async fn nonzero_ssh_exit_is_unavailable() {
     let runner = FakeRunner::new(vec![]); // everything exits 255
     let channel = SshChannel::new(ssh_config(), runner);
-    assert_eq!(channel.run_named("ip_neigh"), Err(AdapterError::Unavailable));
+    assert_eq!(
+        channel.run_named("ip_neigh"),
+        Err(AdapterError::Unavailable)
+    );
 }
 
 #[tokio::test]
@@ -752,7 +775,10 @@ async fn command_outside_the_table_is_unsupported_without_spawning() {
     for name in ["factory_reset", "reboot", "rm_rf", ""] {
         assert_eq!(channel.run_named(name), Err(AdapterError::Unsupported));
     }
-    assert!(runner.calls().is_empty(), "nothing outside the table may spawn");
+    assert!(
+        runner.calls().is_empty(),
+        "nothing outside the table may spawn"
+    );
 }
 
 // ---------- client list parsers ----------
@@ -856,7 +882,11 @@ async fn probe_igd_only() {
 #[tokio::test]
 async fn probe_ssh_only() {
     let runner = FakeRunner::new(vec![
-        (&["ip", "link"], 0, "1: lo: <LOOPBACK>\n2: br0: <BROADCAST>\n"),
+        (
+            &["ip", "link"],
+            0,
+            "1: lo: <LOOPBACK>\n2: br0: <BROADCAST>\n",
+        ),
         (
             &["cat", "/tmp/dhcp.leases"],
             0,
@@ -899,7 +929,10 @@ async fn probe_both_channels() {
     let capabilities = probe_router(Some(&igd), Some(&channel)).await;
     assert!(capabilities.igd && capabilities.ssh);
     assert_eq!(capabilities.radio_tools, vec!["wl".to_string()]);
-    assert_eq!(capabilities.dhcp_leases_path, None, "no leases file answered");
+    assert_eq!(
+        capabilities.dhcp_leases_path, None,
+        "no leases file answered"
+    );
     assert_eq!(capabilities.firmware_hint, None);
     assert_eq!(task.await.unwrap().len(), 1);
 }

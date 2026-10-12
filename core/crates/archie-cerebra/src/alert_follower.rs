@@ -242,7 +242,9 @@ impl FollowReport {
 /// keys them (`moved <address>`). An unreadable told file yields an empty map —
 /// the count is enrichment, never a reason to drop the alert.
 fn told_counts(path: Option<&Path>) -> BTreeMap<String, u64> {
-    let Some(path) = path else { return BTreeMap::new() };
+    let Some(path) = path else {
+        return BTreeMap::new();
+    };
     let Ok(bytes) = std::fs::read(path) else {
         return BTreeMap::new();
     };
@@ -324,7 +326,7 @@ fn read_new_lines(path: &Path, offset: u64) -> Result<Option<(Vec<String>, u64)>
         }
         lines.push(String::from_utf8_lossy(raw).into_owned());
     }
-    Ok((lines, offset + end as u64)).map(Some)
+    Ok(Some((lines, offset + end as u64)))
 }
 
 /// A Cerebra with the default router, gateway and config — what a local
@@ -407,10 +409,20 @@ pub fn follow_alerts_once(
 
     if !alerts.is_empty() {
         let mut vault = vault_io::open_vault(&paths.vault_dir)?;
-        let domain = ContextDomain::personal("owner")
-            .map_err(|e| FollowerError::Io(format!("the sentry domain is fixed and must parse: {e}")))?;
+        let domain = ContextDomain::personal("owner").map_err(|e| {
+            FollowerError::Io(format!("the sentry domain is fixed and must parse: {e}"))
+        })?;
         for batch in alerts.chunks(MAX_ALERTS_PER_BATCH) {
-            consider_batch(cerebra, &mut vault, models, &domain, task_id, batch, now_ms, &mut report)?;
+            consider_batch(
+                cerebra,
+                &mut vault,
+                models,
+                &domain,
+                task_id,
+                batch,
+                now_ms,
+                &mut report,
+            )?;
         }
         // Vault first, journal second: a crash between them re-reads alerts the
         // vault then dedupes; the other order could lose them.
@@ -423,6 +435,7 @@ pub fn follow_alerts_once(
 /// One batch through the bridge. A batch that fails validation is retried
 /// alert by alert: the malformed ones are counted and skipped, the rest still
 /// record — one bad line must not wedge the follower behind itself forever.
+#[allow(clippy::too_many_arguments)]
 fn consider_batch(
     cerebra: &Cerebra,
     vault: &mut archie_vault::Vault,
@@ -433,22 +446,35 @@ fn consider_batch(
     now_ms: i64,
     report: &mut FollowReport,
 ) -> Result<(), FollowerError> {
-    let mut attempt = |alerts: &[AlertInput], report: &mut FollowReport| -> Result<bool, FollowerError> {
-        let trace_id = TraceId::new();
-        match consider_alerts(cerebra, vault, models, domain, task_id, alerts, trace_id, now_ms) {
-            Ok(AlertPassOutcome::NoAlerts) => Ok(true),
-            Ok(AlertPassOutcome::Reasoning { records, .. }) => {
-                report.passes.push(PassSummary { trace_id, records: records.len(), refusal: None });
-                Ok(true)
+    let mut attempt =
+        |alerts: &[AlertInput], report: &mut FollowReport| -> Result<bool, FollowerError> {
+            let trace_id = TraceId::new();
+            match consider_alerts(
+                cerebra, vault, models, domain, task_id, alerts, trace_id, now_ms,
+            ) {
+                Ok(AlertPassOutcome::NoAlerts) => Ok(true),
+                Ok(AlertPassOutcome::Reasoning { records, .. }) => {
+                    report.passes.push(PassSummary {
+                        trace_id,
+                        records: records.len(),
+                        refusal: None,
+                    });
+                    Ok(true)
+                }
+                Ok(AlertPassOutcome::Refused {
+                    refusal, records, ..
+                }) => {
+                    report.passes.push(PassSummary {
+                        trace_id,
+                        records: records.len(),
+                        refusal: Some(refusal),
+                    });
+                    Ok(true)
+                }
+                Err(BridgeError::InvalidAlert { .. }) => Ok(false),
+                Err(other) => Err(FollowerError::Bridge(other)),
             }
-            Ok(AlertPassOutcome::Refused { refusal, records, .. }) => {
-                report.passes.push(PassSummary { trace_id, records: records.len(), refusal: Some(refusal) });
-                Ok(true)
-            }
-            Err(BridgeError::InvalidAlert { .. }) => Ok(false),
-            Err(other) => Err(FollowerError::Bridge(other)),
-        }
-    };
+        };
     if attempt(batch, report)? {
         return Ok(());
     }
@@ -465,8 +491,8 @@ mod tests {
     use super::*;
     use archie_router::Router;
     use archie_types::{
-        Availability, Capability, DataRetention, Locality, ModelDescriptor, ModelId,
-        PrivacyGrade, ProviderKind, TokenCost,
+        Availability, Capability, DataRetention, Locality, ModelDescriptor, ModelId, PrivacyGrade,
+        ProviderKind, TokenCost,
     };
     use archie_vault::{ContextGateway, VaultRef};
 
@@ -577,13 +603,27 @@ mod tests {
         fixture.append(&[&line]);
         let cerebra = cerebra();
 
-        let first = follow_alerts_once(&cerebra, &fixture.paths, &ModelRegistry::new(), "sentry-alerts", 20_000).unwrap();
+        let first = follow_alerts_once(
+            &cerebra,
+            &fixture.paths,
+            &ModelRegistry::new(),
+            "sentry-alerts",
+            20_000,
+        )
+        .unwrap();
         assert_eq!(first.alerts_fed, 1);
         let entries_after_first = fixture.vault_entries();
 
         // A "restart": a fresh call over the same files, with the journal the
         // first run persisted. Nothing is re-read, nothing re-fed.
-        let second = follow_alerts_once(&cerebra, &fixture.paths, &ModelRegistry::new(), "sentry-alerts", 21_000).unwrap();
+        let second = follow_alerts_once(
+            &cerebra,
+            &fixture.paths,
+            &ModelRegistry::new(),
+            "sentry-alerts",
+            21_000,
+        )
+        .unwrap();
         assert_eq!(second.alerts_fed, 0);
         assert!(second.passes.is_empty());
         assert_eq!(fixture.vault_entries(), entries_after_first);
@@ -592,7 +632,14 @@ mod tests {
         // re-read, and the vault's content-derived references absorb the
         // replay — the entries count does not move.
         std::fs::remove_file(&fixture.paths.journal).unwrap();
-        let third = follow_alerts_once(&cerebra, &fixture.paths, &ModelRegistry::new(), "sentry-alerts", 22_000).unwrap();
+        let third = follow_alerts_once(
+            &cerebra,
+            &fixture.paths,
+            &ModelRegistry::new(),
+            "sentry-alerts",
+            22_000,
+        )
+        .unwrap();
         assert_eq!(third.alerts_fed, 1);
         assert_eq!(fixture.vault_entries(), entries_after_first);
     }
@@ -607,7 +654,14 @@ mod tests {
             format!("{}\n{{\"at_ms\":15", new_device_line(10_000)),
         )
         .unwrap();
-        let first = follow_alerts_once(&cerebra, &fixture.paths, &ModelRegistry::new(), "sentry-alerts", 20_000).unwrap();
+        let first = follow_alerts_once(
+            &cerebra,
+            &fixture.paths,
+            &ModelRegistry::new(),
+            "sentry-alerts",
+            20_000,
+        )
+        .unwrap();
         assert_eq!(first.alerts_fed, 1);
         assert_eq!(first.malformed_lines, 0);
 
@@ -620,7 +674,14 @@ mod tests {
             .unwrap()
             .write_all(rest.as_bytes())
             .unwrap();
-        let second = follow_alerts_once(&cerebra, &fixture.paths, &ModelRegistry::new(), "sentry-alerts", 21_000).unwrap();
+        let second = follow_alerts_once(
+            &cerebra,
+            &fixture.paths,
+            &ModelRegistry::new(),
+            "sentry-alerts",
+            21_000,
+        )
+        .unwrap();
         assert_eq!(second.alerts_fed, 1);
         assert_eq!(second.malformed_lines, 0);
         assert_eq!(fixture.vault_entries(), 2);
@@ -632,7 +693,14 @@ mod tests {
         let cerebra = cerebra();
         let one = new_device_line(10_000);
         fixture.append(&[&one]);
-        follow_alerts_once(&cerebra, &fixture.paths, &ModelRegistry::new(), "sentry-alerts", 20_000).unwrap();
+        follow_alerts_once(
+            &cerebra,
+            &fixture.paths,
+            &ModelRegistry::new(),
+            "sentry-alerts",
+            20_000,
+        )
+        .unwrap();
 
         // Two more alerts land, then netwatch rotates: alerts.jsonl becomes
         // alerts.1.jsonl and a fresh alerts.jsonl starts.
@@ -642,9 +710,19 @@ mod tests {
         let three = new_device_line(18_000);
         fixture.append(&[&three]);
 
-        let report = follow_alerts_once(&cerebra, &fixture.paths, &ModelRegistry::new(), "sentry-alerts", 21_000).unwrap();
+        let report = follow_alerts_once(
+            &cerebra,
+            &fixture.paths,
+            &ModelRegistry::new(),
+            "sentry-alerts",
+            21_000,
+        )
+        .unwrap();
         assert!(report.rotation_reset);
-        assert_eq!(report.alerts_fed, 2, "the rotated tail and the new file both feed");
+        assert_eq!(
+            report.alerts_fed, 2,
+            "the rotated tail and the new file both feed"
+        );
         // The vault holds all three distinct alerts, each once.
         assert_eq!(fixture.vault_entries(), 3);
     }
@@ -696,12 +774,7 @@ mod tests {
             .find(|r: &VaultRef| r.path().contains("/sentry/alerts/"))
             .expect("the alert was stored");
         let disclosure = vault
-            .disclose(
-                "test",
-                &reference,
-                PrivacyGrade::Restricted,
-                21_000,
-            )
+            .disclose("test", &reference, PrivacyGrade::Restricted, 21_000)
             .unwrap();
         let text = disclosure.text().unwrap();
         assert!(text.contains("\"occurrences\":3"), "stored record: {text}");
@@ -733,8 +806,14 @@ mod tests {
                 labels: BTreeMap::new(),
             })
             .unwrap();
-        let report = follow_alerts_once(&cerebra(), &fixture.paths, &models, "sentry-alerts", 20_000).unwrap();
+        let report =
+            follow_alerts_once(&cerebra(), &fixture.paths, &models, "sentry-alerts", 20_000)
+                .unwrap();
         assert_eq!(report.passes.len(), 1);
-        assert!(report.passes[0].reasoned(), "a local model reasons: {:?}", report.passes[0]);
+        assert!(
+            report.passes[0].reasoned(),
+            "a local model reasons: {:?}",
+            report.passes[0]
+        );
     }
 }

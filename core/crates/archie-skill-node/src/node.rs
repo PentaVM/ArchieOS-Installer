@@ -56,12 +56,18 @@ impl NodeConfig {
 
 /// Skill and contributor names: short, and safe as a path component on every system.
 pub fn valid_name(name: &str) -> bool {
-    (1..=32).contains(&name.len()) && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    (1..=32).contains(&name.len())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 /// Job ids: a start time, the kind and a skill name, so a little longer than a name.
 pub fn valid_job_id(id: &str) -> bool {
-    (1..=80).contains(&id.len()) && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    (1..=80).contains(&id.len())
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 /// Skills every node can train from data the trainer fetches by itself, and their sources
@@ -85,10 +91,14 @@ pub fn source_arg(config: &NodeConfig, source: &str) -> Result<String, String> {
         if !subsets.is_empty() && subsets.split(',').all(|subset| known.contains(&subset)) {
             return Ok(source.to_string());
         }
-        return Err("gui: sources are aitw, coat, mind2web, miniwob and guide, comma-separated".into());
+        return Err(
+            "gui: sources are aitw, coat, mind2web, miniwob and guide, comma-separated".into(),
+        );
     }
     if !valid_name(source) {
-        return Err("source is 'csgo', 'gui:<subsets>' or the name of a folder in work_dir/data".into());
+        return Err(
+            "source is 'csgo', 'gui:<subsets>' or the name of a folder in work_dir/data".into(),
+        );
     }
     let folder = config.work_dir.join("data").join(source);
     if !folder.is_dir() {
@@ -150,17 +160,31 @@ impl Job {
 
 /// The trainer's arguments for a job; the package goes to the job's own folder, never
 /// straight into `skills_dir`.
-pub fn trainer_args(config: &NodeConfig, job: &Job, steps: u32, package: Option<&Path>) -> Vec<String> {
+pub fn trainer_args(
+    config: &NodeConfig,
+    job: &Job,
+    steps: u32,
+    package: Option<&Path>,
+) -> Vec<String> {
     let dir = job.dir(config);
     let mut args = vec![
-        "-u".into(), "-m".into(), "archie_iris_foundry.skill_training".into(),
-        "--weights".into(), config.weights.display().to_string(),
-        "--skill".into(), job.skill.clone(),
-        "--source".into(), job.source.clone(),
-        "--skills-dir".into(), dir.join("skills").display().to_string(),
-        "--contributor".into(), config.contributor.clone(),
-        "--gpu".into(), config.gpu.clone(),
-        "--report".into(), dir.join("report.json").display().to_string(),
+        "-u".into(),
+        "-m".into(),
+        "archie_iris_foundry.skill_training".into(),
+        "--weights".into(),
+        config.weights.display().to_string(),
+        "--skill".into(),
+        job.skill.clone(),
+        "--source".into(),
+        job.source.clone(),
+        "--skills-dir".into(),
+        dir.join("skills").display().to_string(),
+        "--contributor".into(),
+        config.contributor.clone(),
+        "--gpu".into(),
+        config.gpu.clone(),
+        "--report".into(),
+        dir.join("report.json").display().to_string(),
     ];
     match package {
         Some(package) => args.extend(["--verify".into(), package.display().to_string()]),
@@ -177,7 +201,10 @@ pub fn spawn(config: &NodeConfig, job: &Job, args: &[String]) -> Result<u32, Str
     // What this node uses now is the baseline a new package has to beat.
     let current = config.skills_dir.join(format!("{}.skill", job.skill));
     if current.is_file() {
-        let _ = std::fs::copy(&current, dir.join("skills").join(format!("{}.skill", job.skill)));
+        let _ = std::fs::copy(
+            &current,
+            dir.join("skills").join(format!("{}.skill", job.skill)),
+        );
     }
     let start = |breakaway: bool| -> std::io::Result<u32> {
         let log = std::fs::File::create(dir.join("log.txt"))?;
@@ -194,7 +221,9 @@ pub fn spawn(config: &NodeConfig, job: &Job, args: &[String]) -> Result<u32, Str
     };
     // A session whose job object forbids breaking away refuses the first form; the trainer
     // then runs inside it, and a disconnect may end it (docs/SKILL-NODES.md).
-    start(true).or_else(|_| start(false)).map_err(|e| format!("could not start the trainer: {e}"))
+    start(true)
+        .or_else(|_| start(false))
+        .map_err(|e| format!("could not start the trainer: {e}"))
 }
 
 #[cfg(windows)]
@@ -205,7 +234,11 @@ fn detached(program: &Path, breakaway: bool) -> Command {
     const DETACHED: u32 = 0x0000_0008 | 0x0000_0200;
     const BREAKAWAY: u32 = 0x0100_0000;
     let mut command = Command::new(program);
-    command.creation_flags(if breakaway { DETACHED | BREAKAWAY } else { DETACHED });
+    command.creation_flags(if breakaway {
+        DETACHED | BREAKAWAY
+    } else {
+        DETACHED
+    });
     command
 }
 
@@ -219,16 +252,25 @@ fn detached(program: &Path, _breakaway: bool) -> Command {
 
 pub fn process_alive(pid: u32) -> bool {
     #[cfg(windows)]
-    let output = Command::new("tasklist").args(["/FI", &format!("PID eq {pid}"), "/NH"]).output();
+    let output = Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+        .output();
     #[cfg(not(windows))]
-    let output = Command::new("ps").args(["-p", &pid.to_string(), "-o", "pid="]).output();
-    output.map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string())).unwrap_or(false)
+    let output = Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "pid="])
+        .output();
+    output
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
+        .unwrap_or(false)
 }
 
 /// The GPU as `nvidia-smi` reports it now: name, memory used and total, use.
 pub fn gpu_now() -> Option<String> {
     let output = Command::new("nvidia-smi")
-        .args(["--query-gpu=name,memory.used,memory.total,utilization.gpu", "--format=csv,noheader"])
+        .args([
+            "--query-gpu=name,memory.used,memory.total,utilization.gpu",
+            "--format=csv,noheader",
+        ])
         .output()
         .ok()?;
     let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -246,9 +288,15 @@ mod tests {
 
     fn config(work: &Path) -> NodeConfig {
         NodeConfig {
-            contributor: "nelson".into(), gpu: "RTX 3070 8GB".into(), python: "python".into(),
-            foundry: work.join("archie-iris"), weights: work.join("base.pt"), skills_dir: work.join("skills"),
-            work_dir: work.to_path_buf(), board_repo: work.join("iris-skills"), board_branch: "main".into(),
+            contributor: "nelson".into(),
+            gpu: "RTX 3070 8GB".into(),
+            python: "python".into(),
+            foundry: work.join("archie-iris"),
+            weights: work.join("base.pt"),
+            skills_dir: work.join("skills"),
+            work_dir: work.to_path_buf(),
+            board_repo: work.join("iris-skills"),
+            board_branch: "main".into(),
             public_url: String::new(),
         }
     }
@@ -259,14 +307,24 @@ mod tests {
         for bad in ["", "../etc", "a/b", "C:", "x".repeat(33).as_str()] {
             assert!(!valid_name(bad), "{bad}");
         }
-        let work = std::env::temp_dir().join(format!("archie-skill-node-test-{}", std::process::id()));
+        let work =
+            std::env::temp_dir().join(format!("archie-skill-node-test-{}", std::process::id()));
         std::fs::create_dir_all(work.join("data").join("kdenlive")).unwrap();
         let config = config(&work);
         assert_eq!(source_arg(&config, "csgo").unwrap(), "csgo");
-        assert_eq!(source_arg(&config, "gui:aitw,coat").unwrap(), "gui:aitw,coat");
-        assert!(source_arg(&config, "gui:").is_err() && source_arg(&config, "gui:aitw,../x").is_err());
-        assert!(READY_SOURCES.iter().all(|(_, source)| source_arg(&config, source).is_ok()));
-        assert!(source_arg(&config, "kdenlive").unwrap().ends_with("kdenlive"));
+        assert_eq!(
+            source_arg(&config, "gui:aitw,coat").unwrap(),
+            "gui:aitw,coat"
+        );
+        assert!(
+            source_arg(&config, "gui:").is_err() && source_arg(&config, "gui:aitw,../x").is_err()
+        );
+        assert!(READY_SOURCES
+            .iter()
+            .all(|(_, source)| source_arg(&config, source).is_ok()));
+        assert!(source_arg(&config, "kdenlive")
+            .unwrap()
+            .ends_with("kdenlive"));
         assert!(source_arg(&config, "missing").is_err());
         assert!(source_arg(&config, "../../secrets").is_err());
         let _ = std::fs::remove_dir_all(&work);
@@ -276,13 +334,23 @@ mod tests {
     fn a_job_trains_into_its_own_folder_and_says_who_trained_it() {
         let work = PathBuf::from("/work");
         let config = config(&work);
-        let job = Job { id: "20260930-csgo".into(), kind: "train".into(), skill: "csgo".into(), source: "csgo".into(),
-                        candidate: String::new(), pid: 0, started: 0 };
+        let job = Job {
+            id: "20260930-csgo".into(),
+            kind: "train".into(),
+            skill: "csgo".into(),
+            source: "csgo".into(),
+            candidate: String::new(),
+            pid: 0,
+            started: 0,
+        };
         let args = trainer_args(&config, &job, 300, None);
         let at = |flag: &str| args[args.iter().position(|a| a == flag).unwrap() + 1].clone();
         assert_eq!(at("--contributor"), "nelson");
         assert_eq!(at("--steps"), "300");
-        assert!(at("--skills-dir").contains("20260930-csgo"), "never straight into the skills in use");
+        assert!(
+            at("--skills-dir").contains("20260930-csgo"),
+            "never straight into the skills in use"
+        );
         let check = trainer_args(&config, &job, 300, Some(Path::new("/work/candidate.skill")));
         assert!(check.contains(&"--verify".to_string()) && !check.contains(&"--steps".to_string()));
     }

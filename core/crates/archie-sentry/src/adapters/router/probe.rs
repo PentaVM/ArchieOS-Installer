@@ -32,10 +32,7 @@ pub struct RouterCapabilities {
 /// Probe both channels. Either side may be absent from configuration
 /// (`None`) or simply not answer; both cases read the same in the result.
 /// All SSH probing is read-only — the probe never actuates.
-pub async fn probe_router(
-    igd: Option<&IgdClient>,
-    ssh: Option<&SshChannel>,
-) -> RouterCapabilities {
+pub async fn probe_router(igd: Option<&IgdClient>, ssh: Option<&SshChannel>) -> RouterCapabilities {
     let mut capabilities = RouterCapabilities::default();
     if let Some(igd) = igd {
         capabilities.igd = igd.get_status_info().await.is_ok();

@@ -47,7 +47,14 @@ fn sentry_iot_commands_map_onto_the_reviewed_flow_and_daemon_queries() {
     assert_eq!(output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&output.stderr).contains("invalid value"));
     // --pages enforces the contract's 1..=9999 bound at the CLI.
-    let output = archie(&["sentry", "print", "office-printer", "doc.pdf", "--pages", "0"]);
+    let output = archie(&[
+        "sentry",
+        "print",
+        "office-printer",
+        "doc.pdf",
+        "--pages",
+        "0",
+    ]);
     assert_eq!(output.status.code(), Some(2));
 }
 
@@ -144,7 +151,13 @@ fn context_feed_once_ingests_fixtures_and_is_idempotent_across_runs() {
     assert!(output.status.success());
     let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(summary["events_written"], 0);
-    assert_eq!(fs::read_to_string(out.join("segment-000000.jsonl")).unwrap().lines().count(), 4);
+    assert_eq!(
+        fs::read_to_string(out.join("segment-000000.jsonl"))
+            .unwrap()
+            .lines()
+            .count(),
+        4
+    );
 
     fs::remove_dir_all(dir).unwrap();
 }
@@ -218,11 +231,10 @@ fn sentry_print_stages_locally_before_the_daemon_is_ever_contacted() {
     assert_eq!(staged.len(), 1);
     let name = &staged[0];
     assert_eq!(name.len(), 64);
-    assert!(name.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
-    assert_eq!(
-        fs::read(spool.join(name)).unwrap(),
-        b"%PDF-1.4 fixture"
-    );
+    assert!(name
+        .bytes()
+        .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
+    assert_eq!(fs::read(spool.join(name)).unwrap(), b"%PDF-1.4 fixture");
 
     // A non-printable format is refused before anything is staged.
     let blob = dir.join("blob.bin");

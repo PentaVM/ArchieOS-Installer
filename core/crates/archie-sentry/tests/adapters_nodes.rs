@@ -230,13 +230,13 @@ fn magic_packet_is_sync_stream_plus_sixteen_macs() {
 fn mac_must_be_lowercase_hex_with_colons() {
     assert_eq!(parse_mac(MAC), Some([0x7c, 0x10, 0xc9, 0x55, 0xaa, 0x01]));
     for bad in [
-        "7C:10:C9:55:AA:01",        // uppercase
-        "7c-10-c9-55-aa-01",        // hyphens
-        "7c:10:c9:55:aa",           // too short
-        "7c:10:c9:55:aa:01:02",     // too long
-        "7c:10:c9:55:aa:gg",        // not hex
-        "7c:10:c9:55:aa:1",         // single digit
-        "7c:10:c9:55:aa:01 ",       // trailing space
+        "7C:10:C9:55:AA:01",    // uppercase
+        "7c-10-c9-55-aa-01",    // hyphens
+        "7c:10:c9:55:aa",       // too short
+        "7c:10:c9:55:aa:01:02", // too long
+        "7c:10:c9:55:aa:gg",    // not hex
+        "7c:10:c9:55:aa:1",     // single digit
+        "7c:10:c9:55:aa:01 ",   // trailing space
     ] {
         assert_eq!(parse_mac(bad), None, "{bad} must be rejected");
     }
@@ -251,20 +251,68 @@ fn wol_configuration_is_validated() {
     };
     let one = |t: WolTarget| BTreeMap::from([("pc".into(), t)]);
     // Bad MAC, bad IP, relative tool path, empty targets, bad broadcast.
-    assert!(Wol::new("edge", "wol", "192.168.1.255", arp_path(), one({
-        let mut t = target();
-        t.mac = "7C-10-C9-55-AA-01".into();
-        t
-    }), runner.clone()).is_err());
-    assert!(Wol::new("edge", "wol", "192.168.1.255", arp_path(), one({
-        let mut t = target();
-        t.ip = "not-an-ip".into();
-        t
-    }), runner.clone()).is_err());
-    assert!(Wol::new("edge", "wol", "192.168.1.255", "arp", one(target()), runner.clone()).is_err());
-    assert!(Wol::new("edge", "wol", "192.168.1.255", arp_path(), BTreeMap::new(), runner.clone()).is_err());
-    assert!(Wol::new("edge", "wol", "example.com", arp_path(), one(target()), runner.clone()).is_err());
-    assert!(Wol::new("edge", "wol", "192.168.1.255:0", arp_path(), one(target()), runner).is_err());
+    assert!(Wol::new(
+        "edge",
+        "wol",
+        "192.168.1.255",
+        arp_path(),
+        one({
+            let mut t = target();
+            t.mac = "7C-10-C9-55-AA-01".into();
+            t
+        }),
+        runner.clone()
+    )
+    .is_err());
+    assert!(Wol::new(
+        "edge",
+        "wol",
+        "192.168.1.255",
+        arp_path(),
+        one({
+            let mut t = target();
+            t.ip = "not-an-ip".into();
+            t
+        }),
+        runner.clone()
+    )
+    .is_err());
+    assert!(Wol::new(
+        "edge",
+        "wol",
+        "192.168.1.255",
+        "arp",
+        one(target()),
+        runner.clone()
+    )
+    .is_err());
+    assert!(Wol::new(
+        "edge",
+        "wol",
+        "192.168.1.255",
+        arp_path(),
+        BTreeMap::new(),
+        runner.clone()
+    )
+    .is_err());
+    assert!(Wol::new(
+        "edge",
+        "wol",
+        "example.com",
+        arp_path(),
+        one(target()),
+        runner.clone()
+    )
+    .is_err());
+    assert!(Wol::new(
+        "edge",
+        "wol",
+        "192.168.1.255:0",
+        arp_path(),
+        one(target()),
+        runner
+    )
+    .is_err());
 }
 
 // ---------------------------------------------------------------------------
@@ -275,7 +323,7 @@ fn windows_arp_parsing() {
     let ip = |s: &str| s.parse().unwrap();
     assert!(parse_arp_windows(ARP_WINDOWS, &ip("192.168.1.50"))); // dynamic
     assert!(parse_arp_windows(ARP_WINDOWS, &ip("192.168.1.1"))); // dynamic
-    // An "invalid" row is a failed resolution, not a reachable host.
+                                                                 // An "invalid" row is a failed resolution, not a reachable host.
     assert!(!parse_arp_windows(ARP_WINDOWS, &ip("192.168.1.77")));
     // Multicast/static entries for other IPs are not evidence for our host.
     assert!(!parse_arp_windows(ARP_WINDOWS, &ip("192.168.1.99")));
@@ -307,13 +355,10 @@ async fn apply_broadcasts_the_exact_magic_packet() {
         .unwrap();
     assert!(ack.accepted);
     let mut buffer = [0u8; 128];
-    let (size, _) = tokio::time::timeout(
-        Duration::from_secs(2),
-        receiver.recv_from(&mut buffer),
-    )
-    .await
-    .unwrap()
-    .unwrap();
+    let (size, _) = tokio::time::timeout(Duration::from_secs(2), receiver.recv_from(&mut buffer))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(size, 102);
     assert_eq!(
         &buffer[..size],
@@ -402,10 +447,7 @@ fn expect_device_calls(calls: &[Vec<String>], network: bool) -> usize {
         );
         index = 1;
     }
-    assert_eq!(
-        calls[index],
-        vec![adb_path().to_string(), "devices".into()]
-    );
+    assert_eq!(calls[index], vec![adb_path().to_string(), "devices".into()]);
     index + 1
 }
 
@@ -660,7 +702,10 @@ fn volume_index_mapping_and_round_trip() {
     assert_eq!(parse_volume(DUMPSYS_AUDIO), Some((8, 15)));
     // A section-less dump, or a partial one, is unknown - never guessed.
     assert_eq!(parse_volume("AudioManagerService\n"), None);
-    assert_eq!(parse_volume("- STREAM_MUSIC:\n   Max volume index: 15\n"), None);
+    assert_eq!(
+        parse_volume("- STREAM_MUSIC:\n   Max volume index: 15\n"),
+        None
+    );
     // Older key style is also accepted.
     assert_eq!(
         parse_volume("- STREAM_MUSIC:\n   streamVolumeMax:25\n   streamVolume:5\n"),
@@ -861,10 +906,13 @@ fn adb_devices_and_configuration_are_validated() {
         "edge",
         "adb",
         adb_path(),
-        BTreeMap::from([("phone".into(), AndroidTarget {
-            serial: "bad serial;rm -rf".into(),
-            network: false,
-        })]),
+        BTreeMap::from([(
+            "phone".into(),
+            AndroidTarget {
+                serial: "bad serial;rm -rf".into(),
+                network: false,
+            }
+        )]),
         runner.clone(),
     )
     .is_err());
@@ -872,10 +920,13 @@ fn adb_devices_and_configuration_are_validated() {
         "edge",
         "adb",
         adb_path(),
-        BTreeMap::from([("phone".into(), AndroidTarget {
-            serial: "not-an-ip:5555".into(),
-            network: true,
-        })]),
+        BTreeMap::from([(
+            "phone".into(),
+            AndroidTarget {
+                serial: "not-an-ip:5555".into(),
+                network: true,
+            }
+        )]),
         runner.clone(),
     )
     .is_err());

@@ -21,9 +21,12 @@ pub struct Answer {
 impl Nebius {
     /// On `NEBIUS_TOKEN_FACTORY_KEY`, the conversation's own key.
     pub fn from_environment() -> Result<Self, String> {
-        let key = std::env::var("NEBIUS_TOKEN_FACTORY_KEY").map_err(|_| "NEBIUS_TOKEN_FACTORY_KEY is not set")?;
+        let key = std::env::var("NEBIUS_TOKEN_FACTORY_KEY")
+            .map_err(|_| "NEBIUS_TOKEN_FACTORY_KEY is not set")?;
         Ok(Self {
-            http: reqwest::Client::builder().build().map_err(|e| e.to_string())?,
+            http: reqwest::Client::builder()
+                .build()
+                .map_err(|e| e.to_string())?,
             key: key.trim().to_string(),
         })
     }
@@ -40,7 +43,11 @@ impl Nebius {
         timeout: Duration,
     ) -> Result<Answer, String> {
         let mut content = vec![json!({"type": "text", "text": text})];
-        content.extend(images.iter().map(|url| json!({"type": "image_url", "image_url": {"url": url}})));
+        content.extend(
+            images
+                .iter()
+                .map(|url| json!({"type": "image_url", "image_url": {"url": url}})),
+        );
         let started = Instant::now();
         let mut last = String::from("no model to ask");
         for model in models {
@@ -71,16 +78,29 @@ impl Nebius {
                         }
                     },
                     Err(e) => {
-                        last = format!("{model}: {}", e.status().map_or("failed".into(), |s| s.to_string()));
+                        last = format!(
+                            "{model}: {}",
+                            e.status().map_or("failed".into(), |s| s.to_string())
+                        );
                         continue;
                     }
                 },
                 Err(e) => {
-                    last = format!("{model}: {}", if e.is_timeout() { "no answer in time".into() } else { e.to_string() });
+                    last = format!(
+                        "{model}: {}",
+                        if e.is_timeout() {
+                            "no answer in time".into()
+                        } else {
+                            e.to_string()
+                        }
+                    );
                     continue;
                 }
             };
-            let text = value["choices"][0]["message"]["content"].as_str().unwrap_or("").to_string();
+            let text = value["choices"][0]["message"]["content"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
             if text.trim().is_empty() {
                 last = format!("{model}: an empty answer");
                 continue;

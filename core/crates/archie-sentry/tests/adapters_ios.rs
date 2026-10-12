@@ -79,7 +79,10 @@ fn device(volume_shortcut: Option<&str>) -> IosDevice {
     IosDevice {
         actions: BTreeMap::from([
             ("maps".into(), IosAction::OpenUrl("maps://".into())),
-            ("lamp".into(), IosAction::Shortcut("Alternar lámpara".into())),
+            (
+                "lamp".into(),
+                IosAction::Shortcut("Alternar lámpara".into()),
+            ),
         ]),
         volume_shortcut: volume_shortcut.map(str::to_string),
     }
@@ -114,20 +117,69 @@ fn request_text(request: &[u8]) -> String {
 fn configuration_is_validated() {
     let devices = || BTreeMap::from([("iphone".into(), device(None))]);
     // HTTPS beyond loopback without a pinned certificate is refused.
-    assert!(IosCompanion::new("edge", "ios", "https://192.168.1.70:8443", TOKEN, None, devices()).is_err());
+    assert!(IosCompanion::new(
+        "edge",
+        "ios",
+        "https://192.168.1.70:8443",
+        TOKEN,
+        None,
+        devices()
+    )
+    .is_err());
     // A malformed pinned certificate is refused.
-    assert!(IosCompanion::new("edge", "ios", "https://192.168.1.70:8443", TOKEN, Some("not a pem"), devices()).is_err());
+    assert!(IosCompanion::new(
+        "edge",
+        "ios",
+        "https://192.168.1.70:8443",
+        TOKEN,
+        Some("not a pem"),
+        devices()
+    )
+    .is_err());
     // http beyond loopback with credentials is refused by the endpoint rules.
-    assert!(IosCompanion::new("edge", "ios", "http://192.168.1.70:8080", TOKEN, None, devices()).is_err());
+    assert!(IosCompanion::new(
+        "edge",
+        "ios",
+        "http://192.168.1.70:8080",
+        TOKEN,
+        None,
+        devices()
+    )
+    .is_err());
     // Public hosts are refused.
-    assert!(IosCompanion::new("edge", "ios", "https://203.0.113.9:8443", TOKEN, Some("x"), devices()).is_err());
+    assert!(IosCompanion::new(
+        "edge",
+        "ios",
+        "https://203.0.113.9:8443",
+        TOKEN,
+        Some("x"),
+        devices()
+    )
+    .is_err());
     // Empty token, path-bearing base, empty device map.
     assert!(IosCompanion::new("edge", "ios", "http://127.0.0.1:9", "", None, devices()).is_err());
-    assert!(IosCompanion::new("edge", "ios", "http://127.0.0.1:9/api", TOKEN, None, devices()).is_err());
-    assert!(IosCompanion::new("edge", "ios", "http://127.0.0.1:9", TOKEN, None, BTreeMap::new()).is_err());
+    assert!(IosCompanion::new(
+        "edge",
+        "ios",
+        "http://127.0.0.1:9/api",
+        TOKEN,
+        None,
+        devices()
+    )
+    .is_err());
+    assert!(IosCompanion::new(
+        "edge",
+        "ios",
+        "http://127.0.0.1:9",
+        TOKEN,
+        None,
+        BTreeMap::new()
+    )
+    .is_err());
     // A URL without a scheme is not a valid action.
     let mut bad = device(None);
-    bad.actions.insert("evil".into(), IosAction::OpenUrl("no-scheme-here".into()));
+    bad.actions
+        .insert("evil".into(), IosAction::OpenUrl("no-scheme-here".into()));
     assert!(IosCompanion::new(
         "edge",
         "ios",
@@ -139,7 +191,8 @@ fn configuration_is_validated() {
     .is_err());
     // A Shortcut name with control bytes is not valid.
     let mut bad = device(None);
-    bad.actions.insert("evil".into(), IosAction::Shortcut("line\nbreak".into()));
+    bad.actions
+        .insert("evil".into(), IosAction::Shortcut("line\nbreak".into()));
     assert!(IosCompanion::new(
         "edge",
         "ios",
@@ -165,7 +218,9 @@ async fn app_launch_posts_the_configured_url_and_verifies_via_state_report() {
     .await;
     let mut adapter = adapter(&url, None);
     let resource = resource(&[CommandKind::AppLaunch]);
-    let command = Command::AppLaunch { app_id: "maps".into() };
+    let command = Command::AppLaunch {
+        app_id: "maps".into(),
+    };
     assert!(adapter.apply(&resource, &command).await.unwrap().accepted);
     let observation = adapter.observe(&resource).await.unwrap();
     assert_eq!(
@@ -184,7 +239,9 @@ async fn app_launch_posts_the_configured_url_and_verifies_via_state_report() {
     assert_eq!(requests.len(), 2);
     let post = request_text(&requests[0]);
     assert!(post.starts_with("POST /v1/intent HTTP/1.1\r\n"), "{post}");
-    assert!(post.to_lowercase().contains(&format!("authorization: bearer {TOKEN}").to_lowercase()));
+    assert!(post
+        .to_lowercase()
+        .contains(&format!("authorization: bearer {TOKEN}").to_lowercase()));
     assert!(post.contains("\"kind\":\"open_url\""));
     assert!(post.contains("\"target\":\"maps://\""));
     let get = request_text(&requests[1]);
@@ -200,7 +257,9 @@ async fn shortcut_actions_are_first_class() {
     .await;
     let mut adapter = adapter(&url, None);
     let resource = resource(&[CommandKind::AppLaunch]);
-    let command = Command::AppLaunch { app_id: "lamp".into() };
+    let command = Command::AppLaunch {
+        app_id: "lamp".into(),
+    };
     assert!(adapter.apply(&resource, &command).await.unwrap().accepted);
     let requests = task.await.unwrap();
     let post = request_text(&requests[0]);
@@ -247,18 +306,29 @@ async fn unsupported_and_unconfigured_commands_never_send_requests() {
     };
     // VolumeSet without a configured volume Shortcut.
     assert_eq!(
-        adapter.apply(&resource, &Command::VolumeSet { percent: 20 }).await.unwrap_err(),
+        adapter
+            .apply(&resource, &Command::VolumeSet { percent: 20 })
+            .await
+            .unwrap_err(),
         AdapterError::Unsupported
     );
     // SessionLock: iOS cannot be locked remotely. Said plainly, never tried.
     assert_eq!(
-        adapter.apply(&resource, &Command::SessionLock { locked: true }).await.unwrap_err(),
+        adapter
+            .apply(&resource, &Command::SessionLock { locked: true })
+            .await
+            .unwrap_err(),
         AdapterError::Unsupported
     );
     // An app_id outside the configured action table.
     assert_eq!(
         adapter
-            .apply(&resource, &Command::AppLaunch { app_id: "safari".into() })
+            .apply(
+                &resource,
+                &Command::AppLaunch {
+                    app_id: "safari".into()
+                }
+            )
             .await
             .unwrap_err(),
         AdapterError::Unsupported
@@ -266,7 +336,12 @@ async fn unsupported_and_unconfigured_commands_never_send_requests() {
     // Undeclared capability.
     assert_eq!(
         adapter
-            .apply(&volume_only, &Command::AppLaunch { app_id: "maps".into() })
+            .apply(
+                &volume_only,
+                &Command::AppLaunch {
+                    app_id: "maps".into()
+                }
+            )
             .await
             .unwrap_err(),
         AdapterError::Unsupported
@@ -279,20 +354,40 @@ async fn unsupported_and_unconfigured_commands_never_send_requests() {
 #[tokio::test]
 async fn rejected_ack_and_id_mismatch_are_not_success() {
     let (url, task) = companion_server(vec![
-        Reply { status: "200 OK", body: "{\"id\":\"maps\",\"status\":\"rejected\"}" },
-        Reply { status: "200 OK", body: "{\"id\":\"other\",\"status\":\"completed\"}" },
-        Reply { status: "200 OK", body: "not json" },
+        Reply {
+            status: "200 OK",
+            body: "{\"id\":\"maps\",\"status\":\"rejected\"}",
+        },
+        Reply {
+            status: "200 OK",
+            body: "{\"id\":\"other\",\"status\":\"completed\"}",
+        },
+        Reply {
+            status: "200 OK",
+            body: "not json",
+        },
     ])
     .await;
     let mut adapter = adapter(&url, None);
     let resource = resource(&[CommandKind::AppLaunch]);
-    let command = Command::AppLaunch { app_id: "maps".into() };
+    let command = Command::AppLaunch {
+        app_id: "maps".into(),
+    };
     // The app refused (e.g. unknown Shortcut): Unavailable, not accepted.
-    assert_eq!(adapter.apply(&resource, &command).await.unwrap_err(), AdapterError::Unavailable);
+    assert_eq!(
+        adapter.apply(&resource, &command).await.unwrap_err(),
+        AdapterError::Unavailable
+    );
     // An ack echoing a different id is a protocol violation.
-    assert_eq!(adapter.apply(&resource, &command).await.unwrap_err(), AdapterError::Protocol);
+    assert_eq!(
+        adapter.apply(&resource, &command).await.unwrap_err(),
+        AdapterError::Protocol
+    );
     // A malformed ack is a protocol violation.
-    assert_eq!(adapter.apply(&resource, &command).await.unwrap_err(), AdapterError::Protocol);
+    assert_eq!(
+        adapter.apply(&resource, &command).await.unwrap_err(),
+        AdapterError::Protocol
+    );
     let _ = task.await;
 }
 
@@ -307,7 +402,12 @@ async fn authentication_and_unreachable_app_are_plain_errors() {
     let resource = resource(&[CommandKind::AppLaunch]);
     assert_eq!(
         companion
-            .apply(&resource, &Command::AppLaunch { app_id: "maps".into() })
+            .apply(
+                &resource,
+                &Command::AppLaunch {
+                    app_id: "maps".into()
+                }
+            )
             .await
             .unwrap_err(),
         AdapterError::Authentication
@@ -335,7 +435,10 @@ async fn state_report_with_invalid_last_action_is_a_protocol_error() {
     .await;
     let mut adapter = adapter(&url, None);
     assert_eq!(
-        adapter.observe(&resource(&[CommandKind::AppLaunch])).await.unwrap_err(),
+        adapter
+            .observe(&resource(&[CommandKind::AppLaunch]))
+            .await
+            .unwrap_err(),
         AdapterError::Protocol
     );
     let _ = task.await;

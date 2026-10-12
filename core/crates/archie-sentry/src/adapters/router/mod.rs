@@ -172,7 +172,10 @@ impl EdgeAdapter for RouterAdapter {
     /// the radio state via the probed tool. Either side is `None` when its
     /// channel was not probed or nothing has named what to watch — never a
     /// guess.
-    async fn observe(&mut self, resource: &ResourceDescriptor) -> Result<Observation, AdapterError> {
+    async fn observe(
+        &mut self,
+        resource: &ResourceDescriptor,
+    ) -> Result<Observation, AdapterError> {
         self.resource_check(resource)?;
         let mapping_present = match (self.watch, self.igd.as_ref()) {
             (Some((port, protocol)), Some(igd)) if self.capabilities.igd => {

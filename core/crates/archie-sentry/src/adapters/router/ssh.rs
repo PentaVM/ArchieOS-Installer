@@ -17,16 +17,8 @@
 //! in [`crate::adapters::router::probe`] runs the read-only candidates and
 //! only what answered is ever offered.
 
-use crate::{
-    adapters::process::CommandRunner,
-    engine::AdapterError,
-};
-use std::{
-    net::Ipv4Addr,
-    path::Path,
-    sync::Arc,
-    time::Duration,
-};
+use crate::{adapters::process::CommandRunner, engine::AdapterError};
+use std::{net::Ipv4Addr, path::Path, sync::Arc, time::Duration};
 
 /// How the host key is treated on first contact. `AcceptNew` is the default:
 /// the first key is pinned into known_hosts and later changes are refused.
@@ -128,18 +120,42 @@ pub struct CommandSpec {
 /// locations for the DHCP leases file; the probe records the first that
 /// answers. `wl0_radio` / `nvram_wl0_radio` are also the radio state reads.
 pub const READ_COMMANDS: &[CommandSpec] = &[
-    CommandSpec { name: "ip_neigh", argv: &["ip", "neigh"] },
-    CommandSpec { name: "ip_link", argv: &["ip", "link"] },
-    CommandSpec { name: "iwconfig", argv: &["iwconfig"] },
-    CommandSpec { name: "leases_tmp_dhcp", argv: &["cat", "/tmp/dhcp.leases"] },
-    CommandSpec { name: "leases_tmp_dnsmasq", argv: &["cat", "/tmp/dnsmasq.leases"] },
+    CommandSpec {
+        name: "ip_neigh",
+        argv: &["ip", "neigh"],
+    },
+    CommandSpec {
+        name: "ip_link",
+        argv: &["ip", "link"],
+    },
+    CommandSpec {
+        name: "iwconfig",
+        argv: &["iwconfig"],
+    },
+    CommandSpec {
+        name: "leases_tmp_dhcp",
+        argv: &["cat", "/tmp/dhcp.leases"],
+    },
+    CommandSpec {
+        name: "leases_tmp_dnsmasq",
+        argv: &["cat", "/tmp/dnsmasq.leases"],
+    },
     CommandSpec {
         name: "leases_var_dnsmasq",
         argv: &["cat", "/var/lib/misc/dnsmasq.leases"],
     },
-    CommandSpec { name: "nvram_productid", argv: &["nvram", "get", "productid"] },
-    CommandSpec { name: "nvram_wl0_radio", argv: &["nvram", "get", "wl0_radio"] },
-    CommandSpec { name: "wl0_radio", argv: &["wl", "-i", "wl0", "radio"] },
+    CommandSpec {
+        name: "nvram_productid",
+        argv: &["nvram", "get", "productid"],
+    },
+    CommandSpec {
+        name: "nvram_wl0_radio",
+        argv: &["nvram", "get", "wl0_radio"],
+    },
+    CommandSpec {
+        name: "wl0_radio",
+        argv: &["wl", "-i", "wl0", "radio"],
+    },
 ];
 
 /// The bounded write surface: how to switch the radio with a given tool.
@@ -180,7 +196,9 @@ pub fn read_command(name: &str) -> Option<&'static CommandSpec> {
     READ_COMMANDS.iter().find(|spec| spec.name == name)
 }
 pub fn radio_strategy(tool: &str) -> Option<&'static RadioStrategy> {
-    RADIO_STRATEGIES.iter().find(|strategy| strategy.tool == tool)
+    RADIO_STRATEGIES
+        .iter()
+        .find(|strategy| strategy.tool == tool)
 }
 
 /// The filesystem path a `leases_*` command reads, for probe reporting.

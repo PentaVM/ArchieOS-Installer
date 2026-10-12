@@ -112,13 +112,10 @@ impl EnterpriseAdapter {
             .get("archie.quarantine")
             .is_some_and(|value| value != "false");
         if is_quarantined {
-            return Err(TypeError::InvalidTask(
-                format!(
-                    "Task {} cannot be exported: currently in quarantine",
-                    task.task_id
-                )
-                .into(),
-            ));
+            return Err(TypeError::InvalidTask(format!(
+                "Task {} cannot be exported: currently in quarantine",
+                task.task_id
+            )));
         }
 
         // Determine grade from labels
@@ -139,12 +136,10 @@ impl EnterpriseAdapter {
         };
 
         if !self.permits_egress(grade) {
-            return Err(TypeError::InvalidTask(
-                format!(
-                    "Task {} cannot be exported due to strict privacy limits: grade {:?} not permitted",
-                    task.task_id, grade
-                ).into()
-            ));
+            return Err(TypeError::InvalidTask(format!(
+                "Task {} cannot be exported due to strict privacy limits: grade {:?} not permitted",
+                task.task_id, grade
+            )));
         }
 
         // Return the safe DTO

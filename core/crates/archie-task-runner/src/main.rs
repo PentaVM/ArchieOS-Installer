@@ -102,7 +102,6 @@ fn join_cgroup(procs_path: &str) -> Result<(), String> {
     // a write moves one process; truncating is meaningless and, on some kernels,
     // an error that reads like a permission problem.
     let mut file = std::fs::OpenOptions::new()
-        .write(true)
         .append(true)
         .open(procs_path)
         .map_err(|e| format!("cannot open {procs_path}: {e}"))?;

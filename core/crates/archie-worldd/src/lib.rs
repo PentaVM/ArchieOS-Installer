@@ -760,8 +760,7 @@ mod provider {
 
         #[tokio::test]
         async fn a_lan_view_lands_in_the_served_snapshot_and_survives_refresh() {
-            const VIEW: &[u8] =
-                include_bytes!("../tests/fixtures/unified_view_small_lan.json");
+            const VIEW: &[u8] = include_bytes!("../tests/fixtures/unified_view_small_lan.json");
             let t0 = Timestamp::from_millis(1_000_000);
             let provider = Arc::new(ScriptedProvider {
                 results: Mutex::new(VecDeque::from([Ok(batch(t0))])),
@@ -774,7 +773,11 @@ mod provider {
             assert_eq!(current.lan_devices.len(), 3);
             assert_eq!(current.lan_devices[0].identity, "54:4e:f0:07:3d:e8");
             assert_eq!(
-                current.lan_devices[0].sources.keys().copied().collect::<Vec<_>>(),
+                current.lan_devices[0]
+                    .sources
+                    .keys()
+                    .copied()
+                    .collect::<Vec<_>>(),
                 [
                     crate::lan::LanSource::LanScan,
                     crate::lan::LanSource::Netwatch,
@@ -785,8 +788,16 @@ mod provider {
             // Provider refreshes and LAN ingestions are independent flows.
             service.refresh_at(t0).await;
             let after_refresh = service.current_at(t0).await;
-            assert_eq!(after_refresh.lan_devices.len(), 3, "refresh does not touch the graph");
-            assert_eq!(after_refresh.observations.len(), 2, "ingestion does not touch observations");
+            assert_eq!(
+                after_refresh.lan_devices.len(),
+                3,
+                "refresh does not touch the graph"
+            );
+            assert_eq!(
+                after_refresh.observations.len(),
+                2,
+                "ingestion does not touch observations"
+            );
 
             // A rejected view leaves the served devices untouched.
             assert!(service.ingest_lan_view_at(b"junk", t0).await.is_err());

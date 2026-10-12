@@ -83,7 +83,10 @@ fn the_node_router_and_live_wiring_sections_are_accepted() {
     assert!(route.1.contains(&CommandKind::WifiSet));
 
     assert_eq!(sentry.netwatch.as_ref().unwrap().state_dir, abs("netwatch"));
-    assert_eq!(sentry.chat_exports.as_ref().unwrap().watch_dir, abs("exports"));
+    assert_eq!(
+        sentry.chat_exports.as_ref().unwrap().watch_dir,
+        abs("exports")
+    );
 
     // The router config the adapter would be built from is constructible.
     let (router_config, capabilities) = router.to_router_config().unwrap();
@@ -118,8 +121,16 @@ fn malformed_node_sections_are_refused() {
 fn the_cli_commands_match_the_contract_bounds() {
     // The contracts the CLI verbs map to accept what the CLI accepts.
     assert!(SentryCommand::WakeHost.validate().is_ok());
-    assert!(SentryCommand::SessionLock { locked: true }.validate().is_ok());
+    assert!(SentryCommand::SessionLock { locked: true }
+        .validate()
+        .is_ok());
     assert!(SentryCommand::VolumeSet { percent: 100 }.validate().is_ok());
-    assert!(SentryCommand::VolumeSet { percent: 101 }.validate().is_err());
-    assert!(SentryCommand::AppLaunch { app_id: "com.example.app".into() }.validate().is_ok());
+    assert!(SentryCommand::VolumeSet { percent: 101 }
+        .validate()
+        .is_err());
+    assert!(SentryCommand::AppLaunch {
+        app_id: "com.example.app".into()
+    }
+    .validate()
+    .is_ok());
 }

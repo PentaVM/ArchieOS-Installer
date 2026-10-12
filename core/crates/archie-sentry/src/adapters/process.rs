@@ -113,6 +113,8 @@ mod tests {
     fn an_empty_argv_is_refused() {
         let runner = ProcessRunner::default();
         assert!(runner.run(&[], Duration::from_millis(50)).is_err());
-        assert!(runner.run(&["relative".into()], Duration::from_millis(50)).is_err());
+        assert!(runner
+            .run(&["relative".into()], Duration::from_millis(50))
+            .is_err());
     }
 }

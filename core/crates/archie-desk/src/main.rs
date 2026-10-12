@@ -8,7 +8,7 @@
 use archie_bridges::delivery::{DeliveryKey, DEFAULT_PORT};
 use archie_desk::{open::Rules, Desk};
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 const USAGE: &str = "usage:
@@ -76,7 +76,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn pair(key_file: &PathBuf) -> ExitCode {
+fn pair(key_file: &Path) -> ExitCode {
     if key_file.exists() {
         eprintln!(
             "archie-desk: {} exists; it already pairs this computer. Delete it first to pair anew.",

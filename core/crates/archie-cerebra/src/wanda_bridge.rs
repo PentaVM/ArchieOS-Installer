@@ -162,7 +162,8 @@ impl SenderIdentity {
                 reason: "a number sender carries at least six digits",
             });
         }
-        let mut material = Vec::with_capacity(SENDER_HASH_FORMAT.len() + salt.len() + digits.len() + 2);
+        let mut material =
+            Vec::with_capacity(SENDER_HASH_FORMAT.len() + salt.len() + digits.len() + 2);
         material.extend_from_slice(SENDER_HASH_FORMAT.as_bytes());
         material.push(0);
         material.extend_from_slice(salt.as_bytes());
@@ -255,7 +256,14 @@ impl ChatMessage {
         sender: SenderIdentity,
         sent_at: Option<u64>,
     ) -> Result<Self, WandaError> {
-        Self::checked(platform, chat_id.into(), sender, sent_at, String::new(), true)
+        Self::checked(
+            platform,
+            chat_id.into(),
+            sender,
+            sent_at,
+            String::new(),
+            true,
+        )
     }
 
     fn checked(
@@ -266,26 +274,45 @@ impl ChatMessage {
         text: String,
         media_omitted: bool,
     ) -> Result<Self, WandaError> {
-        let invalid = |field: &'static str, reason: &'static str| WandaError::InvalidMessage { field, reason };
+        let invalid = |field: &'static str, reason: &'static str| WandaError::InvalidMessage {
+            field,
+            reason,
+        };
         if chat_id.is_empty()
             || chat_id.chars().count() > MAX_CHAT_ID_CHARS
             || chat_id.bytes().any(|b| b.is_ascii_control())
         {
-            return Err(invalid("chat_id", "a chat id is bounded text without control characters"));
+            return Err(invalid(
+                "chat_id",
+                "a chat id is bounded text without control characters",
+            ));
         }
         match sent_at {
             Some(0) => {
-                return Err(invalid("sent_at", "a missing source time is the explicit None marker"))
+                return Err(invalid(
+                    "sent_at",
+                    "a missing source time is the explicit None marker",
+                ))
             }
             Some(at) if i64::try_from(at).is_err() => {
-                return Err(invalid("sent_at", "the source time does not fit the trace's clock"))
+                return Err(invalid(
+                    "sent_at",
+                    "the source time does not fit the trace's clock",
+                ))
             }
             _ => {}
         }
         if text.chars().count() > MAX_TEXT_CHARS {
             return Err(invalid("text", "a message is bounded to 2000 characters"));
         }
-        Ok(Self { platform, chat_id, sender, sent_at, text, media_omitted })
+        Ok(Self {
+            platform,
+            chat_id,
+            sender,
+            sent_at,
+            text,
+            media_omitted,
+        })
     }
 
     pub fn platform(&self) -> &ChatPlatform {
@@ -386,7 +413,10 @@ impl Category {
     }
 
     fn index(self) -> usize {
-        Self::ALL.iter().position(|c| *c == self).expect("ALL holds every category")
+        Self::ALL
+            .iter()
+            .position(|c| *c == self)
+            .expect("ALL holds every category")
     }
 }
 
@@ -401,154 +431,710 @@ struct Rule {
 
 const RULES: &[Rule] = &[
     // Social
-    Rule { category: Category::Social, keyword: "jaja", weight: 40 },
-    Rule { category: Category::Social, keyword: "haha", weight: 40 },
-    Rule { category: Category::Social, keyword: "lol", weight: 40 },
-    Rule { category: Category::Social, keyword: "fiesta", weight: 40 },
-    Rule { category: Category::Social, keyword: "party", weight: 40 },
-    Rule { category: Category::Social, keyword: "salimos", weight: 40 },
-    Rule { category: Category::Social, keyword: "cervezas", weight: 40 },
-    Rule { category: Category::Social, keyword: "beers", weight: 40 },
-    Rule { category: Category::Social, keyword: "cumpleaños", weight: 40 },
-    Rule { category: Category::Social, keyword: "birthday", weight: 40 },
-    Rule { category: Category::Social, keyword: "amigo", weight: 40 },
-    Rule { category: Category::Social, keyword: "amiga", weight: 40 },
-    Rule { category: Category::Social, keyword: "friend", weight: 40 },
+    Rule {
+        category: Category::Social,
+        keyword: "jaja",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Social,
+        keyword: "haha",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Social,
+        keyword: "lol",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Social,
+        keyword: "fiesta",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Social,
+        keyword: "party",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Social,
+        keyword: "salimos",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Social,
+        keyword: "cervezas",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Social,
+        keyword: "beers",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Social,
+        keyword: "cumpleaños",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Social,
+        keyword: "birthday",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Social,
+        keyword: "amigo",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Social,
+        keyword: "amiga",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Social,
+        keyword: "friend",
+        weight: 40,
+    },
     // Urgency
-    Rule { category: Category::Urgency, keyword: "urgente", weight: 40 },
-    Rule { category: Category::Urgency, keyword: "urgent", weight: 40 },
-    Rule { category: Category::Urgency, keyword: "ahora mismo", weight: 40 },
-    Rule { category: Category::Urgency, keyword: "right now", weight: 40 },
-    Rule { category: Category::Urgency, keyword: "asap", weight: 40 },
-    Rule { category: Category::Urgency, keyword: "emergencia", weight: 40 },
-    Rule { category: Category::Urgency, keyword: "emergency", weight: 40 },
-    Rule { category: Category::Urgency, keyword: "inmediatamente", weight: 40 },
-    Rule { category: Category::Urgency, keyword: "immediately", weight: 40 },
-    Rule { category: Category::Urgency, keyword: "cuanto antes", weight: 40 },
-    Rule { category: Category::Urgency, keyword: "prisa", weight: 40 },
-    Rule { category: Category::Urgency, keyword: "deadline", weight: 40 },
+    Rule {
+        category: Category::Urgency,
+        keyword: "urgente",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Urgency,
+        keyword: "urgent",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Urgency,
+        keyword: "ahora mismo",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Urgency,
+        keyword: "right now",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Urgency,
+        keyword: "asap",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Urgency,
+        keyword: "emergencia",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Urgency,
+        keyword: "emergency",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Urgency,
+        keyword: "inmediatamente",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Urgency,
+        keyword: "immediately",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Urgency,
+        keyword: "cuanto antes",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Urgency,
+        keyword: "prisa",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Urgency,
+        keyword: "deadline",
+        weight: 40,
+    },
     // Work
-    Rule { category: Category::Work, keyword: "trabajo", weight: 40 },
-    Rule { category: Category::Work, keyword: "work", weight: 40 },
-    Rule { category: Category::Work, keyword: "reunión", weight: 40 },
-    Rule { category: Category::Work, keyword: "meeting", weight: 40 },
-    Rule { category: Category::Work, keyword: "proyecto", weight: 40 },
-    Rule { category: Category::Work, keyword: "project", weight: 40 },
-    Rule { category: Category::Work, keyword: "cliente", weight: 40 },
-    Rule { category: Category::Work, keyword: "client", weight: 40 },
-    Rule { category: Category::Work, keyword: "oficina", weight: 40 },
-    Rule { category: Category::Work, keyword: "office", weight: 40 },
-    Rule { category: Category::Work, keyword: "informe", weight: 40 },
-    Rule { category: Category::Work, keyword: "report", weight: 40 },
-    Rule { category: Category::Work, keyword: "presentación", weight: 40 },
-    Rule { category: Category::Work, keyword: "presentation", weight: 40 },
-    Rule { category: Category::Work, keyword: "entrevista", weight: 40 },
-    Rule { category: Category::Work, keyword: "interview", weight: 40 },
-    Rule { category: Category::Work, keyword: "jefe", weight: 40 },
-    Rule { category: Category::Work, keyword: "boss", weight: 40 },
+    Rule {
+        category: Category::Work,
+        keyword: "trabajo",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Work,
+        keyword: "work",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Work,
+        keyword: "reunión",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Work,
+        keyword: "meeting",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Work,
+        keyword: "proyecto",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Work,
+        keyword: "project",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Work,
+        keyword: "cliente",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Work,
+        keyword: "client",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Work,
+        keyword: "oficina",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Work,
+        keyword: "office",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Work,
+        keyword: "informe",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Work,
+        keyword: "report",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Work,
+        keyword: "presentación",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Work,
+        keyword: "presentation",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Work,
+        keyword: "entrevista",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Work,
+        keyword: "interview",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Work,
+        keyword: "jefe",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Work,
+        keyword: "boss",
+        weight: 40,
+    },
     // Personal
-    Rule { category: Category::Personal, keyword: "me siento", weight: 40 },
-    Rule { category: Category::Personal, keyword: "i feel", weight: 40 },
-    Rule { category: Category::Personal, keyword: "secreto", weight: 40 },
-    Rule { category: Category::Personal, keyword: "secret", weight: 40 },
-    Rule { category: Category::Personal, keyword: "entre tú y yo", weight: 40 },
-    Rule { category: Category::Personal, keyword: "between us", weight: 40 },
-    Rule { category: Category::Personal, keyword: "te cuento", weight: 40 },
-    Rule { category: Category::Personal, keyword: "en confianza", weight: 40 },
+    Rule {
+        category: Category::Personal,
+        keyword: "me siento",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Personal,
+        keyword: "i feel",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Personal,
+        keyword: "secreto",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Personal,
+        keyword: "secret",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Personal,
+        keyword: "entre tú y yo",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Personal,
+        keyword: "between us",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Personal,
+        keyword: "te cuento",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Personal,
+        keyword: "en confianza",
+        weight: 40,
+    },
     // Question (a question mark adds 50 more, see categorize)
-    Rule { category: Category::Question, keyword: "qué", weight: 40 },
-    Rule { category: Category::Question, keyword: "cómo", weight: 40 },
-    Rule { category: Category::Question, keyword: "cuándo", weight: 40 },
-    Rule { category: Category::Question, keyword: "dónde", weight: 40 },
-    Rule { category: Category::Question, keyword: "quién", weight: 40 },
-    Rule { category: Category::Question, keyword: "cuál", weight: 40 },
-    Rule { category: Category::Question, keyword: "what", weight: 40 },
-    Rule { category: Category::Question, keyword: "how", weight: 40 },
-    Rule { category: Category::Question, keyword: "when", weight: 40 },
-    Rule { category: Category::Question, keyword: "where", weight: 40 },
-    Rule { category: Category::Question, keyword: "who", weight: 40 },
-    Rule { category: Category::Question, keyword: "which", weight: 40 },
-    Rule { category: Category::Question, keyword: "why", weight: 40 },
-    Rule { category: Category::Question, keyword: "puedes", weight: 40 },
-    Rule { category: Category::Question, keyword: "sabes", weight: 40 },
+    Rule {
+        category: Category::Question,
+        keyword: "qué",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Question,
+        keyword: "cómo",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Question,
+        keyword: "cuándo",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Question,
+        keyword: "dónde",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Question,
+        keyword: "quién",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Question,
+        keyword: "cuál",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Question,
+        keyword: "what",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Question,
+        keyword: "how",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Question,
+        keyword: "when",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Question,
+        keyword: "where",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Question,
+        keyword: "who",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Question,
+        keyword: "which",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Question,
+        keyword: "why",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Question,
+        keyword: "puedes",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Question,
+        keyword: "sabes",
+        weight: 40,
+    },
     // Planning
-    Rule { category: Category::Planning, keyword: "mañana", weight: 40 },
-    Rule { category: Category::Planning, keyword: "tomorrow", weight: 40 },
-    Rule { category: Category::Planning, keyword: "plan", weight: 40 },
-    Rule { category: Category::Planning, keyword: "quedamos", weight: 40 },
-    Rule { category: Category::Planning, keyword: "nos vemos", weight: 40 },
-    Rule { category: Category::Planning, keyword: "see you", weight: 40 },
-    Rule { category: Category::Planning, keyword: "reserva", weight: 40 },
-    Rule { category: Category::Planning, keyword: "booking", weight: 40 },
-    Rule { category: Category::Planning, keyword: "cita", weight: 40 },
-    Rule { category: Category::Planning, keyword: "appointment", weight: 40 },
-    Rule { category: Category::Planning, keyword: "finde", weight: 40 },
-    Rule { category: Category::Planning, keyword: "weekend", weight: 40 },
-    Rule { category: Category::Planning, keyword: "viaje", weight: 40 },
-    Rule { category: Category::Planning, keyword: "trip", weight: 40 },
+    Rule {
+        category: Category::Planning,
+        keyword: "mañana",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Planning,
+        keyword: "tomorrow",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Planning,
+        keyword: "plan",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Planning,
+        keyword: "quedamos",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Planning,
+        keyword: "nos vemos",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Planning,
+        keyword: "see you",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Planning,
+        keyword: "reserva",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Planning,
+        keyword: "booking",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Planning,
+        keyword: "cita",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Planning,
+        keyword: "appointment",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Planning,
+        keyword: "finde",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Planning,
+        keyword: "weekend",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Planning,
+        keyword: "viaje",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Planning,
+        keyword: "trip",
+        weight: 40,
+    },
     // Finance
-    Rule { category: Category::Finance, keyword: "dinero", weight: 40 },
-    Rule { category: Category::Finance, keyword: "money", weight: 40 },
-    Rule { category: Category::Finance, keyword: "pago", weight: 40 },
-    Rule { category: Category::Finance, keyword: "payment", weight: 40 },
-    Rule { category: Category::Finance, keyword: "pagar", weight: 40 },
-    Rule { category: Category::Finance, keyword: "factura", weight: 40 },
-    Rule { category: Category::Finance, keyword: "invoice", weight: 40 },
-    Rule { category: Category::Finance, keyword: "banco", weight: 40 },
-    Rule { category: Category::Finance, keyword: "bank", weight: 40 },
-    Rule { category: Category::Finance, keyword: "precio", weight: 40 },
-    Rule { category: Category::Finance, keyword: "price", weight: 40 },
-    Rule { category: Category::Finance, keyword: "deuda", weight: 40 },
-    Rule { category: Category::Finance, keyword: "debt", weight: 40 },
-    Rule { category: Category::Finance, keyword: "transferencia", weight: 40 },
-    Rule { category: Category::Finance, keyword: "transfer", weight: 40 },
-    Rule { category: Category::Finance, keyword: "bizum", weight: 40 },
-    Rule { category: Category::Finance, keyword: "sueldo", weight: 40 },
-    Rule { category: Category::Finance, keyword: "salary", weight: 40 },
-    Rule { category: Category::Finance, keyword: "alquiler", weight: 40 },
+    Rule {
+        category: Category::Finance,
+        keyword: "dinero",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Finance,
+        keyword: "money",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Finance,
+        keyword: "pago",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Finance,
+        keyword: "payment",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Finance,
+        keyword: "pagar",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Finance,
+        keyword: "factura",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Finance,
+        keyword: "invoice",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Finance,
+        keyword: "banco",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Finance,
+        keyword: "bank",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Finance,
+        keyword: "precio",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Finance,
+        keyword: "price",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Finance,
+        keyword: "deuda",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Finance,
+        keyword: "debt",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Finance,
+        keyword: "transferencia",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Finance,
+        keyword: "transfer",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Finance,
+        keyword: "bizum",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Finance,
+        keyword: "sueldo",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Finance,
+        keyword: "salary",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Finance,
+        keyword: "alquiler",
+        weight: 40,
+    },
     // Family
-    Rule { category: Category::Family, keyword: "mamá", weight: 40 },
-    Rule { category: Category::Family, keyword: "mom", weight: 40 },
-    Rule { category: Category::Family, keyword: "papá", weight: 40 },
-    Rule { category: Category::Family, keyword: "dad", weight: 40 },
-    Rule { category: Category::Family, keyword: "madre", weight: 40 },
-    Rule { category: Category::Family, keyword: "padre", weight: 40 },
-    Rule { category: Category::Family, keyword: "hermano", weight: 40 },
-    Rule { category: Category::Family, keyword: "hermana", weight: 40 },
-    Rule { category: Category::Family, keyword: "brother", weight: 40 },
-    Rule { category: Category::Family, keyword: "sister", weight: 40 },
-    Rule { category: Category::Family, keyword: "abuela", weight: 40 },
-    Rule { category: Category::Family, keyword: "abuelo", weight: 40 },
-    Rule { category: Category::Family, keyword: "grandma", weight: 40 },
-    Rule { category: Category::Family, keyword: "grandpa", weight: 40 },
-    Rule { category: Category::Family, keyword: "tío", weight: 40 },
-    Rule { category: Category::Family, keyword: "tía", weight: 40 },
-    Rule { category: Category::Family, keyword: "uncle", weight: 40 },
-    Rule { category: Category::Family, keyword: "aunt", weight: 40 },
-    Rule { category: Category::Family, keyword: "hijo", weight: 40 },
-    Rule { category: Category::Family, keyword: "hija", weight: 40 },
-    Rule { category: Category::Family, keyword: "familia", weight: 40 },
-    Rule { category: Category::Family, keyword: "family", weight: 40 },
+    Rule {
+        category: Category::Family,
+        keyword: "mamá",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Family,
+        keyword: "mom",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Family,
+        keyword: "papá",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Family,
+        keyword: "dad",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Family,
+        keyword: "madre",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Family,
+        keyword: "padre",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Family,
+        keyword: "hermano",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Family,
+        keyword: "hermana",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Family,
+        keyword: "brother",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Family,
+        keyword: "sister",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Family,
+        keyword: "abuela",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Family,
+        keyword: "abuelo",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Family,
+        keyword: "grandma",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Family,
+        keyword: "grandpa",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Family,
+        keyword: "tío",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Family,
+        keyword: "tía",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Family,
+        keyword: "uncle",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Family,
+        keyword: "aunt",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Family,
+        keyword: "hijo",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Family,
+        keyword: "hija",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Family,
+        keyword: "familia",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Family,
+        keyword: "family",
+        weight: 40,
+    },
     // Greeting
-    Rule { category: Category::Greeting, keyword: "hola", weight: 40 },
-    Rule { category: Category::Greeting, keyword: "hello", weight: 40 },
-    Rule { category: Category::Greeting, keyword: "hey", weight: 40 },
-    Rule { category: Category::Greeting, keyword: "buenos días", weight: 40 },
-    Rule { category: Category::Greeting, keyword: "good morning", weight: 40 },
-    Rule { category: Category::Greeting, keyword: "buenas tardes", weight: 40 },
-    Rule { category: Category::Greeting, keyword: "good afternoon", weight: 40 },
-    Rule { category: Category::Greeting, keyword: "buenas noches", weight: 40 },
-    Rule { category: Category::Greeting, keyword: "good night", weight: 40 },
-    Rule { category: Category::Greeting, keyword: "qué tal", weight: 40 },
+    Rule {
+        category: Category::Greeting,
+        keyword: "hola",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Greeting,
+        keyword: "hello",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Greeting,
+        keyword: "hey",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Greeting,
+        keyword: "buenos días",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Greeting,
+        keyword: "good morning",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Greeting,
+        keyword: "buenas tardes",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Greeting,
+        keyword: "good afternoon",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Greeting,
+        keyword: "buenas noches",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Greeting,
+        keyword: "good night",
+        weight: 40,
+    },
+    Rule {
+        category: Category::Greeting,
+        keyword: "qué tal",
+        weight: 40,
+    },
     // News
-    Rule { category: Category::News, keyword: "noticias", weight: 40 },
-    Rule { category: Category::News, keyword: "news", weight: 40 },
-    Rule { category: Category::News, keyword: "artículo", weight: 40 },
-    Rule { category: Category::News, keyword: "article", weight: 40 },
-    Rule { category: Category::News, keyword: "vídeo", weight: 40 },
-    Rule { category: Category::News, keyword: "video", weight: 40 },
-    Rule { category: Category::News, keyword: "viral", weight: 40 },
-    Rule { category: Category::News, keyword: "viste", weight: 40 },
+    Rule {
+        category: Category::News,
+        keyword: "noticias",
+        weight: 40,
+    },
+    Rule {
+        category: Category::News,
+        keyword: "news",
+        weight: 40,
+    },
+    Rule {
+        category: Category::News,
+        keyword: "artículo",
+        weight: 40,
+    },
+    Rule {
+        category: Category::News,
+        keyword: "article",
+        weight: 40,
+    },
+    Rule {
+        category: Category::News,
+        keyword: "vídeo",
+        weight: 40,
+    },
+    Rule {
+        category: Category::News,
+        keyword: "video",
+        weight: 40,
+    },
+    Rule {
+        category: Category::News,
+        keyword: "viral",
+        weight: 40,
+    },
+    Rule {
+        category: Category::News,
+        keyword: "viste",
+        weight: 40,
+    },
 ];
 
 /// The categorized shape of one message: ten integer scores in `0..=100`, a salience
@@ -592,12 +1178,17 @@ impl ContextVector {
             + 15 * u32::from(clamped[Category::Personal.index()])
             + 10 * u32::from(clamped[Category::Planning.index()]))
             / 100;
-        let length_bonus = u32::try_from(text.chars().count() / 100).unwrap_or(10).min(10);
+        let length_bonus = u32::try_from(text.chars().count() / 100)
+            .unwrap_or(10)
+            .min(10);
         let mut salience = (weighted + length_bonus).min(100);
         if media_omitted {
             salience /= 2;
         }
-        Self { scores: clamped, salience: salience as u8 }
+        Self {
+            scores: clamped,
+            salience: salience as u8,
+        }
     }
 
     pub fn score(&self, category: Category) -> u8 {
@@ -632,7 +1223,10 @@ impl ContextVector {
     fn entries(&self) -> Vec<VectorEntry<'static>> {
         Category::ALL
             .iter()
-            .map(|c| VectorEntry { category: c.label(), score: self.score(*c) })
+            .map(|c| VectorEntry {
+                category: c.label(),
+                score: self.score(*c),
+            })
             .collect()
     }
 }
@@ -708,7 +1302,11 @@ fn parse_timestamp(date: &str, time: &str) -> Option<u64> {
     }
     let hour: u64 = time[0].parse().ok()?;
     let minute: u64 = time[1].parse().ok()?;
-    let second: u64 = if time.len() == 3 { time[2].parse().ok()? } else { 0 };
+    let second: u64 = if time.len() == 3 {
+        time[2].parse().ok()?
+    } else {
+        0
+    };
     if hour >= 24 || minute >= 60 || second >= 60 {
         return None;
     }
@@ -780,8 +1378,11 @@ pub fn parse_whatsapp_export(
     let mut outcome = ParseOutcome::default();
     // A message in progress: sender, time, media flag, accumulated body lines.
     let mut pending: Option<(SenderIdentity, u64, bool, Vec<&str>)> = None;
-    let flush = |outcome: &mut ParseOutcome, pending: &mut Option<(SenderIdentity, u64, bool, Vec<&str>)>| {
-        let Some((sender, at, is_media, lines)) = pending.take() else { return };
+    let flush = |outcome: &mut ParseOutcome,
+                 pending: &mut Option<(SenderIdentity, u64, bool, Vec<&str>)>| {
+        let Some((sender, at, is_media, lines)) = pending.take() else {
+            return;
+        };
         let body = lines.join("\n");
         let message = if is_media {
             ChatMessage::media(ChatPlatform::Whatsapp, chat_id, sender, Some(at))
@@ -841,17 +1442,27 @@ pub fn parse_whatsapp_export(
 /// chat. Mojibake is kept as decoded (see the module note) — this parser assumes the
 /// text is already lossy UTF-8.
 pub fn parse_instagram_export(json: &str, salt: &str) -> Result<ParseOutcome, ParseError> {
-    validate_salt(salt).map_err(|_| ParseError::MalformedDocument { reason: "the salt is missing or oversized" })?;
+    validate_salt(salt).map_err(|_| ParseError::MalformedDocument {
+        reason: "the salt is missing or oversized",
+    })?;
     let root: serde_json::Value =
-        serde_json::from_str(json).map_err(|_| ParseError::MalformedDocument { reason: "not valid JSON" })?;
-    let messages = root
-        .get("messages")
-        .and_then(|m| m.as_array())
-        .ok_or(ParseError::MalformedDocument { reason: "no messages array" })?;
+        serde_json::from_str(json).map_err(|_| ParseError::MalformedDocument {
+            reason: "not valid JSON",
+        })?;
+    let messages =
+        root.get("messages")
+            .and_then(|m| m.as_array())
+            .ok_or(ParseError::MalformedDocument {
+                reason: "no messages array",
+            })?;
     let mut participants: Vec<String> = root
         .get("participants")
         .and_then(|p| p.as_array())
-        .map(|p| p.iter().filter_map(|one| one.get("name")?.as_str().map(str::to_owned)).collect())
+        .map(|p| {
+            p.iter()
+                .filter_map(|one| one.get("name")?.as_str().map(str::to_owned))
+                .collect()
+        })
         .unwrap_or_default();
     participants.sort();
     let mut chat_material = b"wanda-ig-chat-v1\0".to_vec();
@@ -869,16 +1480,30 @@ pub fn parse_instagram_export(json: &str, salt: &str) -> Result<ParseOutcome, Pa
             let at = entry.get("timestamp_ms")?.as_u64()?;
             let content = entry.get("content").and_then(|c| c.as_str());
             let share_text = entry.get("share").and_then(|s| {
-                s.get("share_text").and_then(|t| t.as_str()).or_else(|| s.get("link").and_then(|l| l.as_str()))
+                s.get("share_text")
+                    .and_then(|t| t.as_str())
+                    .or_else(|| s.get("link").and_then(|l| l.as_str()))
             });
             let has_media = entry.get("share").is_some() && share_text.is_none()
                 || ["photos", "videos", "audio_files", "gifs"]
                     .iter()
-                    .any(|key| entry.get(key).and_then(|m| m.as_array()).is_some_and(|a| !a.is_empty()));
+                    .any(|key| {
+                        entry
+                            .get(key)
+                            .and_then(|m| m.as_array())
+                            .is_some_and(|a| !a.is_empty())
+                    });
             let sender = SenderIdentity::display(sender).ok()?;
             let sent_at = if at == 0 { None } else { Some(at) };
             if let Some(text) = content.or(share_text) {
-                ChatMessage::new(ChatPlatform::Instagram, chat_id.clone(), sender, sent_at, text).ok()
+                ChatMessage::new(
+                    ChatPlatform::Instagram,
+                    chat_id.clone(),
+                    sender,
+                    sent_at,
+                    text,
+                )
+                .ok()
             } else if has_media {
                 ChatMessage::media(ChatPlatform::Instagram, chat_id.clone(), sender, sent_at).ok()
             } else {
@@ -919,7 +1544,10 @@ pub fn parse_notification_dump(jsonl: &str, salt: &str) -> Result<ParseOutcome, 
             if text.trim().is_empty() {
                 return None;
             }
-            let title = entry.get("title").and_then(|t| t.as_str()).unwrap_or("unknown");
+            let title = entry
+                .get("title")
+                .and_then(|t| t.as_str())
+                .unwrap_or("unknown");
             let key = (package.to_string(), at, content_id(text.as_bytes()));
             if !seen.insert(key) {
                 return Some(None); // a duplicate, not malformed
@@ -927,7 +1555,9 @@ pub fn parse_notification_dump(jsonl: &str, salt: &str) -> Result<ParseOutcome, 
             let sender = SenderIdentity::from_export(title, salt).ok()?;
             let platform = ChatPlatform::notification(package).ok()?;
             let sent_at = if at == 0 { None } else { Some(at) };
-            ChatMessage::new(platform, package, sender, sent_at, text).ok().map(Some)
+            ChatMessage::new(platform, package, sender, sent_at, text)
+                .ok()
+                .map(Some)
         })();
         match parsed {
             Some(Some(message)) => outcome.messages.push(message),
@@ -949,7 +1579,10 @@ pub enum WandaError {
     #[error("a message batch holds {found} messages; the most one batch may carry is {cap}")]
     BatchTooLarge { found: usize, cap: usize },
     #[error("invalid message: {field}: {reason}")]
-    InvalidMessage { field: &'static str, reason: &'static str },
+    InvalidMessage {
+        field: &'static str,
+        reason: &'static str,
+    },
     #[error("the sender-hash salt is missing or oversized")]
     InvalidSalt,
     #[error("a different record already holds {reference}")]
@@ -1134,10 +1767,19 @@ fn encode<T: Serialize>(value: &T) -> Result<String, WandaError> {
 
 /// Shape one message into the record the vault will hold. Pure: nothing is stored
 /// here, so a bad batch leaves the vault untouched.
-fn message_record(domain: &ContextDomain, message: &ChatMessage) -> Result<MessageRecord, WandaError> {
+fn message_record(
+    domain: &ContextDomain,
+    message: &ChatMessage,
+) -> Result<MessageRecord, WandaError> {
     let vector = ContextVector::categorize(&message.text, message.media_omitted);
     let excerpt = if vector.salience() >= EXCERPT_SALIENCE_THRESHOLD && !message.media_omitted {
-        Some(message.text.chars().take(MAX_EXCERPT_CHARS).collect::<String>())
+        Some(
+            message
+                .text
+                .chars()
+                .take(MAX_EXCERPT_CHARS)
+                .collect::<String>(),
+        )
     } else {
         None
     };
@@ -1157,7 +1799,10 @@ fn message_record(domain: &ContextDomain, message: &ChatMessage) -> Result<Messa
         excerpt: excerpt.as_deref(),
     };
     let content = encode(&content)?;
-    let reference = domain.reference(&format!("wanda/messages/{}", content_id(content.as_bytes())))?;
+    let reference = domain.reference(&format!(
+        "wanda/messages/{}",
+        content_id(content.as_bytes())
+    ))?;
     Ok(MessageRecord {
         reference,
         platform: message.platform.clone(),
@@ -1211,7 +1856,10 @@ fn chat_record(
     times.sort_unstable();
     let mean_scores: Vec<VectorEntry<'static>> = Category::ALL
         .iter()
-        .map(|c| VectorEntry { category: c.label(), score: (sums[c.index()] / count).min(100) as u8 })
+        .map(|c| VectorEntry {
+            category: c.label(),
+            score: (sums[c.index()] / count).min(100) as u8,
+        })
         .collect();
     let digests: Vec<String> = records.iter().map(|record| content_id_of(record)).collect();
     let content = ChatContent {
@@ -1292,7 +1940,10 @@ impl std::fmt::Debug for ChatBatchOutcome {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NoMessages => f.write_str("ChatBatchOutcome::NoMessages"),
-            Self::Recorded(batch) => f.debug_tuple("ChatBatchOutcome::Recorded").field(batch).finish(),
+            Self::Recorded(batch) => f
+                .debug_tuple("ChatBatchOutcome::Recorded")
+                .field(batch)
+                .finish(),
         }
     }
 }
@@ -1327,15 +1978,25 @@ pub fn record_chat_context(
         return Ok(ChatBatchOutcome::NoMessages);
     }
     if messages.len() > MAX_MESSAGES_PER_BATCH {
-        return Err(WandaError::BatchTooLarge { found: messages.len(), cap: MAX_MESSAGES_PER_BATCH });
+        return Err(WandaError::BatchTooLarge {
+            found: messages.len(),
+            cap: MAX_MESSAGES_PER_BATCH,
+        });
     }
     // Phase one: shape every message, dedupe by the content-derived reference.
     let mut records: Vec<MessageRecord> = Vec::new();
     for message in messages {
         let record = message_record(domain, message)?;
-        match records.iter().find(|existing| existing.reference == record.reference) {
+        match records
+            .iter()
+            .find(|existing| existing.reference == record.reference)
+        {
             Some(existing) if existing.content == record.content => continue,
-            Some(_) => return Err(WandaError::ReferenceCollision { reference: record.reference }),
+            Some(_) => {
+                return Err(WandaError::ReferenceCollision {
+                    reference: record.reference,
+                })
+            }
             None => records.push(record),
         }
     }
@@ -1344,7 +2005,9 @@ pub fn record_chat_context(
     let mut platforms: BTreeMap<(String, String), ChatPlatform> = BTreeMap::new();
     for record in &records {
         let key = (record.platform.label().to_string(), record.chat_id.clone());
-        platforms.entry(key.clone()).or_insert_with(|| record.platform.clone());
+        platforms
+            .entry(key.clone())
+            .or_insert_with(|| record.platform.clone());
         groups.entry(key).or_default().push(record);
     }
     let mut chats: Vec<ChatRecord> = Vec::new();
@@ -1356,14 +2019,23 @@ pub fn record_chat_context(
     // content, which is fine; anything else under its reference is a collision.
     let mut context = PillarContext::new(domain.clone(), task_id)?;
     for record in &records {
-        store_once(vault, &record.reference, &record.content, source_ms(record.sent_at))?;
+        store_once(
+            vault,
+            &record.reference,
+            &record.content,
+            source_ms(record.sent_at),
+        )?;
         context.include(Pillar::Wanda, record.reference.clone())?;
     }
     for chat in &chats {
         store_once(vault, &chat.reference, &chat.content, 0)?;
         context.include(Pillar::Wanda, chat.reference.clone())?;
     }
-    Ok(ChatBatchOutcome::Recorded(ChatBatch { context, messages: records, chats }))
+    Ok(ChatBatchOutcome::Recorded(ChatBatch {
+        context,
+        messages: records,
+        chats,
+    }))
 }
 
 /// The timestamp a record is sealed at: the source's own, or 0 as the explicit
@@ -1373,7 +2045,12 @@ fn source_ms(sent_at: Option<u64>) -> i64 {
 }
 
 /// Store a record unless the vault already holds exactly it at its reference.
-fn store_once(vault: &mut Vault, reference: &VaultRef, content: &str, at_ms: i64) -> Result<(), WandaError> {
+fn store_once(
+    vault: &mut Vault,
+    reference: &VaultRef,
+    content: &str,
+    at_ms: i64,
+) -> Result<(), WandaError> {
     if vault.contains(reference) {
         let existing = vault
             .disclose(ACTOR, reference, PrivacyGrade::Restricted, at_ms)
@@ -1381,11 +2058,21 @@ fn store_once(vault: &mut Vault, reference: &VaultRef, content: &str, at_ms: i64
             .and_then(|disclosure| disclosure.text().map(str::to_owned));
         match existing {
             Some(text) if text == content => Ok(()),
-            _ => Err(WandaError::ReferenceCollision { reference: reference.clone() }),
+            _ => Err(WandaError::ReferenceCollision {
+                reference: reference.clone(),
+            }),
         }
     } else {
         vault
-            .store(ACTOR, reference.clone(), EntryClass::PrivateFact, PrivacyGrade::Restricted, content, at_ms, None)
+            .store(
+                ACTOR,
+                reference.clone(),
+                EntryClass::PrivateFact,
+                PrivacyGrade::Restricted,
+                content,
+                at_ms,
+                None,
+            )
             .map_err(WandaError::Vault)
     }
 }

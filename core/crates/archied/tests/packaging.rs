@@ -1074,7 +1074,10 @@ fn release_builder_stages_model_runtime_and_provider_registry() {
 fn release_builder_stages_the_model_manifests() {
     let root = repo_root();
     let script = std::fs::read_to_string(root.join("distro/archiso/build.sh")).unwrap();
-    assert!(script.contains("airootfs/etc/archie/models"), "release omits the model manifests");
+    assert!(
+        script.contains("airootfs/etc/archie/models"),
+        "release omits the model manifests"
+    );
     let model_count = count_files_with_extension_recursive(&root.join("models"), "toml");
     assert!(model_count > 0, "the staged model registry is empty");
 }

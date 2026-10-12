@@ -112,7 +112,12 @@ fn window_png(
     let (surface_width, surface_height) = (surface.0.min(width), surface.1.min(height));
     let region = region
         .and_then(|region| region.clamped(surface_width, surface_height))
-        .unwrap_or(archie_stage::Region::new(0, 0, surface_width, surface_height));
+        .unwrap_or(archie_stage::Region::new(
+            0,
+            0,
+            surface_width,
+            surface_height,
+        ));
     let part: Vec<u8> = (0..region.height)
         .flat_map(|row| {
             let from = ((region.y as u32 + row) * width + region.x as u32) as usize;
