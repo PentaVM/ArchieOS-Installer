@@ -98,10 +98,19 @@ fixture se reporta como fixture, no como dispositivo real. Un PR por avance, con
   desviación. Los umbrales actuales (100 puertos, 50 hosts, entropía 4,0) son criterio,
   no medida. *Hecho cuando:* hay una tasa de falsos positivos medida sobre una captura
   real de al menos un día.
-- [ ] **8. Adaptador del router** (DHCP, vecinos, Wi-Fi), según el firmware real: el de
+- [x] **8. Adaptador del router** (DHCP, vecinos, Wi-Fi), según el firmware real: el de
   Nelson es un MitraStar GPT-2741GNAC. Sin eso o un puerto espejo, un nodo conmutado
   solo ve su propio tráfico. *Hecho cuando:* la lista de clientes del router entra a la
   vista del punto 1, solo lectura.
+  **Hecho (Kimi, 2026-10-12), como administración, no solo lectura:**
+  `adapters/router/` — sonda de capacidades (`probe.rs`) que declara honestamente qué
+  expone el firmware; clientes reales (`clients.rs`); UPnP IGD con
+  AddPortMapping/DeletePortMapping/GetSpecific/GetGeneric (acotado a 256) y
+  GetStatusInfo (`igd.rs`); canal SSH con tablas de comandos permitidos por familia de
+  firmware (`ssh.rs`). Todo write pasa por Intent → policy → aprobación → postcondición
+  medida (`PortMapping` presente en GetSpecific). Lo que el MitraStar no exponga queda
+  `Unsupported` declarado, nunca omitido en silencio. 25 pruebas. Falta probarlo contra
+  el router real.
 - [x] **9. Imprimir dentro del motor.** ~~`archie-print` habla IPP directo~~
   **Hecho (Kimi, 2026-10-11):** `Command::PrintSubmit` con policy, journal y aprobación
   por digest; la postcondición es la propuesta aquí: «la impresora tiene el trabajo» —
@@ -120,6 +129,16 @@ fixture se reporta como fixture, no como dispositivo real. Un PR por avance, con
   (sin PTZ: sin postcondición medible); Chromecast declara su ausencia (CAST v2 necesita
   TLS+protobuf que el crate no tiene). Falta Matter. Cada adaptador con su prueba (mocks
   loopback; falta hardware real).
+  **Ampliado (Kimi, 2026-10-12):** WoL (paquete mágico de 102 bytes, verificación por
+  tabla ARP / `ip neigh`, sin ping) y ADB para Android (`adapters/adb.rs`): lanzar apps
+  (monkey), bloquear sesión (keyevent solo si el estado difiere), volumen con índice
+  leído de `dumpsys audio`, `adb connect` + `adb devices` antes de actuar; pausa/play
+  multimedia declara `Unsupported` por no tener postcondición medible. Nuevos contratos:
+  `WakeHost`, `WifiSet`, `SessionLock`, `VolumeSet` y `PortMapping`; el estado del Host
+  ahora sigue `reachable/awake/session_locked/volume_percent/foreground_app` y
+  `AppLaunch` verifica contra el proceso en primer plano. Runner de procesos acotado
+  (`adapters/process.rs`): binario absoluto, sin shell, entorno limpio, salida acotada,
+  timeout con kill.
 - [ ] **13. `archie-netwatch.service` bajo systemd real.** No se sabe si `DynamicUser`
   con capacidades ambientales basta para `dumpcap` en Arch.
 - [ ] 14. IPv6: `address-moved` solo mira ARP; falta Neighbor Discovery.
@@ -131,6 +150,13 @@ fixture se reporta como fixture, no como dispositivo real. Un PR por avance, con
   que Cerebra gradúe por contenido y use `ask_private` (el velo).
 - [ ] **Transporte Enterprise.** `POST /sync` responde 501: no hay envío a ningún tablero.
 - [ ] Productores reales de Sentry, Wanda, Vault, IRIS y Forge hacia `PillarContext`.
+  **Parcial (Kimi, 2026-10-12):** Sentry (punto 3 de la sección 3) y Wanda ya producen —
+  `archie_cerebra::wanda_bridge` parsea exports de WhatsApp (.txt), Instagram (JSON) y
+  notificaciones on-device (JSONL), clasifica cada conversación en un vector de 10
+  categorías con saliencia 0–100 (ES/EN) y lo registra con `record_chat_context`:
+  Vault en grado Restricted + referencia `PillarContext` del pilar Wanda. El seudónimo
+  usa doble FNV (sha2 no es dependencia de cerebra): es seudónimo, no protección.
+  Faltan Vault, IRIS y Forge, y el llamador en vivo que siga los exports.
 
 ## 5. Voz
 
