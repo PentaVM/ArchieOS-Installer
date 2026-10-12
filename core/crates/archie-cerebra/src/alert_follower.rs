@@ -315,8 +315,15 @@ fn to_input(wire: WireAlert, told: &BTreeMap<String, u64>) -> AlertInput {
 /// which the caller handles by draining the rotated sibling first; any genuine
 /// I/O failure is the error.
 fn read_new_lines(path: &Path, offset: u64) -> Result<Option<(Vec<String>, u64)>, FollowerError> {
-    let mut file = std::fs::File::open(path)
-        .map_err(|e| FollowerError::Io(format!("{}: {e}", path.display())))?;
+    // Netwatch creates the file with its first alert and renames it away to rotate, so
+    // a missing file is an empty one: nothing yet, or the instant between rotations.
+    let mut file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok((offset == 0).then(|| (Vec::new(), 0)));
+        }
+        Err(e) => return Err(FollowerError::Io(format!("{}: {e}", path.display()))),
+    };
     let length = file
         .metadata()
         .map_err(|e| FollowerError::Io(format!("{}: {e}", path.display())))?
@@ -693,6 +700,39 @@ mod tests {
         let after = run(31_000);
         assert!(after.notices_reset);
         assert_eq!(after.notices_posted, 1);
+    }
+
+    #[test]
+    fn no_alerts_file_yet_or_mid_rotation_is_quiet_not_an_error() {
+        let fixture = Fixture::new("missing");
+        let cerebra = cerebra();
+        let run = |now_ms| {
+            follow_alerts_once(
+                &cerebra,
+                &fixture.paths,
+                &ModelRegistry::new(),
+                "sentry-alerts",
+                now_ms,
+            )
+        };
+        // Netwatch has raised nothing yet: the file does not exist.
+        let quiet = run(1_000).unwrap();
+        assert_eq!((quiet.lines_read, quiet.alerts_fed), (0, 0));
+
+        fixture.append(&[&port_scan_line(15_000)]);
+        assert_eq!(run(20_000).unwrap().alerts_fed, 1);
+        // Netwatch rotated and has not written again: only the rotated file exists,
+        // with a line the follower had not read yet.
+        fixture.append(&[&port_scan_line(16_000)]);
+        std::fs::rename(
+            &fixture.paths.alerts,
+            fixture.paths.alerts.with_file_name("alerts.1.jsonl"),
+        )
+        .unwrap();
+        let rotated = run(21_000).unwrap();
+        assert!(rotated.rotation_reset);
+        assert_eq!(rotated.alerts_fed, 1, "the rotated tail is drained");
+        assert_eq!(run(22_000).unwrap().alerts_fed, 0);
     }
 
     #[test]
