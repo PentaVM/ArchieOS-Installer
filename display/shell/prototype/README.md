@@ -27,6 +27,8 @@ plataforma `offscreen`), a 1920×1080 y 2560×1440.
 El script de captura no se versiona (ArchieOS no incluye Python). Los mismos resultados con
 `qml` en Linux no están verificados.
 
+Pruebas: `BridgeModelTest.qml` (modelo de datos) y `SurfacesTest.qml` (superficies de ejemplo y perfiles de movimiento); ambas sin QtTest, con resultados en `passes` / `failures` / `log`.
+
 **No probado:** Quickshell (`PanelWindow`, capas), blur del compositor, NVIDIA, Wayland,
 lectores de pantalla, `qmllint`.
 
