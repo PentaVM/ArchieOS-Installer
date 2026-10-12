@@ -78,10 +78,10 @@ Cada una dibuja sus estados (normal, vacío, error, offline, degradado, desactua
 
 **Correcciones a la verdad** (misma regla aprobada para la primera entrega): el diseño rotula casi todo «Real · bridge» o «Real · shell», pero el bridge no entrega ventanas, historial de notificaciones, catálogo de puentes, trayectorias de Cortex, proveedores, modelos, política de apps ni diagnóstico. Todas esas superficies dicen **«Diseño · datos de ejemplo»**. La búsqueda no lleva chip propio, igual que el diseño: la rotula el aviso «Datos de diseño» de la shell. Los trabajos largos reales del bridge siguen viéndose en el panel de Actividad, no en estas muestras.
 
-**Cambios de comportamiento que el diseño introduce y que hay que aprobar** (no son sólo visuales):
+**Cambios de comportamiento que el diseño introduce, aprobados por el dueño** (no son sólo visuales):
 - El chip «Dominio» de la barra ahora abre el selector de espacio (decisión 5 del paquete). El chip sigue diciendo «sin lectura»; el menú es de ejemplo.
 - Los iconos Forge y Ajustes del dock abren sus ventanas de ejemplo.
-- La búsqueda (`/`) es una superficie distinta de la paleta (`Ctrl+K`): la lupa de la barra sigue abriendo la paleta. El paquete no aclara cuál de las dos debe abrir la lupa.
+- La búsqueda (`/`) es una superficie distinta de la paleta (`Ctrl+K`): la lupa de la barra sigue abriendo la paleta (el paquete no aclaraba cuál de las dos debía abrirla; se mantiene lo que ya hacía).
 - El perfil de movimiento por omisión es **Balanced** (recomendación del paquete); antes la animación era única.
 
 **Desviaciones:** la tipografía monoespaciada es la del sistema (el diseño usa `ui-monospace`); la ventana de Ajustes tiene alto fijo de 520 (el diseño dice `min-height`); `OrbHole` sólo se ve con el escritorio vacío (`H`) para no tapar Vault; sombras aproximadas como antes; sin versiones 2560×1440 propias.
