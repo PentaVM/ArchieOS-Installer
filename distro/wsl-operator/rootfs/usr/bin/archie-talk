@@ -28,6 +28,8 @@ fi
 if [ "$where" = local ]; then
   archie-local up
   export ARCHIE_VOICE_ENDPOINT=http://127.0.0.1:8081/v1 ARCHIE_VOICE_MODEL=bonsai
+  # A small model is shown how to speak or to call a tool; IRIS does the seeing.
+  export ARCHIE_VOICE_GUIDE=/usr/share/archie/skills/voice-local/SKILL.md
   grade=internal
   echo 'archie-talk: the model on this machine answers (archie-talk --cloud for Nebius)' >&2
 fi
