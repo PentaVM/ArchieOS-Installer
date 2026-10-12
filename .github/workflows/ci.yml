@@ -11,6 +11,11 @@ permissions:
 jobs:
   rust:
     runs-on: ubuntu-latest
+    # Without debug info the workspace's test binaries fit the runner's disk: with it,
+    # linking archied and the archie-core tests ran out of space. Tests are unchanged.
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     defaults:
       run:
         working-directory: core
