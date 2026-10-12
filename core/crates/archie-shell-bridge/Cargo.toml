@@ -1,0 +1,30 @@
+[package]
+name = "archie-shell-bridge"
+description = "The shell's read-only adapter: archie-displayd's loopback projection as a versioned stream of JSON lines, with an honest link state."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "archie_shell_bridge"
+path = "src/lib.rs"
+
+[[bin]]
+name = "archie-shell-bridge"
+path = "src/main.rs"
+
+[dependencies]
+archie-displayd.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+archie-bridges.workspace = true
+archie-core.workspace = true
+# Contract test: the bridge reads what the real archie-lan types write.
+archie-lan = { path = "../archie-lan" }
+archie-state.workspace = true
+tokio = { workspace = true, features = ["full"] }
