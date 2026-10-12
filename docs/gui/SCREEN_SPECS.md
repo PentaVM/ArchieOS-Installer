@@ -41,3 +41,7 @@ Mapa de capturas: `01-frost`, `02-workspace`, `03-signature`, `04-synthesis` (li
 ## Responsive y accesibilidad
 
 Verificado: proporcionalidad en 1080p y 1440p. **No verificado:** lector de pantalla (AT-SPI), escala fraccional, multi-monitor, táctil. Jerarquía de accesibilidad prevista: cada fila de archivo = elemento con rol, nombre, estado de selección y contexto; `Accessible.*` aún no está añadido al prototipo.
+
+## Actualización Fase C: qué muestra datos reales
+
+Capturas `C-*` en `screenshots/`: `C-real-daemon-unreachable` (trama **real**: `archie-displayd` real, sin `archied`; telemetría "no medido" con la razón real del kernel), `C-real-displayd-offline` (trama **real**: nada escucha) y `C-synthetic-live-with-psi` (trama **sintética** con la forma de los tipos reales: la única forma de ver `live` con PSI/térmica en este equipo). Datos reales en el prototipo: chip de enlace (barra superior y centro de control), resumen de sistema (sólo si `archied` respondió) y medidores de presión/temperatura. Las chips de **cámara/micro** y **dominio** pasaron de afirmar un estado a decir "sin lectura", porque su fuente (`CameraAuthority`, `PillarContext`) aún no está conectada.

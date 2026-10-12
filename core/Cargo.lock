@@ -539,6 +539,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "archie-shell-bridge"
+version = "0.1.0"
+dependencies = [
+ "archie-core",
+ "archie-displayd",
+ "archie-state",
+ "clap",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+]
+
+[[package]]
 name = "archie-sight"
 version = "0.1.0"
 dependencies = [

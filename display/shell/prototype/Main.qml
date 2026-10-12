@@ -28,7 +28,28 @@ Item {
     Rectangle { anchors.fill: parent
         gradient: Gradient { GradientStop { position: 0; color: Theme.wall0 } GradientStop { position: 1; color: Theme.wall1 } } }
 
-    TopBar { id: bar; width: parent.width; overlay: root.overlay
+    // Fed by quickshell/BridgeProcess.qml in the shell, by a recorded frame in tests.
+    property alias bridge: bridgeModel
+    // Plain values for tests that cannot reach the model object.
+    readonly property string bridgeLink: bridgeModel.link
+    readonly property int bridgeRejected: bridgeModel.rejected
+    BridgeModel { id: bridgeModel }
+
+    // Test/replay only: a context property `replayFile` (a file URL of JSON lines written by
+    // archie-shell-bridge) is fed through the same ingest() path. Needs QML_XHR_ALLOW_FILE_READ=1.
+    property string replayDebug: ""
+    Component.onCompleted: {
+        replayDebug = typeof replayFile === "undefined" ? "no-context-property" : "file=" + replayFile
+        if (typeof replayFile === "undefined" || replayFile === "") return
+        var xhr = new XMLHttpRequest()
+        xhr.open("GET", replayFile, false)
+        xhr.send()
+        var lines = xhr.responseText.split(/\r?\n/)
+        replayDebug += " status=" + xhr.status + " bytes=" + xhr.responseText.length + " lines=" + lines.length
+        for (var i = 0; i < lines.length; i++) if (lines[i].trim() !== "") bridgeModel.ingest(lines[i])
+    }
+
+    TopBar { id: bar; width: parent.width; overlay: root.overlay; bridge: bridgeModel
         onToggle: function (n) { root.overlay = root.overlay === n ? "" : n } }
 
     VaultWindow { id: vault; x: Math.round(parent.width * 0.13); y: Math.round(parent.height * 0.083); width: Math.round(parent.width * 0.615); height: Math.round(parent.height * 0.65) }
@@ -47,7 +68,7 @@ Item {
 
     Item { anchors.fill: parent; visible: root.overlay !== ""
         MouseArea { anchors.fill: parent; onClicked: root.overlay = "" }
-        ControlCenter { visible: root.overlay === "control"; x: parent.width - width - 14; y: Theme.barH + 8 }
+        ControlCenter { bridge: bridgeModel; visible: root.overlay === "control"; x: parent.width - width - 14; y: Theme.barH + 8 }
         ActivityCenter { visible: root.overlay === "activity"; x: parent.width - width - 14; y: Theme.barH + 8 }
         CommandPalette { visible: root.overlay === "palette"; x: (parent.width - width) / 2; y: 150 }
     }

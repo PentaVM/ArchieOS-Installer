@@ -46,3 +46,22 @@ Ninguna todavía. Cuando exista código se informará, por cada ítem `GUI-*`: p
 1. La capa Qt/QML/Quickshell no se ha compilado ni renderizado en esta sesión; todo lo que entregue la Fase B se marcará `NOT_RENDERED_HERE` salvo que se produzca evidencia.
 2. Defecto previo de `INDEX.md` (arriba) hará fallar cualquier CI Rust que exija verde.
 3. PRs #28–#30 cambian `archie-core`, `archie-lan`, `archie-workstation`, `archie-state` y `archie-cli`; pueden mover contratos que esta auditoría cita.
+
+## Fase C, primera rebanada: `archie-shell-bridge` y su consumo en QML
+
+**Rust** (`cargo test -p archie-shell-bridge --locked`): **15 pasan, 0 fallan** (6 unitarias de `client.rs`, 9 de contrato en `tests/contract.rs`). `cargo fmt --check` limpio; `clippy` sin hallazgos en este crate. (`clippy -D warnings` de todo el workspace falla en `archie-orb` por código previo y un clippy 1.98 más estricto que el 1.88 de CI; no es de este PR.)
+
+Casos positivos: contra el **router real de `archie-displayd`** servido por un socket loopback real, con `archied` ausente (`daemon_unreachable`; telemetría presente e independiente de `archied`); grabación nunca presentada como `live`, aunque diga que el daemon era alcanzable; estado `live` con campos de `StatusView` (servido por un par que usa los tipos reales, porque ningún `archied` real puede correr aquí).
+Casos negativos: nadie escucha (`displayd_offline`), respuesta que no cumple el esquema, HTTP 500, respuesta de más de 4 MiB, dirección no loopback (rechazada antes de conectar), ruta que podría partir la línea de petición, cuerpo truncado, texto que no es HTTP.
+
+**Binario real** (`archie-shell-bridge watch --once`) contra el `archie-displayd` real en este equipo: trama `daemon_unreachable` con `kernel` presente y `pressure_availability`/`thermal_availability` en `unavailable` con la razón real del kernel; y contra un puerto sin servidor: `displayd_offline`. Ambas se guardaron en `display/shell/prototype/frames/`.
+
+**QML** (`BridgeModelTest.qml`, Qt 6.12, offscreen): **15 comprobaciones, 0 fallos** — estado inicial `waiting`, tramas válidas, grabación ≠ live, razón y edad del dato, rechazo de JSON inválido / otro esquema / trama sin enlace sin pisar la última trama buena, y silencio del bridge tras 3 sondeos. Render del prototipo: 0 avisos de QML.
+
+**Regresión del workspace** (`cargo test --workspace --exclude archie-arena --locked --no-fail-fast`): **1 915 pasan** (1 900 de la línea base + 15 nuevas), **1 falla** (el mismo `index::tests::the_committed_index_is_current` previo) y 78 ignoradas. Sin regresiones.
+
+**No ejecutado / no verificado en esta rebanada:**
+- `archied` real: no arranca aquí (`state store unavailable`: falta el almacén PostgreSQL), así que **no existe una trama `live` real**; la trama `live` de las capturas es sintética y está nombrada así.
+- Quickshell (`BridgeProcess.qml`), Linux, Wayland, NVIDIA.
+- Lectores de pantalla, movimiento reducido en estos componentes, rendimiento.
+- Por eso ningún ítem pasa a `TESTED`: `GUI-DISPLAY-001` y `GUI-DISPLAY-002` están `INTEGRATED`; `GUI-CORE-001` y `GUI-CORE-013` `IN_PROGRESS`.

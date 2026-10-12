@@ -1,10 +1,10 @@
 # Matriz de integración: código → IPC → interfaz → prueba
 
-Generada desde `CAPABILITY_REGISTRY.csv` (sólo capacidades con `ui_required` = `YES` o `INDIRECT`). Columna **Estado**: ninguna fila está `INTEGRATED` ni `TESTED`; `TODO` = sin diseño ni adaptador, `BLOCKED` = falta un contrato IPC o un backend (motivo en la columna IPC). `Prueba` es la referencia de prueba existente o `none yet`. Las filas `ADAPTER_TODO` indican que el adaptador tipado aún no existe.
+Generada desde `CAPABILITY_REGISTRY.csv` (capacidades con `ui_required` = `YES` o `INDIRECT`). **Estado:** `TODO` sin adaptador; `IN_PROGRESS` parcialmente conectado; `INTEGRATED` conectado a la fuente real con pruebas positivas y negativas (aún no `TESTED`: falta accesibilidad, movimiento reducido, rendimiento y Linux/Quickshell); `BLOCKED` falta un contrato IPC o un backend (motivo en la columna IPC).
 
 | GUI | Capacidad | Código (ruta::símbolo) | IPC / contrato | Superficie > componente | Estado | Prueba |
 |---|---|---|---|---|---|---|
-| GUI-CORE-001 | CAP-CORE-001 | `core/crates/archie-core/src/control.rs::Status` | control.status (existing newline JSON) | CONTROL_CENTER > SystemSummaryCard | TODO | none yet |
+| GUI-CORE-001 | CAP-CORE-001 | `core/crates/archie-core/src/control.rs::Status` | control.status (existing newline JSON) | CONTROL_CENTER > SystemSummaryCard | IN_PROGRESS | contract.rs a_reachable_live_snapshot_maps_status_fields_and_is_live (peer serves real StatusView types; no live archied available to test) |
 | GUI-CORE-002 | CAP-CORE-002 | `core/crates/archie-core/src/control.rs::Topology` | control.topology | CONTROL_CENTER > FabricTopologyView | TODO | none yet |
 | GUI-CORE-003 | CAP-CORE-003 | `core/crates/archie-core/src/control.rs::Modules` | control.modules | SETTINGS > ModuleStateList | TODO | none yet |
 | GUI-CORE-004 | CAP-CORE-004 | `core/crates/archie-core/src/control.rs::Providers` | control.providers | WATCHER_FEED > ProviderHealthList | TODO | none yet |
@@ -16,7 +16,7 @@ Generada desde `CAPABILITY_REGISTRY.csv` (sólo capacidades con `ui_required` = 
 | GUI-CORE-010 | CAP-CORE-010 | `core/crates/archie-core/src/control.rs::Boot` | control.boot | CONTROL_CENTER > BootStageTimeline | TODO | none yet |
 | GUI-CORE-011 | CAP-CORE-011 | `core/crates/archie-core/src/control.rs::Metrics` | control.metrics | CONTROL_CENTER > ResourceGauges | TODO | none yet |
 | GUI-CORE-012 | CAP-CORE-012 | `core/crates/archie-core/src/control.rs::Audit` | control.audit | ACTIVITY_CENTER > AuditTimeline | TODO | none yet |
-| GUI-CORE-013 | CAP-CORE-013 | `core/crates/archie-core/src/control.rs::Ping` | control.ping | CONTROL_CENTER > DaemonLivenessChip | TODO | none yet |
+| GUI-CORE-013 | CAP-CORE-013 | `core/crates/archie-core/src/control.rs::Ping` | control.ping | CONTROL_CENTER > DaemonLivenessChip | IN_PROGRESS | liveness is derived from DisplaySnapshot.daemon_reachable via archie-displayd, not from ControlRequest::Ping directly; contract.rs link-state tests; BridgeModelTest.qml |
 | GUI-CORE-014 | CAP-CORE-014 | `core/crates/archied/src/main.rs::main` | n/a | CONTROL_CENTER > DaemonLivenessChip | TODO | none yet |
 | GUI-CORE-015 | CAP-CORE-015 | `core/crates/archie-cli/src/main.rs::Enrol` | ADAPTER_TODO (local file op; no control request) | SETTINGS > FabricEnrolWizard | TODO | none yet |
 | GUI-CORE-016 | CAP-CORE-016 | `core/crates/archie-cli/src/main.rs::Doctor` | ADAPTER_TODO (call archie_workstation::health::doctor) | SETTINGS > DiagnosticsPanel | TODO | none yet |
@@ -67,8 +67,8 @@ Generada desde `CAPABILITY_REGISTRY.csv` (sólo capacidades con `ui_required` = 
 | GUI-SENTRY-008 | CAP-SENTRY-007 | `sentry/include/sentry/policy/override.hpp::OwnerOverride` | ADAPTER_TODO | SENTRY_CENTER > OwnerOverrideDialog | TODO | none yet |
 | GUI-SENTRY-009 | CAP-SENTRY-008 | `sentry/include/sentry/runtime/camera_worker.hpp::CameraWorker` | ADAPTER_TODO | SENTRY_CENTER > PrivacyIndicators | TODO | none yet |
 | GUI-CORTEX-001 | CAP-CORTEX-001 | `cortex/include/archie/cortex/contracts.hpp::DeterministicContextCompiler` | cortex ipc.hpp kProtocolVersion=1 | DEVTOOLS > CortexInspector | TODO | none yet |
-| GUI-DISPLAY-001 | CAP-DISPLAY-001 | `core/crates/archie-displayd/src/lib.rs::route` | existing HTTP loopback (no mutation) | CONTROL_CENTER > DisplaydClient | TODO | none yet |
-| GUI-DISPLAY-002 | CAP-DISPLAY-002 | `core/crates/archie-displayd/src/kernel.rs::KernelSnapshot` | GET /api/kernel | CONTROL_CENTER > ResourceGauges | TODO | none yet |
+| GUI-DISPLAY-001 | CAP-DISPLAY-001 | `core/crates/archie-displayd/src/lib.rs::route` | existing HTTP loopback (no mutation) | CONTROL_CENTER > DisplaydClient | INTEGRATED | core/crates/archie-shell-bridge/tests/contract.rs (9 tests, real displayd router + hostile peers); src/client.rs (6); frame captured from the real archie-displayd binary: display/shell/prototype/frames/real-daemon-unreachable.jsonl |
+| GUI-DISPLAY-002 | CAP-DISPLAY-002 | `core/crates/archie-displayd/src/kernel.rs::KernelSnapshot` | GET /api/kernel | CONTROL_CENTER > ResourceGauges | INTEGRATED | bridge forwards KernelSnapshot (contract.rs); QML gauges rendered from a real frame (PSI/thermal unavailable) and a synthetic typed frame (available); BridgeModelTest.qml |
 | GUI-DISPLAY-003 | CAP-DISPLAY-003 | `display/native/src/AppCatalog.h::AppCatalog` | reuse C++ class or port logic (QML cannot exec) | DOCK > DockAppModel | TODO | none yet |
 | GUI-DISPLAY-004 | CAP-DISPLAY-004 | `display/native/src/DisplayControl.cpp::DisplayControl` | existing TCP 7668 | ORB_CONTEXT > ObservatoryViewSwitch | TODO | none yet |
 | GUI-WORLD-001 | CAP-WORLD-001 | `core/crates/archie-worldd/src/main.rs::main` | via displayd GET /api/world | WATCHER_FEED > WorldObservationFeed | TODO | none yet |

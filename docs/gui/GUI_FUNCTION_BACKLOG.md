@@ -1,15 +1,15 @@
 # GUI function backlog
 
-Generated from `CAPABILITY_REGISTRY.csv` (114 canonical capabilities, each path and symbol checked against the tree at the base SHA). Every `YES` and `INDIRECT` capability has a `GUI-<SUBSYSTEM>-NNN` item below, grouped by destination surface. `implementation_status` is `TODO` or `BLOCKED`; **nothing is `INTEGRATED` or `TESTED` yet**, and `design_status` is `NOT_STARTED` until the design prototype lands. Owners are `unassigned (crate X)`: the repository records no human owner per component.
+Generated from `CAPABILITY_REGISTRY.csv` (114 canonical capabilities, each path and symbol checked against the tree at the base SHA). `[ ]` pendiente, `[~]` en curso o integrado sin probar del todo, `[x]` sólo `TESTED`. Every `YES` and `INDIRECT` capability has a `GUI-<SUBSYSTEM>-NNN` item below, grouped by destination surface. `implementation_status` is `TODO`, `IN_PROGRESS`, `INTEGRATED` or `BLOCKED`; **nothing is `TESTED`**: that needs accessibility, reduced-motion, performance and Linux/Quickshell evidence that does not exist yet. `design_status` is `PROTOTYPED` where the prototype renders the item, otherwise `NOT_STARTED`. Owners are `unassigned (crate X)`: the repository records no human owner per component.
 
 ## Totals
 
-| ui_required | TODO | BLOCKED | n/a |
-|---|---|---|---|
-| YES | 49 | 4 | 0 |
-| INDIRECT | 32 | 3 | 0 |
-| UNDECIDED | 0 | 2 | 0 |
-| NO_GUI_NEEDED | 0 | 0 | 24 |
+| ui_required | TODO | IN_PROGRESS | INTEGRATED | TESTED | BLOCKED | n/a |
+|---|---|---|---|---|---|---|
+| YES | 45 | 2 | 2 | 0 | 4 | 0 |
+| INDIRECT | 32 | 0 | 0 | 0 | 3 | 0 |
+| UNDECIDED | 0 | 0 | 0 | 0 | 2 | 0 |
+| NO_GUI_NEEDED | 0 | 0 | 0 | 0 | 0 | 24 |
 
 Además: **24 ítems GUI-VAULT-001..024** (gestor de archivos, sin backend) están `BLOCKED` y no figuran en la tabla anterior porque no tienen símbolo de código que verificar.
 
@@ -18,7 +18,7 @@ Priority legend: **P0** first vertical slice (honest liveness, privacy indicator
 
 ## Surface: CONTROL_CENTER
 
-- [ ] GUI-CORE-001 — SystemSummaryCard: Node identity, hardware, capabilities, peers, modules, models, health, location
+- [~] GUI-CORE-001 — SystemSummaryCard: Node identity, hardware, capabilities, peers, modules, models, health, location
   - Origen: `core/crates/archie-core/src/control.rs::Status` (verificado en el árbol; capacidad CAP-CORE-001)
   - Estado real: IMPLEMENTED
   - UI destino: CONTROL_CENTER > SystemSummaryCard
@@ -29,10 +29,10 @@ Priority legend: **P0** first vertical slice (honest liveness, privacy indicator
   - Motion: panel fade+8px rise, 160 ms; none under Reduced Motion
   - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
   - Dependencias: none
-  - Prioridad: P0; implementación: TODO; diseño: NOT_STARTED
+  - Prioridad: P0; implementación: IN_PROGRESS; diseño: PROTOTYPED
   - Nota: Only source of active_tasks count
-  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
-- [ ] GUI-CORE-013 — DaemonLivenessChip: Liveness and daemon version
+  - Evidencia de terminado: contract.rs a_reachable_live_snapshot_maps_status_fields_and_is_live (peer serves real StatusView types; no live archied available to test)
+- [~] GUI-CORE-013 — DaemonLivenessChip: Liveness and daemon version
   - Origen: `core/crates/archie-core/src/control.rs::Ping` (verificado en el árbol; capacidad CAP-CORE-013)
   - Estado real: IMPLEMENTED
   - UI destino: CONTROL_CENTER > DaemonLivenessChip
@@ -43,10 +43,10 @@ Priority legend: **P0** first vertical slice (honest liveness, privacy indicator
   - Motion: panel fade+8px rise, 160 ms; none under Reduced Motion
   - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
   - Dependencias: none
-  - Prioridad: P0; implementación: TODO; diseño: NOT_STARTED
+  - Prioridad: P0; implementación: IN_PROGRESS; diseño: PROTOTYPED
   - Nota: Drives offline/degraded/reconnect state of every surface
-  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
-- [ ] GUI-DISPLAY-001 — DisplaydClient: Read-only projection bridge for the native display
+  - Evidencia de terminado: liveness is derived from DisplaySnapshot.daemon_reachable via archie-displayd, not from ControlRequest::Ping directly; contract.rs link-state tests; BridgeModelTest.qml
+- [~] GUI-DISPLAY-001 — DisplaydClient: Read-only projection bridge for the native display
   - Origen: `core/crates/archie-displayd/src/lib.rs::route` (verificado en el árbol; capacidad CAP-DISPLAY-001)
   - Estado real: IMPLEMENTED
   - UI destino: CONTROL_CENTER > DisplaydClient
@@ -57,9 +57,9 @@ Priority legend: **P0** first vertical slice (honest liveness, privacy indicator
   - Motion: panel fade+8px rise, 160 ms; none under Reduced Motion
   - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
   - Dependencias: CAP-CORE-013
-  - Prioridad: P0; implementación: TODO; diseño: NOT_STARTED
+  - Prioridad: P0; implementación: INTEGRATED; diseño: PROTOTYPED
   - Nota: Best first IPC adapter for the shell: typed, read-only, `source` is live or fixture
-  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+  - Evidencia de terminado: core/crates/archie-shell-bridge/tests/contract.rs (9 tests, real displayd router + hostile peers); src/client.rs (6); frame captured from the real archie-displayd binary: display/shell/prototype/frames/real-daemon-unreachable.jsonl
 - [ ] GUI-POLICY-002 — PanicPauseButton: Emergency pause: refuse all new authority
   - Origen: `core/crates/archie-policy/src/lib.rs::set_emergency_pause` (verificado en el árbol; capacidad CAP-POLICY-002)
   - Estado real: IMPLEMENTED
@@ -74,7 +74,7 @@ Priority legend: **P0** first vertical slice (honest liveness, privacy indicator
   - Prioridad: P0; implementación: BLOCKED; diseño: NOT_STARTED
   - Nota: Do not draw a pause button that does nothing; DESIGN_ONLY until IPC exists
   - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
-- [ ] GUI-DISPLAY-002 — ResourceGauges: PSI pressure and thermals read locally; Unavailable{reason} when unmeasured
+- [~] GUI-DISPLAY-002 — ResourceGauges: PSI pressure and thermals read locally; Unavailable{reason} when unmeasured
   - Origen: `core/crates/archie-displayd/src/kernel.rs::KernelSnapshot` (verificado en el árbol; capacidad CAP-DISPLAY-002)
   - Estado real: IMPLEMENTED
   - UI destino: CONTROL_CENTER > ResourceGauges
@@ -85,9 +85,9 @@ Priority legend: **P0** first vertical slice (honest liveness, privacy indicator
   - Motion: panel fade+8px rise, 160 ms; none under Reduced Motion
   - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
   - Dependencias: CAP-DISPLAY-001
-  - Prioridad: P1; implementación: TODO; diseño: NOT_STARTED
+  - Prioridad: P1; implementación: INTEGRATED; diseño: PROTOTYPED
   - Nota: Unmeasured must not look like idle (dashed rule)
-  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+  - Evidencia de terminado: bridge forwards KernelSnapshot (contract.rs); QML gauges rendered from a real frame (PSI/thermal unavailable) and a synthetic typed frame (available); BridgeModelTest.qml
 - [ ] GUI-CORE-002 — FabricTopologyView: Capability to nodes graph and resource totals across the fabric
   - Origen: `core/crates/archie-core/src/control.rs::Topology` (verificado en el árbol; capacidad CAP-CORE-002)
   - Estado real: IMPLEMENTED
