@@ -451,11 +451,35 @@ enum SentryIoT {    /// Send one verifiable remote key to a paired Roku resource
         #[arg(value_enum)]
         key: RemoteKeyArg,
     },
-    /// Launch an application on a paired Roku resource (reviewed flow).
+    /// Launch an application on a paired Roku or Chromecast resource
+    /// (reviewed flow, verified against the device's own status).
     Launch {
         resource_id: String,
-        /// ECP application ID, e.g. `12` for Netflix.
+        /// ECP application ID (e.g. `12` for Netflix) or Cast app ID (e.g. `CC1AD845`).
         app_id: String,
+    },
+    /// Stop the running application on a paired Chromecast (reviewed flow,
+    /// verified when RECEIVER_STATUS shows only the idle screen).
+    Stop { resource_id: String },
+    /// Set a paired Chromecast's volume (reviewed flow, verified against
+    /// RECEIVER_STATUS; a receiver that rounds the level diverges).
+    Volume {
+        resource_id: String,
+        #[arg(value_parser = clap::value_parser!(u8).range(0..=100))]
+        percent: u8,
+    },
+    /// Mute a paired Chromecast (reviewed flow, verified against RECEIVER_STATUS).
+    Mute { resource_id: String },
+    /// Unmute a paired Chromecast (reviewed flow, verified against RECEIVER_STATUS).
+    Unmute { resource_id: String },
+    /// Complete one TLS handshake with a Chromecast and print the SHA-256 of
+    /// the certificate it presents, for the operator to compare and pin as
+    /// `certificate_sha256`. Sends no CAST message; trusts nothing by itself.
+    CastProbe {
+        /// Device address (loopback or private).
+        address: std::net::IpAddr,
+        #[arg(long, default_value_t = 8009)]
+        port: u16,
     },
     /// Hash, stage and submit one document to a configured printer (reviewed flow).
     ///
@@ -530,6 +554,27 @@ impl Command {
                         app_id: app_id.clone(),
                     },
                 },
+                SentryIoT::Stop { resource_id } => ControlRequest::SentryPrepare {
+                    resource_id: resource_id.clone(),
+                    command: archie_core::control::SentryCommand::AppStop,
+                },
+                SentryIoT::Volume {
+                    resource_id,
+                    percent,
+                } => ControlRequest::SentryPrepare {
+                    resource_id: resource_id.clone(),
+                    command: archie_core::control::SentryCommand::VolumeSet { percent: *percent },
+                },
+                SentryIoT::Mute { resource_id } | SentryIoT::Unmute { resource_id } => {
+                    ControlRequest::SentryPrepare {
+                        resource_id: resource_id.clone(),
+                        command: archie_core::control::SentryCommand::MuteSet {
+                            muted: matches!(action, SentryIoT::Mute { .. }),
+                        },
+                    }
+                }
+                // A handshake from this machine; no daemon, no intent.
+                SentryIoT::CastProbe { .. } => return None,
                 SentryIoT::PrinterDoctor { resource_id } => ControlRequest::SentryPrinterDoctor {
                     resource_id: resource_id.clone(),
                 },
@@ -557,6 +602,30 @@ impl Command {
                 return None
             }
         })
+    }
+}
+
+/// Print the certificate fingerprint a Chromecast presents. The operator
+/// compares it (for example with the device's own settings or a second probe
+/// from another machine) before writing it into `[[sentry.chromecasts]]`.
+async fn cast_probe(address: std::net::IpAddr, port: u16, json: bool) -> std::process::ExitCode {
+    match archie_core::sentry_config::probe_cast_certificate(address, port).await {
+        Ok(fingerprint) => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"address": address, "port": port, "certificate_sha256": fingerprint})
+                );
+            } else {
+                println!("certificate_sha256 = \"{fingerprint}\"");
+                println!("Nothing was trusted or stored. Pin it only after comparing it.");
+            }
+            std::process::ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("archie: {address}:{port}: {error}");
+            std::process::ExitCode::FAILURE
+        }
     }
 }
 
@@ -1047,6 +1116,9 @@ async fn main() -> std::process::ExitCode {
                 once,
                 poll_ms,
             } => sentry_follow(&paths, state_dir.as_deref(), *poll_ms, *once, cli.json),
+            Command::Sentry {
+                action: SentryIoT::CastProbe { address, port },
+            } => cast_probe(*address, *port, cli.json).await,
             Command::WandaIngest { file, salt } => {
                 wanda_ingest(&paths, file, salt.as_deref(), cli.json)
             }
@@ -1073,7 +1145,13 @@ async fn main() -> std::process::ExitCode {
         Command::SentryExecute { .. }
             | Command::SentryNode { .. }
             | Command::Sentry {
-                action: SentryIoT::Key { .. } | SentryIoT::Launch { .. } | SentryIoT::Print { .. },
+                action: SentryIoT::Key { .. }
+                    | SentryIoT::Launch { .. }
+                    | SentryIoT::Print { .. }
+                    | SentryIoT::Stop { .. }
+                    | SentryIoT::Volume { .. }
+                    | SentryIoT::Mute { .. }
+                    | SentryIoT::Unmute { .. },
             }
     ) {
         return review_and_execute(&mut stream, &request, cli.json).await;
@@ -2677,6 +2755,34 @@ mod tests {
         // Volume is bounded at the CLI, before any intent exists.
         assert!(Cli::try_parse_from(["archie", "sentry-node", "volume", "pixel", "101"]).is_err());
         assert!(Cli::try_parse_from(["archie", "sentry-node", "wake"]).is_err());
+    }
+
+    /// Chromecast verbs prepare reviewed intents; the probe is local.
+    #[test]
+    fn cast_verbs_parse_to_typed_commands_and_the_probe_stays_local() {
+        use archie_core::control::{ControlRequest, SentryCommand};
+        for (argv, expected) in [
+            (vec!["stop", "living-cast"], SentryCommand::AppStop),
+            (vec!["volume", "living-cast", "35"], SentryCommand::VolumeSet { percent: 35 }),
+            (vec!["mute", "living-cast"], SentryCommand::MuteSet { muted: true }),
+            (vec!["unmute", "living-cast"], SentryCommand::MuteSet { muted: false }),
+            (
+                vec!["launch", "living-cast", "CC1AD845"],
+                SentryCommand::AppLaunch { app_id: "CC1AD845".into() },
+            ),
+        ] {
+            let cli = Cli::try_parse_from(["archie", "sentry"].into_iter().chain(argv)).unwrap();
+            let Some(ControlRequest::SentryPrepare { resource_id, command }) =
+                cli.command.to_request()
+            else {
+                panic!("cast verbs prepare an intent");
+            };
+            assert_eq!(resource_id, "living-cast");
+            assert_eq!(command, expected);
+        }
+        assert!(Cli::try_parse_from(["archie", "sentry", "volume", "c", "101"]).is_err());
+        let probe = Cli::try_parse_from(["archie", "sentry", "cast-probe", "192.168.1.30"]).unwrap();
+        assert!(probe.command.to_request().is_none());
     }
 
     /// The follower and Wanda verbs are local commands: they never reach the

@@ -114,6 +114,42 @@ Verificado contra una impresora simulada (codec, envío único, seguimiento del 
 Imprimir todavía no pasa por `Intent`/journal/aprobación por digest de Core; ver
 `docs/HANDOFF-2026-10-11-SENTRY-AUDITORIA.md`.
 
+## Chromecast (CAST v2)
+
+`adapters/chromecast.rs` habla CAST v2 sobre TLS (TCP 8009): tramas con prefijo de
+longitud de 4 bytes y `CastMessage` protobuf (`prost`, sin `protoc`), CONNECT/CLOSE,
+PING/PONG, GET_STATUS, LAUNCH, STOP y SET_VOLUME (nivel y mute). `apply` sólo envía y
+espera la respuesta a su `requestId`; la postcondición se mide con un GET_STATUS nuevo
+sobre el RECEIVER_STATUS del propio receptor (`ResourceState::Cast`). STOP lee la sesión
+en `preflight`, antes del control final de Core. Play/pausa necesita el canal de media de
+la aplicación y queda `Unsupported`. Un receptor que redondea el volumen produce
+`Diverged`, no `Verified`.
+
+**Qué se verifica en TLS:** el SHA-256 del certificado hoja (DER) debe coincidir con el
+`certificate_sha256` que el operador fijó, y la firma del handshake se comprueba con la
+clave de ese certificado (rustls + ring). Otro certificado falla con `Authentication`
+antes de enviar un byte CAST. **Qué no:** cadena, nombre ni fechas (el pin es el ancla),
+ni el desafío de autenticación de dispositivo de Cast (`tp.deviceauth`, CA raíz de
+Google): un canal fijado prueba «el mismo equipo que se emparejó», no «un Chromecast
+genuino». Si el equipo rota su certificado, todo falla cerrado hasta que el operador
+apruebe la huella nueva. `archie sentry cast-probe <ip>` hace un handshake, imprime la
+huella y no envía nada ni confía en nada.
+
+```toml
+[[sentry.chromecasts]]
+resource_id = "living-cast"
+name = "Living Room"
+model = "Chromecast"
+address = "192.168.1.30"
+port = 8009
+certificate_sha256 = "<64 hex en minúsculas, de archie sentry cast-probe>"
+```
+
+CLI (flujo revisado): `archie sentry launch|stop|volume|mute|unmute <resource> …`.
+Probado contra un receptor CAST v2 en proceso sobre TLS loopback
+(`tests/servers/cast.rs`), que exige CONNECT, hace PING antes de responder, difunde
+cambios y cuantiza el volumen. **No probado contra un Chromecast físico.**
+
 ## Diagnóstico
 
 El daemon actualizado ofrece `archie sentry-printer <resource-id>`. Core busca

@@ -1,8 +1,7 @@
 //! Integration tests for the IoT protocol adapters: MQTT 3.1.1 over TCP,
-//! observation-only ONVIF over SOAP, and the stated Chromecast non-support.
+//! observation-only ONVIF over SOAP. Chromecast lives in `adapters_cast.rs`.
 use archie_sentry::{
     adapters::{
-        chromecast::{CastDevice, Chromecast},
         mqtt::{Mqtt, MqttBinding},
         onvif::{base64_encode, password_digest, sha1, wsse_header, OnvifProbe},
     },
@@ -10,10 +9,7 @@ use archie_sentry::{
     engine::*,
     registry::ResourceDescriptor,
 };
-use std::{
-    collections::BTreeMap,
-    net::{IpAddr, Ipv4Addr},
-};
+use std::collections::BTreeMap;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -491,65 +487,4 @@ fn onvif_probe_rejects_credentialed_cleartext_off_loopback() {
     // Anonymous probes may reach private LAN addresses over http.
     assert!(OnvifProbe::new("http://192.168.1.20/onvif/device_service", None).is_ok());
     assert!(OnvifProbe::new("https://example.com/onvif/device_service", None).is_err());
-}
-
-// ---------- Chromecast tests ----------
-
-fn cast_device() -> CastDevice {
-    CastDevice::new(
-        "tv",
-        "Living Room",
-        "Chromecast",
-        IpAddr::V4(Ipv4Addr::new(192, 168, 1, 30)),
-        8009,
-    )
-    .unwrap()
-}
-
-#[test]
-fn cast_device_descriptor_stores_bounded_fields() {
-    let device = cast_device();
-    assert_eq!(device.name, "Living Room");
-    assert_eq!(device.model, "Chromecast");
-    assert_eq!(device.port, 8009);
-    let address = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 30));
-    let public = IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8));
-    let cases: [(String, String, IpAddr, u16); 5] = [
-        ("x".repeat(65), "Chromecast".to_owned(), address, 8009),
-        ("Living\nRoom".to_owned(), "Chromecast".to_owned(), address, 8009),
-        ("Living Room".to_owned(), String::new(), address, 8009),
-        ("Living Room".to_owned(), "Chromecast".to_owned(), public, 8009),
-        ("Living Room".to_owned(), "Chromecast".to_owned(), address, 0),
-    ];
-    for (name, model, addr, port) in cases {
-        assert!(CastDevice::new("tv", &name, &model, addr, port).is_err());
-    }
-    assert!(CastDevice::new("bad id!", "Living Room", "Chromecast", address, 8009).is_err());
-}
-
-#[tokio::test]
-async fn chromecast_apply_is_explicitly_unsupported_with_a_documented_reason() {
-    let mut adapter = Chromecast::new("edge", "cast", vec![cast_device()]).unwrap();
-    let descriptor = adapter.descriptor("tv").unwrap();
-    assert_eq!(descriptor.model, "Chromecast");
-    assert!(adapter.descriptor("unknown").is_none());
-    let resource = ResourceDescriptor {
-        resource_id: "tv".into(),
-        edge_id: "edge".into(),
-        adapter_id: "cast".into(),
-        paired: true,
-        capabilities: vec![CommandKind::MediaPause],
-    };
-    assert_eq!(
-        adapter.apply(&resource, &Command::MediaPause).await,
-        Err(AdapterError::Unsupported)
-    );
-    assert_eq!(
-        adapter.observe(&resource).await,
-        Err(AdapterError::Unsupported)
-    );
-    // The absence is a stated decision, not a silence.
-    assert!(Chromecast::UNSUPPORTED_REASON.contains("TLS"));
-    assert!(Chromecast::UNSUPPORTED_REASON.contains("protobuf"));
-    assert!(Chromecast::UNSUPPORTED_REASON.contains("out of scope"));
 }

@@ -34,6 +34,8 @@ pub enum CommandKind {
     WifiSet,
     SessionLock,
     VolumeSet,
+    AppStop,
+    MuteSet,
 }
 
 /// Remote keys with a measurable postcondition. Navigation keys (directions,
@@ -102,6 +104,12 @@ pub enum Command {
     /// Set a node's output volume. The postcondition is the mixer reporting
     /// the requested level.
     VolumeSet { percent: u8 },
+    /// Stop whatever application a receiver is running. The postcondition is
+    /// the receiver reporting no application other than its idle screen.
+    AppStop,
+    /// Mute or unmute a receiver. The postcondition is the receiver reporting
+    /// the requested mute flag.
+    MuteSet { muted: bool },
 }
 
 /// Transport protocol of a router port mapping.
@@ -135,6 +143,8 @@ impl Command {
             Self::WifiSet { .. } => CommandKind::WifiSet,
             Self::SessionLock { .. } => CommandKind::SessionLock,
             Self::VolumeSet { .. } => CommandKind::VolumeSet,
+            Self::AppStop => CommandKind::AppStop,
+            Self::MuteSet { .. } => CommandKind::MuteSet,
         }
     }
     /// The job name a printer must report for this submission. Stable and
@@ -261,6 +271,17 @@ impl Command {
                     ..
                 },
             ) => *awake == Some(true) && foreground_app.as_deref() == Some(app_id.as_str()),
+            // A cast receiver answers for itself in RECEIVER_STATUS.
+            (Self::AppLaunch { app_id }, ResourceState::Cast { active_app, .. }) => {
+                active_app.as_deref() == Some(app_id.as_str())
+            }
+            (Self::AppStop, ResourceState::Cast { active_app, .. }) => active_app.is_none(),
+            (Self::VolumeSet { percent }, ResourceState::Cast { volume_percent, .. }) => {
+                *volume_percent == Some(*percent)
+            }
+            (Self::MuteSet { muted }, ResourceState::Cast { muted: actual, .. }) => {
+                *actual == Some(*muted)
+            }
             _ => false,
         }
     }
@@ -297,6 +318,16 @@ pub enum ResourceState {
         session_locked: Option<bool>,
         volume_percent: Option<u8>,
         foreground_app: Option<String>,
+    },
+    /// A cast receiver's own RECEIVER_STATUS. `active_app` is the running
+    /// application that is not the idle screen; `None` means only the idle
+    /// screen (or nothing) runs. Volume and mute are `None` when the receiver
+    /// did not report them (a fixed-volume device reports no level).
+    Cast {
+        active_app: Option<String>,
+        volume_percent: Option<u8>,
+        muted: Option<bool>,
+        standby: Option<bool>,
     },
     Unknown,
 }
@@ -425,6 +456,14 @@ impl Observation {
                 foreground_app: Some(ref a),
                 ..
             } if validate_id(a).is_err() => Err(ContractError("invalid measured foreground app")),
+            ResourceState::Cast {
+                volume_percent: Some(v),
+                ..
+            } if v > 100 => Err(ContractError("invalid measured volume")),
+            ResourceState::Cast {
+                active_app: Some(ref a),
+                ..
+            } if validate_id(a).is_err() => Err(ContractError("invalid measured application id")),
             _ => Ok(()),
         }
     }

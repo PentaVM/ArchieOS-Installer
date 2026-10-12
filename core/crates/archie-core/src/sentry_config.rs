@@ -2,6 +2,7 @@
 use archie_sentry::{
     adapters::{
         adb::{Adb, AndroidTarget},
+        chromecast::{CastDevice, Chromecast},
         home_assistant::HomeAssistant,
         ipp::{IppAdapter, IppClient},
         mqtt::{Mqtt, MqttBinding, MqttKind},
@@ -14,6 +15,8 @@ use archie_sentry::{
     contracts::{validate_id, CommandKind},
     engine::AdapterError,
 };
+/// Re-exported for `archie sentry cast-probe`: a handshake that only reports.
+pub use archie_sentry::adapters::chromecast::probe_certificate as probe_cast_certificate;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -46,6 +49,9 @@ pub struct SentrySection {
     pub netwatch: Option<NetwatchSection>,
     /// The chat-export drop folder Wanda ingests, and the sender-hash salt.
     pub chat_exports: Option<ChatExportSection>,
+    /// Chromecasts over CAST v2 (TLS 8009), each with the certificate
+    /// fingerprint the operator approved after `archie sentry cast-probe`.
+    pub chromecasts: Vec<CastDevice>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -598,6 +604,7 @@ impl SentrySection {
             || self.operator_uids.iter().collect::<BTreeSet<_>>().len() != self.operator_uids.len()
             || self.roku.len() > 64
             || self.onvif_cameras.len() > 64
+            || self.chromecasts.len() > 64
         {
             return Err(invalid());
         }
@@ -705,6 +712,21 @@ impl SentrySection {
                 }
             }
         }
+        for cast in &self.chromecasts {
+            // Deserialization skips the constructor; rebuild through it.
+            CastDevice::new(
+                &cast.resource_id,
+                &cast.name,
+                &cast.model,
+                cast.address,
+                cast.port,
+                &cast.certificate_sha256,
+            )
+            .map_err(|_| invalid())?;
+            if !resources.insert(&cast.resource_id) {
+                return Err(invalid());
+            }
+        }
         if let Some(netwatch) = &self.netwatch {
             netwatch.validate().map_err(|_| invalid())?;
         }
@@ -725,6 +747,9 @@ impl SentrySection {
         }
         if self.roku.iter().any(|r| r.resource_id == resource_id) {
             return Some(("roku", RokuBinding::capabilities()));
+        }
+        if self.chromecasts.iter().any(|c| c.resource_id == resource_id) {
+            return Some(("cast", Chromecast::CAPABILITIES.to_vec()));
         }
         if self
             .printers
@@ -772,5 +797,12 @@ impl SentrySection {
             }
         }
         None
+    }
+}
+
+impl SentrySection {
+    /// The Chromecast adapter over every configured device.
+    pub fn cast_adapter(&self) -> Result<Chromecast, AdapterError> {
+        Chromecast::new("local-core", "cast", self.chromecasts.clone())
     }
 }

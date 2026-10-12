@@ -71,7 +71,7 @@ impl OperatorSession {
         }))
     }
     /// Registers every configured actuable resource with its owning adapter
-    /// route. Telemetry resources (HA telemetry, ONVIF cameras, Chromecasts)
+    /// route. Telemetry resources (HA telemetry, ONVIF cameras)
     /// never appear here, so no intent can name them.
     fn service(&self) -> Result<crate::sentry::SentryService, EngineError> {
         let sentry = &self.core.config.sentry;
@@ -102,6 +102,19 @@ impl OperatorSession {
                     archie_state::DeviceClass::Television,
                 )?,
                 capabilities: crate::sentry_config::RokuBinding::capabilities(),
+            })?;
+        }
+        for cast in &sentry.chromecasts {
+            registry.register(ResourceDescriptor {
+                resource_id: cast.resource_id.clone(),
+                edge_id: "local-core".into(),
+                adapter_id: "cast".into(),
+                paired: self.paired_device(
+                    &cast.resource_id,
+                    archie_state::DeviceClass::Television,
+                )?,
+                capabilities: archie_sentry::adapters::chromecast::Chromecast::CAPABILITIES
+                    .to_vec(),
             })?;
         }
         for printer in &sentry.printers {
@@ -207,6 +220,7 @@ impl OperatorSession {
                 )
                 .map_err(|_| EngineError::Authority)?,
             ),
+            "cast" => Box::new(sentry.cast_adapter().map_err(|_| EngineError::Authority)?),
             "ipp" => {
                 let printer = sentry
                     .printers
