@@ -163,9 +163,17 @@ fn valid_stream_uri(uri: &str) -> bool {
     })
 }
 
+/// A nonce this process never repeats. `created` has millisecond resolution, so
+/// requests in one millisecond shared a nonce, and a camera that refuses replays (as
+/// WS-Security recommends) rejected all but the first: a counter makes each unique.
 fn fresh_nonce(password: &str, created: &str) -> [u8; 16] {
+    static ISSUED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let count = ISSUED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
     let digest = Sha256::digest(format!(
-        "onvif-nonce\0{password}\0{created}\0{}",
+        "onvif-nonce\0{password}\0{created}\0{}\0{count}\0{nanos}",
         std::process::id()
     ));
     let mut nonce = [0u8; 16];
@@ -406,4 +414,17 @@ fn xml_attr_values(xml: &str, local: &str, attr: &str) -> Vec<String> {
 /// probe results into the registry should validate with this before use.
 pub fn validate_camera_resource_id(id: &str) -> Result<(), AdapterError> {
     validate_id(id).map_err(|_| AdapterError::Protocol)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nonces_in_one_millisecond_are_all_different() {
+        let created = "2026-10-12T11:27:00.123Z";
+        let nonces: std::collections::BTreeSet<[u8; 16]> =
+            (0..1000).map(|_| fresh_nonce("secret", created)).collect();
+        assert_eq!(nonces.len(), 1000);
+    }
 }
