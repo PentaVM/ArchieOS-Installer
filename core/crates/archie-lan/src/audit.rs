@@ -14,6 +14,7 @@
 //! | `host-sweep` | one device opens the same port on 50 LAN hosts within a minute |
 //! | `cleartext-login` | a device opens Telnet or FTP, which carry passwords in the clear |
 //! | `dns-tunnel-suspect` | a DNS question is long and random enough to be carrying data |
+//! | `unusual-destination` | a device learned for a day sends over 25 MB to an outside destination it had not used before |
 //! | `traffic-surge` | a device that has been learned for a day sends far more in ten minutes than it usually does |
 //!
 //! Time is the frames' own, so a capture file is audited exactly as the live network is.
@@ -51,6 +52,8 @@ const BASELINE_ALPHA: f64 = 1.0 / 144.0;
 const SURGE_MIN_BYTES: u64 = 50 * 1024 * 1024;
 const SURGE_FACTOR: f64 = 4.0;
 const SURGE_SIGMAS: f64 = 6.0;
+/// Bytes a learned device may send to a destination new to it before that is told.
+const NEW_DESTINATION_BYTES: u64 = 25_000_000;
 /// One device's surges are told at most once in this long.
 const SURGE_COOLDOWN_MS: u64 = 60 * 60 * 1000;
 const STATE_FORMAT: &str = "archie-netwatch-state-v1";
@@ -449,6 +452,10 @@ pub struct Audit {
     openings: HashMap<String, Openings>,
     /// Server names seen for outside addresses, to label the traffic that follows.
     named: HashMap<IpAddr, String>,
+    /// Destinations a device first used after its baseline was learned, by hardware
+    /// address and label. In memory only: a restart forgets which are new, which can
+    /// only make the rule quieter.
+    fresh: HashSet<(String, String)>,
     /// The alerts already raised, kept on disk so a restart does not repeat them.
     pub told: Told,
 }
@@ -485,6 +492,7 @@ impl Audit {
             settings,
             openings: HashMap::new(),
             named: HashMap::new(),
+            fresh: HashSet::new(),
             told: Told::default(),
         }
     }
@@ -569,6 +577,7 @@ impl Audit {
         device.last_seen_ms = packet.at_ms;
         device.frames += 1;
         device.bytes += packet.length;
+        let mut unusual: Option<String> = None;
         let surge = device.baseline.add(packet.at_ms, packet.length).then(|| {
             format!(
                 "sent over {} MB in ten minutes; it usually sends about {} MB",
@@ -588,8 +597,22 @@ impl Audit {
                 .get(&peer)
                 .cloned()
                 .unwrap_or_else(|| peer.to_string());
-            if device.sent_to.len() < MAX_PEERS || device.sent_to.contains_key(&label) {
-                *device.sent_to.entry(label).or_default() += packet.length;
+            let known = device.sent_to.contains_key(&label);
+            // Past the cap a destination is not tracked at all, so it cannot be new.
+            if device.sent_to.len() < MAX_PEERS || known {
+                let key = (mac.to_string(), label);
+                if !known && device.baseline.learned() && self.fresh.len() < MAX_REMEMBERED {
+                    self.fresh.insert(key.clone());
+                }
+                let total = device.sent_to.entry(key.1.clone()).or_default();
+                let before = *total;
+                *total += packet.length;
+                if before < NEW_DESTINATION_BYTES
+                    && *total >= NEW_DESTINATION_BYTES
+                    && self.fresh.contains(&key)
+                {
+                    unusual = Some(key.1);
+                }
             }
         }
         if let Some(question) = &packet.dns_question {
@@ -611,6 +634,20 @@ impl Audit {
                     format!("asked for {shown} under {zone}"),
                 );
             }
+        }
+        if let Some(label) = unusual {
+            self.tell(
+                &mut alerts,
+                format!("unusual {mac} {label}"),
+                packet.at_ms,
+                Severity::Warning,
+                "unusual-destination",
+                mac,
+                format!(
+                    "sent over {} MB to {label}, which it had not used before",
+                    NEW_DESTINATION_BYTES / 1_000_000
+                ),
+            );
         }
         if let Some(detail) = surge {
             if self
@@ -986,6 +1023,46 @@ mod tests {
             .flat_map(|i| audit.see(&sent(later + i * 1_000, 1_000_000)))
             .collect();
         assert_eq!(rules(&again), ["traffic-surge"]);
+    }
+
+    #[test]
+    fn a_learned_device_sending_much_to_somewhere_new_is_told_once() {
+        let mut audit = Audit::new(State::default(), learned());
+        let to = |peer: &str, at_ms: u64, length: u64| Packet {
+            length,
+            destination: Some(peer.parse().unwrap()),
+            ..from(TV, "192.168.1.84", at_ms)
+        };
+        // Before the device is learned, a big new destination is learning, not news.
+        let early: Vec<Alert> = (0..30)
+            .flat_map(|i| audit.see(&to("9.9.9.9", 1 + i, 1_000_000)))
+            .collect();
+        assert!(early.is_empty());
+        // A day of ordinary traffic to its usual place.
+        let day = u64::from(BASELINE_BUCKETS) + 1;
+        for bucket in 1..=day {
+            audit.see(&to("1.1.1.1", bucket * BUCKET_MS, 1_000_000));
+        }
+        assert!(audit.state.devices[TV].baseline.learned());
+        let now = (day + 1) * BUCKET_MS;
+        // Much more to its usual place, and to 9.9.9.9 (seen while learning): no news.
+        let usual: Vec<Alert> = (0..30)
+            .flat_map(|i| {
+                let mut a = audit.see(&to("1.1.1.1", now + i, 1_000_000));
+                a.extend(audit.see(&to("9.9.9.9", now + i, 1_000_000)));
+                a
+            })
+            .filter(|a| a.rule == "unusual-destination")
+            .collect();
+        assert!(usual.is_empty());
+        // Somewhere it never used: told once, when it crosses the line.
+        let told: Vec<Alert> = (0..60)
+            .flat_map(|i| audit.see(&to("203.0.113.7", now + 100 + i, 1_000_000)))
+            .filter(|a| a.rule == "unusual-destination")
+            .collect();
+        assert_eq!(rules(&told), ["unusual-destination"]);
+        assert!(told[0].detail.contains("203.0.113.7"), "{}", told[0].detail);
+        assert_eq!(told[0].severity, Severity::Warning);
     }
 
     #[test]

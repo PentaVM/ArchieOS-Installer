@@ -49,6 +49,7 @@ says a great deal about the people who use it.
 | `host-sweep` | high | one device opens the same port on 50 hosts of the network within a minute |
 | `cleartext-login` | warning | a device opens Telnet or FTP |
 | `dns-tunnel-suspect` | warning | a DNS question is over 180 characters, or has a label of 40 or more near-random characters |
+| `unusual-destination` | warning | a device learned for a day sends over 25 MB to an outside destination (server name, else address) first used after it was learned; told once per device and destination. Which destinations are new is kept in memory, so a restart can only make it quieter; past the 64 destinations a device keeps, a new one is not tracked and cannot be told |
 | `traffic-surge` | warning | a device learned for a day (144 ten-minute buckets) sends, in one bucket, more than all of: 50 MB, 4× its usual, and its usual plus 6 deviations; told at most once an hour per device. The usual is an exponentially weighted mean and variance kept in `state.json` (`baseline`), so a restart keeps it. Thresholds are a criterion, not a measurement: a nightly backup will trip it until the false-positive rate is measured on a real capture |
 
 An alert is a reason to look, with what was seen. It is not a verdict, and nothing here

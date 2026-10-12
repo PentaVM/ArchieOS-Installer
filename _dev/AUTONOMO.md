@@ -33,7 +33,7 @@ deja commiteada y empujada en `claude/sentry-ola3-cast-focos-servidores` (PR #36
   `archie-sentry` y `archie-cerebra`, timeouts y límites de tamaño en E/S de red.
 
 - [ ] **CI en el último head**, con el paso nuevo de TShark e2e. Si falla, es lo primero.
-- [ ] **Sentry 7b — destinos inusuales.** Un dispositivo aprendido que manda mucho
+- [x] **Sentry 7b — destinos inusuales.** Un dispositivo aprendido que manda mucho
   volumen a un destino que nunca usó (no cada destino nuevo: eso sería ruido).
 - [ ] **Sección 4 — productores de contexto.** Averiguar qué exponen Vault, IRIS y Forge
   hacia `PillarContext` y hacer el primero que no requiera la GUI ni IRIS runtime.

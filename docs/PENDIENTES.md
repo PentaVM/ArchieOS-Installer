@@ -107,7 +107,8 @@ fixture se reporta como fixture, no como dispositivo real. Un PR por avance, con
 - [~] **7. Baselines por dispositivo**: volumen y destinos habituales, alerta por
   desviación. **Parcial (Claude, 2026-10-12):** volumen, sí: `traffic-surge`, con media
   y varianza móviles por tramos de 10 minutos, persistidas en `state.json`, aprendidas
-  durante un día y avisadas como mucho una vez por hora. Destinos habituales, no. La
+  durante un día y avisadas como mucho una vez por hora. Destinos: `unusual-destination`,
+  que salta con más de 25 MB a un destino que el dispositivo no usaba al aprender. La
   tasa de falsos positivos sigue sin medir. Los umbrales actuales (100 puertos, 50 hosts, entropía 4,0) son criterio,
   no medida. *Hecho cuando:* hay una tasa de falsos positivos medida sobre una captura
   real de al menos un día.
