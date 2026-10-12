@@ -57,10 +57,14 @@ pub struct VaultGuard {
 }
 impl Deref for VaultGuard {
     type Target = Vault;
-    fn deref(&self) -> &Vault { &self.vault }
+    fn deref(&self) -> &Vault {
+        &self.vault
+    }
 }
 impl DerefMut for VaultGuard {
-    fn deref_mut(&mut self) -> &mut Vault { &mut self.vault }
+    fn deref_mut(&mut self) -> &mut Vault {
+        &mut self.vault
+    }
 }
 impl std::fmt::Debug for VaultGuard {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -73,14 +77,17 @@ fn transaction_lock(dir: &Path) -> Result<File, VaultIoError> {
     options.create(true).read(true).write(true).truncate(false);
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    let file = options.open(dir.join("vault.lock"))
+    let file = options
+        .open(dir.join("vault.lock"))
         .map_err(|e| VaultIoError::Io(format!("vault lock: {e}")))?;
     let started = Instant::now();
     loop {
         match FileExt::try_lock_exclusive(&file) {
             Ok(()) => return Ok(file),
             Err(e) if e.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {
-                if started.elapsed() >= Duration::from_secs(10) { return Err(VaultIoError::LockTimeout); }
+                if started.elapsed() >= Duration::from_secs(10) {
+                    return Err(VaultIoError::LockTimeout);
+                }
                 std::thread::sleep(Duration::from_millis(5));
             }
             Err(e) => return Err(VaultIoError::Io(format!("vault lock: {e}"))),
@@ -89,12 +96,28 @@ fn transaction_lock(dir: &Path) -> Result<File, VaultIoError> {
 }
 
 fn bounded_read(file: File, cap: u64) -> Result<Vec<u8>, VaultIoError> {
-    let metadata = file.metadata().map_err(|e| VaultIoError::Io(e.to_string()))?;
-    if !metadata.is_file() { return Err(VaultIoError::MalformedEntries); }
-    if metadata.len() > cap { return Err(VaultIoError::TooLarge { bytes: metadata.len(), cap }); }
+    let metadata = file
+        .metadata()
+        .map_err(|e| VaultIoError::Io(e.to_string()))?;
+    if !metadata.is_file() {
+        return Err(VaultIoError::MalformedEntries);
+    }
+    if metadata.len() > cap {
+        return Err(VaultIoError::TooLarge {
+            bytes: metadata.len(),
+            cap,
+        });
+    }
     let mut bytes = Vec::new();
-    file.take(cap + 1).read_to_end(&mut bytes).map_err(|e| VaultIoError::Io(e.to_string()))?;
-    if bytes.len() as u64 > cap { return Err(VaultIoError::TooLarge { bytes: bytes.len() as u64, cap }); }
+    file.take(cap + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| VaultIoError::Io(e.to_string()))?;
+    if bytes.len() as u64 > cap {
+        return Err(VaultIoError::TooLarge {
+            bytes: bytes.len() as u64,
+            cap,
+        });
+    }
     Ok(bytes)
 }
 
@@ -124,12 +147,17 @@ fn load_or_create_key(dir: &Path) -> Result<VaultKey, VaultIoError> {
     match File::open(&path) {
         Ok(file) => {
             let bytes = bounded_read(file, 32).map_err(|_| VaultIoError::BadKey)?;
-            let raw: [u8; 32] = bytes.as_slice().try_into().map_err(|_| VaultIoError::BadKey)?;
+            let raw: [u8; 32] = bytes
+                .as_slice()
+                .try_into()
+                .map_err(|_| VaultIoError::BadKey)?;
             Ok(VaultKey::from_bytes(raw))
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             let mut raw = [0u8; 32];
-            SystemRandom::new().fill(&mut raw).map_err(|_| VaultIoError::BadKey)?;
+            SystemRandom::new()
+                .fill(&mut raw)
+                .map_err(|_| VaultIoError::BadKey)?;
             write_private(&path, &raw)?;
             Ok(VaultKey::from_bytes(raw))
         }
@@ -164,7 +192,11 @@ pub fn open_vault(dir: &Path) -> Result<VaultGuard, VaultIoError> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
         Err(e) => return Err(VaultIoError::Io(format!("{}: {e}", path.display()))),
     };
-    Ok(VaultGuard { vault: Vault::load(&key, entries)?, directory, _lock: lock })
+    Ok(VaultGuard {
+        vault: Vault::load(&key, entries)?,
+        directory,
+        _lock: lock,
+    })
 }
 
 /// Persist every sealed entry, atomically. The caps are re-checked on the way out:
@@ -172,7 +204,9 @@ pub fn open_vault(dir: &Path) -> Result<VaultGuard, VaultIoError> {
 /// open would reject.
 pub fn persist_vault(dir: &Path, vault: &VaultGuard) -> Result<(), VaultIoError> {
     let directory = std::fs::canonicalize(dir).map_err(|e| VaultIoError::Io(e.to_string()))?;
-    if directory != vault.directory { return Err(VaultIoError::DirectoryMismatch); }
+    if directory != vault.directory {
+        return Err(VaultIoError::DirectoryMismatch);
+    }
     let entries = vault.sealed_entries();
     if entries.len() > MAX_SEALED_ENTRIES {
         return Err(VaultIoError::TooLarge {

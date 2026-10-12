@@ -408,7 +408,11 @@ impl InferenceClient {
             .redirect(reqwest::redirect::Policy::none());
         // Local inference must reach the admitted endpoint directly; an environment
         // proxy would receive private request bodies despite local classification.
-        let builder = if endpoint.locality == Locality::Local { builder.no_proxy() } else { builder };
+        let builder = if endpoint.locality == Locality::Local {
+            builder.no_proxy()
+        } else {
+            builder
+        };
         let client = builder.build()?;
         Ok(Self { endpoint, client })
     }

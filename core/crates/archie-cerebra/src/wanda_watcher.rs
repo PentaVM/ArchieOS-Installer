@@ -26,8 +26,8 @@
 //! The salt comes from local configuration (`[sentry.chat_exports]`); it is a
 //! pseudonym key, not a defence — see the bridge's module note.
 
-use crate::vault_io::{self, VaultIoError};
 use crate::pillars::PillarContext;
+use crate::vault_io::{self, VaultIoError};
 use crate::wanda_bridge::{
     parse_instagram_export, parse_notification_dump, parse_whatsapp_export, record_chat_context,
     ChatMessage, ParseError, WandaError, MAX_MESSAGES_PER_BATCH,
@@ -71,7 +71,11 @@ pub enum ExportKind {
 
 impl ExportKind {
     fn of(path: &Path) -> Option<Self> {
-        match path.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()) {
+        match path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase())
+        {
             Some(ext) if ext == "txt" => Some(Self::Whatsapp),
             Some(ext) if ext == "json" => Some(Self::Instagram),
             Some(ext) if ext == "jsonl" => Some(Self::Notifications),
@@ -170,11 +174,7 @@ fn whatsapp_chat_id(path: &Path) -> String {
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("whatsapp-chat");
-    let cleaned: String = stem
-        .chars()
-        .filter(|c| !c.is_control())
-        .take(64)
-        .collect();
+    let cleaned: String = stem.chars().filter(|c| !c.is_control()).take(64).collect();
     let cleaned = cleaned.trim();
     if cleaned.is_empty() {
         "whatsapp-chat".to_string()
@@ -184,7 +184,12 @@ fn whatsapp_chat_id(path: &Path) -> String {
 }
 
 /// Parse one export file into messages with the parser its extension selects.
-fn parse_export(kind: ExportKind, path: &Path, text: &str, salt: &str) -> Result<Vec<ChatMessage>, ParseError> {
+fn parse_export(
+    kind: ExportKind,
+    path: &Path,
+    text: &str,
+    salt: &str,
+) -> Result<Vec<ChatMessage>, ParseError> {
     match kind {
         ExportKind::Whatsapp => parse_whatsapp_export(&whatsapp_chat_id(path), text, salt),
         ExportKind::Instagram => parse_instagram_export(text, salt),
@@ -206,8 +211,8 @@ fn ingest(
     path: &Path,
     salt: &str,
 ) -> Result<(u64, u64, Vec<PillarContext>), WatcherError> {
-    let bytes = std::fs::read(path)
-        .map_err(|e| WatcherError::Io(format!("{}: {e}", path.display())))?;
+    let bytes =
+        std::fs::read(path).map_err(|e| WatcherError::Io(format!("{}: {e}", path.display())))?;
     if bytes.is_empty() || bytes.len() as u64 > MAX_EXPORT_BYTES {
         return Err(WatcherError::Io(format!(
             "{}: empty or over the {}-byte export cap",
@@ -224,7 +229,9 @@ fn ingest(
         if let Some(batch) = record_chat_context(vault, domain, task_id, batch)?.batch() {
             recorded.0 += batch.messages().len() as u64;
             recorded.1 += batch.chats().len() as u64;
-            if contexts.len() == 64 { contexts.remove(0); }
+            if contexts.len() == 64 {
+                contexts.remove(0);
+            }
             contexts.push(batch.context().clone());
         }
     }
@@ -240,8 +247,7 @@ pub fn ingest_export_file(
     salt: &str,
     task_id: &str,
 ) -> Result<WatchReport, WatcherError> {
-    let domain = ContextDomain::personal("owner")
-        .map_err(|e| WatcherError::Io(e.to_string()))?;
+    let domain = ContextDomain::personal("owner").map_err(|e| WatcherError::Io(e.to_string()))?;
     ingest_export_file_in_domain(vault_dir, journal_path, file, salt, task_id, &domain)
 }
 
@@ -255,14 +261,15 @@ pub fn ingest_export_file_in_domain(
 ) -> Result<WatchReport, WatcherError> {
     let mut report = WatchReport::default();
     let Some(kind) = ExportKind::of(file) else {
-        report
-            .failures
-            .push(format!("{}: not a .txt, .json or .jsonl export", file.display()));
+        report.failures.push(format!(
+            "{}: not a .txt, .json or .jsonl export",
+            file.display()
+        ));
         return Ok(report);
     };
     report.files_seen = 1;
-    let bytes = std::fs::read(file)
-        .map_err(|e| WatcherError::Io(format!("{}: {e}", file.display())))?;
+    let bytes =
+        std::fs::read(file).map_err(|e| WatcherError::Io(format!("{}: {e}", file.display())))?;
     let hash = scoped_content_id(domain, &bytes);
     let mut journal = WatchJournal::load(journal_path);
     if journal.seen.contains(&hash) {
@@ -302,8 +309,7 @@ pub fn watch_exports_once(
     salt: &str,
     task_id: &str,
 ) -> Result<WatchReport, WatcherError> {
-    let domain = ContextDomain::personal("owner")
-        .map_err(|e| WatcherError::Io(e.to_string()))?;
+    let domain = ContextDomain::personal("owner").map_err(|e| WatcherError::Io(e.to_string()))?;
     watch_exports_once_in_domain(vault_dir, journal_path, watch_dir, salt, task_id, &domain)
 }
 
@@ -453,7 +459,11 @@ mod tests {
         let fixture = Fixture::new("idempotent");
         std::fs::write(fixture.watch.join("chat.txt"), whatsapp_export()).unwrap();
         std::fs::write(fixture.watch.join("messages_1.json"), instagram_export()).unwrap();
-        std::fs::write(fixture.watch.join("notifications.jsonl"), notification_dump()).unwrap();
+        std::fs::write(
+            fixture.watch.join("notifications.jsonl"),
+            notification_dump(),
+        )
+        .unwrap();
 
         let first = watch_exports_once(
             &fixture.vault_dir,
@@ -468,7 +478,10 @@ mod tests {
         assert_eq!(first.failures.len(), 0, "failures: {:?}", first.failures);
         assert_eq!(first.messages_recorded, 4);
         let entries = fixture.vault_entries();
-        assert!(entries >= 4, "messages plus chat aggregates are sealed: {entries}");
+        assert!(
+            entries >= 4,
+            "messages plus chat aggregates are sealed: {entries}"
+        );
 
         // A "restart": the journal remembers; nothing is ingested twice.
         let second = watch_exports_once(
@@ -489,13 +502,30 @@ mod tests {
     fn a_changed_file_reingests_and_the_vault_dedupes_what_it_shares() {
         let fixture = Fixture::new("changed");
         std::fs::write(fixture.watch.join("chat.txt"), whatsapp_export()).unwrap();
-        watch_exports_once(&fixture.vault_dir, &fixture.journal, &fixture.watch, SALT, "wanda-watch").unwrap();
+        watch_exports_once(
+            &fixture.vault_dir,
+            &fixture.journal,
+            &fixture.watch,
+            SALT,
+            "wanda-watch",
+        )
+        .unwrap();
         let entries = fixture.vault_entries();
 
         // The export grows by one message; its hash changes, so it re-ingests.
-        let grown = format!("{}[10/05/2026, 14:33:02] Alice: trae dinero para la cena\n", whatsapp_export());
+        let grown = format!(
+            "{}[10/05/2026, 14:33:02] Alice: trae dinero para la cena\n",
+            whatsapp_export()
+        );
         std::fs::write(fixture.watch.join("chat.txt"), grown).unwrap();
-        let report = watch_exports_once(&fixture.vault_dir, &fixture.journal, &fixture.watch, SALT, "wanda-watch").unwrap();
+        let report = watch_exports_once(
+            &fixture.vault_dir,
+            &fixture.journal,
+            &fixture.watch,
+            SALT,
+            "wanda-watch",
+        )
+        .unwrap();
         assert_eq!(report.files_ingested, 1);
         // The two replayed messages land on their existing references; exactly
         // one new message record (plus one new chat aggregate) appears.
@@ -508,17 +538,38 @@ mod tests {
         let file = fixture.watch.join("chat.txt");
         std::fs::write(&file, whatsapp_export()).unwrap();
 
-        let first = ingest_export_file(&fixture.vault_dir, &fixture.journal, &file, SALT, "wanda-manual").unwrap();
+        let first = ingest_export_file(
+            &fixture.vault_dir,
+            &fixture.journal,
+            &file,
+            SALT,
+            "wanda-manual",
+        )
+        .unwrap();
         assert_eq!(first.files_ingested, 1);
         assert_eq!(first.messages_recorded, 2);
 
-        let second = ingest_export_file(&fixture.vault_dir, &fixture.journal, &file, SALT, "wanda-manual").unwrap();
+        let second = ingest_export_file(
+            &fixture.vault_dir,
+            &fixture.journal,
+            &file,
+            SALT,
+            "wanda-manual",
+        )
+        .unwrap();
         assert_eq!(second.files_ingested, 0);
         assert_eq!(second.files_already_known, 1);
 
         let odd = fixture.watch.join("photo.png");
         std::fs::write(&odd, b"not an export").unwrap();
-        let third = ingest_export_file(&fixture.vault_dir, &fixture.journal, &odd, SALT, "wanda-manual").unwrap();
+        let third = ingest_export_file(
+            &fixture.vault_dir,
+            &fixture.journal,
+            &odd,
+            SALT,
+            "wanda-manual",
+        )
+        .unwrap();
         assert_eq!(third.files_ingested, 0);
         assert_eq!(third.failures.len(), 1);
     }
@@ -526,9 +577,20 @@ mod tests {
     #[test]
     fn a_broken_export_is_counted_and_does_not_stop_the_rest() {
         let fixture = Fixture::new("broken");
-        std::fs::write(fixture.watch.join("empty.txt"), "not a chat export at all\n").unwrap();
+        std::fs::write(
+            fixture.watch.join("empty.txt"),
+            "not a chat export at all\n",
+        )
+        .unwrap();
         std::fs::write(fixture.watch.join("good.txt"), whatsapp_export()).unwrap();
-        let report = watch_exports_once(&fixture.vault_dir, &fixture.journal, &fixture.watch, SALT, "wanda-watch").unwrap();
+        let report = watch_exports_once(
+            &fixture.vault_dir,
+            &fixture.journal,
+            &fixture.watch,
+            SALT,
+            "wanda-watch",
+        )
+        .unwrap();
         assert_eq!(report.files_seen, 2);
         assert_eq!(report.files_ingested, 1);
         assert_eq!(report.failures.len(), 1);

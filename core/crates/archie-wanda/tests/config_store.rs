@@ -279,14 +279,31 @@ fn full_body_stays_encrypted_and_config_debug_reveals_no_tokens() {
 
 #[test]
 fn expired_query_snapshots_are_removed_without_touching_other_pillars() {
-    let dir=tempfile::tempdir().unwrap();let store=WandaStore::new(config(dir.path())).unwrap();
-    let path=store.vault_path();let mut vault=archie_cerebra::vault_io::open_vault(&path).unwrap();
-    let temporary=domain().reference("wanda/query/fixture").unwrap();
-    let foreign=domain().reference("forge/fixture").unwrap();
-    for reference in [&temporary,&foreign] {vault.store("fixture",reference.clone(),archie_vault::EntryClass::PrivateFact,archie_types::PrivacyGrade::Restricted,"private fixture",1000,Some(2000)).unwrap();}
-    archie_cerebra::vault_io::persist_vault(&path,&vault).unwrap();drop(vault);
-    store.events(&domain(),64,2000).unwrap();let vault=archie_cerebra::vault_io::open_vault(&path).unwrap();
-    assert!(!vault.contains(&temporary));assert!(vault.contains(&foreign));
+    let dir = tempfile::tempdir().unwrap();
+    let store = WandaStore::new(config(dir.path())).unwrap();
+    let path = store.vault_path();
+    let mut vault = archie_cerebra::vault_io::open_vault(&path).unwrap();
+    let temporary = domain().reference("wanda/query/fixture").unwrap();
+    let foreign = domain().reference("forge/fixture").unwrap();
+    for reference in [&temporary, &foreign] {
+        vault
+            .store(
+                "fixture",
+                reference.clone(),
+                archie_vault::EntryClass::PrivateFact,
+                archie_types::PrivacyGrade::Restricted,
+                "private fixture",
+                1000,
+                Some(2000),
+            )
+            .unwrap();
+    }
+    archie_cerebra::vault_io::persist_vault(&path, &vault).unwrap();
+    drop(vault);
+    store.events(&domain(), 64, 2000).unwrap();
+    let vault = archie_cerebra::vault_io::open_vault(&path).unwrap();
+    assert!(!vault.contains(&temporary));
+    assert!(vault.contains(&foreign));
 }
 
 #[test]

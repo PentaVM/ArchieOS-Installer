@@ -42,8 +42,8 @@ pub mod rvc;
 pub mod segment;
 pub mod tools;
 pub mod voice;
-pub mod wav;
 pub mod wanda;
+pub mod wav;
 
 pub use act::{decide, Plan, Refusal};
 pub use hands::{Grounding, Hands, Launch, Performed};

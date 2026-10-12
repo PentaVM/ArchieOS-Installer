@@ -99,8 +99,11 @@ impl WandaStore {
             .into_iter()
             .filter(|e| {
                 self.config.domains.iter().any(|b| {
-                    ["events", "query", "graph"].iter().any(|kind| e.reference.path()
-                        .starts_with(&format!("{}/wanda/{kind}/", b.domain.path())))
+                    ["events", "query", "graph"].iter().any(|kind| {
+                        e.reference
+                            .path()
+                            .starts_with(&format!("{}/wanda/{kind}/", b.domain.path()))
+                    })
                 }) && e.expires_at_ms.is_some_and(|at| now_ms >= at)
             })
             .map(|e| e.reference)

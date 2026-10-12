@@ -229,7 +229,14 @@ impl Senses {
         voice_rate: u32,
         curiosity_budget: u32,
     ) -> Arc<Self> {
-        Self::new_with_wanda(audio,identifier,researcher,voice_rate,curiosity_budget,crate::wanda::WandaVoiceAccess::default())
+        Self::new_with_wanda(
+            audio,
+            identifier,
+            researcher,
+            voice_rate,
+            curiosity_budget,
+            crate::wanda::WandaVoiceAccess::default(),
+        )
     }
 
     pub fn new_with_wanda(
@@ -344,7 +351,9 @@ impl Senses {
 
     /// Carries out a live tool; `None` when the tool is not one of them.
     pub async fn handle_tool(&self, name: &str, raw_arguments: &str) -> Option<String> {
-        if name=="wanda_context" {return Some(self.wanda.handle_tool(raw_arguments).await);}
+        if name == "wanda_context" {
+            return Some(self.wanda.handle_tool(raw_arguments).await);
+        }
         let arguments: serde_json::Value = serde_json::from_str(raw_arguments).unwrap_or_default();
         match name {
             "identify" => Some(
