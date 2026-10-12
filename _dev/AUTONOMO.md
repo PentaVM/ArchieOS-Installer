@@ -41,6 +41,12 @@ deja commiteada y empujada en `claude/sentry-ola3-cast-focos-servidores` (PR #36
   `Intent` (`Command::DeviceBlock` por el router). Toca contratos y policy, y el
   firmware del MitraStar es desconocido.
 
+- [ ] **Vigilancia permanente hasta 2026-10-13T10:00Z.** En cada despertar: CI del último
+  head del PR #36 (rojo = arreglarlo con causa raíz), revisiones y comentarios
+  (responder o corregir). No abrir funcionalidades nuevas sin Nelson: el PR ya es grande
+  y lo pendiente son decisiones suyas (ver el relevo). Cuando llegue la hora, desactivar
+  la rutina y dejar el resumen final.
+
 ## Hecho
 
 - CI: fmt + clippy `-D warnings` del workspace con 1.88, `#include <array>`, la cgroup raíz
@@ -65,3 +71,4 @@ deja commiteada y empujada en `claude/sentry-ola3-cast-focos-servidores` (PR #36
 - Productor de Vault (`vault_bridge`, `archie vault-docs`, feeder y perfiles). Humo:
   3 documentos → `focus trabajo` admite 3 (90/80/60); `personal` no ve ninguno.
 - `sentry-notices --claim` (`f7f7572`) y el relevo `docs/HANDOFF-2026-10-12-SENTRY-OLA3.md`.
+- Rutina verificada dos veces: disparo manual (10:38) y despertar programado (11:38).
