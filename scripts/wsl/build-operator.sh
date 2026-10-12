@@ -21,7 +21,8 @@ vjepa_src=${VJEPA_SRC:?VJEPA_SRC is facebookresearch/vjepa2 at the revision IRIS
 vjepa_revision=204698b45b3712590f06245fbfba32d3be539812
 stage=${STAGE:?STAGE is the built archie-stage}
 bin=${BIN:?BIN is the cargo release directory}
-work_dir=/var/tmp/archieos-wsl-operator
+# ARCHIE_WSL_WORK_DIR: where the root is assembled, when /var/tmp has no room for 5 GB.
+work_dir=${ARCHIE_WSL_WORK_DIR:-/var/tmp/archieos-wsl-operator}
 rootfs=$work_dir/rootfs
 
 [[ $EUID -eq 0 ]] || { echo 'run as root on Arch Linux' >&2; exit 1; }
@@ -32,9 +33,17 @@ install -d "$rootfs"
 # Qt for the Stage, Mesa's software GL (WSLg shares no GPU buffers with a nested
 # compositor), and a font so a page has letters. No TShark: a WSL machine sees only its
 # own virtual network, so archie-netwatch has nothing of the house to listen to here.
-pacstrap -K -c "$rootfs" base ca-certificates curl jq python firefox mesa \
-  qt6-base qt6-declarative qt6-wayland ttf-dejavu \
-  kdenlive mlt ffmpeg
+# Packages are downloaded into the root being built and removed after each step, so the
+# build needs room in one place only and never holds every archive at once.
+pacstrap -K "$rootfs" base ca-certificates curl jq python firefox mesa \
+  qt6-base qt6-declarative qt6-wayland ttf-dejavu
+rm -rf "${rootfs:?}/var/cache/pacman/pkg"/*
+# MLT and FFmpeg for the video bridge, which needs no window, and Kdenlive to edit in the
+# Stage. ARCHIE_OPERATOR_APPS= (empty) leaves Kdenlive out, about 1.5 GB lighter; it is
+# then one pacman command away, which archie-operate says when asked for it.
+read -r -a apps <<<"${ARCHIE_OPERATOR_APPS-kdenlive}"
+pacstrap "$rootfs" mlt ffmpeg "${apps[@]}"
+rm -rf "${rootfs:?}/var/cache/pacman/pkg"/*
 
 rm -f "$rootfs/etc/resolv.conf" "$rootfs/boot"/vmlinuz-* "$rootfs/boot"/initramfs-*
 cp -a "$repo_root/distro/wsl-operator/rootfs/." "$rootfs/"

@@ -88,11 +88,11 @@ shown the screen. Only IRIS sees the screen, and IRIS runs on your machine.
   GTX 1660 included, was not. If it fails to start, `~/.archie/run/iris.log` says why.
 - The browser draws with software rendering inside the Stage. A game is slower than in
   a browser on Windows.
-- **Kdenlive and the video bridge are in images built from `main` after 2026-10-11.**
-  The pre-release `wsl-operator-2026.10.11` has neither. In that one, as root:
-  `pacman -Sy --noconfirm kdenlive mlt ffmpeg`, then start it in the Stage by hand
-  with `WAYLAND_DISPLAY=archie-stage QT_QPA_PLATFORM=wayland kdenlive`. Neither path
-  was run in the image.
+- **Kdenlive itself may not be in the image.** The video bridge, MLT and FFmpeg always
+  are. An image built with `ARCHIE_OPERATOR_APPS=` leaves Kdenlive out (1.5 GB lighter),
+  as `wsl-operator-2026.10.12` does; then, from Windows, once:
+  `wsl -d ArchieOS-Operator -u root pacman -Sy --noconfirm kdenlive`.
+  Neither the bridge nor Kdenlive in the Stage was run in the image before it shipped.
 - No voice. No Observatory. `archie-lan` and `archie-netwatch` are in the image, but a
   WSL machine sees only its own virtual network, not your home network, and TShark is
   not installed.
