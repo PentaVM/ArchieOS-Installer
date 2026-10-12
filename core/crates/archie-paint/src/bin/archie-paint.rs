@@ -120,8 +120,14 @@ mod scoring {
         let score = (balance * 1000.0).round() as i64;
 
         println!("score {score} of 1000");
-        println!("  coverage  {:.3}  of the picture's darkness was said", coverage);
-        println!("  restraint {:.3}  of what was said belonged there", restraint);
+        println!(
+            "  coverage  {:.3}  of the picture's darkness was said",
+            coverage
+        );
+        println!(
+            "  restraint {:.3}  of what was said belonged there",
+            restraint
+        );
         println!(
             "  drawn     {}x{} in tiles of {TILE}, {:.0} tiles of ink against {:.0} wanted",
             drawn.width(),
@@ -205,7 +211,8 @@ mod planning {
             max_points,
         };
         if flowing {
-            let mut groups = archie_paint::flow_plan(&picture, canvas, &flow, &swatches, max_points);
+            let mut groups =
+                archie_paint::flow_plan(&picture, canvas, &flow, &swatches, max_points);
             // What the application will see of it, not what was planned: the pointer is a
             // place reported at a frame rate, and the drawing is made of those reports.
             if let Some(speed) = seen_at {
@@ -232,7 +239,12 @@ mod planning {
             );
             super::say_how_covered(length, pen, canvas);
             let travelled = super::travel_of(&groups);
-            super::say_what_it_costs(length, travelled, seen_at.unwrap_or(0.0), super::commands_for(&groups));
+            super::say_what_it_costs(
+                length,
+                travelled,
+                seen_at.unwrap_or(0.0),
+                super::commands_for(&groups),
+            );
             if let Some(out) = preview {
                 let paper = archie_paint::preview_in_colour(&groups, canvas, &swatches, pen);
                 write_colour(Path::new(&out), &paper, canvas.width, canvas.height)?;
@@ -363,9 +375,8 @@ impl Palette {
 
 /// `--swatches "#1b1a17,#6b4a2f,â¦"`, and the default the demo canvas has.
 fn swatches_of(args: &mut Vec<String>) -> Result<Vec<[u8; 3]>, String> {
-    let text = take(args, "--swatches").unwrap_or_else(|| {
-        "#141210,#4a352a,#8a6a46,#c39c6d,#e6d3b3,#5d6b63".to_string()
-    });
+    let text = take(args, "--swatches")
+        .unwrap_or_else(|| "#141210,#4a352a,#8a6a46,#c39c6d,#e6d3b3,#5d6b63".to_string());
     let mut colours = Vec::new();
     for part in text.split(',') {
         let hex = part.trim().trim_start_matches('#');
@@ -628,7 +639,11 @@ fn number<T: std::str::FromStr>(args: &mut Vec<String>, name: &str) -> Result<Op
 }
 
 /// Where to draw: what was asked for, or the window with a margin taken off it.
-fn canvas_of(asked: Option<&str>, surface: Option<(i32, i32)>, inset: u32) -> Result<Canvas, String> {
+fn canvas_of(
+    asked: Option<&str>,
+    surface: Option<(i32, i32)>,
+    inset: u32,
+) -> Result<Canvas, String> {
     if let Some(text) = asked {
         let parts: Vec<&str> = text.split(',').collect();
         if parts.len() != 4 {
@@ -661,8 +676,8 @@ fn canvas_of(asked: Option<&str>, surface: Option<(i32, i32)>, inset: u32) -> Re
 #[cfg(unix)]
 mod unix {
 
-    use archie_policy::{PolicyEngine, Principal};
     use archie_paint::{Canvas, Picture};
+    use archie_policy::{PolicyEngine, Principal};
     use archie_stage::{
         learn, ActOutcome, ActRequest, CommandKey, LookOutcome, Operator, PointerButton,
         StageAction, StageClient, StagePolicy, StageWorld,
@@ -707,8 +722,8 @@ mod unix {
         let mut batch: Vec<Vec<archie_stage::StrokePoint>> = Vec::new();
         let mut points = 0;
         for line in lines {
-            let full = batch.len() >= most
-                || points + line.len() > archie_stage::MAX_STROKE_POINTS_IN_ALL;
+            let full =
+                batch.len() >= most || points + line.len() > archie_stage::MAX_STROKE_POINTS_IN_ALL;
             if full && !batch.is_empty() {
                 deeds.push(Deed::Lines(std::mem::take(&mut batch)));
                 points = 0;
@@ -763,8 +778,8 @@ mod unix {
         let socket = socket.ok_or("--socket is required")?;
         let app = app.ok_or("--app is required")?;
         let key = load_key(&key_file.ok_or("--key-file is required")?)?;
-        let policy =
-            StagePolicy::load(&policy_path.ok_or("--policy is required")?).map_err(|e| e.to_string())?;
+        let policy = StagePolicy::load(&policy_path.ok_or("--policy is required")?)
+            .map_err(|e| e.to_string())?;
         let stream = UnixStream::connect(&socket)
             .await
             .map_err(|e| format!("{socket}: {e}"))?;
@@ -805,7 +820,8 @@ mod unix {
         // What to do, in order: a colour to pick up, or a line to draw with it.
         let mut deeds: Vec<Deed> = Vec::new();
         if flowing {
-            let groups = archie_paint::flow_plan(&picture, canvas, &flow, &palette.colours, max_points);
+            let groups =
+                archie_paint::flow_plan(&picture, canvas, &flow, &palette.colours, max_points);
             let lines: usize = groups.iter().map(|(_, plan)| plan.strokes.len()).sum();
             let length: f32 = groups.iter().map(|(_, plan)| plan.drawn_length()).sum();
             println!(
@@ -972,18 +988,13 @@ mod unix {
         })
     }
 
-
-
     /// Looks at the window once and takes the largest light rectangle in it for paper.
     ///
     /// The capture goes the way every capture goes: a read lease, the compositor's checks,
     /// a digest, and the file removed as it is read. Nothing of it is kept but a rectangle.
     async fn look_for_paper(
         operator: &mut Operator,
-        client: &mut StageClient<
-            tokio::net::unix::OwnedReadHalf,
-            tokio::net::unix::OwnedWriteHalf,
-        >,
+        client: &mut StageClient<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>,
         world: &mut StageWorld,
         app: &str,
         surface: u32,

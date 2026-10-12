@@ -66,15 +66,26 @@ impl Task {
     /// Reads a task; its files are named relative to it.
     pub fn load(path: &Path) -> Result<Self, String> {
         let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let mut task: Task = toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+        let mut task: Task =
+            toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
         let base = path.parent().unwrap_or(Path::new("."));
-        task.reference = task.reference.map(|p| if p.is_absolute() { p } else { base.join(p) });
-        task.docs = task.docs.map(|p| if p.is_absolute() { p } else { base.join(p) });
+        task.reference = task
+            .reference
+            .map(|p| if p.is_absolute() { p } else { base.join(p) });
+        task.docs = task
+            .docs
+            .map(|p| if p.is_absolute() { p } else { base.join(p) });
         if task.tiers.is_empty() || task.tiers.iter().any(|t| *t == 0) {
-            return Err(format!("{}: tiers are positive numbers of seconds", path.display()));
+            return Err(format!(
+                "{}: tiers are positive numbers of seconds",
+                path.display()
+            ));
         }
         if task.judge == "picture" && task.reference.is_none() {
-            return Err(format!("{}: a picture is judged against a reference", path.display()));
+            return Err(format!(
+                "{}: a picture is judged against a reference",
+                path.display()
+            ));
         }
         Ok(task)
     }
@@ -96,9 +107,22 @@ mod tests {
         .unwrap();
         let task = Task::load(&path).unwrap();
         assert_eq!(task.reference.unwrap(), dir.join("ref.png"));
-        assert_eq!(task.planners[0], "moonshotai/Kimi-K3", "the slow, thorough model plans");
-        assert_eq!(task.actors[0], "openbmb/MiniCPM-V-4_5", "the fast one acts on the clock");
-        std::fs::write(&path, "id = \"x\"\nprompt = \"p\"\napp_id = \"a\"\ntiers = [15]\njudge = \"picture\"\n").unwrap();
-        assert!(Task::load(&path).is_err(), "a picture task needs its reference");
+        assert_eq!(
+            task.planners[0], "moonshotai/Kimi-K3",
+            "the slow, thorough model plans"
+        );
+        assert_eq!(
+            task.actors[0], "openbmb/MiniCPM-V-4_5",
+            "the fast one acts on the clock"
+        );
+        std::fs::write(
+            &path,
+            "id = \"x\"\nprompt = \"p\"\napp_id = \"a\"\ntiers = [15]\njudge = \"picture\"\n",
+        )
+        .unwrap();
+        assert!(
+            Task::load(&path).is_err(),
+            "a picture task needs its reference"
+        );
     }
 }

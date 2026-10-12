@@ -4,9 +4,7 @@
 //! request the normalized contract from `archie-worldd` on a fixed loopback address.
 
 use archie_types::Timestamp;
-pub use archie_worldd::lan::{
-    LanDeviceEntity, LanEntityOrigin, LanSource, LanSourceProvenance,
-};
+pub use archie_worldd::lan::{LanDeviceEntity, LanEntityOrigin, LanSource, LanSourceProvenance};
 pub use archie_worldd::{
     EarthquakeSeverity, GeoPosition, ObservationDetails, ObservationProvenance, ProviderCondition,
     ProviderRetryState, WorldDataSource, WorldObservation, WorldProviderId, WorldProviderStatus,
@@ -272,7 +270,11 @@ mod tests {
         assert_eq!(tv.origin, LanEntityOrigin::Measurement);
         assert_eq!(
             tv.sources.keys().copied().collect::<Vec<_>>(),
-            [LanSource::LanScan, LanSource::Netwatch, LanSource::PassiveImport]
+            [
+                LanSource::LanScan,
+                LanSource::Netwatch,
+                LanSource::PassiveImport
+            ]
         );
         assert_eq!(tv.ingested_at, Timestamp::from_millis(1_790_000_200_000));
         // The weak identity is visibly weak on the display side too.

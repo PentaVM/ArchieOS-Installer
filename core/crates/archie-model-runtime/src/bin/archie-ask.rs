@@ -44,7 +44,10 @@ struct Args {
     /// A name to keep here, as KIND=VALUE: person, company, project, account, location or contract.
     #[arg(long = "know", value_name = "KIND=VALUE")]
     known: Vec<String>,
-    #[arg(long, default_value = "You are Archie. Answer what is asked, and nothing else.")]
+    #[arg(
+        long,
+        default_value = "You are Archie. Answer what is asked, and nothing else."
+    )]
     system: String,
     #[arg(long, default_value = "/etc/archie/models")]
     models: String,
@@ -55,7 +58,9 @@ struct Args {
 }
 
 fn entity(text: &str) -> Result<(EntityKind, String), String> {
-    let (kind, value) = text.split_once('=').ok_or_else(|| format!("--know {text}: write it as KIND=VALUE"))?;
+    let (kind, value) = text
+        .split_once('=')
+        .ok_or_else(|| format!("--know {text}: write it as KIND=VALUE"))?;
     let kind = match kind.to_lowercase().as_str() {
         "person" => EntityKind::Person,
         "company" => EntityKind::Company,
@@ -70,7 +75,9 @@ fn entity(text: &str) -> Result<(EntityKind, String), String> {
 
 async fn run(args: Args) -> Result<(), String> {
     let mut question = String::new();
-    std::io::stdin().read_to_string(&mut question).map_err(|e| e.to_string())?;
+    std::io::stdin()
+        .read_to_string(&mut question)
+        .map_err(|e| e.to_string())?;
     if question.trim().is_empty() {
         return Err("give the question on standard input".into());
     }
@@ -104,7 +111,11 @@ async fn run(args: Args) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
     println!("{}", answer.answered.text.trim_end());
-    let covered: Vec<String> = answer.covered.iter().map(|(kind, count)| format!("{count} {}", kind.to_lowercase())).collect();
+    let covered: Vec<String> = answer
+        .covered
+        .iter()
+        .map(|(kind, count)| format!("{count} {}", kind.to_lowercase()))
+        .collect();
     eprintln!(
         "archie-ask: {} in {:.1} s; {}",
         answer.answered.model,

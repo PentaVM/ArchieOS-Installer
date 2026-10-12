@@ -242,7 +242,10 @@ impl Operator {
         R: AsyncRead + Unpin,
         W: AsyncWrite + Unpin,
     {
-        if !matches!(request.action, StageAction::Snapshot { .. } | StageAction::Frame { .. }) {
+        if !matches!(
+            request.action,
+            StageAction::Snapshot { .. } | StageAction::Frame { .. }
+        ) {
             return Err(OperateError::NotACapture);
         }
         let performed = self
@@ -500,7 +503,9 @@ fn take_capture(path: &str, sha256: &str, snapshot_dir: &Path) -> Result<Vec<u8>
         }
         let bytes = std::fs::read(path)?;
         let digest = hex::encode(ring::digest::digest(&ring::digest::SHA256, &bytes).as_ref());
-        if digest != sha256 || !(bytes.starts_with(PNG_SIGNATURE) || bytes.starts_with(PPM_SIGNATURE)) {
+        if digest != sha256
+            || !(bytes.starts_with(PNG_SIGNATURE) || bytes.starts_with(PPM_SIGNATURE))
+        {
             return Err(OperateError::CaptureInvalid);
         }
         Ok(bytes)

@@ -381,9 +381,12 @@ fn render(binding: &MqttBinding, command: &Command) -> Result<Vec<u8>, AdapterEr
         (MqttKind::Light, Command::LightSetBrightness { percent }) => binding
             .brightness_template
             .replace("{percent}", &percent.to_string()),
-        (MqttKind::Climate, Command::ClimateSetTemperature { milli_celsius }) => binding
-            .temperature_template
-            .replace("{celsius}", &format!("{:.1}", *milli_celsius as f64 / 1000.0)),
+        (MqttKind::Climate, Command::ClimateSetTemperature { milli_celsius }) => {
+            binding.temperature_template.replace(
+                "{celsius}",
+                &format!("{:.1}", *milli_celsius as f64 / 1000.0),
+            )
+        }
         _ => return Err(AdapterError::Unsupported),
     };
     payload(&text)?;
@@ -485,7 +488,11 @@ impl EdgeAdapter for Mqtt {
         let payload = render(&binding, command)?;
         let mut stream = self.connect().await?;
         let result = async {
-            write_packet(&mut stream, &encode_publish(&binding.command_topic, &payload)?).await?;
+            write_packet(
+                &mut stream,
+                &encode_publish(&binding.command_topic, &payload)?,
+            )
+            .await?;
             Ok::<_, AdapterError>(())
         }
         .await;

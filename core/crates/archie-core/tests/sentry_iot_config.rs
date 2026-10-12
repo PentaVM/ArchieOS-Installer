@@ -56,17 +56,26 @@ fn full_config() -> String {
 fn a_full_iot_configuration_is_accepted() {
     let config = ArchieConfig::from_toml(&full_config()).unwrap();
     assert_eq!(config.sentry.roku.len(), 1);
-    assert_eq!(config.sentry.printers[0].spool_dir.as_deref(), Some(abs_dir("spool").as_str()));
+    assert_eq!(
+        config.sentry.printers[0].spool_dir.as_deref(),
+        Some(abs_dir("spool").as_str())
+    );
     assert!(config.sentry.mqtt.is_some());
     assert_eq!(config.sentry.onvif_cameras.len(), 1);
     assert_eq!(config.sentry.context_feed.as_ref().unwrap().poll_ms, 1500);
     // Routing: actuable resources map to their adapters; cameras never do.
     assert_eq!(
-        config.sentry.actuable_route("living-room-tv").map(|(a, _)| a),
+        config
+            .sentry
+            .actuable_route("living-room-tv")
+            .map(|(a, _)| a),
         Some("roku")
     );
     assert_eq!(
-        config.sentry.actuable_route("office-printer").map(|(a, _)| a),
+        config
+            .sentry
+            .actuable_route("office-printer")
+            .map(|(a, _)| a),
         Some("ipp")
     );
     assert_eq!(
@@ -97,8 +106,14 @@ fn unknown_fields_are_rejected_in_every_new_section() {
     let full = full_config();
     for bad in [
         full.replace("poll_ms=1500", "poll_ms=1500\nbogus_key=1"),
-        full.replace("endpoint='http://192.168.1.40'", "endpoint='http://192.168.1.40'\napp='12'"),
-        full.replace("broker='192.168.1.10:1883'", "broker='192.168.1.10:1883'\npassword='hunter2'"),
+        full.replace(
+            "endpoint='http://192.168.1.40'",
+            "endpoint='http://192.168.1.40'\napp='12'",
+        ),
+        full.replace(
+            "broker='192.168.1.10:1883'",
+            "broker='192.168.1.10:1883'\npassword='hunter2'",
+        ),
         full.replace(
             "endpoint='http://192.168.1.20/onvif/device_service'",
             "endpoint='http://192.168.1.20/onvif/device_service'\npassword='hunter2'",
@@ -114,9 +129,15 @@ fn resource_ids_are_unique_across_all_sections() {
     let full = full_config();
     for bad in [
         // roku duplicates a printer id
-        full.replace("resource_id='living-room-tv'", "resource_id='office-printer'"),
+        full.replace(
+            "resource_id='living-room-tv'",
+            "resource_id='office-printer'",
+        ),
         // mqtt duplicates a roku id
-        full.replace("[sentry.mqtt.resources.porch-light]", "[sentry.mqtt.resources.living-room-tv]"),
+        full.replace(
+            "[sentry.mqtt.resources.porch-light]",
+            "[sentry.mqtt.resources.living-room-tv]",
+        ),
         // a camera duplicates an mqtt resource id
         full.replace("resource_id='gate-camera'", "resource_id='porch-light'"),
     ] {

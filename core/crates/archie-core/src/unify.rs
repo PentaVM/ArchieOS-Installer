@@ -155,7 +155,8 @@ pub fn parse_inventory(text: &str) -> Result<LanInventory, UnifyError> {
     if text.len() > MAX_INVENTORY_BYTES {
         return Err(UnifyError::TooLarge("lan inventory"));
     }
-    let inventory: LanInventory = serde_json::from_str(text).map_err(|_| UnifyError::Malformed("lan inventory json"))?;
+    let inventory: LanInventory =
+        serde_json::from_str(text).map_err(|_| UnifyError::Malformed("lan inventory json"))?;
     if inventory.format != "archie-lan-inventory-v1" {
         return Err(UnifyError::Malformed("unsupported lan inventory format"));
     }
@@ -163,7 +164,10 @@ pub fn parse_inventory(text: &str) -> Result<LanInventory, UnifyError> {
         return Err(UnifyError::TooLarge("lan inventory devices"));
     }
     for device in &inventory.devices {
-        device.address.parse::<IpAddr>().map_err(|_| UnifyError::Malformed("inventory device address"))?;
+        device
+            .address
+            .parse::<IpAddr>()
+            .map_err(|_| UnifyError::Malformed("inventory device address"))?;
         field(&device.name, "inventory device name")?;
         field(&device.manufacturer, "inventory device manufacturer")?;
         field(&device.model, "inventory device model")?;
@@ -219,7 +223,8 @@ pub fn parse_netwatch_state(text: &str) -> Result<NetwatchState, UnifyError> {
     if text.len() > MAX_STATE_BYTES {
         return Err(UnifyError::TooLarge("netwatch state"));
     }
-    let state: NetwatchState = serde_json::from_str(text).map_err(|_| UnifyError::Malformed("netwatch state json"))?;
+    let state: NetwatchState =
+        serde_json::from_str(text).map_err(|_| UnifyError::Malformed("netwatch state json"))?;
     if state.format != "archie-netwatch-state-v1" {
         return Err(UnifyError::Malformed("unsupported netwatch state format"));
     }
@@ -306,7 +311,11 @@ impl Builder {
         if let Some(mac) = &record.mac {
             self.by_mac.entry(mac.clone()).or_insert(record);
         } else {
-            let ip = record.ips.first().copied().ok_or(UnifyError::Malformed("device with no address"))?;
+            let ip = record
+                .ips
+                .first()
+                .copied()
+                .ok_or(UnifyError::Malformed("device with no address"))?;
             self.by_ip.entry(ip).or_insert(record);
         }
         Ok(())
@@ -327,7 +336,12 @@ impl Builder {
 
     /// Every source's contribution to a record lands in the record's own sets and
     /// under its source. Bounds are checked so a file cannot grow a record forever.
-    fn absorb(record: &mut DeviceRecord, source: Source, fact: SourceFact, ips: impl IntoIterator<Item = IpAddr>) -> Result<(), UnifyError> {
+    fn absorb(
+        record: &mut DeviceRecord,
+        source: Source,
+        fact: SourceFact,
+        ips: impl IntoIterator<Item = IpAddr>,
+    ) -> Result<(), UnifyError> {
         for ip in ips {
             if record.ips.len() >= MAX_IPS && !record.ips.contains(&ip) {
                 return Err(UnifyError::TooLarge("device addresses"));
@@ -349,8 +363,16 @@ impl Builder {
         if fact.claims.len() > MAX_CLAIMS {
             return Err(UnifyError::TooLarge("source claims"));
         }
-        record.first_seen_unix = record.first_seen_unix.into_iter().chain(fact.first_seen_unix).min();
-        record.last_seen_unix = record.last_seen_unix.into_iter().chain(fact.last_seen_unix).max();
+        record.first_seen_unix = record
+            .first_seen_unix
+            .into_iter()
+            .chain(fact.first_seen_unix)
+            .min();
+        record.last_seen_unix = record
+            .last_seen_unix
+            .into_iter()
+            .chain(fact.last_seen_unix)
+            .max();
         record.sources.entry(source).or_insert(fact);
         Ok(())
     }
@@ -366,7 +388,10 @@ pub fn unify(
     passive: &[NetworkAssetObservation],
     generated_unix: u64,
 ) -> Result<UnifiedView, UnifyError> {
-    let mut builder = Builder { by_mac: BTreeMap::new(), by_ip: BTreeMap::new() };
+    let mut builder = Builder {
+        by_mac: BTreeMap::new(),
+        by_ip: BTreeMap::new(),
+    };
 
     // The audit is the only source that knows hardware addresses: it seeds the
     // records, and its address history decides which record a scan or import
@@ -385,9 +410,16 @@ pub fn unify(
             if let Some(hostname) = &device.hostname {
                 fact.names.insert(hostname.clone());
             }
-            fact.claims.insert("frames".to_string(), device.frames.to_string());
-            fact.claims.insert("bytes".to_string(), device.bytes.to_string());
-            Builder::absorb(&mut record, Source::Netwatch, fact, device.addresses.iter().copied())?;
+            fact.claims
+                .insert("frames".to_string(), device.frames.to_string());
+            fact.claims
+                .insert("bytes".to_string(), device.bytes.to_string());
+            Builder::absorb(
+                &mut record,
+                Source::Netwatch,
+                fact,
+                device.addresses.iter().copied(),
+            )?;
             builder.record(record)?;
             for ip in &device.addresses {
                 match claimed.get(ip) {
@@ -403,24 +435,36 @@ pub fn unify(
 
     if let Some(inventory) = inventory {
         for device in &inventory.devices {
-            let ip: IpAddr = device.address.parse().map_err(|_| UnifyError::Malformed("inventory device address"))?;
-            let mut fact = SourceFact { first_seen_unix: Some(inventory.scanned_unix), last_seen_unix: Some(inventory.scanned_unix), ..SourceFact::default() };
+            let ip: IpAddr = device
+                .address
+                .parse()
+                .map_err(|_| UnifyError::Malformed("inventory device address"))?;
+            let mut fact = SourceFact {
+                first_seen_unix: Some(inventory.scanned_unix),
+                last_seen_unix: Some(inventory.scanned_unix),
+                ..SourceFact::default()
+            };
             if !device.name.is_empty() {
                 fact.names.insert(device.name.clone());
             }
             if let Some(class) = &device.class {
                 fact.classes.insert(class.clone());
             }
-            for (key, value) in [("manufacturer", &device.manufacturer), ("model", &device.model)] {
+            for (key, value) in [
+                ("manufacturer", &device.manufacturer),
+                ("model", &device.model),
+            ] {
                 if !value.is_empty() {
                     fact.claims.insert(key.to_string(), value.clone());
                 }
             }
             if !device.services.is_empty() {
-                fact.claims.insert("services".to_string(), device.services.join(","));
+                fact.claims
+                    .insert("services".to_string(), device.services.join(","));
             }
             if !device.seen_by.is_empty() {
-                fact.claims.insert("seen_by".to_string(), device.seen_by.join(","));
+                fact.claims
+                    .insert("seen_by".to_string(), device.seen_by.join(","));
             }
             // What a device says it is doing (a Roku's power and programme) stays,
             // bounded like everything else.
@@ -429,7 +473,10 @@ pub fn unify(
             }
             match claim(&ip) {
                 Some(mac) => {
-                    let record = builder.by_mac.get_mut(mac).ok_or(UnifyError::Malformed("claim without record"))?;
+                    let record = builder
+                        .by_mac
+                        .get_mut(mac)
+                        .ok_or(UnifyError::Malformed("claim without record"))?;
                     Builder::absorb(record, Source::LanScan, fact, [ip])?;
                 }
                 None => {
@@ -449,7 +496,10 @@ pub fn unify(
         }
         match claim(&ip) {
             Some(mac) => {
-                let record = builder.by_mac.get_mut(mac).ok_or(UnifyError::Malformed("claim without record"))?;
+                let record = builder
+                    .by_mac
+                    .get_mut(mac)
+                    .ok_or(UnifyError::Malformed("claim without record"))?;
                 Builder::absorb(record, Source::PassiveImport, fact, [ip])?;
             }
             None => {
@@ -465,8 +515,16 @@ pub fn unify(
         }
     }
 
-    let devices = builder.by_mac.into_values().chain(builder.by_ip.into_values()).collect();
-    Ok(UnifiedView { format: FORMAT.to_string(), generated_unix, devices })
+    let devices = builder
+        .by_mac
+        .into_values()
+        .chain(builder.by_ip.into_values())
+        .collect();
+    Ok(UnifiedView {
+        format: FORMAT.to_string(),
+        generated_unix,
+        devices,
+    })
 }
 
 #[cfg(test)]
@@ -511,9 +569,15 @@ mod tests {
     fn passive() -> Vec<NetworkAssetObservation> {
         let observed = |ip: &str, evidence: NetworkEvidence| NetworkAssetObservation {
             ipv4_address: ip.parse().unwrap(),
-            evidence: vec![SourcedNetworkEvidence { source: NetworkEvidenceSource::PassiveMdns, evidence }],
+            evidence: vec![SourcedNetworkEvidence {
+                source: NetworkEvidenceSource::PassiveMdns,
+                evidence,
+            }],
         };
-        vec![observed("192.168.1.40", NetworkEvidence::MdnsRoku), observed("192.168.1.60", NetworkEvidence::MdnsIpp)]
+        vec![
+            observed("192.168.1.40", NetworkEvidence::MdnsRoku),
+            observed("192.168.1.60", NetworkEvidence::MdnsIpp),
+        ]
     }
 
     #[test]
@@ -523,12 +587,19 @@ mod tests {
         let view = unify(Some(&inventory), Some(&netwatch), &passive(), 1_790_000_100).unwrap();
 
         assert_eq!(view.format, FORMAT);
-        assert_eq!(view.devices.len(), 2, "the television is one device, not three");
+        assert_eq!(
+            view.devices.len(),
+            2,
+            "the television is one device, not three"
+        );
         let tv = &view.devices[0];
         assert_eq!(tv.mac.as_deref(), Some(TV_MAC));
         assert_eq!(tv.identity, TV_MAC);
         assert_eq!(tv.ips, BTreeSet::from(["192.168.1.40".parse().unwrap()]));
-        assert_eq!(tv.names, BTreeSet::from(["Living".to_string(), "roku-living".to_string()]));
+        assert_eq!(
+            tv.names,
+            BTreeSet::from(["Living".to_string(), "roku-living".to_string()])
+        );
         assert!(tv.classes.contains("television") && tv.classes.contains("mdns-roku"));
         // Every source said something, under its own name, with its own times.
         assert_eq!(
@@ -542,7 +613,11 @@ mod tests {
         let watch = &tv.sources[&Source::Netwatch];
         assert_eq!(watch.claims["frames"], "12");
         assert_eq!(watch.last_seen_unix, Some(1_790_000_005));
-        assert_eq!(tv.first_seen_unix, Some(1_789_999_000), "earliest across sources");
+        assert_eq!(
+            tv.first_seen_unix,
+            Some(1_789_999_000),
+            "earliest across sources"
+        );
         assert_eq!(tv.last_seen_unix, Some(1_790_000_005));
         // The audit's DNS and destination records stay in the audit, not the view.
         let json = serde_json::to_string(&view).unwrap();
@@ -560,20 +635,38 @@ mod tests {
         let view = unify(None, Some(&netwatch), &[], 0).unwrap();
         assert_eq!(view.devices.len(), 2);
         assert_ne!(view.devices[0].mac, view.devices[1].mac);
-        assert_eq!(view.devices[0].sources.keys().collect::<Vec<_>>(), [&Source::Netwatch]);
+        assert_eq!(
+            view.devices[0].sources.keys().collect::<Vec<_>>(),
+            [&Source::Netwatch]
+        );
     }
 
     #[test]
     fn devices_known_only_by_address_never_merge_with_each_other() {
         // Neither address is claimed by any audited device: two records, not one.
-        let view = unify(Some(&parse_inventory(&inventory_json()).unwrap()), None, &passive(), 0).unwrap();
+        let view = unify(
+            Some(&parse_inventory(&inventory_json()).unwrap()),
+            None,
+            &passive(),
+            0,
+        )
+        .unwrap();
         assert_eq!(view.devices.len(), 2);
         for device in &view.devices {
             assert_eq!(device.mac, None);
-            assert!(device.identity.starts_with("ip:"), "the weaker identity is marked");
-            assert_eq!(device.identity, format!("ip:{}", device.ips.first().unwrap()));
+            assert!(
+                device.identity.starts_with("ip:"),
+                "the weaker identity is marked"
+            );
+            assert_eq!(
+                device.identity,
+                format!("ip:{}", device.ips.first().unwrap())
+            );
             // The scan and the import describe the same address: one record, two sources.
-            assert_eq!(device.sources.keys().copied().collect::<Vec<_>>(), [Source::LanScan, Source::PassiveImport]);
+            assert_eq!(
+                device.sources.keys().copied().collect::<Vec<_>>(),
+                [Source::LanScan, Source::PassiveImport]
+            );
         }
     }
 
@@ -596,16 +689,33 @@ mod tests {
                          "services": [], "seen_by": [], "state": {}}]
         })
         .to_string();
-        let view = unify(Some(&parse_inventory(&scan).unwrap()), Some(&parse_netwatch_state(&state).unwrap()), &[], 0).unwrap();
+        let view = unify(
+            Some(&parse_inventory(&scan).unwrap()),
+            Some(&parse_netwatch_state(&state).unwrap()),
+            &[],
+            0,
+        )
+        .unwrap();
         assert_eq!(view.devices.len(), 2);
-        let winner = view.devices.iter().find(|d| d.sources.contains_key(&Source::LanScan)).unwrap();
-        assert_eq!(winner.mac.as_deref(), Some(PRINTER_MAC), "seen last at 9000 ms");
+        let winner = view
+            .devices
+            .iter()
+            .find(|d| d.sources.contains_key(&Source::LanScan))
+            .unwrap();
+        assert_eq!(
+            winner.mac.as_deref(),
+            Some(PRINTER_MAC),
+            "seen last at 9000 ms"
+        );
     }
 
     #[test]
     fn malformed_and_oversize_inputs_are_rejected_without_panicking() {
         assert!(parse_inventory("not json").is_err());
-        assert!(parse_inventory(&serde_json::json!({"format": "other", "scanned_unix": 0, "devices": []}).to_string()).is_err());
+        assert!(parse_inventory(
+            &serde_json::json!({"format": "other", "scanned_unix": 0, "devices": []}).to_string()
+        )
+        .is_err());
         // A field the writer never emits means the file is not trusted as one.
         let extra = serde_json::json!({"format": "archie-lan-inventory-v1", "scanned_unix": 0, "devices": [], "surprise": 1});
         assert!(parse_inventory(&extra.to_string()).is_err());
@@ -615,18 +725,27 @@ mod tests {
         let long_name = serde_json::json!({"format": "archie-lan-inventory-v1", "scanned_unix": 0, "devices": [
             {"address": "192.168.1.9", "class": null, "name": "n".repeat(MAX_FIELD_CHARS + 1), "manufacturer": "", "model": "",
              "services": [], "seen_by": [], "state": {}}]});
-        assert_eq!(parse_inventory(&long_name.to_string()), Err(UnifyError::TooLarge("inventory device name")));
+        assert_eq!(
+            parse_inventory(&long_name.to_string()),
+            Err(UnifyError::TooLarge("inventory device name"))
+        );
         assert!(parse_inventory(&" ".repeat(MAX_INVENTORY_BYTES + 1)).is_err());
 
         assert!(parse_netwatch_state("not json").is_err());
         let bad_mac = serde_json::json!({"format": "archie-netwatch-state-v1", "started_ms": 0, "owners": {}, "devices": {
             "54:4E:F0:07:3D:E8": {"first_seen_ms": 0, "last_seen_ms": 0, "addresses": [], "hostname": null,
                                   "frames": 0, "bytes": 0, "asked": [], "sent_to": {}}}});
-        assert!(parse_netwatch_state(&bad_mac.to_string()).is_err(), "uppercase is not what the writer emits");
+        assert!(
+            parse_netwatch_state(&bad_mac.to_string()).is_err(),
+            "uppercase is not what the writer emits"
+        );
         let too_many: serde_json::Value = serde_json::json!({"format": "archie-lan-inventory-v1", "scanned_unix": 0, "devices":
             vec![serde_json::json!({"address": "192.168.1.9", "class": null, "name": "", "manufacturer": "", "model": "",
                                     "services": [], "seen_by": [], "state": {}}); MAX_DEVICES + 1]});
-        assert_eq!(parse_inventory(&too_many.to_string()), Err(UnifyError::TooLarge("lan inventory devices")));
+        assert_eq!(
+            parse_inventory(&too_many.to_string()),
+            Err(UnifyError::TooLarge("lan inventory devices"))
+        );
     }
 
     #[test]
@@ -641,7 +760,11 @@ mod tests {
         let text = serde_json::to_string_pretty(&view).unwrap();
         assert_eq!(serde_json::from_str::<UnifiedView>(&text).unwrap(), view);
         // Source names in the document are the ones the CLI prints.
-        assert!(text.contains("\"lan-scan\"") && text.contains("\"netwatch\"") && text.contains("\"passive-import\""));
+        assert!(
+            text.contains("\"lan-scan\"")
+                && text.contains("\"netwatch\"")
+                && text.contains("\"passive-import\"")
+        );
     }
 
     #[test]
@@ -649,7 +772,13 @@ mod tests {
         let view = unify(None, None, &[], 7).unwrap();
         assert!(view.devices.is_empty());
         assert_eq!(view.generated_unix, 7);
-        let scan_only = unify(Some(&parse_inventory(&inventory_json()).unwrap()), None, &[], 0).unwrap();
+        let scan_only = unify(
+            Some(&parse_inventory(&inventory_json()).unwrap()),
+            None,
+            &[],
+            0,
+        )
+        .unwrap();
         assert_eq!(scan_only.devices.len(), 2);
         assert!(scan_only.devices.iter().all(|d| d.mac.is_none()));
     }

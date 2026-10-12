@@ -59,8 +59,14 @@ impl std::fmt::Display for Wait {
         match self {
             Self::OutsideNightWindow => f.write_str("outside the night window"),
             Self::OnBattery => f.write_str("the machine is on battery"),
-            Self::PersonActive { idle_seconds, needed } => {
-                write!(f, "someone used the machine {idle_seconds} s ago (needs {needed} s untouched)")
+            Self::PersonActive {
+                idle_seconds,
+                needed,
+            } => {
+                write!(
+                    f,
+                    "someone used the machine {idle_seconds} s ago (needs {needed} s untouched)"
+                )
             }
         }
     }
@@ -105,23 +111,42 @@ mod tests {
     use super::*;
 
     const NIGHT: Gate = Gate {
-        window: NightWindow { start_minute: 120, end_minute: 360 },
+        window: NightWindow {
+            start_minute: 120,
+            end_minute: 360,
+        },
         idle_seconds: 1800,
     };
 
     fn at(clock: &str, on_mains: bool, idle_seconds: u64) -> Conditions {
-        Conditions { local_minute: minute_of(clock).unwrap(), on_mains, idle_seconds }
+        Conditions {
+            local_minute: minute_of(clock).unwrap(),
+            on_mains,
+            idle_seconds,
+        }
     }
 
     #[test]
     fn rem_starts_at_night_on_mains_with_nobody_there_and_says_why_otherwise() {
         assert_eq!(NIGHT.may_start(&at("03:00", true, 3600)), Ok(()));
-        assert_eq!(NIGHT.may_start(&at("14:00", true, 3600)), Err(Wait::OutsideNightWindow));
-        assert_eq!(NIGHT.may_start(&at("06:00", true, 3600)), Err(Wait::OutsideNightWindow));
-        assert_eq!(NIGHT.may_start(&at("03:00", false, 3600)), Err(Wait::OnBattery));
+        assert_eq!(
+            NIGHT.may_start(&at("14:00", true, 3600)),
+            Err(Wait::OutsideNightWindow)
+        );
+        assert_eq!(
+            NIGHT.may_start(&at("06:00", true, 3600)),
+            Err(Wait::OutsideNightWindow)
+        );
+        assert_eq!(
+            NIGHT.may_start(&at("03:00", false, 3600)),
+            Err(Wait::OnBattery)
+        );
         assert_eq!(
             NIGHT.may_start(&at("03:00", true, 600)),
-            Err(Wait::PersonActive { idle_seconds: 600, needed: 1800 })
+            Err(Wait::PersonActive {
+                idle_seconds: 600,
+                needed: 1800
+            })
         );
     }
 
@@ -142,9 +167,18 @@ mod tests {
 
     #[test]
     fn a_touch_or_a_pulled_plug_stops_it_and_the_clock_does_not() {
-        assert!(NIGHT.must_stop(&at("03:10", true, 4), 3600), "the person is back");
-        assert!(NIGHT.must_stop(&at("03:10", false, 4200), 3600), "on battery now");
+        assert!(
+            NIGHT.must_stop(&at("03:10", true, 4), 3600),
+            "the person is back"
+        );
+        assert!(
+            NIGHT.must_stop(&at("03:10", false, 4200), 3600),
+            "on battery now"
+        );
         assert!(!NIGHT.must_stop(&at("03:10", true, 4200), 3600));
-        assert!(!NIGHT.must_stop(&at("06:30", true, 16_000), 3600), "past the window, still training");
+        assert!(
+            !NIGHT.must_stop(&at("06:30", true, 16_000), 3600),
+            "past the window, still training"
+        );
     }
 }

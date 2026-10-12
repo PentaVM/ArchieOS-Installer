@@ -62,13 +62,37 @@ struct Span {
 
 /// Words after which the next value is a credential whatever it looks like.
 const LABELS: [&str; 14] = [
-    "password", "passwd", "pwd", "contraseña", "contrasena", "clave", "api_key", "apikey", "api-key", "token",
-    "secret", "secreto", "access_key", "bearer",
+    "password",
+    "passwd",
+    "pwd",
+    "contraseña",
+    "contrasena",
+    "clave",
+    "api_key",
+    "apikey",
+    "api-key",
+    "token",
+    "secret",
+    "secreto",
+    "access_key",
+    "bearer",
 ];
 
 /// Prefixes credentials are issued with.
-const PREFIXES: [&str; 12] =
-    ["sk-", "ghp_", "gho_", "github_pat_", "xoxb-", "xoxp-", "hf_", "nvapi-", "glpat-", "AKIA", "AIza", "eyJ"];
+const PREFIXES: [&str; 12] = [
+    "sk-",
+    "ghp_",
+    "gho_",
+    "github_pat_",
+    "xoxb-",
+    "xoxp-",
+    "hf_",
+    "nvapi-",
+    "glpat-",
+    "AKIA",
+    "AIza",
+    "eyJ",
+];
 
 fn is_word(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_'
@@ -81,9 +105,17 @@ fn pem(text: &str, spans: &mut Vec<Span>) {
     while let Some(start) = text[from..].find("-----BEGIN ").map(|at| at + from) {
         let end = text[start..]
             .find("-----END ")
-            .and_then(|at| text[start + at + 9..].find("-----").map(|close| start + at + 9 + close + 5))
+            .and_then(|at| {
+                text[start + at + 9..]
+                    .find("-----")
+                    .map(|close| start + at + 9 + close + 5)
+            })
             .unwrap_or(text.len());
-        spans.push(Span { start, end, kind: Kind::Secret });
+        spans.push(Span {
+            start,
+            end,
+            kind: Kind::Secret,
+        });
         from = end;
     }
 }
@@ -130,8 +162,12 @@ fn rut_at(bytes: &[u8], at: usize) -> Option<usize> {
     if bytes.get(cursor + 2).is_some_and(|&next| is_word(next)) {
         return None;
     }
-    let sum: u32 =
-        digits.iter().rev().zip([2u32, 3, 4, 5, 6, 7].iter().cycle()).map(|(d, m)| u32::from(d - b'0') * m).sum();
+    let sum: u32 = digits
+        .iter()
+        .rev()
+        .zip([2u32, 3, 4, 5, 6, 7].iter().cycle())
+        .map(|(d, m)| u32::from(d - b'0') * m)
+        .sum();
     let expected = match 11 - sum % 11 {
         11 => b'0',
         10 => b'K',
@@ -144,14 +180,18 @@ fn rut_at(bytes: &[u8], at: usize) -> Option<usize> {
 fn numbers(bytes: &[u8], spans: &mut Vec<Span>) {
     let mut at = 0;
     while at < bytes.len() {
-        let starts =
-            bytes[at].is_ascii_digit() || (bytes[at] == b'+' && bytes.get(at + 1).is_some_and(u8::is_ascii_digit));
+        let starts = bytes[at].is_ascii_digit()
+            || (bytes[at] == b'+' && bytes.get(at + 1).is_some_and(u8::is_ascii_digit));
         if !starts || (at > 0 && is_word(bytes[at - 1])) {
             at += 1;
             continue;
         }
         if let Some(end) = rut_at(bytes, at) {
-            spans.push(Span { start: at, end, kind: Kind::Rut });
+            spans.push(Span {
+                start: at,
+                end,
+                kind: Kind::Rut,
+            });
             at = end;
             continue;
         }
@@ -160,7 +200,8 @@ fn numbers(bytes: &[u8], spans: &mut Vec<Span>) {
         let mut end = at + usize::from(international);
         let mut digits = Vec::new();
         while let Some(&byte) = bytes.get(end) {
-            let separator = matches!(byte, b' ' | b'-' | b'.') && bytes.get(end + 1).is_some_and(u8::is_ascii_digit);
+            let separator = matches!(byte, b' ' | b'-' | b'.')
+                && bytes.get(end + 1).is_some_and(u8::is_ascii_digit);
             if byte.is_ascii_digit() {
                 digits.push(byte);
             } else if !separator {
@@ -177,22 +218,38 @@ fn numbers(bytes: &[u8], spans: &mut Vec<Span>) {
             _ => None,
         };
         if let (true, Some(kind)) = (bounded, kind) {
-            spans.push(Span { start: at, end, kind });
+            spans.push(Span {
+                start: at,
+                end,
+                kind,
+            });
         }
         at = end.max(at + 1);
     }
 }
 
 fn is_email(word: &str) -> bool {
-    let Some((local, domain)) = word.split_once('@') else { return false };
-    let plain =
-        |part: &str, extra: &str| !part.is_empty() && part.chars().all(|c| c.is_ascii_alphanumeric() || extra.contains(c));
-    plain(local, "._%+-") && plain(domain, ".-") && domain.contains('.') && !domain.starts_with('.') && !domain.ends_with('.')
+    let Some((local, domain)) = word.split_once('@') else {
+        return false;
+    };
+    let plain = |part: &str, extra: &str| {
+        !part.is_empty()
+            && part
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || extra.contains(c))
+    };
+    plain(local, "._%+-")
+        && plain(domain, ".-")
+        && domain.contains('.')
+        && !domain.starts_with('.')
+        && !domain.ends_with('.')
 }
 
 /// Whether a word is shaped like an issued credential.
 fn is_token(word: &str) -> bool {
-    let token_chars = word.bytes().all(|b| b.is_ascii_alphanumeric() || b"_-+/=.~".contains(&b));
+    let token_chars = word
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b"_-+/=.~".contains(&b));
     if !token_chars || word.contains("://") {
         return false;
     }
@@ -200,7 +257,11 @@ fn is_token(word: &str) -> bool {
         return true;
     }
     let has = |test: fn(&u8) -> bool| word.bytes().any(|b| test(&b));
-    let (digit, lower, upper) = (has(u8::is_ascii_digit), has(u8::is_ascii_lowercase), has(u8::is_ascii_uppercase));
+    let (digit, lower, upper) = (
+        has(u8::is_ascii_digit),
+        has(u8::is_ascii_lowercase),
+        has(u8::is_ascii_uppercase),
+    );
     let mut distinct: Vec<u8> = word.bytes().collect();
     distinct.sort_unstable();
     distinct.dedup();
@@ -210,7 +271,9 @@ fn is_token(word: &str) -> bool {
 
 /// Credentials and addresses, word by word.
 fn words(text: &str, spans: &mut Vec<Span>) {
-    let trim: &[char] = &['"', '\'', '`', '(', ')', '[', ']', '{', '}', '<', '>', ',', ';', '!', '?'];
+    let trim: &[char] = &[
+        '"', '\'', '`', '(', ')', '[', ']', '{', '}', '<', '>', ',', ';', '!', '?',
+    ];
     let mut labelled = false;
     let mut offset = 0;
     for raw in text.split_inclusive(char::is_whitespace) {
@@ -234,7 +297,11 @@ fn words(text: &str, spans: &mut Vec<Span>) {
                     labelled = true;
                 } else {
                     let from = core_start + at + 1 + core[at + 1..].find(value).unwrap_or(0);
-                    spans.push(Span { start: from, end: from + value.len(), kind: Kind::Secret });
+                    spans.push(Span {
+                        start: from,
+                        end: from + value.len(),
+                        kind: Kind::Secret,
+                    });
                 }
                 continue;
             }
@@ -244,7 +311,11 @@ fn words(text: &str, spans: &mut Vec<Span>) {
             if core == "=" || core == ":" {
                 labelled = true;
             } else {
-                spans.push(Span { start: core_start, end: core_start + core.len(), kind: Kind::Secret });
+                spans.push(Span {
+                    start: core_start,
+                    end: core_start + core.len(),
+                    kind: Kind::Secret,
+                });
             }
             continue;
         }
@@ -254,9 +325,17 @@ fn words(text: &str, spans: &mut Vec<Span>) {
             continue;
         }
         if is_email(core) {
-            spans.push(Span { start: core_start, end: core_start + core.len(), kind: Kind::Email });
+            spans.push(Span {
+                start: core_start,
+                end: core_start + core.len(),
+                kind: Kind::Email,
+            });
         } else if is_token(core) {
-            spans.push(Span { start: core_start, end: core_start + core.len(), kind: Kind::Secret });
+            spans.push(Span {
+                start: core_start,
+                end: core_start + core.len(),
+                kind: Kind::Secret,
+            });
         }
     }
 }
@@ -306,7 +385,11 @@ impl Unveil {
         // Longest first, so SECRET_12 is not read as SECRET_1 followed by a 2.
         let mut ordered: Vec<(&String, &String)> = self.by_alias.iter().collect();
         ordered.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then(a.0.cmp(b.0)));
-        ordered.into_iter().fold(text.to_string(), |out, (alias, value)| out.replace(alias.as_str(), value))
+        ordered
+            .into_iter()
+            .fold(text.to_string(), |out, (alias, value)| {
+                out.replace(alias.as_str(), value)
+            })
     }
 
     /// How many values of each kind were covered: what may be written down about it.
@@ -322,7 +405,9 @@ impl Unveil {
 impl fmt::Debug for Unveil {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Counts only. The table is the one thing here that must not reach a log.
-        f.debug_struct("Unveil").field("covered", &self.counters).finish_non_exhaustive()
+        f.debug_struct("Unveil")
+            .field("covered", &self.counters)
+            .finish_non_exhaustive()
     }
 }
 
@@ -351,7 +436,12 @@ impl Veiled {
                 // A stand-in after a label (`password=SECRET_1`) is the veil's own work.
                 spans_of(text)
                     .into_iter()
-                    .filter(|span| !self.unveil.by_alias.contains_key(&text[span.start..span.end]))
+                    .filter(|span| {
+                        !self
+                            .unveil
+                            .by_alias
+                            .contains_key(&text[span.start..span.end])
+                    })
                     .map(|span| span.kind)
             })
             .collect()
@@ -380,8 +470,17 @@ impl Veil {
     pub fn cover(&self, texts: &[&str]) -> Veiled {
         // Longest name first: with "Acme" and "Acme Holdings" both known, the short one
         // first would leave "COMPANY_1 Holdings".
-        let mut entities: Vec<&Entity> = self.entities.iter().filter(|e| !e.value.trim().is_empty()).collect();
-        entities.sort_by(|a, b| b.value.len().cmp(&a.value.len()).then(a.value.cmp(&b.value)));
+        let mut entities: Vec<&Entity> = self
+            .entities
+            .iter()
+            .filter(|e| !e.value.trim().is_empty())
+            .collect();
+        entities.sort_by(|a, b| {
+            b.value
+                .len()
+                .cmp(&a.value.len())
+                .then(a.value.cmp(&b.value))
+        });
         let mut unveil = Unveil::default();
         let named = |segment: &str, unveil: &mut Unveil| {
             let mut segment = segment.to_string();
@@ -405,7 +504,10 @@ impl Veil {
             out.push_str(&named(&text[at..], &mut unveil));
             covered.push(out);
         }
-        Veiled { texts: covered, unveil }
+        Veiled {
+            texts: covered,
+            unveil,
+        }
     }
 }
 
@@ -418,7 +520,11 @@ fn entity_prefix(kind: &EntityKind) -> String {
         EntityKind::Account => "ACCOUNT".into(),
         EntityKind::Project => "PROJECT".into(),
         EntityKind::Other(name) => {
-            let prefix: String = name.chars().filter(char::is_ascii_alphanumeric).collect::<String>().to_uppercase();
+            let prefix: String = name
+                .chars()
+                .filter(char::is_ascii_alphanumeric)
+                .collect::<String>()
+                .to_uppercase();
             if prefix.is_empty() {
                 "ENTITY".into()
             } else {
@@ -439,14 +545,26 @@ mod tests {
     #[test]
     fn a_key_never_leaves_and_comes_back_where_the_model_put_its_stand_in() {
         let key = "sk-proj-9fQ2xLmA71bZtR4wYc8uHn3KpVeD6sJg";
-        let veiled = cover(&format!("Write a .env file for my service. The API key is {key} and the port is 8080."));
+        let veiled = cover(&format!(
+            "Write a .env file for my service. The API key is {key} and the port is 8080."
+        ));
         assert!(!veiled.texts[0].contains(key));
-        assert_eq!(veiled.texts[0], "Write a .env file for my service. The API key is SECRET_1 and the port is 8080.");
+        assert_eq!(
+            veiled.texts[0],
+            "Write a .env file for my service. The API key is SECRET_1 and the port is 8080."
+        );
         assert!(veiled.residue().is_empty());
 
         let answer = "API_KEY=SECRET_1\nPORT=8080\n";
-        assert_eq!(veiled.unveil.restore(answer), format!("API_KEY={key}\nPORT=8080\n"));
-        assert_eq!(veiled.unveil.restore("SECRET_7 stays"), "SECRET_7 stays", "a stand-in the model invented means nothing");
+        assert_eq!(
+            veiled.unveil.restore(answer),
+            format!("API_KEY={key}\nPORT=8080\n")
+        );
+        assert_eq!(
+            veiled.unveil.restore("SECRET_7 stays"),
+            "SECRET_7 stays",
+            "a stand-in the model invented means nothing"
+        );
     }
 
     #[test]
@@ -459,19 +577,37 @@ mod tests {
             "Authorization: Bearer hunter2 for the router",
         ] {
             let veiled = cover(text);
-            assert!(!veiled.texts[0].contains("hunter2"), "{text} -> {}", veiled.texts[0]);
+            assert!(
+                !veiled.texts[0].contains("hunter2"),
+                "{text} -> {}",
+                veiled.texts[0]
+            );
             assert!(veiled.texts[0].contains("SECRET_1"), "{}", veiled.texts[0]);
-            assert!(veiled.texts[0].ends_with("router"), "only the secret is covered: {}", veiled.texts[0]);
+            assert!(
+                veiled.texts[0].ends_with("router"),
+                "only the secret is covered: {}",
+                veiled.texts[0]
+            );
         }
-        assert_eq!(cover("the token economy is growing").texts[0], "the token economy is growing", "a label with no sign names nothing");
+        assert_eq!(
+            cover("the token economy is growing").texts[0],
+            "the token economy is growing",
+            "a label with no sign names nothing"
+        );
     }
 
     #[test]
     fn a_private_key_is_covered_whole() {
         let text = "Deploy with this:\n-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk\nAAAA\n-----END OPENSSH PRIVATE KEY-----\nthen restart.";
         let veiled = cover(text);
-        assert_eq!(veiled.texts[0], "Deploy with this:\nSECRET_1\nthen restart.");
-        assert!(cover("-----BEGIN RSA PRIVATE KEY-----\nMIIE").texts[0].starts_with("SECRET_1"), "an unfinished block is covered to the end");
+        assert_eq!(
+            veiled.texts[0],
+            "Deploy with this:\nSECRET_1\nthen restart."
+        );
+        assert!(
+            cover("-----BEGIN RSA PRIVATE KEY-----\nMIIE").texts[0].starts_with("SECRET_1"),
+            "an unfinished block is covered to the end"
+        );
     }
 
     #[test]
@@ -481,7 +617,13 @@ mod tests {
              Su RUT es 12.345.678-5 y paga con 4111 1111 1111 1111. Son 3 cajas, pedido 20261011, a las 15:30.",
         );
         let text = &veiled.texts[0];
-        for raw in ["maria.soto@example.cl", "8765 4321", "987654321", "12.345.678-5", "4111 1111"] {
+        for raw in [
+            "maria.soto@example.cl",
+            "8765 4321",
+            "987654321",
+            "12.345.678-5",
+            "4111 1111",
+        ] {
             assert!(!text.contains(raw), "{raw} left in: {text}");
         }
         assert_eq!(
@@ -493,20 +635,34 @@ mod tests {
         assert!(veiled.residue().is_empty());
 
         // A RUT whose check digit is wrong is a number, and a card that fails Luhn is too.
-        assert_eq!(cover("folio 12.345.678-9 y serie 4111 1111 1111 1112").texts[0], "folio 12.345.678-9 y serie 4111 1111 1111 1112");
+        assert_eq!(
+            cover("folio 12.345.678-9 y serie 4111 1111 1111 1112").texts[0],
+            "folio 12.345.678-9 y serie 4111 1111 1111 1112"
+        );
     }
 
     #[test]
     fn the_same_value_is_one_stand_in_across_the_system_prompt_and_the_question() {
-        let veil = Veil::new().knowing(EntityKind::Person, "Camila Rojas").knowing(EntityKind::Company, "Acme").knowing(EntityKind::Company, "Acme Holdings");
+        let veil = Veil::new()
+            .knowing(EntityKind::Person, "Camila Rojas")
+            .knowing(EntityKind::Company, "Acme")
+            .knowing(EntityKind::Company, "Acme Holdings");
         let veiled = veil.cover(&[
             "You help Camila Rojas, who works at Acme Holdings.",
             "Draft an email from Camila Rojas (camila@acme.cl) to Acme about the Acme Holdings merger.",
         ]);
-        assert_eq!(veiled.texts[0], "You help PERSON_1, who works at COMPANY_1.");
-        assert_eq!(veiled.texts[1], "Draft an email from PERSON_1 (EMAIL_1) to COMPANY_2 about the COMPANY_1 merger.");
         assert_eq!(
-            veiled.unveil.restore("Dear COMPANY_2 team, PERSON_1 (EMAIL_1) writes about COMPANY_1."),
+            veiled.texts[0],
+            "You help PERSON_1, who works at COMPANY_1."
+        );
+        assert_eq!(
+            veiled.texts[1],
+            "Draft an email from PERSON_1 (EMAIL_1) to COMPANY_2 about the COMPANY_1 merger."
+        );
+        assert_eq!(
+            veiled
+                .unveil
+                .restore("Dear COMPANY_2 team, PERSON_1 (EMAIL_1) writes about COMPANY_1."),
             "Dear Acme team, Camila Rojas (camila@acme.cl) writes about Acme Holdings."
         );
     }
@@ -518,6 +674,9 @@ mod tests {
         let veiled = cover("token: abc123def456");
         let shown = format!("{veiled:?}");
         assert!(!shown.contains("abc123def456"), "{shown}");
-        assert!(shown.contains("SECRET"), "what kind was covered may be said: {shown}");
+        assert!(
+            shown.contains("SECRET"),
+            "what kind was covered may be said: {shown}"
+        );
     }
 }

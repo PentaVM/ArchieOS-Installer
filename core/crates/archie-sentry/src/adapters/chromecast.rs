@@ -50,9 +50,8 @@ impl CastDevice {
         port: u16,
     ) -> Result<Self, AdapterError> {
         validate_id(resource_id).map_err(|_| AdapterError::Protocol)?;
-        let bounded = |s: &str| {
-            !s.is_empty() && s.len() <= 64 && !s.bytes().any(|b| b < 0x20 || b == 0x7f)
-        };
+        let bounded =
+            |s: &str| !s.is_empty() && s.len() <= 64 && !s.bytes().any(|b| b < 0x20 || b == 0x7f);
         let permitted = match address {
             IpAddr::V4(ip) => ip.is_loopback() || ip.is_private(),
             IpAddr::V6(ip) => ip.is_loopback() || (ip.segments()[0] & 0xfe00) == 0xfc00,
@@ -87,14 +86,11 @@ impl std::fmt::Debug for Chromecast {
 impl Chromecast {
     /// Why every operation returns `AdapterError::Unsupported`. Surfaced so
     /// receipts and operator tooling can state the reason instead of a bare code.
-    pub const UNSUPPORTED_REASON: &'static str = "CAST v2 requires TLS plus protobuf on port 8009; \
+    pub const UNSUPPORTED_REASON: &'static str =
+        "CAST v2 requires TLS plus protobuf on port 8009; \
          archie-sentry has neither a raw-TLS stack (tokio-rustls is not a dependency) \
          nor a protobuf codec, so cast observation and control are out of scope";
-    pub fn new(
-        edge: &str,
-        adapter: &str,
-        devices: Vec<CastDevice>,
-    ) -> Result<Self, AdapterError> {
+    pub fn new(edge: &str, adapter: &str, devices: Vec<CastDevice>) -> Result<Self, AdapterError> {
         validate_id(edge).map_err(|_| AdapterError::Protocol)?;
         validate_id(adapter).map_err(|_| AdapterError::Protocol)?;
         if devices.len() > 4096 {

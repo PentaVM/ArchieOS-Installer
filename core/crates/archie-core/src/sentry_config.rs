@@ -243,12 +243,9 @@ pub struct ContextFeedSection {
 }
 impl ContextFeedSection {
     fn validate(&self) -> Result<(), AdapterError> {
-        let dir = |value: &str| {
-            value.len() <= 512 && !value.is_empty() && Path::new(value).is_absolute()
-        };
-        if !dir(&self.watchdog_dir)
-            || !dir(&self.out_dir)
-            || !(500..=60000).contains(&self.poll_ms)
+        let dir =
+            |value: &str| value.len() <= 512 && !value.is_empty() && Path::new(value).is_absolute();
+        if !dir(&self.watchdog_dir) || !dir(&self.out_dir) || !(500..=60000).contains(&self.poll_ms)
         {
             return Err(AdapterError::Protocol);
         }

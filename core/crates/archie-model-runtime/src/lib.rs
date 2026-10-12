@@ -514,7 +514,10 @@ impl InferenceClient {
             return Err(RuntimeError::ProviderMismatch);
         }
         let response = self
-            .send(self.endpoint.url("chat/completions")?, Some(&request.body()))
+            .send(
+                self.endpoint.url("chat/completions")?,
+                Some(&request.body()),
+            )
             .await?;
         let status = response.status();
         if !status.is_success() {
@@ -599,11 +602,13 @@ impl InferenceClient {
                 } else {
                     // Exponential backoff: base * 2^(attempt - 1) + jitter
                     let mult = 1_u32.checked_shl(attempt as u32 - 1).unwrap_or(8);
-                    let exp_ms = (BASE_RETRY_BACKOFF.as_millis() as u64).saturating_mul(mult as u64);
+                    let exp_ms =
+                        (BASE_RETRY_BACKOFF.as_millis() as u64).saturating_mul(mult as u64);
                     let jitter_ms = (std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()
-                        .subsec_millis() % 100) as u64;
+                        .subsec_millis()
+                        % 100) as u64;
                     let total_ms = exp_ms.saturating_add(jitter_ms);
                     Duration::from_millis(total_ms).min(MAX_RETRY_BACKOFF)
                 };
@@ -997,4 +1002,3 @@ mod tests {
         assert_eq!(models.data.len(), 1);
     }
 }
-

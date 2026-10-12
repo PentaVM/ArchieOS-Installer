@@ -72,12 +72,26 @@ impl PrintFormat {
 pub enum Command {
     MediaPause,
     MediaPlay,
-    SwitchSet { on: bool },
-    LightSetBrightness { percent: u8 },
-    ClimateSetTemperature { milli_celsius: i32 },
-    RemoteKey { key: RemoteKeyName },
-    AppLaunch { app_id: String },
-    PrintSubmit { sha256: String, format: PrintFormat, pages: u16 },
+    SwitchSet {
+        on: bool,
+    },
+    LightSetBrightness {
+        percent: u8,
+    },
+    ClimateSetTemperature {
+        milli_celsius: i32,
+    },
+    RemoteKey {
+        key: RemoteKeyName,
+    },
+    AppLaunch {
+        app_id: String,
+    },
+    PrintSubmit {
+        sha256: String,
+        format: PrintFormat,
+        pages: u16,
+    },
 }
 impl Command {
     pub fn capability(&self) -> CommandKind {
@@ -100,7 +114,9 @@ impl Command {
                 .bytes()
                 .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
         {
-            return Err(ContractError("print content must be a lowercase sha256 hex"));
+            return Err(ContractError(
+                "print content must be a lowercase sha256 hex",
+            ));
         }
         Ok(format!("archie-{}", &sha256[..16]))
     }
@@ -174,11 +190,9 @@ impl Command {
                     ..
                 },
             ) => *power_on && active_app.as_deref() == Some(app_id.as_str()),
-            (
-                Self::PrintSubmit { sha256, .. },
-                ResourceState::Printer { job_present, .. },
-            ) => job_present.as_deref()
-                == Self::print_job_name(sha256).ok().as_deref(),
+            (Self::PrintSubmit { sha256, .. }, ResourceState::Printer { job_present, .. }) => {
+                job_present.as_deref() == Self::print_job_name(sha256).ok().as_deref()
+            }
             _ => false,
         }
     }
@@ -187,10 +201,19 @@ impl Command {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ResourceState {
-    Media { playing: bool },
-    Switch { on: bool },
-    Light { on: bool, brightness_percent: u8 },
-    Climate { target_milli_celsius: i32 },
+    Media {
+        playing: bool,
+    },
+    Switch {
+        on: bool,
+    },
+    Light {
+        on: bool,
+        brightness_percent: u8,
+    },
+    Climate {
+        target_milli_celsius: i32,
+    },
     Tv {
         power_on: bool,
         showing_home: bool,
@@ -307,9 +330,11 @@ impl Observation {
             } if !(5000..=35000).contains(&target_milli_celsius) => {
                 Err(ContractError("invalid measured temperature"))
             }
-            ResourceState::Tv {
-                ref active_app, ..
-            } if active_app.as_deref().is_some_and(|a| validate_id(a).is_err()) => {
+            ResourceState::Tv { ref active_app, .. }
+                if active_app
+                    .as_deref()
+                    .is_some_and(|a| validate_id(a).is_err()) =>
+            {
                 Err(ContractError("invalid measured application id"))
             }
             ResourceState::Printer {

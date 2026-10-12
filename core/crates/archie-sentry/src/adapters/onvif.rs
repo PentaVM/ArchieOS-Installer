@@ -62,10 +62,7 @@ impl std::fmt::Debug for OnvifProbe {
 }
 impl OnvifProbe {
     /// `base` is the device service URL, e.g. `http://192.168.1.20/onvif/device_service`.
-    pub fn new(
-        base: &str,
-        credentials: Option<(String, String)>,
-    ) -> Result<Self, AdapterError> {
+    pub fn new(base: &str, credentials: Option<(String, String)>) -> Result<Self, AdapterError> {
         let base = endpoint(base, credentials.is_some())?;
         if base.path().is_empty() {
             return Err(AdapterError::Protocol);
@@ -114,9 +111,7 @@ impl OnvifProbe {
         let info = self.soap("<tds:GetDeviceInformation/>").await?;
         let bounded = |value: Option<String>| -> Result<String, AdapterError> {
             let value = value.ok_or(AdapterError::Protocol)?;
-            if value.is_empty()
-                || value.len() > 64
-                || value.bytes().any(|b| b < 0x20 || b == 0x7f)
+            if value.is_empty() || value.len() > 64 || value.bytes().any(|b| b < 0x20 || b == 0x7f)
             {
                 return Err(AdapterError::Protocol);
             }
@@ -181,8 +176,7 @@ fn fresh_nonce(password: &str, created: &str) -> [u8; 16] {
 /// Standard base64 (RFC 4648, with padding). Implemented locally because the
 /// `base64` crate is not a dependency of archie-sentry.
 pub fn base64_encode(data: &[u8]) -> String {
-    const TABLE: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let n = (u32::from(chunk[0]) << 16)
@@ -207,7 +201,13 @@ pub fn base64_encode(data: &[u8]) -> String {
 /// Minimal SHA-1 (FIPS 180-1), implemented locally solely for the WS-Security
 /// PasswordDigest profile. Archie-internal integrity uses SHA-256.
 pub fn sha1(data: &[u8]) -> [u8; 20] {
-    let mut h: [u32; 5] = [0x6745_2301, 0xEFCD_AB89, 0x98BA_DCFE, 0x1032_5476, 0xC3D2_E1F0];
+    let mut h: [u32; 5] = [
+        0x6745_2301,
+        0xEFCD_AB89,
+        0x98BA_DCFE,
+        0x1032_5476,
+        0xC3D2_E1F0,
+    ];
     let bit_length = (data.len() as u64).wrapping_mul(8);
     let mut message = data.to_vec();
     message.push(0x80);

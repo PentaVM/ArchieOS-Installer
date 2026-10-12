@@ -97,10 +97,8 @@ impl OperatorSession {
                 resource_id: roku.resource_id.clone(),
                 edge_id: "local-core".into(),
                 adapter_id: "roku".into(),
-                paired: self.paired_device(
-                    &roku.resource_id,
-                    archie_state::DeviceClass::Television,
-                )?,
+                paired: self
+                    .paired_device(&roku.resource_id, archie_state::DeviceClass::Television)?,
                 capabilities: crate::sentry_config::RokuBinding::capabilities(),
             })?;
         }
@@ -123,10 +121,8 @@ impl OperatorSession {
                     resource_id: resource_id.clone(),
                     edge_id: "local-core".into(),
                     adapter_id: "mqtt".into(),
-                    paired: self.paired_device(
-                        resource_id,
-                        archie_state::DeviceClass::HomeAssistant,
-                    )?,
+                    paired: self
+                        .paired_device(resource_id, archie_state::DeviceClass::HomeAssistant)?,
                     capabilities: crate::sentry_config::mqtt_capabilities(binding),
                 })?;
             }

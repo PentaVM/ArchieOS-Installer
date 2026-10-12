@@ -69,9 +69,16 @@ fn operation(code: u16, uri: &str, request_id: u32) -> Result<Vec<u8>, AdapterEr
 }
 
 /// The request that precedes the document's bytes.
-pub fn encode_print_job(uri: &str, request_id: u32, job_name: &str, format: &str) -> Result<Vec<u8>, AdapterError> {
-    let named = !job_name.is_empty() && job_name.len() <= 255 && !job_name.chars().any(char::is_control);
-    let typed = !format.is_empty() && format.len() <= 255 && format.bytes().all(|b| b.is_ascii_graphic());
+pub fn encode_print_job(
+    uri: &str,
+    request_id: u32,
+    job_name: &str,
+    format: &str,
+) -> Result<Vec<u8>, AdapterError> {
+    let named =
+        !job_name.is_empty() && job_name.len() <= 255 && !job_name.chars().any(char::is_control);
+    let typed =
+        !format.is_empty() && format.len() <= 255 && format.bytes().all(|b| b.is_ascii_graphic());
     if !named || !typed {
         return Err(AdapterError::Protocol);
     }
@@ -82,7 +89,11 @@ pub fn encode_print_job(uri: &str, request_id: u32, job_name: &str, format: &str
     Ok(bytes)
 }
 
-pub fn encode_get_job_attributes(uri: &str, request_id: u32, job_id: u32) -> Result<Vec<u8>, AdapterError> {
+pub fn encode_get_job_attributes(
+    uri: &str,
+    request_id: u32,
+    job_id: u32,
+) -> Result<Vec<u8>, AdapterError> {
     if job_id == 0 || job_id > i32::MAX as u32 {
         return Err(AdapterError::Protocol);
     }
@@ -97,7 +108,10 @@ pub fn encode_get_job_attributes(uri: &str, request_id: u32, job_id: u32) -> Res
 
 /// Reads the job a printer describes in answer to either request.
 pub fn parse_job(bytes: &[u8], request_id: u32) -> Result<JobSnapshot, AdapterError> {
-    if bytes.len() < 9 || bytes.len() > MAX_BODY || !matches!((bytes[0], bytes[1]), (1, 1) | (2, 0..=2)) {
+    if bytes.len() < 9
+        || bytes.len() > MAX_BODY
+        || !matches!((bytes[0], bytes[1]), (1, 1) | (2, 0..=2))
+    {
         return Err(AdapterError::Protocol);
     }
     if u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) != request_id {
@@ -142,19 +156,26 @@ pub fn parse_job(bytes: &[u8], request_id: u32) -> Result<JobSnapshot, AdapterEr
         match (previous.as_str(), tag, value.len()) {
             ("job-id", 0x21, 4) if job_id.is_none() => {
                 let id = i32::from_be_bytes([value[0], value[1], value[2], value[3]]);
-                job_id = Some(u32::try_from(id).ok().filter(|id| *id > 0).ok_or(AdapterError::Protocol)?);
+                job_id = Some(
+                    u32::try_from(id)
+                        .ok()
+                        .filter(|id| *id > 0)
+                        .ok_or(AdapterError::Protocol)?,
+                );
             }
             ("job-state", 0x23, 4) if state.is_none() => {
-                state = Some(match i32::from_be_bytes([value[0], value[1], value[2], value[3]]) {
-                    3 => JobState::Pending,
-                    4 => JobState::Held,
-                    5 => JobState::Processing,
-                    6 => JobState::Stopped,
-                    7 => JobState::Canceled,
-                    8 => JobState::Aborted,
-                    9 => JobState::Completed,
-                    _ => return Err(AdapterError::Protocol),
-                });
+                state = Some(
+                    match i32::from_be_bytes([value[0], value[1], value[2], value[3]]) {
+                        3 => JobState::Pending,
+                        4 => JobState::Held,
+                        5 => JobState::Processing,
+                        6 => JobState::Stopped,
+                        7 => JobState::Canceled,
+                        8 => JobState::Aborted,
+                        9 => JobState::Completed,
+                        _ => return Err(AdapterError::Protocol),
+                    },
+                );
             }
             ("job-state-reasons", 0x44, _) if reasons.len() < 64 => reasons.push(text(value, 255)?),
             // A job identifier or state in another shape, or said twice, is not evidence.
@@ -190,18 +211,30 @@ impl IppClient {
 
     /// Sends one document as one job. It is sent once: a failure after the request left
     /// may still have printed, and is reported, never retried.
-    pub async fn print_job(&self, request_id: u32, job_name: &str, format: &str, document: &[u8]) -> Result<JobSnapshot, AdapterError> {
+    pub async fn print_job(
+        &self,
+        request_id: u32,
+        job_name: &str,
+        format: &str,
+        document: &[u8],
+    ) -> Result<JobSnapshot, AdapterError> {
         if document.is_empty() || document.len() > MAX_DOCUMENT {
             return Err(AdapterError::Protocol);
         }
         let mut request = encode_print_job(&self.uri, request_id, job_name, format)?;
         request.extend_from_slice(document);
-        parse_job(&self.exchange(request, Duration::from_secs(120)).await?, request_id)
+        parse_job(
+            &self.exchange(request, Duration::from_secs(120)).await?,
+            request_id,
+        )
     }
 
     /// What the printer says of a job it accepted.
     pub async fn job(&self, request_id: u32, job_id: u32) -> Result<JobSnapshot, AdapterError> {
         let request = encode_get_job_attributes(&self.uri, request_id, job_id)?;
-        parse_job(&self.exchange(request, Duration::from_secs(5)).await?, request_id)
+        parse_job(
+            &self.exchange(request, Duration::from_secs(5)).await?,
+            request_id,
+        )
     }
 }

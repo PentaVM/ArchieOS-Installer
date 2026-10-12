@@ -56,7 +56,11 @@ pub fn wrap(text: &str) -> Vec<String> {
 }
 
 fn glyph(character: char) -> [u8; 8] {
-    BASIC_FONTS.get(character).or_else(|| LATIN_FONTS.get(character)).or_else(|| BASIC_FONTS.get('?')).unwrap_or([0; 8])
+    BASIC_FONTS
+        .get(character)
+        .or_else(|| LATIN_FONTS.get(character))
+        .or_else(|| BASIC_FONTS.get('?'))
+        .unwrap_or([0; 8])
 }
 
 fn draw(lines: &[String]) -> Vec<u8> {
@@ -91,7 +95,9 @@ pub fn pages(text: &str) -> Result<Vec<Vec<u8>>, PageError> {
         .chunks(LINES)
         .map(|chunk| {
             let mut jpeg = Vec::new();
-            Encoder::new(&mut jpeg, 90).encode(&draw(chunk), WIDTH as u16, HEIGHT as u16, ColorType::Luma).map_err(|_| PageError::Encoding)?;
+            Encoder::new(&mut jpeg, 90)
+                .encode(&draw(chunk), WIDTH as u16, HEIGHT as u16, ColorType::Luma)
+                .map_err(|_| PageError::Encoding)?;
             Ok(jpeg)
         })
         .collect()
@@ -108,7 +114,13 @@ mod tests {
         assert!(lines.len() > 1 && lines.iter().all(|line| line.chars().count() <= COLUMNS));
         assert_eq!(lines.join(" "), long.trim());
         let wide = "x".repeat(COLUMNS * 2 + 5);
-        assert_eq!(wrap(&wide).iter().map(|l| l.chars().count()).collect::<Vec<_>>(), [COLUMNS, COLUMNS, 5]);
+        assert_eq!(
+            wrap(&wide)
+                .iter()
+                .map(|l| l.chars().count())
+                .collect::<Vec<_>>(),
+            [COLUMNS, COLUMNS, 5]
+        );
         assert_eq!(wrap("uno\n\ndos\n\n"), ["uno", "", "dos"]);
     }
 
@@ -117,7 +129,10 @@ mod tests {
         let one = pages("Hola, soy Archie.\nÑandú, año, canción.").unwrap();
         assert_eq!(one.len(), 1);
         assert_eq!(&one[0][..3], &[0xff, 0xd8, 0xff]);
-        assert_eq!(crate::adapters::ipp::print::format_of(&one[0]), Some("image/jpeg"));
+        assert_eq!(
+            crate::adapters::ipp::print::format_of(&one[0]),
+            Some("image/jpeg")
+        );
         assert!(draw(&["A".into()]).iter().any(|&pixel| pixel == 0));
         for letter in "áéíóúñÑ¿¡ü".chars() {
             assert_ne!(glyph(letter), glyph('?'), "{letter}");
@@ -128,7 +143,10 @@ mod tests {
     fn long_text_takes_more_pages_and_too_long_is_refused() {
         let two = "linea\n".repeat(LINES + 1);
         assert_eq!(pages(&two).unwrap().len(), 2);
-        assert_eq!(pages(&"linea\n".repeat(LINES * MAX_PAGES + 1)), Err(PageError::TooLong(MAX_PAGES + 1)));
+        assert_eq!(
+            pages(&"linea\n".repeat(LINES * MAX_PAGES + 1)),
+            Err(PageError::TooLong(MAX_PAGES + 1))
+        );
         assert_eq!(pages("  \n"), Err(PageError::Empty));
     }
 }

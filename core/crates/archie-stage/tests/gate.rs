@@ -772,7 +772,6 @@ fn a_held_key_goes_on_the_wire_as_the_compositor_reads_it() {
     );
 }
 
-
 #[test]
 fn a_held_mouse_button_goes_on_the_wire_as_the_compositor_reads_it() {
     let down = archie_stage::WireAction::from(&StageAction::ButtonDown {

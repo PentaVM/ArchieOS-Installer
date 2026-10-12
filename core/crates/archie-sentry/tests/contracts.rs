@@ -161,7 +161,12 @@ fn verification_requires_fresh_measurement_from_exact_target_after_dispatch() {
     assert!(!Command::MediaPlay.matches(&value.state));
 }
 
-fn tv(power_on: bool, showing_home: bool, active_app: Option<&str>, playing: Option<bool>) -> ResourceState {
+fn tv(
+    power_on: bool,
+    showing_home: bool,
+    active_app: Option<&str>,
+    playing: Option<bool>,
+) -> ResourceState {
     ResourceState::Tv {
         power_on,
         showing_home,

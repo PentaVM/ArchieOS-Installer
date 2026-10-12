@@ -167,7 +167,11 @@ async fn mqtt_climate_temperature_is_rendered_as_celsius_with_one_decimal() {
     });
     let mut adapter = mqtt_adapter(
         &address.to_string(),
-        MqttBinding::climate("home/thermostat/set", "home/thermostat/state", "set {celsius}"),
+        MqttBinding::climate(
+            "home/thermostat/set",
+            "home/thermostat/state",
+            "set {celsius}",
+        ),
     );
     adapter
         .apply(
@@ -234,9 +238,15 @@ async fn mqtt_truncated_packet_is_a_protocol_error() {
         mqtt_read_packet(&mut stream).await;
         stream.write_all(&[0x20, 0x02, 0x00, 0x00]).await.unwrap();
         mqtt_read_packet(&mut stream).await; // SUBSCRIBE
-        stream.write_all(&[0x90, 0x03, 0x00, 0x01, 0x00]).await.unwrap();
+        stream
+            .write_all(&[0x90, 0x03, 0x00, 0x01, 0x00])
+            .await
+            .unwrap();
         // Declares a 10-byte body, sends 3 bytes, then closes.
-        stream.write_all(&[0x30, 0x0A, 0x00, 0x01, b'a']).await.unwrap();
+        stream
+            .write_all(&[0x30, 0x0A, 0x00, 0x01, b'a'])
+            .await
+            .unwrap();
     });
     let mut adapter = mqtt_adapter(
         &address.to_string(),
@@ -258,7 +268,10 @@ async fn mqtt_oversized_remaining_length_is_rejected_without_reading_the_body() 
         mqtt_read_packet(&mut stream).await;
         stream.write_all(&[0x20, 0x02, 0x00, 0x00]).await.unwrap();
         mqtt_read_packet(&mut stream).await; // SUBSCRIBE
-        stream.write_all(&[0x90, 0x03, 0x00, 0x01, 0x00]).await.unwrap();
+        stream
+            .write_all(&[0x90, 0x03, 0x00, 0x01, 0x00])
+            .await
+            .unwrap();
         // Remaining-length varint for 300_000 > 256 KiB cap, no body follows.
         stream.write_all(&[0x30, 0xE0, 0xA7, 0x12]).await.unwrap();
     });
@@ -316,28 +329,24 @@ fn mqtt_constructor_rejects_public_brokers_wildcards_and_bad_templates() {
     assert!(Mqtt::new("edge", "mqtt", "127.0.0.1:0", None, bindings()).is_err());
     let mut wildcard = binding();
     wildcard.command_topic = "home/+/set".into();
-    assert!(
-        Mqtt::new(
-            "edge",
-            "mqtt",
-            "127.0.0.1:1883",
-            None,
-            BTreeMap::from([("lamp".into(), wildcard)])
-        )
-        .is_err()
-    );
+    assert!(Mqtt::new(
+        "edge",
+        "mqtt",
+        "127.0.0.1:1883",
+        None,
+        BTreeMap::from([("lamp".into(), wildcard)])
+    )
+    .is_err());
     let mut bad_template = binding();
     bad_template.temperature_template = "set point".into();
-    assert!(
-        Mqtt::new(
-            "edge",
-            "mqtt",
-            "127.0.0.1:1883",
-            None,
-            BTreeMap::from([("lamp".into(), bad_template)])
-        )
-        .is_err()
-    );
+    assert!(Mqtt::new(
+        "edge",
+        "mqtt",
+        "127.0.0.1:1883",
+        None,
+        BTreeMap::from([("lamp".into(), bad_template)])
+    )
+    .is_err());
 }
 
 #[tokio::test]
@@ -366,9 +375,7 @@ async fn mqtt_unsupported_command_and_unconfigured_resource_are_unsupported() {
     media.paired = false;
     media.capabilities = vec![CommandKind::SwitchSet];
     assert_eq!(
-        adapter
-            .observe(&media)
-            .await,
+        adapter.observe(&media).await,
         Err(AdapterError::Unsupported)
     );
 }
@@ -403,9 +410,18 @@ const STREAM: &str = "<trt:GetStreamUriResponse \
 #[tokio::test]
 async fn onvif_probe_parses_device_information_and_stream_uri() {
     let (url, task) = http_server(vec![
-        ("200 OK\r\nContent-Type: application/soap+xml", soap_ok(DEVICE_INFO)),
-        ("200 OK\r\nContent-Type: application/soap+xml", soap_ok(PROFILES)),
-        ("200 OK\r\nContent-Type: application/soap+xml", soap_ok(STREAM)),
+        (
+            "200 OK\r\nContent-Type: application/soap+xml",
+            soap_ok(DEVICE_INFO),
+        ),
+        (
+            "200 OK\r\nContent-Type: application/soap+xml",
+            soap_ok(PROFILES),
+        ),
+        (
+            "200 OK\r\nContent-Type: application/soap+xml",
+            soap_ok(STREAM),
+        ),
     ])
     .await;
     let probe = OnvifProbe::new(&url, Some(("operator".into(), "cam-secret".into()))).unwrap();
@@ -454,7 +470,11 @@ async fn onvif_soap_fault_is_a_protocol_error() {
         "<s:Fault><s:Code><s:Value>s:Sender</s:Value></s:Code>\
          <s:Reason><s:Text>ter:NotAuthorized</s:Text></s:Reason></s:Fault>",
     );
-    let (url, task) = http_server(vec![("200 OK\r\nContent-Type: application/soap+xml", fault)]).await;
+    let (url, task) = http_server(vec![(
+        "200 OK\r\nContent-Type: application/soap+xml",
+        fault,
+    )])
+    .await;
     let probe = OnvifProbe::new(&url, None).unwrap();
     assert_eq!(probe.probe().await, Err(AdapterError::Protocol));
     task.await.unwrap();
@@ -471,10 +491,13 @@ fn onvif_wsse_digest_is_sha1_base64_and_deterministic() {
     // Fixed (nonce, created, password) → fixed digest, verified independently.
     let digest = password_digest(b"0123456789abcdef", "2024-01-01T00:00:00Z", "cam-secret");
     assert_eq!(digest, "ic0sEg9LTjlTPKiNBt8E6a/OTxc=");
-    let header = wsse_header("operator", "cam-secret", b"0123456789abcdef", "2024-01-01T00:00:00Z");
-    assert!(header.contains(
-        "#PasswordDigest\">ic0sEg9LTjlTPKiNBt8E6a/OTxc=</wsse:Password>"
-    ));
+    let header = wsse_header(
+        "operator",
+        "cam-secret",
+        b"0123456789abcdef",
+        "2024-01-01T00:00:00Z",
+    );
+    assert!(header.contains("#PasswordDigest\">ic0sEg9LTjlTPKiNBt8E6a/OTxc=</wsse:Password>"));
     assert!(header.contains("#Base64Binary\">MDEyMzQ1Njc4OWFiY2RlZg==</wsse:Nonce>"));
     assert!(header.contains("<wsu:Created>2024-01-01T00:00:00Z</wsu:Created>"));
     assert!(!header.contains("cam-secret"));
@@ -516,10 +539,25 @@ fn cast_device_descriptor_stores_bounded_fields() {
     let public = IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8));
     let cases: [(String, String, IpAddr, u16); 5] = [
         ("x".repeat(65), "Chromecast".to_owned(), address, 8009),
-        ("Living\nRoom".to_owned(), "Chromecast".to_owned(), address, 8009),
+        (
+            "Living\nRoom".to_owned(),
+            "Chromecast".to_owned(),
+            address,
+            8009,
+        ),
         ("Living Room".to_owned(), String::new(), address, 8009),
-        ("Living Room".to_owned(), "Chromecast".to_owned(), public, 8009),
-        ("Living Room".to_owned(), "Chromecast".to_owned(), address, 0),
+        (
+            "Living Room".to_owned(),
+            "Chromecast".to_owned(),
+            public,
+            8009,
+        ),
+        (
+            "Living Room".to_owned(),
+            "Chromecast".to_owned(),
+            address,
+            0,
+        ),
     ];
     for (name, model, addr, port) in cases {
         assert!(CastDevice::new("tv", &name, &model, addr, port).is_err());

@@ -50,7 +50,10 @@ pub enum ToolChatMessage {
         tool_calls: Vec<ToolCall>,
     },
     /// What a tool returned, answering one call by its id.
-    Tool { call_id: String, content: String },
+    Tool {
+        call_id: String,
+        content: String,
+    },
 }
 
 impl ToolChatMessage {
@@ -246,8 +249,8 @@ impl SseAssembler {
             }
             return Ok(());
         }
-        let chunk: Value = serde_json::from_str(data)
-            .map_err(|error| SseError::Malformed(error.to_string()))?;
+        let chunk: Value =
+            serde_json::from_str(data).map_err(|error| SseError::Malformed(error.to_string()))?;
         let Some(choice) = chunk["choices"].get(0) else {
             return Ok(());
         };
@@ -369,8 +372,14 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert!(said.to_lowercase().contains("volc"), "the answer is about volcanoes: {said}");
-        assert!(said.len() > 40, "and it is a whole answer, not a fragment: {said}");
+        assert!(
+            said.to_lowercase().contains("volc"),
+            "the answer is about volcanoes: {said}"
+        );
+        assert!(
+            said.len() > 40,
+            "and it is a whole answer, not a fragment: {said}"
+        );
     }
 
     #[test]
@@ -388,7 +397,10 @@ mod tests {
                 _ => None,
             })
             .collect();
-        for line in raw.lines().filter(|line| line.contains("reasoning_content")) {
+        for line in raw
+            .lines()
+            .filter(|line| line.contains("reasoning_content"))
+        {
             if let Some(start) = line.find("\"reasoning_content\":\"") {
                 let rest = &line[start + 21..];
                 let piece: String = rest.chars().take_while(|c| *c != '"').collect();
@@ -440,7 +452,10 @@ mod tests {
         request.validate().unwrap();
         let body = request.body();
         assert_eq!(body["stream"], true);
-        assert_eq!(body["messages"][2]["tool_calls"][0]["function"]["name"], "open_app");
+        assert_eq!(
+            body["messages"][2]["tool_calls"][0]["function"]["name"],
+            "open_app"
+        );
         assert_eq!(body["messages"][3]["role"], "tool");
         assert_eq!(body["messages"][3]["tool_call_id"], "call_1");
         assert_eq!(body["tools"][0]["function"]["name"], "open_app");

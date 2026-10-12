@@ -12,7 +12,9 @@ pub fn decode(png_bytes: &[u8]) -> Result<Sheet, String> {
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = decoder.read_info().map_err(|e| format!("capture: {e}"))?;
     let mut buffer = vec![0; reader.output_buffer_size().ok_or("capture: too large")?];
-    let info = reader.next_frame(&mut buffer).map_err(|e| format!("capture: {e}"))?;
+    let info = reader
+        .next_frame(&mut buffer)
+        .map_err(|e| format!("capture: {e}"))?;
     let channels = info.color_type.samples();
     if channels < 3 {
         return Err("capture: not a colour picture".into());
@@ -21,7 +23,11 @@ pub fn decode(png_bytes: &[u8]) -> Result<Sheet, String> {
         .chunks_exact(channels)
         .map(|p| [p[0], p[1], p[2]])
         .collect();
-    Ok(Sheet { width: info.width, height: info.height, pixels })
+    Ok(Sheet {
+        width: info.width,
+        height: info.height,
+        pixels,
+    })
 }
 
 /// A binary PPM (`P6`, maxval 255): three whitespace-separated numbers after the magic, one
@@ -37,7 +43,10 @@ pub fn decode_ppm(bytes: &[u8]) -> Result<Sheet, String> {
         while at < bytes.len() && bytes[at].is_ascii_digit() {
             at += 1;
         }
-        let number: u32 = std::str::from_utf8(&bytes[start..at]).ok().and_then(|s| s.parse().ok()).ok_or("capture: bad PPM header")?;
+        let number: u32 = std::str::from_utf8(&bytes[start..at])
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .ok_or("capture: bad PPM header")?;
         fields.push(number);
     }
     let (width, height) = (fields[0], fields[1]);
@@ -49,7 +58,11 @@ pub fn decode_ppm(bytes: &[u8]) -> Result<Sheet, String> {
     if body.len() != needed {
         return Err("capture: PPM size does not match its header".into());
     }
-    Ok(Sheet { width, height, pixels: body.chunks_exact(3).map(|p| [p[0], p[1], p[2]]).collect() })
+    Ok(Sheet {
+        width,
+        height,
+        pixels: body.chunks_exact(3).map(|p| [p[0], p[1], p[2]]).collect(),
+    })
 }
 
 /// The sheet as a binary PPM: what IRIS reads without decoding a picture format.
@@ -73,8 +86,18 @@ pub fn fit_width(sheet: &Sheet, max_width: u32) -> (Sheet, f32) {
     let mut pixels = Vec::with_capacity((max_width * height) as usize);
     for y in 0..height {
         for x in 0..max_width {
-            let (x0, x1) = ((x as f32 * scale) as u32, (((x + 1) as f32 * scale) as u32).min(sheet.width).max((x as f32 * scale) as u32 + 1));
-            let (y0, y1) = ((y as f32 * scale) as u32, (((y + 1) as f32 * scale) as u32).min(sheet.height).max((y as f32 * scale) as u32 + 1));
+            let (x0, x1) = (
+                (x as f32 * scale) as u32,
+                (((x + 1) as f32 * scale) as u32)
+                    .min(sheet.width)
+                    .max((x as f32 * scale) as u32 + 1),
+            );
+            let (y0, y1) = (
+                (y as f32 * scale) as u32,
+                (((y + 1) as f32 * scale) as u32)
+                    .min(sheet.height)
+                    .max((y as f32 * scale) as u32 + 1),
+            );
             let (mut sum, mut n) = ([0u32; 3], 0u32);
             for sy in y0..y1.min(sheet.height) {
                 for sx in x0..x1.min(sheet.width) {
@@ -89,7 +112,14 @@ pub fn fit_width(sheet: &Sheet, max_width: u32) -> (Sheet, f32) {
             pixels.push([(sum[0] / n) as u8, (sum[1] / n) as u8, (sum[2] / n) as u8]);
         }
     }
-    (Sheet { width: max_width, height, pixels }, scale)
+    (
+        Sheet {
+            width: max_width,
+            height,
+            pixels,
+        },
+        scale,
+    )
 }
 
 /// The part of a sheet inside a rectangle (clamped to it).
@@ -103,7 +133,11 @@ pub fn crop(sheet: &Sheet, x: u32, y: u32, width: u32, height: u32) -> Sheet {
             pixels.push(sheet.pixels[(row * sheet.width + col) as usize]);
         }
     }
-    Sheet { width: x1 - x, height: y1 - y, pixels }
+    Sheet {
+        width: x1 - x,
+        height: y1 - y,
+        pixels,
+    }
 }
 
 /// The largest near-white rectangle, where a new document's paper is: grown from the most
@@ -165,18 +199,32 @@ pub fn page_in_editor(sheet: &Sheet) -> Option<((u32, u32, u32, u32), [u8; 3])> 
     let mid = y + h / 2;
     let left = sheet.pixels[(mid * sheet.width + x - 6) as usize];
     let right = sheet.pixels[(mid * sheet.width + x + w + 5) as usize];
-    (luma(left) < 110.0 && luma(right) < 110.0 && (luma(left) - luma(right)).abs() < 25.0).then_some(((x, y, w, h), left))
+    (luma(left) < 110.0 && luma(right) < 110.0 && (luma(left) - luma(right)).abs() < 25.0)
+        .then_some(((x, y, w, h), left))
 }
 
 /// Where the document is when the run ends: everything around the first page's place that
 /// is not the workspace's colour, if it keeps the page's proportions — the document after
 /// Archie painted, zoomed or moved it. Otherwise the page's first place.
-pub fn document_now(sheet: &Sheet, first: (u32, u32, u32, u32), workspace: [u8; 3]) -> (u32, u32, u32, u32) {
+pub fn document_now(
+    sheet: &Sheet,
+    first: (u32, u32, u32, u32),
+    workspace: [u8; 3],
+) -> (u32, u32, u32, u32) {
     let (x, y, w, h) = first;
     let (gx, gy) = (w / 3, h / 3);
     let (x0, y0) = (x.saturating_sub(gx), y.saturating_sub(gy));
-    let (x1, y1) = ((x + w + gx).min(sheet.width), (y + h + gy).min(sheet.height));
-    let differs = |p: [u8; 3]| (0..3).map(|k| (p[k] as i32 - workspace[k] as i32).abs()).max().unwrap_or(0) > 14;
+    let (x1, y1) = (
+        (x + w + gx).min(sheet.width),
+        (y + h + gy).min(sheet.height),
+    );
+    let differs = |p: [u8; 3]| {
+        (0..3)
+            .map(|k| (p[k] as i32 - workspace[k] as i32).abs())
+            .max()
+            .unwrap_or(0)
+            > 14
+    };
     let (mut left, mut top, mut right, mut bottom) = (u32::MAX, u32::MAX, 0, 0);
     for row in y0..y1 {
         for col in x0..x1 {
@@ -203,7 +251,10 @@ pub fn document_now(sheet: &Sheet, first: (u32, u32, u32, u32), workspace: [u8; 
 /// A sheet as a PNG data URL, for a model.
 pub fn data_url(sheet: &Sheet) -> String {
     use base64::Engine;
-    format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(sheet.png()))
+    format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(sheet.png())
+    )
 }
 
 #[cfg(test)]
@@ -212,7 +263,11 @@ mod tests {
 
     fn window() -> Sheet {
         // Grey editor with a white page from (40,30) to (99,109).
-        let mut sheet = Sheet { width: 160, height: 140, pixels: vec![[60, 60, 60]; 160 * 140] };
+        let mut sheet = Sheet {
+            width: 160,
+            height: 140,
+            pixels: vec![[60, 60, 60]; 160 * 140],
+        };
         for y in 30..110 {
             for x in 40..100 {
                 sheet.pixels[(y * 160 + x) as usize] = [255, 255, 255];
@@ -224,18 +279,30 @@ mod tests {
     #[test]
     fn the_white_page_is_found_in_an_editor() {
         assert_eq!(paper(&window()), Some((40, 30, 60, 80)));
-        let grey = Sheet { width: 50, height: 50, pixels: vec![[60, 60, 60]; 2500] };
+        let grey = Sheet {
+            width: 50,
+            height: 50,
+            pixels: vec![[60, 60, 60]; 2500],
+        };
         assert_eq!(paper(&grey), None);
     }
 
     #[test]
     fn a_page_still_loading_is_not_a_document_and_a_moved_document_is_found() {
-        let loading = Sheet { width: 160, height: 140, pixels: vec![[250, 250, 252]; 160 * 140] };
+        let loading = Sheet {
+            width: 160,
+            height: 140,
+            pixels: vec![[250, 250, 252]; 160 * 140],
+        };
         assert_eq!(page_in_editor(&loading), None, "all white: still loading");
         let (page, workspace) = page_in_editor(&window()).unwrap();
         assert_eq!((page, workspace), ((40, 30, 60, 80), [60, 60, 60]));
         // Painted over and nudged 5 px right: found where it is now.
-        let mut after = Sheet { width: 160, height: 140, pixels: vec![[60, 60, 60]; 160 * 140] };
+        let mut after = Sheet {
+            width: 160,
+            height: 140,
+            pixels: vec![[60, 60, 60]; 160 * 140],
+        };
         for y in 30..110 {
             for x in 45..105 {
                 after.pixels[(y * 160 + x) as usize] = [120, 90, 40];
@@ -261,8 +328,14 @@ mod tests {
         assert_eq!(decode(&ppm(&frame)).unwrap(), frame);
         // The header the compositor writes, with a comment-free single newline before the rows.
         let two = decode(b"P6\n2 1\n255\n\xff\x00\x00\x00\xff\x00").unwrap();
-        assert_eq!((two.width, two.height, two.pixels.clone()), (2, 1, vec![[255, 0, 0], [0, 255, 0]]));
+        assert_eq!(
+            (two.width, two.height, two.pixels.clone()),
+            (2, 1, vec![[255, 0, 0], [0, 255, 0]])
+        );
         assert!(decode(b"P6\n2 1\n255\n\xff\x00").is_err(), "short rows");
-        assert!(decode(b"P6\n2 1\n65535\n\xff\x00\x00\x00\xff\x00").is_err(), "16-bit is not what the stage writes");
+        assert!(
+            decode(b"P6\n2 1\n65535\n\xff\x00\x00\x00\xff\x00").is_err(),
+            "16-bit is not what the stage writes"
+        );
     }
 }
