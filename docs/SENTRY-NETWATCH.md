@@ -30,8 +30,14 @@ which device last claimed each IPv4 address.
 
 `alerts.jsonl`, one alert to a line; past 4 MiB it becomes `alerts.1.jsonl`.
 
-Both are written for their owner only (mode 0600). Which names a device asks for says a
-great deal about the people who use it.
+`told.json`: which alerts were already announced, and for `address-moved` how many
+changes were counted. It is what makes a restart silent about what was already said.
+Both `told.json` and `state.json` load through bounded parsers: a file beyond the
+caps (4096 devices, 512 names, 64 peers, 16 addresses per device, 256 MiB) is refused
+with an error that names the cap, never loaded partly.
+
+All three are written for their owner only (mode 0600). Which names a device asks for
+says a great deal about the people who use it.
 
 ## Alerts
 
@@ -45,7 +51,8 @@ great deal about the people who use it.
 | `dns-tunnel-suspect` | warning | a DNS question is over 180 characters, or has a label of 40 or more near-random characters |
 
 An alert is a reason to look, with what was seen. It is not a verdict, and nothing here
-acts on a device or on the network. Each is told once for its subject.
+acts on a device or on the network. Each is told once for its subject, and the telling
+survives a restart.
 
 ## Running it as a service
 
@@ -73,8 +80,11 @@ itself, a mirror port on the switch, or a tap.
 - Not verified as a systemd unit or inside the ISO. Verified live on Linux, as root, on
   one interface (see the hand-off for the run).
 - Encrypted DNS (DoH, DoT) hides the questions; only the server name of the resolver shows.
-- `address-moved` is told once for each device that claims an address. Two devices
-  fighting over one address are two alerts, not a stream.
+- `address-moved` follows an address, not a pair. Two devices fighting over one address
+  raise one alert whose count grows; a further alert comes only after an hour of cool-down
+  and at least one more change.
 - A device that changes its hardware address (phones do, per network) is a new device.
-- The inventory `archie-lan scan` writes and this record are not joined yet, and neither
-  reaches Sentry's world graph.
+- The inventory, this record and the passive import are joined by `archie sentry-devices`
+  into one view keyed by hardware address, and that view reaches Sentry's world graph.
+  What is not joined yet: the QML panel of the Observatory does not draw them yet (the
+  graph and the display data path carry them; the visual panel is pending).

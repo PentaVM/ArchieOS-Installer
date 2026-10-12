@@ -34,6 +34,7 @@ pub mod runtime;
 pub mod sentry;
 pub mod sentry_config;
 pub mod task_service;
+pub mod unify;
 
 pub use boot::{BootReport, BootStage, StageStatus};
 pub use config::{ArchieConfig, ConfigError, TransportKind};

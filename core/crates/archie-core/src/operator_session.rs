@@ -6,12 +6,14 @@ use crate::{
 };
 use archie_policy::{Action, CapabilityRequest, Constraints, Principal, Resource, Scope};
 use archie_sentry::{
-    contracts::{Command, Intent},
-    engine::{CoreAuthority, EngineError, ExecutionGuard},
+    adapters::{ipp::IppAdapter, roku::Roku},
+    contracts::{Command, CommandKind, Intent},
+    engine::{CoreAuthority, EdgeAdapter, EngineError, ExecutionGuard},
     journal::Journal,
     registry::{Registry, ResourceDescriptor},
 };
 use archie_types::{Timestamp, TraceId};
+use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -50,36 +52,144 @@ impl OperatorSession {
         peer.check_present()?;
         Ok(peer)
     }
-    fn service(&self) -> Result<crate::sentry::SentryService, EngineError> {
-        let binding = self
+    /// A configured resource is usable only while the local inventory holds a
+    /// paired record of the expected device class for it. MQTT actuators reuse
+    /// the HomeAssistant class: they are home-automation devices and the fixed
+    /// inventory vocabulary has no more specific honest class for them.
+    fn paired_device(
+        &self,
+        resource_id: &str,
+        class: archie_state::DeviceClass,
+    ) -> Result<bool, EngineError> {
+        let device = self
             .core
-            .config
-            .sentry
-            .home_assistant
-            .as_ref()
-            .ok_or(EngineError::Authority)?;
+            .state
+            .get_device(resource_id)
+            .map_err(|_| EngineError::Authority)?;
+        Ok(device.is_some_and(|d| {
+            d.pairing == archie_state::DevicePairingState::Paired && d.class == class
+        }))
+    }
+    /// Registers every configured actuable resource with its owning adapter
+    /// route. Telemetry resources (HA telemetry, ONVIF cameras, Chromecasts)
+    /// never appear here, so no intent can name them.
+    fn service(&self) -> Result<crate::sentry::SentryService, EngineError> {
+        let sentry = &self.core.config.sentry;
         let mut registry = Registry::default();
-        for resource in &binding.resources {
-            let device = self
-                .core
-                .state
-                .get_device(&resource.resource_id)
-                .map_err(|_| EngineError::Authority)?;
-            let paired = device.is_some_and(|d| {
-                d.pairing == archie_state::DevicePairingState::Paired
-                    && d.class == archie_state::DeviceClass::HomeAssistant
-            });
+        if let Some(binding) = &sentry.home_assistant {
+            for resource in &binding.resources {
+                registry.register(ResourceDescriptor {
+                    resource_id: resource.resource_id.clone(),
+                    edge_id: "local-core".into(),
+                    adapter_id: "home-assistant".into(),
+                    paired: self.paired_device(
+                        &resource.resource_id,
+                        archie_state::DeviceClass::HomeAssistant,
+                    )?,
+                    capabilities: resource
+                        .capabilities()
+                        .map_err(|_| EngineError::Authority)?,
+                })?;
+            }
+        }
+        for roku in &sentry.roku {
             registry.register(ResourceDescriptor {
-                resource_id: resource.resource_id.clone(),
+                resource_id: roku.resource_id.clone(),
                 edge_id: "local-core".into(),
-                adapter_id: "home-assistant".into(),
-                paired,
-                capabilities: resource
-                    .capabilities()
-                    .map_err(|_| EngineError::Authority)?,
+                adapter_id: "roku".into(),
+                paired: self.paired_device(
+                    &roku.resource_id,
+                    archie_state::DeviceClass::Television,
+                )?,
+                capabilities: crate::sentry_config::RokuBinding::capabilities(),
             })?;
         }
+        for printer in &sentry.printers {
+            if printer.spool_dir.is_none() {
+                continue; // query-only printer; never actuable
+            }
+            registry.register(ResourceDescriptor {
+                resource_id: printer.resource_id.clone(),
+                edge_id: "local-core".into(),
+                adapter_id: "ipp".into(),
+                paired: self
+                    .paired_device(&printer.resource_id, archie_state::DeviceClass::Printer)?,
+                capabilities: vec![CommandKind::PrintSubmit],
+            })?;
+        }
+        if let Some(mqtt) = &sentry.mqtt {
+            for (resource_id, binding) in &mqtt.resources {
+                registry.register(ResourceDescriptor {
+                    resource_id: resource_id.clone(),
+                    edge_id: "local-core".into(),
+                    adapter_id: "mqtt".into(),
+                    paired: self.paired_device(
+                        resource_id,
+                        archie_state::DeviceClass::HomeAssistant,
+                    )?,
+                    capabilities: crate::sentry_config::mqtt_capabilities(binding),
+                })?;
+            }
+        }
         Ok(self.core.sentry_service(Arc::new(Mutex::new(registry))))
+    }
+    /// Builds the owning adapter for one configured actuable resource, opening
+    /// referenced secrets for this one operation only.
+    fn adapter_for(&self, resource_id: &str) -> Result<Box<dyn EdgeAdapter>, EngineError> {
+        let sentry = &self.core.config.sentry;
+        let (route, _) = sentry
+            .actuable_route(resource_id)
+            .ok_or(EngineError::Authority)?;
+        let adapter: Box<dyn EdgeAdapter> = match route {
+            "home-assistant" => Box::new(
+                sentry
+                    .home_assistant
+                    .as_ref()
+                    .ok_or(EngineError::Authority)?
+                    .adapter()
+                    .map_err(|_| EngineError::Authority)?,
+            ),
+            "roku" => Box::new(
+                Roku::new(
+                    "local-core",
+                    "roku",
+                    sentry
+                        .roku
+                        .iter()
+                        .map(|r| (r.resource_id.clone(), r.endpoint.clone()))
+                        .collect(),
+                )
+                .map_err(|_| EngineError::Authority)?,
+            ),
+            "ipp" => {
+                let printer = sentry
+                    .printers
+                    .iter()
+                    .find(|p| p.resource_id == resource_id)
+                    .ok_or(EngineError::Authority)?;
+                let spool = printer.spool_dir.as_ref().ok_or(EngineError::Authority)?;
+                Box::new(
+                    IppAdapter::new(
+                        "local-core",
+                        "ipp",
+                        &printer.endpoint,
+                        &printer.resource_id,
+                        PathBuf::from(spool),
+                    )
+                    .map_err(|_| EngineError::Authority)?,
+                )
+            }
+            "mqtt" => Box::new(
+                sentry
+                    .mqtt
+                    .as_ref()
+                    .ok_or(EngineError::Authority)?
+                    .adapter()
+                    .map_err(|_| EngineError::Authority)?,
+            ),
+            _ => return Err(EngineError::Authority),
+        };
+        Ok(adapter)
     }
     fn prepare(
         &mut self,
@@ -90,23 +200,13 @@ impl OperatorSession {
         if self.pending.is_some() {
             return Err(EngineError::Authority);
         }
-        let binding = self
+        let (_, capabilities) = self
             .core
             .config
             .sentry
-            .home_assistant
-            .as_ref()
+            .actuable_route(&resource_id)
             .ok_or(EngineError::Authority)?;
-        let resource = binding
-            .resources
-            .iter()
-            .find(|r| r.resource_id == resource_id)
-            .ok_or(EngineError::Authority)?;
-        if !resource
-            .capabilities()
-            .map_err(|_| EngineError::Authority)?
-            .contains(&command.capability())
-        {
+        if !capabilities.contains(&command.capability()) {
             return Err(EngineError::Authority);
         }
         let now = Timestamp::now();
@@ -202,21 +302,14 @@ impl OperatorSession {
             true,
             digest,
         )?;
-        let binding = self
-            .core
-            .config
-            .sentry
-            .home_assistant
-            .as_ref()
-            .ok_or(EngineError::Authority)?;
-        let mut adapter = binding.adapter().map_err(|_| EngineError::Authority)?;
+        let mut adapter = self.adapter_for(&intent.resource_id)?;
         let guard = Arc::new(SessionGuard {
             peer,
             connected: self.connected.clone(),
         });
         let result = self
             .service()?
-            .execute_with_guard(&intent, &authority, &mut adapter, guard)
+            .execute_with_guard(&intent, &authority, adapter.as_mut(), guard)
             .await?;
         Ok(ControlResponse::SentryResult(Box::new(result)))
     }

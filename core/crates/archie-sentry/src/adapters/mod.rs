@@ -1,6 +1,11 @@
 //! Native, bounded LAN protocols. Tokens and raw provider bodies never enter receipts.
+pub mod chromecast;
+pub mod drivers;
 pub mod home_assistant;
 pub mod ipp;
+pub mod mqtt;
+pub mod onvif;
+pub mod roku;
 
 use crate::engine::AdapterError;
 use reqwest::{Client, Response, Url};

@@ -7,6 +7,7 @@
 use archie_types::Timestamp;
 use serde::{Deserialize, Serialize};
 
+pub mod lan;
 pub mod layers;
 
 #[cfg(feature = "provider")]
@@ -173,6 +174,11 @@ pub struct WorldSnapshot {
     pub source: WorldDataSource,
     pub generated_at: Timestamp,
     pub observations: Vec<WorldObservation>,
+    /// Devices on the owner's LAN, ingested from the `archie sentry-devices`
+    /// unified view into the world graph (see [`lan`]). Additive to the v1
+    /// contract: an older payload simply has none.
+    #[serde(default)]
+    pub lan_devices: Vec<lan::LanDeviceEntity>,
     pub providers: Vec<WorldProviderStatus>,
 }
 
@@ -183,6 +189,7 @@ impl WorldSnapshot {
             source,
             generated_at: now,
             observations: Vec::new(),
+            lan_devices: Vec::new(),
             providers: vec![WorldProviderStatus::initial(source)],
         }
     }
@@ -584,6 +591,30 @@ mod provider {
             snapshot.generated_at = now;
         }
 
+        /// Ingest one `archie-sentry-devices-v1` document (as written by
+        /// `archie sentry-devices --json`) into the world graph. Atomic: a
+        /// rejected view changes nothing, and a provider refresh never touches
+        /// the device entities — the two flows meet only in the snapshot.
+        pub async fn ingest_lan_view(
+            &self,
+            view: &[u8],
+        ) -> Result<lan::LanIngestReport, lan::LanIngestError> {
+            self.ingest_lan_view_at(view, Timestamp::now()).await
+        }
+
+        async fn ingest_lan_view_at(
+            &self,
+            view: &[u8],
+            now: Timestamp,
+        ) -> Result<lan::LanIngestReport, lan::LanIngestError> {
+            let mut graph = lan::LanGraph::new();
+            let report = graph.ingest(view, now)?;
+            let mut snapshot = self.state.write().await;
+            snapshot.lan_devices = graph.entities().cloned().collect();
+            snapshot.generated_at = now;
+            Ok(report)
+        }
+
         pub async fn current(&self) -> WorldSnapshot {
             self.current_at(Timestamp::now()).await
         }
@@ -725,6 +756,41 @@ mod provider {
             let aged = service.current_at(t0.plus_millis(STALE_AFTER_MS + 1)).await;
             assert_eq!(aged.providers[0].condition, ProviderCondition::Stale);
             assert_eq!(aged.providers[0].data_age_ms, Some(STALE_AFTER_MS + 1));
+        }
+
+        #[tokio::test]
+        async fn a_lan_view_lands_in_the_served_snapshot_and_survives_refresh() {
+            const VIEW: &[u8] =
+                include_bytes!("../tests/fixtures/unified_view_small_lan.json");
+            let t0 = Timestamp::from_millis(1_000_000);
+            let provider = Arc::new(ScriptedProvider {
+                results: Mutex::new(VecDeque::from([Ok(batch(t0))])),
+            });
+            let service = WorldService::with_provider(provider);
+
+            let report = service.ingest_lan_view_at(VIEW, t0).await.unwrap();
+            assert_eq!(report.devices, 3);
+            let current = service.current_at(t0).await;
+            assert_eq!(current.lan_devices.len(), 3);
+            assert_eq!(current.lan_devices[0].identity, "54:4e:f0:07:3d:e8");
+            assert_eq!(
+                current.lan_devices[0].sources.keys().copied().collect::<Vec<_>>(),
+                [
+                    crate::lan::LanSource::LanScan,
+                    crate::lan::LanSource::Netwatch,
+                    crate::lan::LanSource::PassiveImport
+                ]
+            );
+
+            // Provider refreshes and LAN ingestions are independent flows.
+            service.refresh_at(t0).await;
+            let after_refresh = service.current_at(t0).await;
+            assert_eq!(after_refresh.lan_devices.len(), 3, "refresh does not touch the graph");
+            assert_eq!(after_refresh.observations.len(), 2, "ingestion does not touch observations");
+
+            // A rejected view leaves the served devices untouched.
+            assert!(service.ingest_lan_view_at(b"junk", t0).await.is_err());
+            assert_eq!(service.current_at(t0).await.lan_devices.len(), 3);
         }
     }
 }

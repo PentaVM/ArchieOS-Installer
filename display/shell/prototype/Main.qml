@@ -5,7 +5,7 @@ import QtQuick
 // The Quickshell host layer (PanelWindow, layer-shell) is not part of this file and is untested.
 //
 //   Ctrl+K palette   C control center   A activity   G grid/list   M reduced motion
-//   1..4 theme: frost / workspace / signature / synthesis
+//   S sentry (red local)   1..4 theme: frost / workspace / signature / synthesis
 Item {
     id: root
     width: 1920; height: 1080
@@ -16,6 +16,7 @@ Item {
         if (e.key === Qt.Key_Escape) overlay = ""
         else if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_K) overlay = overlay === "palette" ? "" : "palette"
         else if (e.key === Qt.Key_C) overlay = overlay === "control" ? "" : "control"
+        else if (e.key === Qt.Key_S) overlay = overlay === "sentry" ? "" : "sentry"
         else if (e.key === Qt.Key_A) overlay = overlay === "activity" ? "" : "activity"
         else if (e.key === Qt.Key_G) vault.gridView = !vault.gridView
         else if (e.key === Qt.Key_M) Theme.reducedMotion = !Theme.reducedMotion
@@ -28,7 +29,28 @@ Item {
     Rectangle { anchors.fill: parent
         gradient: Gradient { GradientStop { position: 0; color: Theme.wall0 } GradientStop { position: 1; color: Theme.wall1 } } }
 
-    TopBar { id: bar; width: parent.width; overlay: root.overlay
+    // Fed by quickshell/BridgeProcess.qml in the shell, by a recorded frame in tests.
+    property alias bridge: bridgeModel
+    // Plain values for tests that cannot reach the model object.
+    readonly property string bridgeLink: bridgeModel.link
+    readonly property int bridgeRejected: bridgeModel.rejected
+    BridgeModel { id: bridgeModel }
+
+    // Test/replay only: a context property `replayFile` (a file URL of JSON lines written by
+    // archie-shell-bridge) is fed through the same ingest() path. Needs QML_XHR_ALLOW_FILE_READ=1.
+    property string replayDebug: ""
+    Component.onCompleted: {
+        replayDebug = typeof replayFile === "undefined" ? "no-context-property" : "file=" + replayFile
+        if (typeof replayFile === "undefined" || replayFile === "") return
+        var xhr = new XMLHttpRequest()
+        xhr.open("GET", replayFile, false)
+        xhr.send()
+        var lines = xhr.responseText.split(/\r?\n/)
+        replayDebug += " status=" + xhr.status + " bytes=" + xhr.responseText.length + " lines=" + lines.length
+        for (var i = 0; i < lines.length; i++) if (lines[i].trim() !== "") bridgeModel.ingest(lines[i])
+    }
+
+    TopBar { id: bar; width: parent.width; overlay: root.overlay; bridge: bridgeModel
         onToggle: function (n) { root.overlay = root.overlay === n ? "" : n } }
 
     VaultWindow { id: vault; x: Math.round(parent.width * 0.13); y: Math.round(parent.height * 0.083); width: Math.round(parent.width * 0.615); height: Math.round(parent.height * 0.65) }
@@ -43,12 +65,14 @@ Item {
         }
     }
 
-    Dock { id: dock; anchors.horizontalCenter: parent.horizontalCenter; y: parent.height - height - 14 }
+    Dock { id: dock; anchors.horizontalCenter: parent.horizontalCenter; y: parent.height - height - 14
+        onLaunched: function (id) { if (id === "sentry") root.overlay = root.overlay === "sentry" ? "" : "sentry" } }
 
     Item { anchors.fill: parent; visible: root.overlay !== ""
         MouseArea { anchors.fill: parent; onClicked: root.overlay = "" }
-        ControlCenter { visible: root.overlay === "control"; x: parent.width - width - 14; y: Theme.barH + 8 }
-        ActivityCenter { visible: root.overlay === "activity"; x: parent.width - width - 14; y: Theme.barH + 8 }
+        ControlCenter { bridge: bridgeModel; visible: root.overlay === "control"; x: parent.width - width - 14; y: Theme.barH + 8 }
+        ActivityCenter { bridge: bridgeModel; visible: root.overlay === "activity"; x: parent.width - width - 14; y: Theme.barH + 8 }
+        SentryPanel { bridge: bridgeModel; visible: root.overlay === "sentry"; x: (parent.width - width) / 2; y: 120 }
         CommandPalette { visible: root.overlay === "palette"; x: (parent.width - width) / 2; y: 150 }
     }
 

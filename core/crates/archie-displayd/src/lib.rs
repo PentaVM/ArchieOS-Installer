@@ -28,7 +28,7 @@ pub use http::{Request, Response};
 pub use kernel::{Availability, KernelService, KernelSnapshot, ZoneView};
 pub use orb::OrbService;
 pub use snapshot::{DisplaySnapshot, SnapshotSource};
-pub use world::{WorldDataSource, WorldService, WorldSnapshot};
+pub use world::{LanDeviceEntity, LanSource, WorldDataSource, WorldService, WorldSnapshot};
 
 use archie_state::StatePaths;
 use std::sync::Arc;
