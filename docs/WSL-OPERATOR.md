@@ -37,6 +37,7 @@ wsl -d ArchieOS-Operator
 archie-operate "do a flip reset" --app car-soccer
 archie-operate "open the File menu and look at what it offers" --app photopea --seconds 45
 archie-operate "scroll down the page" --url https://en.wikipedia.org/wiki/Mona_Lisa
+archie-operate "add the first clip of the bin to the timeline" --app kdenlive
 ```
 
 A window opens on the Windows desktop: the Stage, with a browser in it. The first run
@@ -53,6 +54,20 @@ decision in `trajectory.jsonl`, and a frame a second in `frames/`.
 | `archie-setup key` | replace the Nebius key |
 | `archie-session status` / `down` | the Stage, IRIS and the browser: running or not; stop them |
 | `archie-ask` | ask the reasoning model in a terminal; private values are veiled first |
+
+## Video, without a window
+
+The image carries the video bridge: MLT, the engine under Kdenlive, cuts and renders
+a timeline from a description, and leaves a project Kdenlive opens beside the MP4.
+
+```bash
+mkdir -p ~/media            # put the clips to cut from in here
+archie-bridges call video video_sources '{}' --workspace $HOME/media
+less /usr/share/archie/bridges/video/SKILL.md
+```
+
+`archie-mcp-server --bridge video=$HOME/media` serves the same tools over MCP to a
+planner. `archie-session run kdenlive` opens Kdenlive in the Stage to carry on by hand.
 
 ## What to expect
 
@@ -73,6 +88,11 @@ shown the screen. Only IRIS sees the screen, and IRIS runs on your machine.
   GTX 1660 included, was not. If it fails to start, `~/.archie/run/iris.log` says why.
 - The browser draws with software rendering inside the Stage. A game is slower than in
   a browser on Windows.
+- **Kdenlive and the video bridge are in images built from `main` after 2026-10-11.**
+  The pre-release `wsl-operator-2026.10.11` has neither. In that one, as root:
+  `pacman -Sy --noconfirm kdenlive mlt ffmpeg`, then start it in the Stage by hand
+  with `WAYLAND_DISPLAY=archie-stage QT_QPA_PLATFORM=wayland kdenlive`. Neither path
+  was run in the image.
 - No voice. No Observatory. `archie-lan` and `archie-netwatch` are in the image, but a
   WSL machine sees only its own virtual network, not your home network, and TShark is
   not installed.

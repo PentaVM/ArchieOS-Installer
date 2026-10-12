@@ -1,5 +1,9 @@
 # Relevo vigente — 2026-10-11
 
+**Actualización (Claude, 2026-10-11 noche):** `main` es la única rama y todo está
+fusionado, incluido el prototipo de GUI de Xavi. Lo que falta está en
+`../docs/PENDIENTES.md` y en el PR en borrador `todo/pendientes`.
+
 **Actualización de voz e integración (Codex):** continuar exclusivamente en
 `PentaVM/ArchieOS-Nvidia`. Leer primero
 `../docs/HANDOFF-2026-10-11-SPEECH-FLOOR.md`. Main incorpora `feat/sentry-complete`

@@ -4,6 +4,7 @@
 #
 #   archie-session up | down | status
 #   archie-session open URL      open a page in the Stage, in a fresh browser profile
+#   archie-session run PROGRAM   start an installed application in the Stage (kdenlive)
 set -euo pipefail
 RUN=${ARCHIE_RUN:-$HOME/.archie/run}
 VENV=/opt/archie/iris-venv
@@ -82,13 +83,25 @@ P
     start firefox firefox --profile "$profile" --new-window "$url"
 }
 
+# An application of the image, drawn in the Stage. Its name is checked against what is
+# installed; nothing else of what was asked reaches a shell.
+run_app() {
+  local program=${1:?archie-session run PROGRAM}
+  case "$program" in *[!a-z0-9-]*) echo "archie-session: $program is not a program name" >&2; exit 64 ;; esac
+  command -v "$program" >/dev/null || { echo "archie-session: $program is not installed in this image" >&2; exit 1; }
+  stop app
+  XDG_RUNTIME_DIR=$(cat "$RUN/xdg") WAYLAND_DISPLAY=archie-stage QT_QPA_PLATFORM=wayland LIBGL_ALWAYS_SOFTWARE=1 \
+    start app "$program"
+}
+
 case "${1:-status}" in
   up) up ;;
   open) open "${2:-}" ;;
+  run) run_app "${2:-}" ;;
   down)
-    for name in firefox iris stage; do stop "$name"; done
+    for name in firefox app iris stage; do stop "$name"; done
     pkill -f -- "--profile ${RUN:?}/ff" 2>/dev/null || true
     ;;
-  status) for name in stage iris firefox; do running "$name" && echo "$name: running" || echo "$name: stopped"; done ;;
-  *) echo 'usage: archie-session up|down|status|open URL' >&2; exit 64 ;;
+  status) for name in stage iris firefox app; do running "$name" && echo "$name: running" || echo "$name: stopped"; done ;;
+  *) echo 'usage: archie-session up|down|status|open URL|run PROGRAM' >&2; exit 64 ;;
 esac
