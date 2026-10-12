@@ -338,6 +338,8 @@ pub fn collect_from_vault(
             FeedSource::WandaMessage
         } else if relative.starts_with("wanda/chats/") {
             FeedSource::WandaChat
+        } else if relative.starts_with("vault/documents/") {
+            FeedSource::VaultDocument
         } else {
             continue;
         };
@@ -433,6 +435,23 @@ pub fn collect_from_vault(
                     at_ms,
                     weight: salience.min(100) as u8,
                     category: best.map(|(c, _)| c),
+                }
+            }
+            FeedSource::VaultDocument => {
+                let Ok(content) =
+                    serde_json::from_value::<crate::vault_bridge::DocumentContent>(value.clone())
+                else {
+                    continue;
+                };
+                if content.format != crate::vault_bridge::DOCUMENT_FORMAT {
+                    continue;
+                }
+                FeedItem {
+                    source: kind,
+                    reference,
+                    at_ms,
+                    weight: content.kind.weight(),
+                    category: None,
                 }
             }
             FeedSource::WandaChat => {
@@ -537,6 +556,7 @@ fn pillar_of(source: FeedSource) -> Pillar {
         FeedSource::WandaMessage | FeedSource::WandaNotification | FeedSource::WandaChat => {
             Pillar::Wanda
         }
+        FeedSource::VaultDocument => Pillar::Vault,
     }
 }
 

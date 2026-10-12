@@ -23,15 +23,18 @@ pub enum FeedSource {
     WandaNotification,
     /// One chat's aggregate (counts and digests, never transcripts).
     WandaChat,
+    /// A document the owner put under Archie's care, via [`crate::vault_bridge`].
+    VaultDocument,
 }
 
 impl FeedSource {
-    pub const ALL: [FeedSource; 5] = [
+    pub const ALL: [FeedSource; 6] = [
         Self::NetwatchAlert,
         Self::Device,
         Self::WandaMessage,
         Self::WandaNotification,
         Self::WandaChat,
+        Self::VaultDocument,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -40,6 +43,7 @@ impl FeedSource {
             Self::WandaMessage => "wanda-message",
             Self::WandaNotification => "wanda-notification",
             Self::WandaChat => "wanda-chat",
+            Self::VaultDocument => "vault-document",
         }
     }
 }
@@ -147,6 +151,8 @@ impl FocusProfile {
                         .only(&[Category::Work, Category::Urgency]),
                     FocusRule::new(WandaChat, 0, 30),
                     FocusRule::new(NetwatchAlert, 90, 80),
+                    // The work's own evidence: the brief and its restrictions first.
+                    FocusRule::new(VaultDocument, 0, 85),
                 ],
                 max_items: 24,
             },
@@ -163,6 +169,7 @@ impl FocusProfile {
                     FocusRule::new(WandaNotification, 10, 60),
                     FocusRule::new(WandaChat, 0, 40),
                     FocusRule::new(NetwatchAlert, 90, 50),
+                    FocusRule::new(VaultDocument, 0, 45),
                 ],
                 max_items: 32,
             },

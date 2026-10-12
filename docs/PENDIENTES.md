@@ -224,6 +224,14 @@ fixture se reporta como fixture, no como dispositivo real. Un PR por avance, con
   **Feeder (Claude, 2026-10-12):** todo lo que producen Sentry y Wanda, más los cambios
   de dispositivo, llega a Cerebra por un solo `feeder::plan` con perfil de foco
   (sección 3, punto 15).
+  **Vault (Claude, 2026-10-12):** `archie_cerebra::vault_bridge` sella los documentos
+  del dueño (`.md`, `.txt`, hasta 256 KiB) como `Document`/`Restricted` en un dominio
+  explícito y los incluye como `Pillar::Vault`. El tipo (encargo, restricción, versión,
+  nota) sale del front-matter `kind:` o del nombre del archivo, nunca de adivinar por la
+  prosa. CLI `archie vault-docs --dir … --domain work/<org>/<proyecto>`. El feeder los
+  pesa (encargo 90, restricción 80, versión 60, nota 40): entran en `trabajo` y
+  `personal`, nunca en `pantalla-1`. Faltan IRIS (nada escribe sus episodios ni sus
+  recibos a disco) y Forge (`core.forge` no tiene worker).
 
 ## 5. Voz
 

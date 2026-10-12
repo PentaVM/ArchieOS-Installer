@@ -59,6 +59,25 @@ pub fn follow_alerts_once(
     )
 }
 
+/// One pass over a directory of the owner's documents (`.md`, `.txt`): each new one
+/// is sealed into the vault in `domain` as the Vault pillar's evidence.
+pub fn watch_documents_once(
+    watch_dir: &Path,
+    vault_dir: &Path,
+    domain: &str,
+) -> Result<archie_cerebra::vault_bridge::DocumentWatchReport, String> {
+    let domain =
+        archie_vault::ContextDomain::try_from(domain.to_owned()).map_err(|e| e.to_string())?;
+    archie_cerebra::vault_bridge::watch_documents_once(
+        vault_dir,
+        &vault_dir.join("vault-docs-journal.json"),
+        watch_dir,
+        &domain,
+        "vault-documents",
+    )
+    .map_err(|e| e.to_string())
+}
+
 /// One pass over the chat-export watch directory.
 pub fn watch_exports_once(
     watch_dir: &Path,

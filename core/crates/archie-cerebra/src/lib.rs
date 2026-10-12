@@ -52,6 +52,7 @@ pub mod parameters;
 pub mod pass;
 pub mod pillars;
 pub mod sentry_bridge;
+pub mod vault_bridge;
 pub mod vault_io;
 pub mod wanda_bridge;
 pub mod wanda_watcher;

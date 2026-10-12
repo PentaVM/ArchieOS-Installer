@@ -32,10 +32,10 @@ deja commiteada y empujada en `claude/sentry-ola3-cast-focos-servidores` (PR #36
 - [x] **Endurecimiento general.** Revisar `unwrap`/`expect` en rutas de producción de
   `archie-sentry` y `archie-cerebra`, timeouts y límites de tamaño en E/S de red.
 
-- [ ] **CI en el último head**, con el paso nuevo de TShark e2e. Si falla, es lo primero.
+- [~] **CI en el último head**, con el paso nuevo de TShark e2e. Si falla, es lo primero.
 - [x] **Sentry 7b — destinos inusuales.** Un dispositivo aprendido que manda mucho
   volumen a un destino que nunca usó (no cada destino nuevo: eso sería ruido).
-- [ ] **Sección 4 — productores de contexto.** Averiguar qué exponen Vault, IRIS y Forge
+- [x] **Sección 4 — productores de contexto.** Averiguar qué exponen Vault, IRIS y Forge
   hacia `PillarContext` y hacer el primero que no requiera la GUI ni IRIS runtime.
 - [ ] **Sólo propuesta, no implementar sin Nelson:** bloqueo de un dispositivo como
   `Intent` (`Command::DeviceBlock` por el router). Toca contratos y policy, y el
@@ -58,3 +58,9 @@ deja commiteada y empujada en `claude/sentry-ola3-cast-focos-servidores` (PR #36
   sesiones. Cada arreglo tiene una prueba que falla sin él.
 - e2e con TShark 4.2.2 real (`5c9e47b`), también en el CI.
 - CI verde en GitHub en `4625bb7` (rust + native-contracts). Descripción del PR al día.
+- `unusual-destination` (`88670e7`).
+- ONVIF (`8977076`): el nonce se repetía dentro del mismo milisegundo. La prueba de
+  protocolo fallaba de forma intermitente en el CI, y una cámara real también lo habría
+  rechazado.
+- Productor de Vault (`vault_bridge`, `archie vault-docs`, feeder y perfiles). Humo:
+  3 documentos → `focus trabajo` admite 3 (90/80/60); `personal` no ve ninguno.

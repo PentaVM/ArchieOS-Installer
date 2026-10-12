@@ -56,3 +56,10 @@ hardware sintéticas, mensajes escritos para la prueba). Un humo con el binario 
 (`wanda-ingest` de un volcado de notificaciones y luego `archie focus`) admitió las tres
 referencias esperadas y terminó en `refused:NoLocalModel`. No se ha corrido sobre datos
 reales del dueño ni con un modelo local.
+
+## Documentos del Vault (2026-10-12)
+
+`archie vault-docs --dir <carpeta> --domain work/<org>/<proyecto>` sella los documentos
+del dueño como `Pillar::Vault`. Fuente nueva del feeder: `vault-document`. En `trabajo`
+entra con prioridad 85 y en `personal` con 45. `pantalla-1` y `red` no la reciben. El
+peso depende del tipo: encargo 90, restricción 80, versión 60, nota 40.

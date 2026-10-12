@@ -460,3 +460,72 @@ fn device_events_are_validated_sealed_once_and_collide_loudly() {
     bad.detail = "line\nbreak".into();
     assert!(record_device_events(&mut v, &home(), &[bad]).is_err());
 }
+
+/// The Vault pillar's documents reach work context by kind, briefs first, and never
+/// the shared screen.
+#[test]
+fn work_documents_enter_as_the_vault_pillar_briefs_first_and_never_on_screen() {
+    use archie_cerebra::vault_bridge::{record_document, DocumentInput};
+    let mut v = vault();
+    for (name, text) in [
+        ("notas.md", "Reunión el martes."),
+        ("brief.md", "Encargo: puente peatonal."),
+        ("normas.txt", "No usar acero corten."),
+    ] {
+        record_document(
+            &mut v,
+            &office(),
+            "docs",
+            &DocumentInput {
+                name: name.into(),
+                text: text.into(),
+                modified_ms: Some(20_000),
+            },
+        )
+        .unwrap();
+    }
+    let items = collect_from_vault(&mut v, &office(), 0, 30_000);
+    let weights: Vec<u8> = items
+        .iter()
+        .filter(|i| i.source == FeedSource::VaultDocument)
+        .map(|i| i.weight)
+        .collect();
+    assert_eq!(weights.len(), 3);
+
+    let work = plan(
+        &FocusProfile::preset("trabajo").unwrap(),
+        &office(),
+        "work",
+        &items,
+    )
+    .unwrap();
+    let documents: Vec<u8> = work
+        .admitted()
+        .iter()
+        .filter(|a| a.source == FeedSource::VaultDocument)
+        .map(|a| a.weight)
+        .collect();
+    assert_eq!(documents, [90, 80, 40], "brief, restriction, note");
+    assert!(work
+        .context()
+        .references()
+        .values()
+        .any(|p| p.contains(&Pillar::Vault)));
+
+    let screen = plan(
+        &FocusProfile::preset("pantalla-1").unwrap(),
+        &office(),
+        "screen",
+        &items,
+    )
+    .unwrap();
+    assert!(screen
+        .admitted()
+        .iter()
+        .all(|a| a.source != FeedSource::VaultDocument));
+    // And a personal plan never sees the work documents.
+    let home_items = collect_from_vault(&mut v, &home(), 0, 30_000);
+    assert!(home_items
+        .iter()
+        .all(|i| i.source != FeedSource::VaultDocument));
+}

@@ -176,6 +176,24 @@ enum Command {
     },
     /// Ingest every chat export in the watch directory into Wanda's context.
     /// The directory and salt fall back to `[sentry.chat_exports]`.
+    /// Seal the owner's documents (`.md`, `.txt`) from a directory into the
+    /// vault as the Vault pillar: briefs, restrictions, versions and notes,
+    /// each in the one domain given. Local and idempotent; nothing leaves the
+    /// machine, and `archie focus trabajo` then weighs them.
+    VaultDocs {
+        /// Directory of documents.
+        #[arg(long)]
+        dir: std::path::PathBuf,
+        /// Context domain: `personal/<owner>` or `work/<organisation>/<project>`.
+        #[arg(long, default_value = "personal/owner")]
+        domain: String,
+        /// One pass instead of a poll loop.
+        #[arg(long)]
+        once: bool,
+        /// Poll interval when looping (500..=60000 ms; default 5000).
+        #[arg(long)]
+        poll_ms: Option<u64>,
+    },
     WandaWatch {
         /// Directory of `.txt` / `.json` / `.jsonl` exports.
         #[arg(long)]
@@ -635,7 +653,8 @@ impl Command {
             | Self::Focus { .. }
             | Self::SentryNotices { .. }
             | Self::WandaIngest { .. }
-            | Self::WandaWatch { .. } => return None,
+            | Self::WandaWatch { .. }
+            | Self::VaultDocs { .. } => return None,
         })
     }
 }
@@ -1170,6 +1189,12 @@ async fn main() -> std::process::ExitCode {
             Command::WandaIngest { file, salt } => {
                 wanda_ingest(&paths, file, salt.as_deref(), cli.json)
             }
+            Command::VaultDocs {
+                dir,
+                domain,
+                once,
+                poll_ms,
+            } => vault_docs(&paths, dir, domain, *poll_ms, *once, cli.json),
             Command::WandaWatch {
                 dir,
                 salt,
@@ -1961,6 +1986,58 @@ fn wanda_watch(
             let report = archie_workstation::live::watch_exports_once(&dir, &vault_dir, &salt)
                 .map_err(|e| format!("wanda watch failed: {e}"))?;
             print_watch_report(&report, json);
+            if once {
+                return Ok(());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(poll_ms));
+        }
+    };
+    match run() {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(message) => {
+            eprintln!("archie: {message}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+fn vault_docs(
+    paths: &StatePaths,
+    dir: &std::path::Path,
+    domain: &str,
+    poll_ms: Option<u64>,
+    once: bool,
+    json: bool,
+) -> std::process::ExitCode {
+    let run = || -> Result<(), String> {
+        let poll_ms = poll_ms.unwrap_or(5000);
+        if !(500..=60000).contains(&poll_ms) {
+            return Err("poll_ms must be within 500..=60000".to_owned());
+        }
+        let vault_dir = archie_workstation::live::cerebra_vault_dir(&paths.state_dir);
+        loop {
+            let report = archie_workstation::live::watch_documents_once(dir, &vault_dir, domain)
+                .map_err(|e| format!("vault documents failed: {e}"))?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string(&report).map_err(|e| e.to_string())?
+                );
+            } else {
+                println!(
+                    "vault docs: {} recorded ({} briefs, {} restrictions, {} versions, {} notes), {} already known, {} failed",
+                    report.documents_recorded,
+                    report.briefs,
+                    report.restrictions,
+                    report.versions,
+                    report.notes,
+                    report.files_already_known,
+                    report.failures.len()
+                );
+                for failure in &report.failures {
+                    eprintln!("archie: {failure}");
+                }
+            }
             if once {
                 return Ok(());
             }
