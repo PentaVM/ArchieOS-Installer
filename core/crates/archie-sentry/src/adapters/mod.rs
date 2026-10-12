@@ -1,4 +1,5 @@
 //! Native, bounded LAN protocols. Tokens and raw provider bodies never enter receipts.
+pub mod adb;
 pub mod chromecast;
 pub mod drivers;
 pub mod home_assistant;
