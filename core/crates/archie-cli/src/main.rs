@@ -2136,5 +2136,4 @@ mod tests {
         .to_request()
         .is_none());
     }
-    }
 }

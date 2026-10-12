@@ -130,7 +130,16 @@ fn handle(mock: &Arc<Mutex<Mock>>, body: &[u8]) -> Vec<u8> {
                 mock.jobs.push(job_name);
             }
             mock.documents.push(document);
+            // Print-Job accepted: the printer answers with the job it now holds.
             let mut response = header(request_id);
+            response.push(2);
+            attribute(
+                &mut response,
+                0x21,
+                "job-id",
+                &(mock.jobs.len() as i32).to_be_bytes(),
+            );
+            attribute(&mut response, 0x23, "job-state", &5i32.to_be_bytes());
             response.push(3);
             response
         }

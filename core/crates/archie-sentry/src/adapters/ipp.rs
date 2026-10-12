@@ -402,32 +402,6 @@ impl IppClient {
             .map_err(|_| AdapterError::Transport)?;
         parse_job_names(&body(response, "application/ipp").await?, request_id)
     }
-    /// Print-Job: IPP request immediately followed by the raw document bytes.
-    /// The document is sent exactly as read from the verified spool file; no
-    /// conversion of any kind is attempted.
-    pub async fn print_job(
-        &self,
-        request_id: u32,
-        job_name: &str,
-        document_format: &str,
-        document: &[u8],
-    ) -> Result<(), AdapterError> {
-        if document.is_empty() || document.len() > MAX_SPOOL {
-            return Err(AdapterError::Protocol);
-        }
-        let mut request = encode_print_job(&self.uri, request_id, job_name, document_format)?;
-        request.extend_from_slice(document);
-        let response = self
-            .client
-            .post(self.http.clone())
-            .header("Content-Type", "application/ipp")
-            .header("Accept", "application/ipp")
-            .body(request)
-            .send()
-            .await
-            .map_err(|_| AdapterError::Transport)?;
-        parse_operation_status(&body(response, "application/ipp").await?, request_id)
-    }
 }
 
 /// Print-Job (0x0002) request header; document bytes are appended by the caller.
@@ -476,28 +450,6 @@ pub fn encode_get_jobs(uri: &str, request_id: u32) -> Result<Vec<u8>, AdapterErr
     attribute(&mut bytes, 0x44, "requested-attributes", b"job-name")?;
     bytes.push(3);
     Ok(bytes)
-}
-
-/// Header-only status check for operations whose response body carries no
-/// evidence this adapter uses (Print-Job).
-fn parse_operation_status(bytes: &[u8], request_id: u32) -> Result<(), AdapterError> {
-    if bytes.len() < 8 || bytes.len() > MAX_BODY || request_id == 0 || request_id > i32::MAX as u32
-    {
-        return Err(AdapterError::Protocol);
-    }
-    if !matches!((bytes[0], bytes[1]), (1, 1) | (2, 0) | (2, 1) | (2, 2))
-        || u32::from_be_bytes(bytes[4..8].try_into().map_err(|_| AdapterError::Protocol)?)
-            != request_id
-    {
-        return Err(AdapterError::Protocol);
-    }
-    match u16::from_be_bytes([bytes[2], bytes[3]]) {
-        // successful-ok and its informational variants
-        0..=2 => Ok(()),
-        // client errors, e.g. client-error-document-format-not-supported (0x040A)
-        0x400..=0x4ff => Err(AdapterError::Unsupported),
-        _ => Err(AdapterError::Unavailable),
-    }
 }
 
 /// Job names from a Get-Jobs response (job attributes groups, tag 2).
@@ -722,7 +674,10 @@ impl EdgeAdapter for IppAdapter {
             return Err(AdapterError::Unsupported);
         }
         let print_request = self.next_request();
-        self.ipp
+        // Returns the printer's own JobSnapshot (job-id and state); the queue
+        // entry observed afterwards remains the postcondition evidence.
+        let _accepted: print::JobSnapshot = self
+            .ipp
             .print_job(print_request, &job_name, format.mime(), &document)
             .await?;
         Ok(AdapterAck { accepted: true })
