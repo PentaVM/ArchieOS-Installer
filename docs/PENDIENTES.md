@@ -98,6 +98,12 @@ fixture se reporta como fixture, no como dispositivo real. Un PR por avance, con
   `address-moved`, `host-sweep`. En WSL el DNS sale por loopback; hace falta Linux real o
   capturar en `any`. *Hecho cuando:* cada una salta con tráfico generado y queda el
   comando que lo reproduce.
+  **Parcial (Claude, 2026-10-12):** con TShark real, no con red real.
+  `archie-lan/tests/tshark_e2e.rs` construye byte a byte una captura con ARP spoofing
+  del router, su gemelo IPv6 (Neighbor Advertisement), un túnel DNS y un barrido de 50
+  hosts, la pasa por `archie-netwatch read` y comprueba cada alerta. El CI instala
+  tshark y la ejecuta (`--ignored`). Reproducir:
+  `cargo test -p archie-lan --test tshark_e2e -- --ignored`. Falta el tráfico vivo.
 - [~] **7. Baselines por dispositivo**: volumen y destinos habituales, alerta por
   desviación. **Parcial (Claude, 2026-10-12):** volumen, sí: `traffic-surge`, con media
   y varianza móviles por tramos de 10 minutos, persistidas en `state.json`, aprendidas

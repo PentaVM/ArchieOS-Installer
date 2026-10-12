@@ -32,6 +32,9 @@ jobs:
       - run: cargo check --workspace --locked
       - run: cargo test --workspace --locked
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # The audit through the real TShark: proves capture::FIELDS exist in it.
+      - run: sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y tshark
+      - run: cargo test -p archie-lan --test tshark_e2e --locked -- --ignored
 
   native-contracts:
     runs-on: ubuntu-latest
