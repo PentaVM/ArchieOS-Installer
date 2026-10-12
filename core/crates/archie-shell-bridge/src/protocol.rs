@@ -5,8 +5,11 @@
 //! told so rather than left with the last picture.
 
 use crate::client::{Client, ClientError};
+use crate::jobs::{self, Jobs};
+use crate::lan::{self, Lan};
 use archie_displayd::{DisplaySnapshot, KernelSnapshot, SnapshotSource};
 use serde::Serialize;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Version of this wire format. Bumped on any incompatible change.
@@ -57,6 +60,10 @@ pub struct Frame {
     /// is still true when the daemon is down. Each source carries its own availability, so
     /// "not measured" can be told from "idle".
     pub kernel: Option<KernelSnapshot>,
+    /// The LAN inventory file `archie-lan` keeps, read passively (no scan is started).
+    pub lan: Lan,
+    /// Long bridge jobs, read from the given workspaces' `.archie/jobs`. Read-only.
+    pub jobs: Jobs,
 }
 
 fn now_ms() -> i64 {
@@ -104,13 +111,38 @@ fn system_of(snapshot: &DisplaySnapshot) -> Option<System> {
 /// Never panics and never returns an error: every failure is a `Frame` whose `link` says
 /// what failed, because the shell must be able to draw that.
 pub fn poll(client: &Client) -> Frame {
+    poll_with(client, &Sources::default())
+}
+
+/// Where the bridge reads files from, besides `archie-displayd`. Both are optional.
+#[derive(Debug, Clone, Default)]
+pub struct Sources {
+    pub lan_file: Option<PathBuf>,
+    pub workspaces: Vec<PathBuf>,
+    /// A folder whose subfolders are workspaces (e.g. `/archie/workspaces`), listed each poll.
+    pub workspaces_root: Option<PathBuf>,
+}
+
+/// Like [`poll`], also reading the optional file sources.
+pub fn poll_with(client: &Client, sources: &Sources) -> Frame {
     let at_ms = now_ms();
+    let lan = lan::read(
+        sources.lan_file.as_deref().map(Path::new),
+        u64::try_from(at_ms / 1000).unwrap_or(0),
+    );
+    let jobs = jobs::read_sources(
+        &sources.workspaces,
+        sources.workspaces_root.as_deref(),
+        u64::try_from(at_ms).unwrap_or(0),
+    );
     let offline = |reason: String| Frame {
         schema: SCHEMA,
         at_ms,
         link: Link::DisplaydOffline { reason },
         system: None,
         kernel: None,
+        lan: lan.clone(),
+        jobs: jobs.clone(),
     };
 
     let body = match client.get("/api/snapshot") {
@@ -125,6 +157,8 @@ pub fn poll(client: &Client) -> Frame {
                 },
                 system: None,
                 kernel: None,
+                lan: lan.clone(),
+                jobs: jobs.clone(),
             }
         }
     };
@@ -139,6 +173,8 @@ pub fn poll(client: &Client) -> Frame {
                 },
                 system: None,
                 kernel: None,
+                lan: lan.clone(),
+                jobs: jobs.clone(),
             }
         }
     };
@@ -156,5 +192,7 @@ pub fn poll(client: &Client) -> Frame {
         link: link_of(&snapshot),
         system: system_of(&snapshot),
         kernel,
+        lan,
+        jobs,
     }
 }

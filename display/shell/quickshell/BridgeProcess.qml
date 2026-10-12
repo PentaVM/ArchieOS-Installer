@@ -13,7 +13,11 @@ Process {
     id: bridge
     required property var model          // a BridgeModel (display/shell/prototype/BridgeModel.qml)
 
-    command: ["archie-shell-bridge", "watch"]
+    // Paths are the deployed ones (modules/sentry/lan.toml, docs/WSL-ARCHITECTURE.md), fixed here:
+    // the bridge reads them, never writes them, and a missing file is reported as missing.
+    command: ["archie-shell-bridge", "watch",
+              "--lan-file", "/var/lib/archie/sentry/lan.json",
+              "--workspaces-root", "/archie/workspaces"]
     running: true
 
     stdout: SplitParser {

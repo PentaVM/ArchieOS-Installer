@@ -542,8 +542,10 @@ dependencies = [
 name = "archie-shell-bridge"
 version = "0.1.0"
 dependencies = [
+ "archie-bridges",
  "archie-core",
  "archie-displayd",
+ "archie-lan",
  "archie-state",
  "clap",
  "serde",

@@ -6,8 +6,9 @@ Panel {
     id: cc
     property var bridge
     fill: Theme.solid
-    width: 400; height: 640
-    Column { x: 16; y: 16; width: parent.width - 32; spacing: 12
+    width: 400
+    height: content.implicitHeight + 32
+    Column { id: content; x: 16; y: 16; width: parent.width - 32; spacing: 12
         Text { text: "Centro de control"; color: Theme.ink; font.pixelSize: Theme.fsTitle; font.bold: true }
 
         // Real: link state and, when archied answered, its status (GUI-CORE-001, GUI-CORE-013).

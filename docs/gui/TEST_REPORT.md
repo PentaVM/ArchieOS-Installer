@@ -65,3 +65,18 @@ Casos negativos: nadie escucha (`displayd_offline`), respuesta que no cumple el 
 - Quickshell (`BridgeProcess.qml`), Linux, Wayland, NVIDIA.
 - Lectores de pantalla, movimiento reducido en estos componentes, rendimiento.
 - Por eso ningún ítem pasa a `TESTED`: `GUI-DISPLAY-001` y `GUI-DISPLAY-002` están `INTEGRATED`; `GUI-CORE-001` y `GUI-CORE-013` `IN_PROGRESS`.
+
+## Fase C, segunda rebanada: inventario LAN y trabajos largos (sólo lectura)
+
+**Rust** (`cargo test -p archie-shell-bridge --locked`): **38 pasan, 0 fallan** en Windows — 6 de `client.rs`, 9 de `tests/contract.rs`, 11 de `tests/lan.rs`, 12 de `tests/jobs.rs`. Una prueba más de `jobs.rs` (`a_symlinked_job_folder_is_never_followed`) es sólo Unix y **no se ejecutó aquí**. `fmt` limpio; clippy: 0 hallazgos en este crate.
+
+- **LAN:** el archivo de entrada se escribe con el **tipo real** `archie_lan::inventory::Inventory`. Casos: lectura correcta, vacío ≠ ausente, desactualizado (límite exacto incluido), hora futura → antigüedad 0, no configurado / ausente / no legible como estados distintos, directorio, JSON roto, otro formato, sin campo de formato, archivo de más de 1 MiB, más de 512 dispositivos (se cuentan, no se envían todos), y la trama lleva `lan` aunque `displayd` esté caído.
+- **Trabajos:** `status.json` escrito con el **tipo real** `archie_bridges::jobs::Status`. Casos: el campo libre `latest` **nunca** llega a la shell, sólo se envía el nombre de la carpeta (nunca la ruta), orden por más reciente con los cinco estados, espacio sin trabajos, reloj hacia atrás → inactividad 0, estado dañado o de más de 64 KiB contado como omitido, error truncado a 300 caracteres, tope de 64 trabajos, raíz de espacios listada en cada sondeo, raíz vacía = respuesta vacía, raíz inexistente = se nombra como no legible.
+
+**QML** (`BridgeModelTest.qml`): **21 comprobaciones, 0 fallos** (añade `lan` y `jobs`, y el conteo de trabajos en curso). Render de `SentryPanel` y `ActivityCenter`: 0 avisos de QML. Defectos encontrados en las capturas y corregidos: tarjeta de dispositivo con altura fija que recortaba su tercera línea, y panel de actividad que desbordaba (ahora la altura sale del contenido).
+
+**Binario real:** `archie-shell-bridge watch --lan-file /var/lib/archie/sentry/lan.json --once` en este equipo → `lan: missing` (trama real guardada). Las tramas `synthetic-lan-*` y `synthetic-jobs` son salida **real del binario** sobre archivos de entrada **sintéticos**.
+
+**Regresión del workspace:** **1 938 pasan** (1 900 + 38), **1 falla** (la misma previa de `INDEX.md`), 78 ignoradas. Sin regresiones.
+
+**No ejecutado:** `archie-lan` contra una red real (generaría tráfico SSDP/mDNS en la red del dueño y sus dispositivos acabarían en los fixtures: no se hizo), un `archie-bridges run-job` real, Quickshell, Linux. Estados: `GUI-SENTRY-001` `INTEGRATED`; `GUI-BRIDGE-002` `IN_PROGRESS` (no hay cancelación).

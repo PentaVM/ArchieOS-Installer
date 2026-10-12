@@ -6,7 +6,7 @@ Generated from `CAPABILITY_REGISTRY.csv` (114 canonical capabilities, each path 
 
 | ui_required | TODO | IN_PROGRESS | INTEGRATED | TESTED | BLOCKED | n/a |
 |---|---|---|---|---|---|---|
-| YES | 45 | 2 | 2 | 0 | 4 | 0 |
+| YES | 43 | 3 | 3 | 0 | 4 | 0 |
 | INDIRECT | 32 | 0 | 0 | 0 | 3 | 0 |
 | UNDECIDED | 0 | 0 | 0 | 0 | 2 | 0 |
 | NO_GUI_NEEDED | 0 | 0 | 0 | 0 | 0 | 24 |
@@ -170,7 +170,7 @@ Priority legend: **P0** first vertical slice (honest liveness, privacy indicator
 
 ## Surface: ACTIVITY_CENTER
 
-- [ ] GUI-BRIDGE-002 — JobProgressList: Long bridge jobs: list, status, cancel
+- [~] GUI-BRIDGE-002 — JobProgressList: Long bridge jobs: list, status, cancel
   - Origen: `core/crates/archie-mcp-server/src/jobs.rs::specs` (verificado en el árbol; capacidad CAP-BRIDGE-002)
   - Estado real: IMPLEMENTED
   - UI destino: ACTIVITY_CENTER > JobProgressList
@@ -181,9 +181,9 @@ Priority legend: **P0** first vertical slice (honest liveness, privacy indicator
   - Motion: row insert slide 140 ms; progress bar tied to real progress only
   - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
   - Dependencias: none
-  - Prioridad: P0; implementación: TODO; diseño: NOT_STARTED
+  - Prioridad: P0; implementación: IN_PROGRESS; diseño: PROTOTYPED
   - Nota: Real progress + cancel; best first end-to-end Activity Center candidate
-  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+  - Evidencia de terminado: core/crates/archie-shell-bridge/tests/jobs.rs (12 on Windows + 1 Unix-only: status.json written with the real archie_bridges::jobs::Status; latest never forwarded; symlinks not followed; damaged/oversized counted; caps; workspaces root); ActivityCenter.qml rendered from synthetic-jobs.jsonl (real bridge binary over a synthetic workspace). Cancel is NOT offered: it writes a file and needs an authorised path
 - [ ] GUI-POLICY-001 — AuthorizationPrompt: Capability request to Decision (grant/deny/escalate) with expiring Lease
   - Origen: `core/crates/archie-policy/src/lib.rs::PolicyEngine` (verificado en el árbol; capacidad CAP-POLICY-001)
   - Estado real: IMPLEMENTED
@@ -562,7 +562,7 @@ Priority legend: **P0** first vertical slice (honest liveness, privacy indicator
 
 ## Surface: SENTRY_CENTER
 
-- [ ] GUI-SENTRY-001 — LanInventoryView: Inventory of devices on the owner's LAN (mDNS, SSDP, UPnP, Roku)
+- [~] GUI-SENTRY-001 — LanInventoryView: Inventory of devices on the owner's LAN (mDNS, SSDP, UPnP, Roku)
   - Origen: `core/crates/archie-lan/src/inventory.rs::scan` (verificado en el árbol; capacidad CAP-LAN-001)
   - Estado real: IMPLEMENTED
   - UI destino: SENTRY_CENTER > LanInventoryView
@@ -573,9 +573,9 @@ Priority legend: **P0** first vertical slice (honest liveness, privacy indicator
   - Motion: state-change pulse 1x on real transition; never on a timer
   - Tests: contract test against recorded real response + negative case (daemon down / permission denied); a11y + reduced-motion check
   - Dependencias: none
-  - Prioridad: P0; implementación: TODO; diseño: NOT_STARTED
+  - Prioridad: P0; implementación: INTEGRATED; diseño: PROTOTYPED
   - Nota: modules/sentry/lan.toml worker=process; passive classification, no port scan
-  - Evidencia de terminado: (pendiente) commit, captura/vídeo, test
+  - Evidencia de terminado: core/crates/archie-shell-bridge/tests/lan.rs (11 tests: file written with the real archie_lan::inventory::Inventory type; missing / unreadable / invalid / oversized / stale / empty / capped); display/shell/prototype/SentryPanel.qml rendered from real-lan-missing.jsonl and synthetic-lan-*.jsonl; BridgeModelTest.qml. Not run against a real network or a real scanner file
 - [ ] GUI-SENTRY-002 — PrivacyIndicators: Who may use a camera and when (owner-present gating)
   - Origen: `sentry/include/sentry/camera/authority.hpp::CameraAuthority` (verificado en el árbol; capacidad CAP-SENTRY-001)
   - Estado real: IMPLEMENTED

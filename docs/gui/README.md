@@ -9,7 +9,7 @@ Trabajo en curso en la rama `feat/professional-gui-quickshell-vault`. Orden de l
 | [CAPABILITY_SYMBOL_INDEX.csv](CAPABILITY_SYMBOL_INDEX.csv) | A | 3 841 símbolos públicos asignados a una capacidad canónica |
 | [GUI_FUNCTION_BACKLOG.md](GUI_FUNCTION_BACKLOG.md) | A | 88 ítems `GUI-*` + 24 `GUI-VAULT-*` |
 | [ARCHITECTURE_GUI.md](ARCHITECTURE_GUI.md) | A | ADR propuestos, sin aceptar |
-| [INTEGRATION_MATRIX.md](INTEGRATION_MATRIX.md) | A/C | 2 `INTEGRATED`, 2 `IN_PROGRESS`, 0 `TESTED` |
+| [INTEGRATION_MATRIX.md](INTEGRATION_MATRIX.md) | A/C | 3 `INTEGRATED`, 3 `IN_PROGRESS`, 0 `TESTED` |
 | [TEST_REPORT.md](TEST_REPORT.md) | A | línea base |
 | [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md), [SCREEN_SPECS.md](SCREEN_SPECS.md), [MOTION_CINEMATICS.md](MOTION_CINEMATICS.md) | B | escritos; capturas en `screenshots/`; prototipo en `display/shell/prototype/` |
 

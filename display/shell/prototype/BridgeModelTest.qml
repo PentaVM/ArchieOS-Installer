@@ -43,6 +43,23 @@ Item {
         check("rejections are counted", m.rejected === 4 && m.lastRejection === "no link state")
         check("rejections keep the last frame", m.link === before)
 
+        // The LAN inventory: absent field means not configured; a present one is passed through.
+        var l = model()
+        check("lan defaults to not_configured", l.lan.state === "not_configured")
+        l.ingest(frame({ state: "live" }, { lan: { state: "missing", path: "/p" } }))
+        check("lan missing is passed through", l.lan.state === "missing" && l.lan.path === "/p")
+        l.ingest(frame({ state: "live" }, { lan: { state: "ok", total: 1, devices: [{ name: "d" }], stale: false, age_seconds: 5 } }))
+        check("lan ok carries devices", l.lan.state === "ok" && l.lan.devices[0].name === "d")
+        l.ingest(frame({ state: "live" }))
+        check("a frame without lan resets it to not_configured", l.lan.state === "not_configured")
+
+        // Long jobs: read-only list; running count includes starting jobs only.
+        var j = model()
+        check("jobs default to not_configured", j.jobs.state === "not_configured" && j.runningJobs === 0)
+        j.ingest(frame({ state: "live" }, { jobs: { state: "ok", skipped: 0, unreadable: [], jobs: [
+            { id: "a", state: "running" }, { id: "b", state: "starting" }, { id: "c", state: "done" }, { id: "d", state: "failed" } ] } }))
+        check("running jobs counted", j.jobs.state === "ok" && j.runningJobs === 2)
+
         // Silence: three polls (2 s each) without a frame means the bridge is gone.
         var s = model()
         s.nowMs = 1000

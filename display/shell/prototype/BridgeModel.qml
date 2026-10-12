@@ -32,6 +32,11 @@ QtObject {
 
     readonly property var system: received ? frame.system : null
     readonly property var kernel: received ? frame.kernel : null
+    // LAN inventory file read by the bridge. Frames from before this field existed count as not configured.
+    readonly property var lan: received && frame.lan ? frame.lan : ({ state: "not_configured" })
+    // Long bridge jobs, read-only. Same rule as lan for older frames.
+    readonly property var jobs: received && frame.jobs ? frame.jobs : ({ state: "not_configured" })
+    readonly property int runningJobs: jobs.state === "ok" ? jobs.jobs.filter(function (j) { return j.state === "running" || j.state === "starting" }).length : 0
 
     function tick() { nowMs = Date.now() }
 

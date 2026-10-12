@@ -5,7 +5,7 @@ import QtQuick
 // The Quickshell host layer (PanelWindow, layer-shell) is not part of this file and is untested.
 //
 //   Ctrl+K palette   C control center   A activity   G grid/list   M reduced motion
-//   1..4 theme: frost / workspace / signature / synthesis
+//   S sentry (red local)   1..4 theme: frost / workspace / signature / synthesis
 Item {
     id: root
     width: 1920; height: 1080
@@ -16,6 +16,7 @@ Item {
         if (e.key === Qt.Key_Escape) overlay = ""
         else if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_K) overlay = overlay === "palette" ? "" : "palette"
         else if (e.key === Qt.Key_C) overlay = overlay === "control" ? "" : "control"
+        else if (e.key === Qt.Key_S) overlay = overlay === "sentry" ? "" : "sentry"
         else if (e.key === Qt.Key_A) overlay = overlay === "activity" ? "" : "activity"
         else if (e.key === Qt.Key_G) vault.gridView = !vault.gridView
         else if (e.key === Qt.Key_M) Theme.reducedMotion = !Theme.reducedMotion
@@ -64,12 +65,14 @@ Item {
         }
     }
 
-    Dock { id: dock; anchors.horizontalCenter: parent.horizontalCenter; y: parent.height - height - 14 }
+    Dock { id: dock; anchors.horizontalCenter: parent.horizontalCenter; y: parent.height - height - 14
+        onLaunched: function (id) { if (id === "sentry") root.overlay = root.overlay === "sentry" ? "" : "sentry" } }
 
     Item { anchors.fill: parent; visible: root.overlay !== ""
         MouseArea { anchors.fill: parent; onClicked: root.overlay = "" }
         ControlCenter { bridge: bridgeModel; visible: root.overlay === "control"; x: parent.width - width - 14; y: Theme.barH + 8 }
-        ActivityCenter { visible: root.overlay === "activity"; x: parent.width - width - 14; y: Theme.barH + 8 }
+        ActivityCenter { bridge: bridgeModel; visible: root.overlay === "activity"; x: parent.width - width - 14; y: Theme.barH + 8 }
+        SentryPanel { bridge: bridgeModel; visible: root.overlay === "sentry"; x: (parent.width - width) / 2; y: 120 }
         CommandPalette { visible: root.overlay === "palette"; x: (parent.width - width) / 2; y: 150 }
     }
 

@@ -39,3 +39,18 @@ El enlace y los medidores del centro de control salen de `archie-shell-bridge`
 
 Sigue siendo sintético y rotulado "DISEÑO": el Vault, la actividad, la paleta, el dock y los
 interruptores de Wi-Fi/Bluetooth/Silencio/Privacidad (ahora "sin servicio conectado").
+
+## Segunda rebanada: Sentry (red local) y trabajos largos
+
+- `SentryPanel.qml` (tecla `S` o icono de Sentry en el dock): dispositivos del inventario que
+  escribe `archie-lan watch`, leído por el bridge. Sin botones de acción. Estados distintos para
+  "no configurado", "el escáner aún no ha corrido", "sin permiso", "no válido", "vacío" y
+  "desactualizado".
+- `ActivityCenter.qml`: trabajos largos reales (`status.json` de `archie-bridges`), con barra sólo
+  si el trabajo declaró un total y "sin novedades hace N" en vez de afirmar que está colgado.
+  **Sin botón de cancelar.** La autorización y la auditoría siguen como ejemplo de DISEÑO.
+- Barra superior: el contador "◔ N" son los trabajos en curso reales ("—" si no hay espacios).
+- Tramas nuevas: `real-lan-missing.jsonl` (real: el archivo no existe aquí),
+  `synthetic-lan-inventory.jsonl`, `synthetic-lan-stale.jsonl` y `synthetic-jobs.jsonl`: salida
+  **real del binario** del bridge sobre archivos de entrada **sintéticos** (direcciones de
+  documentación 192.0.2.x, nombres "(ejemplo)").

@@ -45,3 +45,9 @@ Verificado: proporcionalidad en 1080p y 1440p. **No verificado:** lector de pant
 ## Actualización Fase C: qué muestra datos reales
 
 Capturas `C-*` en `screenshots/`: `C-real-daemon-unreachable` (trama **real**: `archie-displayd` real, sin `archied`; telemetría "no medido" con la razón real del kernel), `C-real-displayd-offline` (trama **real**: nada escucha) y `C-synthetic-live-with-psi` (trama **sintética** con la forma de los tipos reales: la única forma de ver `live` con PSI/térmica en este equipo). Datos reales en el prototipo: chip de enlace (barra superior y centro de control), resumen de sistema (sólo si `archied` respondió) y medidores de presión/temperatura. Las chips de **cámara/micro** y **dominio** pasaron de afirmar un estado a decir "sin lectura", porque su fuente (`CameraAuthority`, `PillarContext`) aún no está conectada.
+
+## Actualización Fase C, segunda rebanada
+
+- **Sentry Center (superficie 11)** pasa de texto a render: capturas `S-real-lan-missing` (trama real: el inventario no existe en este equipo), `S-synthetic-lan-inventory` y `S-synthetic-lan-stale` (bridge real sobre un inventario sintético). Pasivo, sin acciones.
+- **Actividad (superficie 6)**: los trabajos largos son reales; capturas `A-synthetic-jobs` (bridge real sobre un espacio de trabajo sintético) y `A-real-daemon-unreachable` (sin espacios configurados). Cancelar no se ofrece.
+- Cobertura visual: 6 de 15 superficies renderizadas; con datos reales en parte: barra superior, centro de control, Sentry y actividad.

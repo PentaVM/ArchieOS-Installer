@@ -22,7 +22,8 @@ Rectangle {
         Chip { text: "Cámara y micro: sin lectura"; glyph: "?"; tone: Theme.unknown }
         Chip { text: "Dominio: sin lectura"; glyph: "?"; tone: Theme.unknown }
         Text { text: "⌕"; color: Theme.ink; font.pixelSize: Theme.fsTitle; MouseArea { anchors.fill: parent; anchors.margins: -6; onClicked: bar.toggle("palette") } }
-        Text { text: "◔ 3"; color: bar.overlay === "activity" ? Theme.accent : Theme.ink; font.pixelSize: Theme.fsBody
+        // Running long jobs, from the bridge; "—" when no workspace is configured.
+        Text { text: "◔ " + (bar.bridge.jobs.state === "ok" ? bar.bridge.runningJobs : "—"); color: bar.overlay === "activity" ? Theme.accent : Theme.ink; font.pixelSize: Theme.fsBody
             MouseArea { anchors.fill: parent; anchors.margins: -6; onClicked: bar.toggle("activity") } }
         Text { text: "☰"; color: bar.overlay === "control" ? Theme.accent : Theme.ink; font.pixelSize: Theme.fsTitle
             MouseArea { anchors.fill: parent; anchors.margins: -6; onClicked: bar.toggle("control") } }

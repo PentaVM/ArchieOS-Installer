@@ -22,6 +22,9 @@ serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+archie-bridges.workspace = true
 archie-core.workspace = true
+# Contract test: the bridge reads what the real archie-lan types write.
+archie-lan = { path = "../archie-lan" }
 archie-state.workspace = true
 tokio = { workspace = true, features = ["full"] }

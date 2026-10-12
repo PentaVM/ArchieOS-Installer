@@ -12,15 +12,23 @@
 //! The shell runs it as a child process with a fixed argument list and reads its standard
 //! output. QML never builds a command line from user input.
 //!
+//! Besides `archie-displayd`, it reads two kinds of file: the LAN inventory `archie-lan watch`
+//! keeps, and the `status.json` of the long jobs `archie-bridges` runs. It never starts a scan,
+//! never cancels a job and never writes anything.
+//!
 //! What it does not do, on purpose: answer Policy escalations, pause authority, list
-//! tasks, touch files. `archied` exposes no contract for those yet (see
-//! `GUI-POLICY-001`, `GUI-POLICY-002`, `GUI-EXEC-001` in the backlog), and a control
-//! drawn without one would be a control that does nothing.
+//! tasks. `archied` exposes no contract for those yet (see `GUI-POLICY-001`,
+//! `GUI-POLICY-002`, `GUI-EXEC-001` in the backlog), and a control drawn without one would
+//! be a control that does nothing.
 
 #![forbid(unsafe_code)]
 
 pub mod client;
+pub mod jobs;
+pub mod lan;
 pub mod protocol;
 
 pub use client::{Client, ClientError};
-pub use protocol::{poll, Frame, Link, System, SCHEMA};
+pub use jobs::{Job, Jobs};
+pub use lan::{Device, Lan};
+pub use protocol::{poll, poll_with, Frame, Link, Sources, System, SCHEMA};
