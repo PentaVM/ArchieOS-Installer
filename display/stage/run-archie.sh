@@ -28,7 +28,11 @@ case "$GRADE" in
     public|internal) ;;
     *) echo "run-archie: say how private this is: run-archie.sh public (or internal)" >&2; exit 64 ;;
 esac
-[ -n "${NEBIUS_TOKEN_FACTORY_KEY:-}" ] || { echo "run-archie: set NEBIUS_TOKEN_FACTORY_KEY" >&2; exit 64; }
+# ARCHIE_VOICE_ENDPOINT names a reasoning model on this machine; then no key is needed.
+[ -n "${NEBIUS_TOKEN_FACTORY_KEY:-}" ] || [ -n "${ARCHIE_VOICE_ENDPOINT:-}" ] || {
+    echo "run-archie: set NEBIUS_TOKEN_FACTORY_KEY, or ARCHIE_VOICE_ENDPOINT for a local model" >&2
+    exit 64
+}
 
 # Accessibility needs a session bus, and the stage's clients inherit it.
 if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && command -v dbus-run-session >/dev/null; then

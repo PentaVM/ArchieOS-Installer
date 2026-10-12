@@ -88,7 +88,11 @@ P
 run_app() {
   local program=${1:?archie-session run PROGRAM}
   case "$program" in *[!a-z0-9-]*) echo "archie-session: $program is not a program name" >&2; exit 64 ;; esac
-  command -v "$program" >/dev/null || { echo "archie-session: $program is not installed in this image" >&2; exit 1; }
+  command -v "$program" >/dev/null || {
+    echo "archie-session: $program is not installed in this image. From Windows:" >&2
+    echo "  wsl -d ArchieOS-Operator -u root pacman -Sy --noconfirm $program" >&2
+    exit 1
+  }
   stop app
   XDG_RUNTIME_DIR=$(cat "$RUN/xdg") WAYLAND_DISPLAY=archie-stage QT_QPA_PLATFORM=wayland LIBGL_ALWAYS_SOFTWARE=1 \
     start app "$program"

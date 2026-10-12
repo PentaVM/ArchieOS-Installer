@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Talk with Archie. Say "Archie" to be heard. It answers aloud, in Spanish or English,
+# and opens the applications the Stage's policy names (Kdenlive, the browser) when asked.
+#
+#   archie-talk                 the microphone goes quiet while Archie speaks
+#   archie-talk --headphones    keeps listening while it speaks, so it can be interrupted
+#   archie-talk --local         the reasoning model on this machine answers (archie-local)
+#   archie-talk --cloud         Nemotron on Nebius answers
+#
+# What you say is recognised on this machine. Which model answers: the one on this
+# machine once its GPU runtime is built (archie-local gpu), and nothing then leaves;
+# otherwise Nemotron on Nebius, which is sent the words of what you ask.
+set -euo pipefail
+KEY=$HOME/.config/archie/nebius.key
+grade=public
+where=auto
+for option in "$@"; do
+  case "$option" in
+    --headphones) export HEADPHONES=1 ;;
+    --local) where=local ;;
+    --cloud) where=cloud ;;
+    *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
+  esac
+done
+if [ "$where" = auto ]; then
+  if archie-local ready; then where=local; else where=cloud; fi
+fi
+if [ "$where" = local ]; then
+  archie-local up
+  export ARCHIE_VOICE_ENDPOINT=http://127.0.0.1:8081/v1 ARCHIE_VOICE_MODEL=bonsai
+  # A small model is shown how to speak or to call a tool; IRIS does the seeing.
+  export ARCHIE_VOICE_GUIDE=/usr/share/archie/skills/voice-local/SKILL.md
+  grade=internal
+  echo 'archie-talk: the model on this machine answers (archie-talk --cloud for Nebius)' >&2
+fi
+if [ -z "${ARCHIE_VOICE_ENDPOINT:-}" ] && [ -z "${NEBIUS_TOKEN_FACTORY_KEY:-}" ]; then
+  [ -s "$KEY" ] || { echo 'archie-talk: run archie-setup first' >&2; exit 1; }
+  NEBIUS_TOKEN_FACTORY_KEY=$(cat "$KEY")
+  export NEBIUS_TOKEN_FACTORY_KEY
+fi
+# IRIS and the operator's Stage use the same sockets; one of the two at a time.
+archie-session down >/dev/null 2>&1 || true
+[ -S /mnt/wslg/runtime-dir/wayland-0 ] || { echo 'archie-talk: WSLg is not running, so there is no screen or sound to use' >&2; exit 1; }
+
+export ASR_MODEL=/var/lib/archie/models/asr/nemotron-3.5-asr-streaming-0.6b.q8_0.gguf
+export PIPER=/usr/lib/archie/piper-json-bridge.py
+export PIPER_PYTHON=/opt/archie/iris-venv/bin/python
+export PIPER_VOICES=/var/lib/archie/models/piper
+export POLICY=/usr/share/archie/stage/apps.toml
+export HOST_WAYLAND=/mnt/wslg/runtime-dir/wayland-0
+export RUN_DIR=$HOME/.archie/talk
+# Piper's adapter runs under the Python that has Piper; the Stage draws without a GPU,
+# since WSLg shares no buffers with a nested compositor.
+export PATH=/opt/archie/iris-venv/bin:$PATH
+export LIBGL_ALWAYS_SOFTWARE=1
+exec /usr/lib/archie/run-archie.sh "$grade"
