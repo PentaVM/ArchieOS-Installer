@@ -64,7 +64,10 @@ async fn assert_local_contract(runtime: &Runtime, expected_node: &str) {
             assert!(status.capabilities.iter().any(|c| c == "compute.cpu"));
             assert_eq!(status.peers, 0);
             assert_eq!(status.health, "ok");
-            assert_eq!(status.models_registered, 1, "the staged IRIS manifest is registered");
+            assert_eq!(
+                status.models_registered, 1,
+                "the staged IRIS manifest is registered"
+            );
         }
         response => panic!("unexpected status response: {response:?}"),
     }

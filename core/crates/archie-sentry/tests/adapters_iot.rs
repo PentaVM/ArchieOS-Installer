@@ -1,8 +1,9 @@
 //! Integration tests for the IoT protocol adapters: MQTT 3.1.1 over TCP,
-//! observation-only ONVIF over SOAP, and the stated Chromecast non-support.
+//! observation-only ONVIF over SOAP. Chromecast lives in `adapters_cast.rs`.
+mod servers;
+
 use archie_sentry::{
     adapters::{
-        chromecast::{CastDevice, Chromecast},
         mqtt::{Mqtt, MqttBinding},
         onvif::{base64_encode, password_digest, sha1, wsse_header, OnvifProbe},
     },
@@ -10,10 +11,7 @@ use archie_sentry::{
     engine::*,
     registry::ResourceDescriptor,
 };
-use std::{
-    collections::BTreeMap,
-    net::{IpAddr, Ipv4Addr},
-};
+use std::collections::BTreeMap;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -120,23 +118,39 @@ fn mqtt_adapter(address: &str, binding: MqttBinding) -> Mqtt {
 
 // ---------- MQTT tests ----------
 
+/// A device on the stateful broker that records every command payload it
+/// receives and reports `report` as its new state.
+async fn recording_device(
+    broker: &servers::mqtt::Broker,
+    command: &str,
+    state: &str,
+    initial: &[u8],
+    report: &'static [u8],
+) -> std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>> {
+    let seen: std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>> = Default::default();
+    let record = seen.clone();
+    servers::mqtt::Device::attach(
+        &broker.address,
+        "recorder",
+        command,
+        state,
+        initial,
+        None,
+        Box::new(move |_, payload| {
+            record.lock().unwrap().push(payload.to_vec());
+            Some(report.to_vec())
+        }),
+    )
+    .await;
+    seen
+}
+
 #[tokio::test]
 async fn mqtt_switch_publish_matches_expected_topic_and_payload_then_disconnects() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let task = tokio::spawn(async move {
-        let (mut stream, _) = listener.accept().await.unwrap();
-        let (header, _) = mqtt_read_packet(&mut stream).await;
-        assert_eq!(header >> 4, 1, "CONNECT");
-        stream.write_all(&[0x20, 0x02, 0x00, 0x00]).await.unwrap(); // CONNACK accept
-        let (header, body) = mqtt_read_packet(&mut stream).await;
-        assert_eq!(header, 0x30, "PUBLISH qos 0");
-        let (header, disconnect) = mqtt_read_packet(&mut stream).await;
-        assert_eq!((header, disconnect.is_empty()), (0xE0, true), "DISCONNECT");
-        body
-    });
+    let broker = servers::mqtt::Broker::start(None).await;
+    let seen = recording_device(&broker, "home/lamp/set", "home/lamp/state", b"OFF", b"ON").await;
     let mut adapter = mqtt_adapter(
-        &address.to_string(),
+        &broker.address,
         MqttBinding::switch("home/lamp/set", "home/lamp/state", "ON", "OFF"),
     );
     let ack = adapter
@@ -147,27 +161,42 @@ async fn mqtt_switch_publish_matches_expected_topic_and_payload_then_disconnects
         .await
         .unwrap();
     assert!(ack.accepted);
-    let body = task.await.unwrap();
-    let length = usize::from(u16::from_be_bytes([body[0], body[1]]));
-    assert_eq!(&body[2..2 + length], b"home/lamp/set");
-    assert_eq!(&body[2 + length..], b"ON");
+    assert_eq!(*seen.lock().unwrap(), vec![b"ON".to_vec()]);
+    // The adapter listened on the state topic before it commanded.
+    let log: Vec<String> = broker
+        .log()
+        .into_iter()
+        .filter(|l| l.starts_with("archie-"))
+        .map(|l| l.split_once(':').unwrap().1.to_owned())
+        .collect();
+    assert_eq!(
+        log,
+        [
+            "CONNECT",
+            "SUBSCRIBE home/lamp/state",
+            "PUBLISH home/lamp/set"
+        ]
+    );
 }
 
 #[tokio::test]
 async fn mqtt_climate_temperature_is_rendered_as_celsius_with_one_decimal() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let task = tokio::spawn(async move {
-        let (mut stream, _) = listener.accept().await.unwrap();
-        mqtt_read_packet(&mut stream).await;
-        stream.write_all(&[0x20, 0x02, 0x00, 0x00]).await.unwrap();
-        let (_, body) = mqtt_read_packet(&mut stream).await;
-        mqtt_read_packet(&mut stream).await; // DISCONNECT
-        body
-    });
+    let broker = servers::mqtt::Broker::start(None).await;
+    let seen = recording_device(
+        &broker,
+        "home/thermostat/set",
+        "home/thermostat/state",
+        b"20.0",
+        b"22.5",
+    )
+    .await;
     let mut adapter = mqtt_adapter(
-        &address.to_string(),
-        MqttBinding::climate("home/thermostat/set", "home/thermostat/state", "set {celsius}"),
+        &broker.address,
+        MqttBinding::climate(
+            "home/thermostat/set",
+            "home/thermostat/state",
+            "set {celsius}",
+        ),
     );
     adapter
         .apply(
@@ -178,10 +207,7 @@ async fn mqtt_climate_temperature_is_rendered_as_celsius_with_one_decimal() {
         )
         .await
         .unwrap();
-    let body = task.await.unwrap();
-    let length = usize::from(u16::from_be_bytes([body[0], body[1]]));
-    assert_eq!(&body[2..2 + length], b"home/thermostat/set");
-    assert_eq!(&body[2 + length..], b"set 22.5");
+    assert_eq!(*seen.lock().unwrap(), vec![b"set 22.5".to_vec()]);
 }
 
 #[tokio::test]
@@ -234,9 +260,15 @@ async fn mqtt_truncated_packet_is_a_protocol_error() {
         mqtt_read_packet(&mut stream).await;
         stream.write_all(&[0x20, 0x02, 0x00, 0x00]).await.unwrap();
         mqtt_read_packet(&mut stream).await; // SUBSCRIBE
-        stream.write_all(&[0x90, 0x03, 0x00, 0x01, 0x00]).await.unwrap();
+        stream
+            .write_all(&[0x90, 0x03, 0x00, 0x01, 0x00])
+            .await
+            .unwrap();
         // Declares a 10-byte body, sends 3 bytes, then closes.
-        stream.write_all(&[0x30, 0x0A, 0x00, 0x01, b'a']).await.unwrap();
+        stream
+            .write_all(&[0x30, 0x0A, 0x00, 0x01, b'a'])
+            .await
+            .unwrap();
     });
     let mut adapter = mqtt_adapter(
         &address.to_string(),
@@ -258,7 +290,10 @@ async fn mqtt_oversized_remaining_length_is_rejected_without_reading_the_body() 
         mqtt_read_packet(&mut stream).await;
         stream.write_all(&[0x20, 0x02, 0x00, 0x00]).await.unwrap();
         mqtt_read_packet(&mut stream).await; // SUBSCRIBE
-        stream.write_all(&[0x90, 0x03, 0x00, 0x01, 0x00]).await.unwrap();
+        stream
+            .write_all(&[0x90, 0x03, 0x00, 0x01, 0x00])
+            .await
+            .unwrap();
         // Remaining-length varint for 300_000 > 256 KiB cap, no body follows.
         stream.write_all(&[0x30, 0xE0, 0xA7, 0x12]).await.unwrap();
     });
@@ -316,28 +351,24 @@ fn mqtt_constructor_rejects_public_brokers_wildcards_and_bad_templates() {
     assert!(Mqtt::new("edge", "mqtt", "127.0.0.1:0", None, bindings()).is_err());
     let mut wildcard = binding();
     wildcard.command_topic = "home/+/set".into();
-    assert!(
-        Mqtt::new(
-            "edge",
-            "mqtt",
-            "127.0.0.1:1883",
-            None,
-            BTreeMap::from([("lamp".into(), wildcard)])
-        )
-        .is_err()
-    );
+    assert!(Mqtt::new(
+        "edge",
+        "mqtt",
+        "127.0.0.1:1883",
+        None,
+        BTreeMap::from([("lamp".into(), wildcard)])
+    )
+    .is_err());
     let mut bad_template = binding();
     bad_template.temperature_template = "set point".into();
-    assert!(
-        Mqtt::new(
-            "edge",
-            "mqtt",
-            "127.0.0.1:1883",
-            None,
-            BTreeMap::from([("lamp".into(), bad_template)])
-        )
-        .is_err()
-    );
+    assert!(Mqtt::new(
+        "edge",
+        "mqtt",
+        "127.0.0.1:1883",
+        None,
+        BTreeMap::from([("lamp".into(), bad_template)])
+    )
+    .is_err());
 }
 
 #[tokio::test]
@@ -366,9 +397,7 @@ async fn mqtt_unsupported_command_and_unconfigured_resource_are_unsupported() {
     media.paired = false;
     media.capabilities = vec![CommandKind::SwitchSet];
     assert_eq!(
-        adapter
-            .observe(&media)
-            .await,
+        adapter.observe(&media).await,
         Err(AdapterError::Unsupported)
     );
 }
@@ -403,9 +432,18 @@ const STREAM: &str = "<trt:GetStreamUriResponse \
 #[tokio::test]
 async fn onvif_probe_parses_device_information_and_stream_uri() {
     let (url, task) = http_server(vec![
-        ("200 OK\r\nContent-Type: application/soap+xml", soap_ok(DEVICE_INFO)),
-        ("200 OK\r\nContent-Type: application/soap+xml", soap_ok(PROFILES)),
-        ("200 OK\r\nContent-Type: application/soap+xml", soap_ok(STREAM)),
+        (
+            "200 OK\r\nContent-Type: application/soap+xml",
+            soap_ok(DEVICE_INFO),
+        ),
+        (
+            "200 OK\r\nContent-Type: application/soap+xml",
+            soap_ok(PROFILES),
+        ),
+        (
+            "200 OK\r\nContent-Type: application/soap+xml",
+            soap_ok(STREAM),
+        ),
     ])
     .await;
     let probe = OnvifProbe::new(&url, Some(("operator".into(), "cam-secret".into()))).unwrap();
@@ -454,7 +492,11 @@ async fn onvif_soap_fault_is_a_protocol_error() {
         "<s:Fault><s:Code><s:Value>s:Sender</s:Value></s:Code>\
          <s:Reason><s:Text>ter:NotAuthorized</s:Text></s:Reason></s:Fault>",
     );
-    let (url, task) = http_server(vec![("200 OK\r\nContent-Type: application/soap+xml", fault)]).await;
+    let (url, task) = http_server(vec![(
+        "200 OK\r\nContent-Type: application/soap+xml",
+        fault,
+    )])
+    .await;
     let probe = OnvifProbe::new(&url, None).unwrap();
     assert_eq!(probe.probe().await, Err(AdapterError::Protocol));
     task.await.unwrap();
@@ -471,10 +513,13 @@ fn onvif_wsse_digest_is_sha1_base64_and_deterministic() {
     // Fixed (nonce, created, password) → fixed digest, verified independently.
     let digest = password_digest(b"0123456789abcdef", "2024-01-01T00:00:00Z", "cam-secret");
     assert_eq!(digest, "ic0sEg9LTjlTPKiNBt8E6a/OTxc=");
-    let header = wsse_header("operator", "cam-secret", b"0123456789abcdef", "2024-01-01T00:00:00Z");
-    assert!(header.contains(
-        "#PasswordDigest\">ic0sEg9LTjlTPKiNBt8E6a/OTxc=</wsse:Password>"
-    ));
+    let header = wsse_header(
+        "operator",
+        "cam-secret",
+        b"0123456789abcdef",
+        "2024-01-01T00:00:00Z",
+    );
+    assert!(header.contains("#PasswordDigest\">ic0sEg9LTjlTPKiNBt8E6a/OTxc=</wsse:Password>"));
     assert!(header.contains("#Base64Binary\">MDEyMzQ1Njc4OWFiY2RlZg==</wsse:Nonce>"));
     assert!(header.contains("<wsu:Created>2024-01-01T00:00:00Z</wsu:Created>"));
     assert!(!header.contains("cam-secret"));
@@ -491,65 +536,4 @@ fn onvif_probe_rejects_credentialed_cleartext_off_loopback() {
     // Anonymous probes may reach private LAN addresses over http.
     assert!(OnvifProbe::new("http://192.168.1.20/onvif/device_service", None).is_ok());
     assert!(OnvifProbe::new("https://example.com/onvif/device_service", None).is_err());
-}
-
-// ---------- Chromecast tests ----------
-
-fn cast_device() -> CastDevice {
-    CastDevice::new(
-        "tv",
-        "Living Room",
-        "Chromecast",
-        IpAddr::V4(Ipv4Addr::new(192, 168, 1, 30)),
-        8009,
-    )
-    .unwrap()
-}
-
-#[test]
-fn cast_device_descriptor_stores_bounded_fields() {
-    let device = cast_device();
-    assert_eq!(device.name, "Living Room");
-    assert_eq!(device.model, "Chromecast");
-    assert_eq!(device.port, 8009);
-    let address = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 30));
-    let public = IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8));
-    let cases: [(String, String, IpAddr, u16); 5] = [
-        ("x".repeat(65), "Chromecast".to_owned(), address, 8009),
-        ("Living\nRoom".to_owned(), "Chromecast".to_owned(), address, 8009),
-        ("Living Room".to_owned(), String::new(), address, 8009),
-        ("Living Room".to_owned(), "Chromecast".to_owned(), public, 8009),
-        ("Living Room".to_owned(), "Chromecast".to_owned(), address, 0),
-    ];
-    for (name, model, addr, port) in cases {
-        assert!(CastDevice::new("tv", &name, &model, addr, port).is_err());
-    }
-    assert!(CastDevice::new("bad id!", "Living Room", "Chromecast", address, 8009).is_err());
-}
-
-#[tokio::test]
-async fn chromecast_apply_is_explicitly_unsupported_with_a_documented_reason() {
-    let mut adapter = Chromecast::new("edge", "cast", vec![cast_device()]).unwrap();
-    let descriptor = adapter.descriptor("tv").unwrap();
-    assert_eq!(descriptor.model, "Chromecast");
-    assert!(adapter.descriptor("unknown").is_none());
-    let resource = ResourceDescriptor {
-        resource_id: "tv".into(),
-        edge_id: "edge".into(),
-        adapter_id: "cast".into(),
-        paired: true,
-        capabilities: vec![CommandKind::MediaPause],
-    };
-    assert_eq!(
-        adapter.apply(&resource, &Command::MediaPause).await,
-        Err(AdapterError::Unsupported)
-    );
-    assert_eq!(
-        adapter.observe(&resource).await,
-        Err(AdapterError::Unsupported)
-    );
-    // The absence is a stated decision, not a silence.
-    assert!(Chromecast::UNSUPPORTED_REASON.contains("TLS"));
-    assert!(Chromecast::UNSUPPORTED_REASON.contains("protobuf"));
-    assert!(Chromecast::UNSUPPORTED_REASON.contains("out of scope"));
 }

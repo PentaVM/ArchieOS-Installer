@@ -21,8 +21,16 @@ fn edges(pixels: &[u8]) -> Vec<f32> {
         for x in 0..TILE_WIDTH {
             let at = y * TILE_WIDTH + x;
             let here = f32::from(pixels[at]);
-            let right = if x + 1 < TILE_WIDTH { f32::from(pixels[at + 1]) } else { here };
-            let below = if y + 1 < TILE_HEIGHT { f32::from(pixels[at + TILE_WIDTH]) } else { here };
+            let right = if x + 1 < TILE_WIDTH {
+                f32::from(pixels[at + 1])
+            } else {
+                here
+            };
+            let below = if y + 1 < TILE_HEIGHT {
+                f32::from(pixels[at + TILE_WIDTH])
+            } else {
+                here
+            };
             out[at] = (right - here).abs() + (below - here).abs();
         }
     }
@@ -47,7 +55,11 @@ fn inside(samples: &[Sample], energies: &[Vec<f32>], dx: f32, dy: f32) -> f32 {
             }
         }
     }
-    if counted == 0 { 0.0 } else { total / counted as f32 }
+    if counted == 0 {
+        0.0
+    } else {
+        total / counted as f32
+    }
 }
 
 /// One tile, three times the size, with its labels drawn around what they claim.
@@ -95,7 +107,9 @@ fn drawn(sample: &Sample, path: &std::path::Path) -> std::io::Result<()> {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
-    let dir = args.next().ok_or("usage: corpus_check <corpus dir> [out dir]")?;
+    let dir = args
+        .next()
+        .ok_or("usage: corpus_check <corpus dir> [out dir]")?;
     let out = args.next();
     let samples = Corpus::at(&dir).read()?;
     if samples.is_empty() {
@@ -116,9 +130,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|energy| energy.iter().sum::<f32>() / energy.len() as f32)
         .sum::<f32>()
         / samples.len() as f32;
-    println!("{} windows, {controls} controls, {flat} tiles with nothing in them", samples.len());
+    println!(
+        "{} windows, {controls} controls, {flat} tiles with nothing in them",
+        samples.len()
+    );
     println!("mean edge energy over whole tiles: {everywhere:.2}");
-    println!("mean edge energy inside the labels: {:.2}", inside(&samples, &energies, 0.0, 0.0));
+    println!(
+        "mean edge energy inside the labels: {:.2}",
+        inside(&samples, &energies, 0.0, 0.0)
+    );
 
     let mut sizes: Vec<(f32, f32)> = samples
         .iter()

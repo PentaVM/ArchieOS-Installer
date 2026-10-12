@@ -102,7 +102,13 @@ impl Seat {
         let request = self.request(StageAction::Frame { max_width }, "watch the window")?;
         match self
             .operator
-            .look(&mut self.client, &mut self.world, &request, &self.snapshots, Duration::from_secs(10))
+            .look(
+                &mut self.client,
+                &mut self.world,
+                &request,
+                &self.snapshots,
+                Duration::from_secs(10),
+            )
             .await
             .map_err(|e| e.to_string())?
         {

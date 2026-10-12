@@ -251,7 +251,7 @@ impl CoreAuthority {
             || expiry
                 .0
                 .checked_sub(state.lease.issued_at.0)
-                .map_or(true, |ms| !(1..=300000).contains(&ms))
+                .is_none_or(|ms| !(1..=300000).contains(&ms))
         {
             return Err(EngineError::Authority);
         }
@@ -437,7 +437,7 @@ impl<J: Journal> Engine<J> {
             result.status = ExecutionStatus::Denied;
             return;
         }
-        if result.before.as_ref().map_or(true, |b| {
+        if result.before.as_ref().is_none_or(|b| {
             b.validate_after(
                 intent,
                 &resource.adapter_id,

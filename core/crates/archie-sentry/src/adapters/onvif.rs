@@ -62,10 +62,7 @@ impl std::fmt::Debug for OnvifProbe {
 }
 impl OnvifProbe {
     /// `base` is the device service URL, e.g. `http://192.168.1.20/onvif/device_service`.
-    pub fn new(
-        base: &str,
-        credentials: Option<(String, String)>,
-    ) -> Result<Self, AdapterError> {
+    pub fn new(base: &str, credentials: Option<(String, String)>) -> Result<Self, AdapterError> {
         let base = endpoint(base, credentials.is_some())?;
         if base.path().is_empty() {
             return Err(AdapterError::Protocol);
@@ -114,9 +111,7 @@ impl OnvifProbe {
         let info = self.soap("<tds:GetDeviceInformation/>").await?;
         let bounded = |value: Option<String>| -> Result<String, AdapterError> {
             let value = value.ok_or(AdapterError::Protocol)?;
-            if value.is_empty()
-                || value.len() > 64
-                || value.bytes().any(|b| b < 0x20 || b == 0x7f)
+            if value.is_empty() || value.len() > 64 || value.bytes().any(|b| b < 0x20 || b == 0x7f)
             {
                 return Err(AdapterError::Protocol);
             }
@@ -161,16 +156,24 @@ fn valid_stream_uri(uri: &str) -> bool {
     let rest = uri
         .strip_prefix("rtsp://")
         .or_else(|| uri.strip_prefix("rtsps://"));
-    rest.map_or(false, |r| {
+    rest.is_some_and(|r| {
         r.split(['/', ':'])
             .next()
             .is_some_and(|host| !host.is_empty())
     })
 }
 
+/// A nonce this process never repeats. `created` has millisecond resolution, so
+/// requests in one millisecond shared a nonce, and a camera that refuses replays (as
+/// WS-Security recommends) rejected all but the first: a counter makes each unique.
 fn fresh_nonce(password: &str, created: &str) -> [u8; 16] {
+    static ISSUED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let count = ISSUED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
     let digest = Sha256::digest(format!(
-        "onvif-nonce\0{password}\0{created}\0{}",
+        "onvif-nonce\0{password}\0{created}\0{}\0{count}\0{nanos}",
         std::process::id()
     ));
     let mut nonce = [0u8; 16];
@@ -181,8 +184,7 @@ fn fresh_nonce(password: &str, created: &str) -> [u8; 16] {
 /// Standard base64 (RFC 4648, with padding). Implemented locally because the
 /// `base64` crate is not a dependency of archie-sentry.
 pub fn base64_encode(data: &[u8]) -> String {
-    const TABLE: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let n = (u32::from(chunk[0]) << 16)
@@ -207,7 +209,13 @@ pub fn base64_encode(data: &[u8]) -> String {
 /// Minimal SHA-1 (FIPS 180-1), implemented locally solely for the WS-Security
 /// PasswordDigest profile. Archie-internal integrity uses SHA-256.
 pub fn sha1(data: &[u8]) -> [u8; 20] {
-    let mut h: [u32; 5] = [0x6745_2301, 0xEFCD_AB89, 0x98BA_DCFE, 0x1032_5476, 0xC3D2_E1F0];
+    let mut h: [u32; 5] = [
+        0x6745_2301,
+        0xEFCD_AB89,
+        0x98BA_DCFE,
+        0x1032_5476,
+        0xC3D2_E1F0,
+    ];
     let bit_length = (data.len() as u64).wrapping_mul(8);
     let mut message = data.to_vec();
     message.push(0x80);
@@ -406,4 +414,17 @@ fn xml_attr_values(xml: &str, local: &str, attr: &str) -> Vec<String> {
 /// probe results into the registry should validate with this before use.
 pub fn validate_camera_resource_id(id: &str) -> Result<(), AdapterError> {
     validate_id(id).map_err(|_| AdapterError::Protocol)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nonces_in_one_millisecond_are_all_different() {
+        let created = "2026-10-12T11:27:00.123Z";
+        let nonces: std::collections::BTreeSet<[u8; 16]> =
+            (0..1000).map(|_| fresh_nonce("secret", created)).collect();
+        assert_eq!(nonces.len(), 1000);
+    }
 }

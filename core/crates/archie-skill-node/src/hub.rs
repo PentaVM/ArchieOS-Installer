@@ -24,9 +24,14 @@ pub enum HubError {
 impl std::fmt::Display for HubError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Moved => f.write_str("the board changed since it was read: read it again and retry"),
+            Self::Moved => {
+                f.write_str("the board changed since it was read: read it again and retry")
+            }
             Self::NotFound => f.write_str("not found in the repository"),
-            Self::TooLarge(bytes) => write!(f, "a file of {bytes} bytes is too large for the shared repository"),
+            Self::TooLarge(bytes) => write!(
+                f,
+                "a file of {bytes} bytes is too large for the shared repository"
+            ),
             Self::Failed(message) => write!(f, "shared repository: {message}"),
         }
     }
@@ -38,7 +43,12 @@ pub trait Hub {
     fn head(&self) -> Result<String, HubError>;
     fn read(&self, path: &str) -> Result<Vec<u8>, HubError>;
     /// One commit of `files` on top of `parent`, pushed as this node's person.
-    fn commit(&self, summary: &str, files: &[(String, Vec<u8>)], parent: &str) -> Result<String, HubError>;
+    fn commit(
+        &self,
+        summary: &str,
+        files: &[(String, Vec<u8>)],
+        parent: &str,
+    ) -> Result<String, HubError>;
 }
 
 /// The node's clone of the shared repository.
@@ -49,7 +59,10 @@ pub struct GitRepo {
 
 impl GitRepo {
     pub fn new(dir: &Path, branch: &str) -> Self {
-        Self { dir: dir.to_path_buf(), branch: branch.into() }
+        Self {
+            dir: dir.to_path_buf(),
+            branch: branch.into(),
+        }
     }
 
     fn git(&self, args: &[&str]) -> Result<(bool, Vec<u8>, String), HubError> {
@@ -60,13 +73,21 @@ impl GitRepo {
             .env("GIT_TERMINAL_PROMPT", "0")
             .output()
             .map_err(|e| HubError::Failed(format!("git: {e}")))?;
-        Ok((output.status.success(), output.stdout, String::from_utf8_lossy(&output.stderr).trim().to_string()))
+        Ok((
+            output.status.success(),
+            output.stdout,
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ))
     }
 
     fn run(&self, args: &[&str]) -> Result<Vec<u8>, HubError> {
         match self.git(args)? {
             (true, stdout, _) => Ok(stdout),
-            (false, _, stderr) => Err(HubError::Failed(format!("git {}: {}", args[0], short(&stderr)))),
+            (false, _, stderr) => Err(HubError::Failed(format!(
+                "git {}: {}",
+                args[0],
+                short(&stderr)
+            ))),
         }
     }
 
@@ -85,7 +106,9 @@ fn safe_path(path: &str) -> bool {
         && !path.starts_with('/')
         && !path.contains('\\')
         && !path.contains(':')
-        && path.split('/').all(|part| !part.is_empty() && part != "." && part != ".." && part != ".git")
+        && path
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != ".." && part != ".git")
 }
 
 impl Hub for GitRepo {
@@ -101,14 +124,22 @@ impl Hub for GitRepo {
         }
         match self.git(&["show", &format!("{}:{path}", self.remote_ref())])? {
             (true, stdout, _) => Ok(stdout),
-            (false, _, stderr) if stderr.contains("does not exist") || stderr.contains("exists on disk, but not in") => {
+            (false, _, stderr)
+                if stderr.contains("does not exist")
+                    || stderr.contains("exists on disk, but not in") =>
+            {
                 Err(HubError::NotFound)
             }
             (false, _, stderr) => Err(HubError::Failed(format!("git show: {}", short(&stderr)))),
         }
     }
 
-    fn commit(&self, summary: &str, files: &[(String, Vec<u8>)], parent: &str) -> Result<String, HubError> {
+    fn commit(
+        &self,
+        summary: &str,
+        files: &[(String, Vec<u8>)],
+        parent: &str,
+    ) -> Result<String, HubError> {
         for (path, bytes) in files {
             if !safe_path(path) {
                 return Err(HubError::Failed(format!("refused path {path}")));
@@ -128,11 +159,23 @@ impl Hub for GitRepo {
             self.run(&["add", "--", path])?;
         }
         self.run(&["commit", "--quiet", "-m", summary])?;
-        let sha = String::from_utf8_lossy(&self.run(&["rev-parse", "HEAD"])?).trim().to_string();
-        match self.git(&["push", "--quiet", "origin", &format!("HEAD:{}", self.branch)])? {
+        let sha = String::from_utf8_lossy(&self.run(&["rev-parse", "HEAD"])?)
+            .trim()
+            .to_string();
+        match self.git(&[
+            "push",
+            "--quiet",
+            "origin",
+            &format!("HEAD:{}", self.branch),
+        ])? {
             (true, _, _) => Ok(sha),
-            (false, _, stderr) if stderr.contains("rejected") || stderr.contains("fetch first")
-                || stderr.contains("non-fast-forward") => Err(HubError::Moved),
+            (false, _, stderr)
+                if stderr.contains("rejected")
+                    || stderr.contains("fetch first")
+                    || stderr.contains("non-fast-forward") =>
+            {
+                Err(HubError::Moved)
+            }
             (false, _, stderr) => Err(HubError::Failed(format!("git push: {}", short(&stderr)))),
         }
     }
@@ -147,7 +190,16 @@ mod tests {
         for good in ["board.json", "skills/csgo/1-nelson-abc.skill"] {
             assert!(safe_path(good), "{good}");
         }
-        for bad in ["", "/etc/passwd", "../board.json", "skills/../../x", ".git/config", "a//b", "C:/x", "a\\b"] {
+        for bad in [
+            "",
+            "/etc/passwd",
+            "../board.json",
+            "skills/../../x",
+            ".git/config",
+            "a//b",
+            "C:/x",
+            "a\\b",
+        ] {
             assert!(!safe_path(bad), "{bad}");
         }
     }

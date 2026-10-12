@@ -158,7 +158,7 @@ async fn the_display_recovers_after_the_daemon_restarts() {
 
     let _ = stop_tx2.send(true);
     let _ = tokio::time::timeout(std::time::Duration::from_secs(5), daemon2).await;
-    std::fs::remove_dir_all(&paths.state_dir.parent().unwrap()).ok();
+    std::fs::remove_dir_all(paths.state_dir.parent().unwrap()).ok();
 }
 
 #[tokio::test]

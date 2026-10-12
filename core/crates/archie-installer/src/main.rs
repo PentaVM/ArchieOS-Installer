@@ -314,7 +314,7 @@ mod wizard {
             .as_str()
             .ok_or("no map mount")?;
         let free = Command::new("df")
-            .args(["-B1", "--output=avail", "--", &mount])
+            .args(["-B1", "--output=avail", "--", mount])
             .output()?;
         if !free.status.success() {
             return Err("cannot measure map filesystem space".into());

@@ -32,7 +32,9 @@ fn the_screen_is_handed_to_iris_even_when_it_is_restricted() {
     let chosen = outcome
         .selected_model()
         .unwrap_or_else(|| panic!("nothing can act on a screen: {}", outcome.explain()));
-    let model = registry.get(chosen).expect("the chosen model is registered");
+    let model = registry
+        .get(chosen)
+        .expect("the chosen model is registered");
     assert_eq!(model.locality, Locality::Local);
     assert!(model.id.as_str().starts_with("iris."), "chose {}", model.id);
 }
@@ -44,11 +46,22 @@ fn iris_holds_the_roles_its_manifest_claims_and_no_speech_or_reasoning_role() {
         .iter()
         .find(|m| m.id.as_str().starts_with("iris."))
         .expect("IRIS is shipped");
-    for role in [ModelRole::VisionModel, ModelRole::VisualActor, ModelRole::EmbeddingModel] {
+    for role in [
+        ModelRole::VisionModel,
+        ModelRole::VisualActor,
+        ModelRole::EmbeddingModel,
+    ] {
         assert!(iris.provides(&role.capability()), "IRIS should hold {role}");
     }
-    for role in [ModelRole::CognitiveResponse, ModelRole::ReasoningWorker, ModelRole::Tts] {
-        assert!(!iris.provides(&role.capability()), "IRIS must not claim {role}");
+    for role in [
+        ModelRole::CognitiveResponse,
+        ModelRole::ReasoningWorker,
+        ModelRole::Tts,
+    ] {
+        assert!(
+            !iris.provides(&role.capability()),
+            "IRIS must not claim {role}"
+        );
     }
 }
 
@@ -57,7 +70,11 @@ fn iris_holds_the_roles_its_manifest_claims_and_no_speech_or_reasoning_role() {
 #[test]
 fn a_local_model_names_the_weights_it_runs_by_hash() {
     for model in shipped().iter().filter(|m| m.locality == Locality::Local) {
-        let hash = model.labels.get("weights_sha256").map(String::as_str).unwrap_or("");
+        let hash = model
+            .labels
+            .get("weights_sha256")
+            .map(String::as_str)
+            .unwrap_or("");
         assert!(
             hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()),
             "{} names no SHA-256 for its weights",
@@ -72,10 +89,16 @@ fn a_local_model_names_the_weights_it_runs_by_hash() {
 fn thinking_is_asked_of_a_reasoning_model_and_never_of_iris() {
     let registry = shipped();
     for role in [ModelRole::ReasoningWorker, ModelRole::CognitiveResponse] {
-        let request = RoutingRequest::new(PrivacyGrade::Public, 400, 2000).requiring(role.capability());
+        let request =
+            RoutingRequest::new(PrivacyGrade::Public, 400, 2000).requiring(role.capability());
         let outcome = Router::new(Weights::default()).route(&registry, &request);
-        let chosen = outcome.selected_model().unwrap_or_else(|| panic!("{role}: {}", outcome.explain()));
-        assert!(chosen.as_str().starts_with("nebius.nemotron"), "{role} went to {chosen}");
+        let chosen = outcome
+            .selected_model()
+            .unwrap_or_else(|| panic!("{role}: {}", outcome.explain()));
+        assert!(
+            chosen.as_str().starts_with("nebius.nemotron"),
+            "{role} went to {chosen}"
+        );
     }
 }
 

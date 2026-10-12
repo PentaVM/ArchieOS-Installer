@@ -197,7 +197,7 @@ async fn create_task(
 
     if let Some(meta) = payload.metadata {
         for (k, v) in meta {
-            task.labels.insert(format!("meta.{}", k), v);
+            task.labels.insert(format!("meta.{k}"), v);
         }
     }
 
@@ -248,7 +248,9 @@ async fn sync_board(State(state): State<BoardState>) -> Result<impl IntoResponse
     {
         Ok(_) => Ok((StatusCode::OK, Json("Sync completed"))),
         // The only failure there is today: nothing sends cards anywhere yet.
-        Err(_) => Err(AppError::NotImplemented("enterprise transport is not configured")),
+        Err(_) => Err(AppError::NotImplemented(
+            "enterprise transport is not configured",
+        )),
     }
 }
 
@@ -302,4 +304,3 @@ mod tests {
         assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }
-

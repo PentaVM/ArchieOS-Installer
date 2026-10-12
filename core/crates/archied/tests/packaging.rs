@@ -1074,7 +1074,10 @@ fn release_builder_stages_model_runtime_and_provider_registry() {
 fn release_builder_stages_the_model_manifests() {
     let root = repo_root();
     let script = std::fs::read_to_string(root.join("distro/archiso/build.sh")).unwrap();
-    assert!(script.contains("airootfs/etc/archie/models"), "release omits the model manifests");
+    assert!(
+        script.contains("airootfs/etc/archie/models"),
+        "release omits the model manifests"
+    );
     let model_count = count_files_with_extension_recursive(&root.join("models"), "toml");
     assert!(model_count > 0, "the staged model registry is empty");
 }
@@ -1281,5 +1284,88 @@ fn display_failure_cannot_block_archied_or_the_boot_target() {
     assert!(
         readme.to_ascii_lowercase().contains("hardware-unverified"),
         "distro/display/README.md must not pretend the native display was tested on hardware"
+    );
+}
+
+/// The traffic audit's unit, its account and the ISO staging agree, and the audit's
+/// files can reach the alert follower (group `archie`) and never anyone else.
+#[test]
+fn the_netwatch_unit_runs_as_its_static_account_with_the_capture_group() {
+    let root = repo_root();
+    let unit_text = std::fs::read_to_string(root.join("distro/sentry/archie-netwatch.service"))
+        .expect("the netwatch unit exists");
+    let unit = unit_directives(&unit_text);
+    // A DynamicUser's state lives under /var/lib/private (0700 root): the follower,
+    // running as `archie`, could never read alerts.jsonl there.
+    assert!(
+        !unit.contains_key("DynamicUser"),
+        "netwatch must not run as a DynamicUser"
+    );
+    let user = unit.get("User").expect("netwatch names its account");
+    assert_eq!(unit.get("Group").map(String::as_str), Some("archie"));
+    // dumpcap is root:wireshark 0754 on Arch: no group, no capture.
+    assert!(unit
+        .get("SupplementaryGroups")
+        .is_some_and(|groups| groups.split_whitespace().any(|g| g == "wireshark")));
+    assert_eq!(unit.get("UMask").map(String::as_str), Some("0027"));
+    assert_eq!(
+        unit.get("StateDirectoryMode").map(String::as_str),
+        Some("0750")
+    );
+    assert_eq!(
+        unit.get("CapabilityBoundingSet").map(String::as_str),
+        Some("CAP_NET_RAW CAP_NET_ADMIN")
+    );
+
+    let sysusers = std::fs::read_to_string(root.join("distro/sentry/archie-netwatch.sysusers"))
+        .expect("the netwatch account is declared");
+    let records: Vec<Vec<&str>> = sysusers
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(|l| l.split_whitespace().collect())
+        .collect();
+    assert!(
+        records.iter().any(|r| r.first() == Some(&"u")
+            && r.get(1) == Some(&user.as_str())
+            && r.last() == Some(&"/usr/bin/nologin")),
+        "sysusers must create the non-login {user} account"
+    );
+
+    // The follower reads what netwatch writes, as the control plane's account, with
+    // no network and no capabilities.
+    let follow = unit_directives(
+        &std::fs::read_to_string(root.join("distro/sentry/archie-sentry-follow.service"))
+            .expect("the follower unit exists"),
+    );
+    assert_eq!(follow.get("User").map(String::as_str), Some("archie"));
+    assert_eq!(follow.get("Group").map(String::as_str), Some("archie"));
+    let state_dir = unit
+        .get("ExecStart")
+        .and_then(|e| e.split("--state-dir ").nth(1))
+        .expect("netwatch names its state directory");
+    assert_eq!(
+        follow.get("ExecStart").map(String::as_str),
+        Some(format!("/usr/bin/archie sentry-follow --state-dir {state_dir}").as_str()),
+        "the follower must read the directory netwatch writes"
+    );
+    assert_eq!(
+        follow.get("CapabilityBoundingSet").map(String::as_str),
+        Some("")
+    );
+    assert_eq!(
+        follow.get("RestrictAddressFamilies").map(String::as_str),
+        Some("AF_UNIX")
+    );
+
+    let build = std::fs::read_to_string(root.join("distro/archiso/build.sh")).unwrap();
+    assert!(
+        build.contains("distro/sentry/archie-sentry-follow.service"),
+        "the ISO must stage the follower unit"
+    );
+    assert!(
+        build.contains("distro/sentry/archie-netwatch.sysusers")
+            && build.contains("sysusers.d/archie-netwatch.conf"),
+        "the ISO must stage the netwatch account with its unit"
     );
 }

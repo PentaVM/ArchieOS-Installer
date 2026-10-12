@@ -77,12 +77,7 @@ fn jobs_response(request_id: u32, jobs: &[String]) -> Vec<u8> {
     let mut body = header(request_id);
     for (index, job) in jobs.iter().enumerate() {
         body.push(2);
-        attribute(
-            &mut body,
-            0x21,
-            "job-id",
-            &(index as i32 + 1).to_be_bytes(),
-        );
+        attribute(&mut body, 0x21, "job-id", &(index as i32 + 1).to_be_bytes());
         attribute(&mut body, 0x42, "job-name", job.as_bytes());
     }
     body.push(3);
@@ -258,10 +253,11 @@ async fn verified_spool_content_is_printed_and_queue_entry_is_the_postcondition(
     assert_eq!(observation.origin, ObservationOrigin::Measurement);
     assert!(command.matches(&observation.state));
     // The mock received exactly the verified document bytes, once.
-    let mock = mock.lock().unwrap();
-    assert_eq!(mock.documents, vec![content.clone()]);
-    assert_eq!(mock.jobs, vec![expected.clone()]);
-    drop(mock);
+    {
+        let mock = mock.lock().unwrap();
+        assert_eq!(mock.documents, vec![content.clone()]);
+        assert_eq!(mock.jobs, vec![expected.clone()]);
+    }
     let requests = task.await.unwrap();
     assert_eq!(requests.len(), 4);
     let print_request = &requests[1];
@@ -473,12 +469,17 @@ fn unrecognised_printer_is_unknown_with_the_exact_attributes_considered() {
     };
     assert_eq!(considered, &["application/octet-stream".to_string()]);
     assert_eq!(plan.pacman_command(), None);
-    assert!(plan.planned_command_line().contains("application/octet-stream"));
+    assert!(plan
+        .planned_command_line()
+        .contains("application/octet-stream"));
 }
 
 #[test]
 fn pacman_command_is_data_only_and_never_executed() {
-    let plan = analyze(&snapshot(&["application/postscript"], Some("HP LaserJet 5")));
+    let plan = analyze(&snapshot(
+        &["application/postscript"],
+        Some("HP LaserJet 5"),
+    ));
     let command = plan.pacman_command().unwrap();
     assert_eq!(&command[..4], ["pacman", "-S", "--needed", "--noconfirm"]);
     assert!(command.len() > 4);

@@ -43,26 +43,39 @@ ALWAYS return actions — several at once, never an empty list. You will see the
 screenshot.";
 
 fn log_line(path: &Path, value: serde_json::Value) {
-    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
         let _ = writeln!(file, "{value}");
     }
 }
 
 async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
     let task_path = PathBuf::from(take(&mut args, "--task").ok_or("--task is required")?);
-    let tier: u32 = take(&mut args, "--tier").ok_or("--tier is required")?.parse().map_err(|_| "--tier is seconds")?;
+    let tier: u32 = take(&mut args, "--tier")
+        .ok_or("--tier is required")?
+        .parse()
+        .map_err(|_| "--tier is seconds")?;
     let socket = take(&mut args, "--socket").ok_or("--socket is required")?;
     let key = load_key(&take(&mut args, "--key-file").ok_or("--key-file is required")?)?;
-    let policy = StagePolicy::load(&take(&mut args, "--policy").ok_or("--policy is required")?).map_err(|e| e.to_string())?;
+    let policy = StagePolicy::load(&take(&mut args, "--policy").ok_or("--policy is required")?)
+        .map_err(|e| e.to_string())?;
     let out_root = PathBuf::from(take(&mut args, "--out").ok_or("--out is required")?);
     let memory_path = take(&mut args, "--memory").map(PathBuf::from);
     let reset = take(&mut args, "--reset");
-    let max_width: u32 = take(&mut args, "--max-width").map(|v| v.parse().unwrap_or(1280)).unwrap_or(1280);
+    let max_width: u32 = take(&mut args, "--max-width")
+        .map(|v| v.parse().unwrap_or(1280))
+        .unwrap_or(1280);
     let actors_flag = take(&mut args, "--actors");
     let planners_flag = take(&mut args, "--planners");
     let mut task = Task::load(&task_path)?;
     let models = |list: String| -> Vec<String> {
-        list.split(',').map(|m| m.trim().to_string()).filter(|m| !m.is_empty()).collect()
+        list.split(',')
+            .map(|m| m.trim().to_string())
+            .filter(|m| !m.is_empty())
+            .collect()
     };
     if let Some(list) = actors_flag {
         task.actors = models(list);
@@ -71,25 +84,41 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         task.planners = models(list);
     }
     let nebius = Nebius::from_environment()?;
-    let stamp = format!("{}-t{tier}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
+    let stamp = format!(
+        "{}-t{tier}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    );
     let out = out_root.join(&task.id).join(&stamp);
     std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
     let trajectory = out.join("trajectory.jsonl");
 
     // The application's first state: the arena's doing, not timed.
     if let Some(command) = reset.as_ref().or(task.reset.as_ref()) {
-        let status = tokio::process::Command::new("sh").arg("-c").arg(command).status().await.map_err(|e| e.to_string())?;
+        let status = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg(command)
+            .status()
+            .await
+            .map_err(|e| e.to_string())?;
         if !status.success() {
             return Err(format!("the reset failed: {status}"));
         }
     }
-    let stream = UnixStream::connect(&socket).await.map_err(|e| format!("{socket}: {e}"))?;
+    let stream = UnixStream::connect(&socket)
+        .await
+        .map_err(|e| format!("{socket}: {e}"))?;
     let (read, write) = stream.into_split();
     let mut seat = Seat {
         operator: Operator::new(key, policy, PolicyEngine::default()),
         client: Client::new(read, write),
         world: StageWorld::default(),
-        snapshots: Path::new(&socket).parent().ok_or("--socket has no directory")?.join("snapshots"),
+        snapshots: Path::new(&socket)
+            .parent()
+            .ok_or("--socket has no directory")?
+            .join("snapshots"),
         app_id: task.app_id.clone(),
         principal_id: "archie-arena".into(),
     };
@@ -101,7 +130,13 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
     let ready_by = Instant::now() + Duration::from_secs(240);
     let mut seen_before: Option<(u32, u32, u32, u32)> = None;
     let (first, page) = loop {
-        learn(&mut seat.client, &mut seat.world, Duration::from_millis(500)).await.map_err(|e| e.to_string())?;
+        learn(
+            &mut seat.client,
+            &mut seat.world,
+            Duration::from_millis(500),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
         if seat.world.surfaces_of(&task.app_id).next().is_some() {
             if let Ok(sheet) = seat.look().await {
                 if task.judge != "picture" {
@@ -117,7 +152,10 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
             }
         }
         if Instant::now() > ready_by {
-            return Err(format!("{} never showed a white page to draw on", task.app_id));
+            return Err(format!(
+                "{} never showed a white page to draw on",
+                task.app_id
+            ));
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
     };
@@ -127,27 +165,42 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         None => None,
     };
     let reference_url = match (&reference, &task.reference) {
-        (Some(_), Some(path)) => Some(data_url(&decode(&std::fs::read(path).map_err(|e| e.to_string())?)?)),
+        (Some(_), Some(path)) => Some(data_url(&decode(
+            &std::fs::read(path).map_err(|e| e.to_string())?,
+        )?)),
         _ => None,
     };
     let docs = match &task.docs {
-        Some(path) => std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?,
+        Some(path) => {
+            std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?
+        }
         None => String::new(),
     };
-    let mut memory = memory_path.as_ref().map(|p| Memory::load(p)).unwrap_or_default();
+    let mut memory = memory_path
+        .as_ref()
+        .map(|p| Memory::load(p))
+        .unwrap_or_default();
     let lessons = memory.lessons(&task.id, tier);
 
     // What Archie is told at every decision, the brief's and the timed ones alike.
     let context = |clock: &str, seen: &Sheet| -> String {
-        let mut text = format!("TASK: {}\n\n{clock} The screenshot is {}x{} pixels.", task.prompt, seen.width, seen.height);
+        let mut text = format!(
+            "TASK: {}\n\n{clock} The screenshot is {}x{} pixels.",
+            task.prompt, seen.width, seen.height
+        );
         if reference_url.is_some() {
-            text.push_str(" The FIRST image is the reference picture; the SECOND is the screenshot.");
+            text.push_str(
+                " The FIRST image is the reference picture; the SECOND is the screenshot.",
+            );
         }
         if !task.ends_early {
             text.push_str(" The run lasts the whole time and \"done\" does not end it: use every second left to make the result better.");
         }
         if !docs.is_empty() {
-            text.push_str(&format!("\n\nDOCUMENTATION:\n{}", docs.chars().take(6000).collect::<String>()));
+            text.push_str(&format!(
+                "\n\nDOCUMENTATION:\n{}",
+                docs.chars().take(6000).collect::<String>()
+            ));
         }
         if !lessons.is_empty() {
             text.push_str("\n\nLESSONS FROM YOUR EARLIER RUNS OF THIS TASK:\n- ");
@@ -178,7 +231,11 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
     // the doing, which IRIS is to take over. The plan comes back at every later decision, and
     // its opening moves run the moment the clock starts.
     let (brief_seen, brief_scale) = fit_width(&first, max_width);
-    let brief_frame = Frame { scale: brief_scale, width: first.width, height: first.height };
+    let brief_frame = Frame {
+        scale: brief_scale,
+        width: first.width,
+        height: first.height,
+    };
     let brief_index = keep_frame(&brief_seen);
     let brief_text = format!(
         "{}\n\nBEFORE THE CLOCK: the {tier} s have not started yet. Plan now, without hurry: the whole task and the \
@@ -191,27 +248,49 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
     let mut plan: Vec<String> = Vec::new();
     let mut briefing_seconds = 0.0f32;
     let mut pending: Option<(Decision, Frame)> = None;
-    match nebius.ask(&task.planners, SYSTEM, &brief_text, &images_with(&brief_seen), 8000, Duration::from_secs(300)).await {
+    match nebius
+        .ask(
+            &task.planners,
+            SYSTEM,
+            &brief_text,
+            &images_with(&brief_seen),
+            8000,
+            Duration::from_secs(300),
+        )
+        .await
+    {
         Ok(answer) => {
             briefing_seconds = answer.seconds;
             match decision_of(&answer.text) {
                 Ok(decision) => {
                     plan = decision.plan.clone();
-                    log_line(&trajectory, json!({
-                        "t": 0.0, "brief": true, "model": answer.model, "model_seconds": answer.seconds, "frame": brief_index,
-                        "thought": decision.thought, "plan": plan, "actions": decision.actions.len(), "moves": decision.actions,
-                    }));
+                    log_line(
+                        &trajectory,
+                        json!({
+                            "t": 0.0, "brief": true, "model": answer.model, "model_seconds": answer.seconds, "frame": brief_index,
+                            "thought": decision.thought, "plan": plan, "actions": decision.actions.len(), "moves": decision.actions,
+                        }),
+                    );
                     pending = Some((decision, brief_frame));
                 }
-                Err(error) => log_line(&trajectory, json!({"t": 0.0, "brief": true, "unreadable": error})),
+                Err(error) => log_line(
+                    &trajectory,
+                    json!({"t": 0.0, "brief": true, "unreadable": error}),
+                ),
             }
         }
-        Err(error) => log_line(&trajectory, json!({"t": 0.0, "brief": true, "error": error})),
+        Err(error) => log_line(
+            &trajectory,
+            json!({"t": 0.0, "brief": true, "error": error}),
+        ),
     }
     let plan_text = if plan.is_empty() {
         String::new()
     } else {
-        format!("\n\nYOUR PLAN (made before the clock):\n- {}", plan.join("\n- "))
+        format!(
+            "\n\nYOUR PLAN (made before the clock):\n- {}",
+            plan.join("\n- ")
+        )
     };
 
     // The clock: from here on, looking and deciding count as much as acting.
@@ -219,7 +298,8 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
     let deadline = started + Duration::from_secs(tier as u64);
     let mut reports: Vec<String> = Vec::new();
     let mut notes: Vec<String> = Vec::new();
-    let (mut decisions, mut executed, mut refused, mut failed_calls) = (0usize, 0usize, 0usize, 0usize);
+    let (mut decisions, mut executed, mut refused, mut failed_calls) =
+        (0usize, 0usize, 0usize, 0usize);
     let mut last_actions = String::new();
     'run: while Instant::now() < deadline {
         let (decision, frame) = match pending.take() {
@@ -234,21 +314,43 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
                     }
                 };
                 let (seen, scale) = fit_width(&window, max_width);
-                let frame = Frame { scale, width: window.width, height: window.height };
+                let frame = Frame {
+                    scale,
+                    width: window.width,
+                    height: window.height,
+                };
                 let index = keep_frame(&seen);
                 let left = deadline.saturating_duration_since(Instant::now());
-                let mut text = context(&format!("Time left: {:.1} s of {tier} s.", left.as_secs_f32()), &seen);
+                let mut text = context(
+                    &format!("Time left: {:.1} s of {tier} s.", left.as_secs_f32()),
+                    &seen,
+                );
                 text.push_str(&plan_text);
                 if !last_actions.is_empty() {
-                    text.push_str(&format!("\n\nYOUR LAST ACTIONS AND WHAT HAPPENED:\n{last_actions}"));
+                    text.push_str(&format!(
+                        "\n\nYOUR LAST ACTIONS AND WHAT HAPPENED:\n{last_actions}"
+                    ));
                 }
                 // One decision may not take the whole run: a model that hangs is left for the next.
-                let answer = match nebius.ask(&task.actors, SYSTEM, &text, &images_with(&seen), 3000, left.min(Duration::from_secs(25))).await {
+                let answer = match nebius
+                    .ask(
+                        &task.actors,
+                        SYSTEM,
+                        &text,
+                        &images_with(&seen),
+                        3000,
+                        left.min(Duration::from_secs(25)),
+                    )
+                    .await
+                {
                     Ok(answer) => answer,
                     Err(error) => {
                         failed_calls += 1;
                         reports.push(format!("no decision: {error}"));
-                        log_line(&trajectory, json!({"t": started.elapsed().as_secs_f32(), "error": error}));
+                        log_line(
+                            &trajectory,
+                            json!({"t": started.elapsed().as_secs_f32(), "error": error}),
+                        );
                         continue;
                     }
                 };
@@ -257,15 +359,21 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
                     Ok(decision) => decision,
                     Err(error) => {
                         last_actions = format!("(your answer could not be read: {error})");
-                        log_line(&trajectory, json!({"t": started.elapsed().as_secs_f32(), "model": answer.model, "unreadable": answer.text.chars().take(400).collect::<String>()}));
+                        log_line(
+                            &trajectory,
+                            json!({"t": started.elapsed().as_secs_f32(), "model": answer.model, "unreadable": answer.text.chars().take(400).collect::<String>()}),
+                        );
                         continue;
                     }
                 };
-                log_line(&trajectory, json!({
-                    "t": started.elapsed().as_secs_f32(), "model": answer.model, "model_seconds": answer.seconds,
-                    "tokens": answer.completion_tokens, "thought": decision.thought, "actions": decision.actions.len(),
-                    "frame": index, "moves": decision.actions,
-                }));
+                log_line(
+                    &trajectory,
+                    json!({
+                        "t": started.elapsed().as_secs_f32(), "model": answer.model, "model_seconds": answer.seconds,
+                        "tokens": answer.completion_tokens, "thought": decision.thought, "actions": decision.actions.len(),
+                        "frame": index, "moves": decision.actions,
+                    }),
+                );
                 (decision, frame)
             }
         };
@@ -277,8 +385,10 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
             match step {
                 Move::Done if task.ends_early => break 'run,
                 Move::Done => {
-                    last_actions.push_str("- done: noted, but the run goes on until the time is up
-");
+                    last_actions.push_str(
+                        "- done: noted, but the run goes on until the time is up
+",
+                    );
                 }
                 Move::Note { text } => notes.push(text.clone()),
                 Move::Wait { ms } => {
@@ -299,7 +409,9 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
                     break 'run;
                 }
                 let kind = action.kind().as_str();
-                let outcome = seat.act(action, &decision.thought, Duration::from_secs(20)).await;
+                let outcome = seat
+                    .act(action, &decision.thought, Duration::from_secs(20))
+                    .await;
                 let said = match &outcome {
                     Ok(o) if o.executed() => {
                         executed += 1;
@@ -314,7 +426,10 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
                         e.clone()
                     }
                 };
-                log_line(&trajectory, json!({"t": started.elapsed().as_secs_f32(), "act": kind, "outcome": said}));
+                log_line(
+                    &trajectory,
+                    json!({"t": started.elapsed().as_secs_f32(), "act": kind, "outcome": said}),
+                );
                 let short: String = format!("{step:?}").chars().take(80).collect();
                 last_actions.push_str(&format!("- {short}: {said}\n"));
             }
@@ -339,17 +454,30 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         let colour_error = bench::colour_error(&target, &drawing);
         // Measured as what was gained over the untouched page: a white page shares the light
         // parts of most pictures, and unnormalised it outscored a run that painted.
-        let measure = |ssim: f32, colour_error: f32| 0.5 * ssim.max(0.0) + 0.5 * (1.0 - (colour_error / 50.0).min(1.0));
+        let measure = |ssim: f32, colour_error: f32| {
+            0.5 * ssim.max(0.0) + 0.5 * (1.0 - (colour_error / 50.0).min(1.0))
+        };
         let blank = Sheet::white(drawing.width, drawing.height);
-        let untouched = measure(bench::ssim(&target, &blank), bench::colour_error(&target, &blank));
-        let objective = ((measure(ssim, colour_error) - untouched) / (1.0 - untouched).max(1e-3)).clamp(0.0, 1.0);
+        let untouched = measure(
+            bench::ssim(&target, &blank),
+            bench::colour_error(&target, &blank),
+        );
+        let objective = ((measure(ssim, colour_error) - untouched) / (1.0 - untouched).max(1e-3))
+            .clamp(0.0, 1.0);
         let critic_question = "You are an art critic. The FIRST image is a reference picture; the SECOND is a copy an \
             AI made of it by operating a Photoshop-like program with only a mouse and keyboard under a time limit. \
             Judge ONLY the second against the first. Reply with one line of JSON: {\"likeness\": 0-10, \"realism\": \
             0-10, \"critique\": \"at most two sentences on what most keeps it from the reference\"}. An empty or \
             untouched canvas is 0 and 0. Be strict and consistent.";
         let verdict = match nebius
-            .ask(&task.critics, "You judge drawings.", critic_question, &[data_url(&target), data_url(&drawing)], 2048, Duration::from_secs(120))
+            .ask(
+                &task.critics,
+                "You judge drawings.",
+                critic_question,
+                &[data_url(&target), data_url(&drawing)],
+                2048,
+                Duration::from_secs(120),
+            )
             .await
         {
             Ok(answer) => {
@@ -371,8 +499,10 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         let mut compare = Sheet::white(target.width * 2 + 8, target.height);
         for row in 0..target.height {
             for col in 0..target.width {
-                compare.pixels[(row * compare.width + col) as usize] = target.pixels[(row * target.width + col) as usize];
-                compare.pixels[(row * compare.width + target.width + 8 + col) as usize] = drawing.pixels[(row * drawing.width + col) as usize];
+                compare.pixels[(row * compare.width + col) as usize] =
+                    target.pixels[(row * target.width + col) as usize];
+                compare.pixels[(row * compare.width + target.width + 8 + col) as usize] =
+                    drawing.pixels[(row * drawing.width + col) as usize];
             }
         }
         std::fs::write(out.join("compare.png"), compare.png()).map_err(|e| e.to_string())?;
@@ -404,25 +534,51 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         lessons.join(" | "),
         log.lines().rev().take(60).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n"),
     );
-    let learned: Vec<String> = match nebius.ask(&task.critics, "You write lessons.", &reflect, &[data_url(&fit_width(&last, max_width).0)], 3000, Duration::from_secs(120)).await {
+    let learned: Vec<String> = match nebius
+        .ask(
+            &task.critics,
+            "You write lessons.",
+            &reflect,
+            &[data_url(&fit_width(&last, max_width).0)],
+            3000,
+            Duration::from_secs(120),
+        )
+        .await
+    {
         Ok(answer) => answer
             .text
             .find('{')
             .zip(answer.text.rfind('}'))
             .and_then(|(a, b)| serde_json::from_str::<serde_json::Value>(&answer.text[a..=b]).ok())
             .and_then(|v| v["lessons"].as_array().cloned())
-            .map(|items| items.iter().filter_map(|i| i.as_str().map(str::to_string)).take(6).collect())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|i| i.as_str().map(str::to_string))
+                    .take(6)
+                    .collect()
+            })
             .unwrap_or_default(),
         Err(_) => Vec::new(),
     };
     let mut kept = learned.clone();
     kept.extend(notes.iter().take(4).cloned());
     result["lessons_learned"] = json!(learned);
-    memory.runs.push(Remembered { run: stamp.clone(), task: task.id.clone(), tier, score, lessons: kept });
+    memory.runs.push(Remembered {
+        run: stamp.clone(),
+        task: task.id.clone(),
+        tier,
+        score,
+        lessons: kept,
+    });
     if let Some(path) = &memory_path {
         memory.save(path)?;
     }
-    std::fs::write(out.join("result.json"), serde_json::to_string_pretty(&result).unwrap_or_default()).map_err(|e| e.to_string())?;
+    std::fs::write(
+        out.join("result.json"),
+        serde_json::to_string_pretty(&result).unwrap_or_default(),
+    )
+    .map_err(|e| e.to_string())?;
     log_line(&out_root.join("results.jsonl"), result.clone());
     println!("{result}");
     Ok(ExitCode::SUCCESS)

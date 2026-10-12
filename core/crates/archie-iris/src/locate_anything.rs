@@ -188,7 +188,10 @@ mod tests {
     fn four_bare_numbers_are_an_answer_and_anything_around_them_is_not() {
         // How one of the models that places controls best actually answers.
         assert_eq!(parse_box("0 206 44 234").unwrap(), [0, 206, 44, 234]);
-        assert_eq!(parse_box(" 10, 20, 900, 950 \n").unwrap(), [10, 20, 900, 950]);
+        assert_eq!(
+            parse_box(" 10, 20, 900, 950 \n").unwrap(),
+            [10, 20, 900, 950]
+        );
         assert_eq!(parse_box("10,20 900,950").unwrap(), [10, 20, 900, 950]);
         for invalid in [
             "the button is at 10 20 900 950",
@@ -200,7 +203,10 @@ mod tests {
             "",
         ] {
             assert!(
-                matches!(parse_box(invalid), Err(LocateAnythingError::InvalidGeometry)),
+                matches!(
+                    parse_box(invalid),
+                    Err(LocateAnythingError::InvalidGeometry)
+                ),
                 "refused: {invalid:?}"
             );
         }

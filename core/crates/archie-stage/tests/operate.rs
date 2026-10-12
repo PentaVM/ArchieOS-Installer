@@ -294,14 +294,19 @@ async fn start_camera(dir: std::path::PathBuf, camera: Camera) -> Client {
                 continue;
             };
             let mut reply = String::new();
-            if matches!(command.action, WireAction::Snapshot { .. } | WireAction::Frame { .. }) {
+            if matches!(
+                command.action,
+                WireAction::Snapshot { .. } | WireAction::Frame { .. }
+            ) {
                 let (pixels, extension) = match command.action {
                     WireAction::Frame { .. } => (PPM, "ppm"),
                     _ => (PNG, "png"),
                 };
                 let path = match camera {
                     Camera::ElsewherePath => dir.join(format!("{}.{extension}", command.seq)),
-                    _ => dir.join("snapshots").join(format!("{}.{extension}", command.seq)),
+                    _ => dir
+                        .join("snapshots")
+                        .join(format!("{}.{extension}", command.seq)),
                 };
                 std::fs::write(&path, pixels).unwrap();
                 let digest = match camera {
@@ -352,7 +357,11 @@ async fn a_live_frame_arrives_raw_under_the_same_checks() {
         panic!("expected a frame, got {outcome:?}");
     };
     assert_eq!(frame.png, PPM);
-    assert_eq!(std::fs::read_dir(dir.join("snapshots")).unwrap().count(), 0, "read once, then removed");
+    assert_eq!(
+        std::fs::read_dir(dir.join("snapshots")).unwrap().count(),
+        0,
+        "read once, then removed"
+    );
 }
 
 #[tokio::test]

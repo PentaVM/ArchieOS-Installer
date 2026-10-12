@@ -33,7 +33,11 @@ fn take(args: &mut Vec<String>, flag: &str) -> Option<String> {
 
 fn number<T: std::str::FromStr>(args: &mut Vec<String>, flag: &str) -> Result<Option<T>, String> {
     take(args, flag)
-        .map(|value| value.parse::<T>().map_err(|_| format!("{flag} is a number")))
+        .map(|value| {
+            value
+                .parse::<T>()
+                .map_err(|_| format!("{flag} is a number"))
+        })
         .transpose()
 }
 
@@ -70,8 +74,13 @@ fn settings(args: &mut Vec<String>) -> Result<bench::Realist, String> {
         settings.layers = text
             .split(',')
             .map(|layer| {
-                let (d, share) = layer.split_once(':').ok_or("--layers is diameter:share,…")?;
-                Ok((d.parse().map_err(|_| "a diameter is a whole number")?, share.parse().map_err(|_| "a share is a number")?))
+                let (d, share) = layer
+                    .split_once(':')
+                    .ok_or("--layers is diameter:share,…")?;
+                Ok((
+                    d.parse().map_err(|_| "a diameter is a whole number")?,
+                    share.parse().map_err(|_| "a share is a number")?,
+                ))
             })
             .collect::<Result<_, String>>()?;
     }
@@ -107,13 +116,19 @@ fn paint(mut args: Vec<String>) -> Result<ExitCode, String> {
         Some(path) => std::fs::write(&path, text).map_err(|e| format!("{path}: {e}"))?,
         None => print!("{text}"),
     }
-    eprintln!("{} events planned in {:.2} s", events.len(), started.elapsed().as_secs_f32());
+    eprintln!(
+        "{} events planned in {:.2} s",
+        events.len(),
+        started.elapsed().as_secs_f32()
+    );
     Ok(ExitCode::SUCCESS)
 }
 
 fn read_events(text: &str) -> Vec<Input> {
     // A line that is not an event is what a real device would do with noise: nothing.
-    text.lines().filter_map(|line| serde_json::from_str::<Input>(line.trim()).ok()).collect()
+    text.lines()
+        .filter_map(|line| serde_json::from_str::<Input>(line.trim()).ok())
+        .collect()
 }
 
 fn side_by_side(a: &Sheet, b: &Sheet) -> Sheet {
@@ -122,7 +137,8 @@ fn side_by_side(a: &Sheet, b: &Sheet) -> Sheet {
     for y in 0..a.height {
         for x in 0..a.width {
             out.pixels[(y * out.width + x) as usize] = a.pixels[(y * a.width + x) as usize];
-            out.pixels[(y * out.width + a.width + gap + x) as usize] = b.pixels[(y * b.width + x) as usize];
+            out.pixels[(y * out.width + a.width + gap + x) as usize] =
+                b.pixels[(y * b.width + x) as usize];
         }
     }
     out
@@ -133,7 +149,10 @@ async fn critic(reference: &Sheet, drawing: &Sheet, models: &[String]) -> serde_
         return json!({"error": "NEBIUS_TOKEN_FACTORY_KEY is not set"});
     };
     let image = |sheet: &Sheet| {
-        format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(sheet.png()))
+        format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(sheet.png())
+        )
     };
     let question = "You are an art critic judging a drawing benchmark. The FIRST image is the \
         reference: Leonardo da Vinci's Mona Lisa. The SECOND image is a drawing an AI made of \
@@ -143,7 +162,10 @@ async fn critic(reference: &Sheet, drawing: &Sheet, models: &[String]) -> serde_
         0-10 (how photorealistic and painterly it looks rather than blocky or scribbled), \
         \"critique\": \"at most two sentences on what most keeps it from the reference\"}. \
         Be strict and consistent: 10 is indistinguishable from the reference.";
-    let http = match reqwest::Client::builder().timeout(std::time::Duration::from_secs(120)).build() {
+    let http = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+    {
         Ok(http) => http,
         Err(error) => return json!({"error": error.to_string()}),
     };
@@ -166,14 +188,20 @@ async fn critic(reference: &Sheet, drawing: &Sheet, models: &[String]) -> serde_
         let text = match answer {
             Ok(response) => match response.error_for_status() {
                 Ok(response) => match response.json::<serde_json::Value>().await {
-                    Ok(value) => value["choices"][0]["message"]["content"].as_str().unwrap_or("").to_string(),
+                    Ok(value) => value["choices"][0]["message"]["content"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_string(),
                     Err(error) => {
                         last_error = format!("{model}: {error}");
                         continue;
                     }
                 },
                 Err(error) => {
-                    last_error = format!("{model}: {}", error.status().map_or("failed".into(), |s| s.to_string()));
+                    last_error = format!(
+                        "{model}: {}",
+                        error.status().map_or("failed".into(), |s| s.to_string())
+                    );
                     continue;
                 }
             },
@@ -192,7 +220,10 @@ async fn critic(reference: &Sheet, drawing: &Sheet, models: &[String]) -> serde_
                 return verdict;
             }
         }
-        last_error = format!("{model}: no verdict in {:?}", text.chars().take(160).collect::<String>());
+        last_error = format!(
+            "{model}: no verdict in {:?}",
+            text.chars().take(160).collect::<String>()
+        );
     }
     json!({"error": last_error})
 }
@@ -222,10 +253,18 @@ async fn judge_into(
         None => objective,
     };
     let seconds = see + plan + replayed.seconds_of_input;
-    let on_time = if see + plan <= SECONDS { 1.0 } else { SECONDS / (see + plan) };
+    let on_time = if see + plan <= SECONDS {
+        1.0
+    } else {
+        SECONDS / (see + plan)
+    };
     let score = 100.0 * quality * on_time;
     std::fs::write(out_dir.join("drawing.png"), drawing.png()).map_err(|e| e.to_string())?;
-    std::fs::write(out_dir.join("compare.png"), side_by_side(target, &drawing).png()).map_err(|e| e.to_string())?;
+    std::fs::write(
+        out_dir.join("compare.png"),
+        side_by_side(target, &drawing).png(),
+    )
+    .map_err(|e| e.to_string())?;
     let result = json!({
         "benchmark": "draw-the-mona-lisa", "version": 1, "painter": painter,
         "unix": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
@@ -235,8 +274,11 @@ async fn judge_into(
         "seconds": {"see": see, "plan": plan, "input": replayed.seconds_of_input, "total": seconds, "limit": SECONDS},
         "events": replayed, "critic": verdict,
     });
-    std::fs::write(out_dir.join("result.json"), serde_json::to_string_pretty(&result).unwrap_or_default())
-        .map_err(|e| e.to_string())?;
+    std::fs::write(
+        out_dir.join("result.json"),
+        serde_json::to_string_pretty(&result).unwrap_or_default(),
+    )
+    .map_err(|e| e.to_string())?;
     Ok(result)
 }
 
@@ -260,7 +302,16 @@ async fn judge(mut args: Vec<String>) -> Result<ExitCode, String> {
     let critics = critics(&mut args);
     let target = reference(&path, width)?;
     let text = std::fs::read_to_string(&events_path).map_err(|e| format!("{events_path}: {e}"))?;
-    let result = judge_into(&target, &read_events(&text), see, plan, &painter, &out_dir, &critics).await?;
+    let result = judge_into(
+        &target,
+        &read_events(&text),
+        see,
+        plan,
+        &painter,
+        &out_dir,
+        &critics,
+    )
+    .await?;
     println!("{}", serde_json::to_string(&result).unwrap_or_default());
     Ok(ExitCode::SUCCESS)
 }
@@ -275,7 +326,13 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
     let critics = critics(&mut args);
     let settings = settings(&mut args)?;
     let painter_name = take(&mut args, "--painter").unwrap_or_else(|| {
-        if painter_cmd.is_some() { "external".into() } else if focus.is_some() { "realist+iris-focus".into() } else { "realist".into() }
+        if painter_cmd.is_some() {
+            "external".into()
+        } else if focus.is_some() {
+            "realist+iris-focus".into()
+        } else {
+            "realist".into()
+        }
     });
     let target = reference(&path, width)?;
     let started = Instant::now();
@@ -295,13 +352,25 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
             let focus = focus_of(focus)?;
             let mut events = bench::realist_with(&target, &focus, budget(see, 1.0), &settings);
             events.truncate(budget(see, started.elapsed().as_secs_f32()));
-            events.iter().map(|e| serde_json::to_string(e).unwrap_or_default() + "\n").collect()
+            events
+                .iter()
+                .map(|e| serde_json::to_string(e).unwrap_or_default() + "\n")
+                .collect()
         }
     };
     let plan = started.elapsed().as_secs_f32();
     std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
     std::fs::write(out_dir.join("events.jsonl"), &text).map_err(|e| e.to_string())?;
-    let result = judge_into(&target, &read_events(&text), see, plan, &painter_name, &out_dir, &critics).await?;
+    let result = judge_into(
+        &target,
+        &read_events(&text),
+        see,
+        plan,
+        &painter_name,
+        &out_dir,
+        &critics,
+    )
+    .await?;
     println!("{}", serde_json::to_string(&result).unwrap_or_default());
     Ok(ExitCode::SUCCESS)
 }

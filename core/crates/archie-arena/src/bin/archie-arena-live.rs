@@ -25,8 +25,10 @@ use archie_model_runtime::routed::{Question, Routed};
 use archie_policy::PolicyEngine;
 use archie_rem::record::{discard_run, keep_run, Sample, Verified};
 use archie_rem::DayBuffer;
+use archie_stage::{
+    learn, Operator, PointerButton, StageAction, StageClient, StagePolicy, StageWorld,
+};
 use archie_types::{ModelRole, PrivacyGrade};
-use archie_stage::{learn, Operator, PointerButton, StageAction, StageClient, StagePolicy, StageWorld};
 use serde_json::json;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -45,7 +47,11 @@ Reply with ONE JSON object only: {\"skill\": \"the tool or game being used, a fe
 \"seconds\": N}, ...]}. Order the steps; their seconds should add up to about the time given.";
 
 fn log_line(path: &Path, value: serde_json::Value) {
-    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
         let _ = writeln!(file, "{value}");
     }
 }
@@ -60,44 +66,79 @@ async fn send(seat: &mut Seat, action: StageAction, why: &str) -> String {
 
 async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
     let task_path = PathBuf::from(take(&mut args, "--task").ok_or("--task is required")?);
-    let tier: u32 = take(&mut args, "--tier").ok_or("--tier is required")?.parse().map_err(|_| "--tier is seconds")?;
+    let tier: u32 = take(&mut args, "--tier")
+        .ok_or("--tier is required")?
+        .parse()
+        .map_err(|_| "--tier is seconds")?;
     let socket = take(&mut args, "--socket").ok_or("--socket is required")?;
     let key = load_key(&take(&mut args, "--key-file").ok_or("--key-file is required")?)?;
-    let policy = StagePolicy::load(&take(&mut args, "--policy").ok_or("--policy is required")?).map_err(|e| e.to_string())?;
+    let policy = StagePolicy::load(&take(&mut args, "--policy").ok_or("--policy is required")?)
+        .map_err(|e| e.to_string())?;
     let out_root = PathBuf::from(take(&mut args, "--out").ok_or("--out is required")?);
-    let iris = take(&mut args, "--iris").ok_or("--iris is required")?.trim_end_matches('/').to_string();
-    let settle: u64 = take(&mut args, "--settle-s").map(|v| v.parse().unwrap_or(20)).unwrap_or(20);
+    let iris = take(&mut args, "--iris")
+        .ok_or("--iris is required")?
+        .trim_end_matches('/')
+        .to_string();
+    let settle: u64 = take(&mut args, "--settle-s")
+        .map(|v| v.parse().unwrap_or(20))
+        .unwrap_or(20);
     let models = take(&mut args, "--models").unwrap_or_else(|| "/etc/archie/models".into());
     let skill_flag = take(&mut args, "--skill");
     let record = take(&mut args, "--record");
-    let rem_spool = PathBuf::from(take(&mut args, "--rem-spool").unwrap_or_else(|| "/run/archie/rem/spool".into()));
-    let rem_day = PathBuf::from(take(&mut args, "--rem-day").unwrap_or_else(|| "/var/lib/archie/rem/day".into()));
+    let rem_spool = PathBuf::from(
+        take(&mut args, "--rem-spool").unwrap_or_else(|| "/run/archie/rem/spool".into()),
+    );
+    let rem_day = PathBuf::from(
+        take(&mut args, "--rem-day").unwrap_or_else(|| "/var/lib/archie/rem/day".into()),
+    );
     let task = Task::load(&task_path)?;
-    let stamp = format!("{}-live-t{tier}", SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
+    let stamp = format!(
+        "{}-live-t{tier}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    );
     let out = out_root.join(&task.id).join(&stamp);
     let frames = out.join("frames");
     std::fs::create_dir_all(&frames).map_err(|e| e.to_string())?;
     let trajectory = out.join("trajectory.jsonl");
 
     if let Some(command) = task.reset.as_ref() {
-        let status = tokio::process::Command::new("sh").arg("-c").arg(command).status().await.map_err(|e| e.to_string())?;
+        let status = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg(command)
+            .status()
+            .await
+            .map_err(|e| e.to_string())?;
         if !status.success() {
             return Err(format!("the reset failed: {status}"));
         }
     }
-    let stream = UnixStream::connect(&socket).await.map_err(|e| format!("{socket}: {e}"))?;
+    let stream = UnixStream::connect(&socket)
+        .await
+        .map_err(|e| format!("{socket}: {e}"))?;
     let (read, write) = stream.into_split();
     let mut seat = Seat {
         operator: Operator::new(key, policy, PolicyEngine::default()),
         client: StageClient::new(read, write),
         world: StageWorld::default(),
-        snapshots: Path::new(&socket).parent().ok_or("--socket has no directory")?.join("snapshots"),
+        snapshots: Path::new(&socket)
+            .parent()
+            .ok_or("--socket has no directory")?
+            .join("snapshots"),
         app_id: task.app_id.clone(),
         principal_id: "archie-arena-live".into(),
     };
     let ready_by = Instant::now() + Duration::from_secs(240);
     while seat.world.surfaces_of(&task.app_id).next().is_none() {
-        learn(&mut seat.client, &mut seat.world, Duration::from_millis(500)).await.map_err(|e| e.to_string())?;
+        learn(
+            &mut seat.client,
+            &mut seat.world,
+            Duration::from_millis(500),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
         if Instant::now() > ready_by {
             return Err(format!("{} never opened a window", task.app_id));
         }
@@ -133,15 +174,35 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         .find('{')
         .zip(answer.text.rfind('}'))
         .and_then(|(a, b)| serde_json::from_str(&answer.text[a..=b]).ok())
-        .unwrap_or(Plan { skill: String::new(), steps: vec![Step { what: task.prompt.clone(), seconds: tier as f32 }] });
+        .unwrap_or(Plan {
+            skill: String::new(),
+            steps: vec![Step {
+                what: task.prompt.clone(),
+                seconds: tier as f32,
+            }],
+        });
     let skill = skill_flag.unwrap_or_else(|| plan.skill.clone());
-    log_line(&trajectory, json!({"t": 0.0, "plan": plan.steps.iter().map(|s| json!({"do": s.what, "seconds": s.seconds})).collect::<Vec<_>>(),
-                                 "skill": skill, "planner": answer.model.to_string(), "planner_seconds": answer.seconds}));
+    log_line(
+        &trajectory,
+        json!({"t": 0.0, "plan": plan.steps.iter().map(|s| json!({"do": s.what, "seconds": s.seconds})).collect::<Vec<_>>(),
+                                 "skill": skill, "planner": answer.model.to_string(), "planner_seconds": answer.seconds}),
+    );
 
     // The clock.
-    let http = reqwest::Client::builder().timeout(Duration::from_secs(5)).build().map_err(|e| e.to_string())?;
-    let _ = http.post(format!("{iris}/act/reset?session={stamp}")).send().await;
-    let focus = send(&mut seat, StageAction::Focus, "give the application the keyboard").await;
+    let http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let _ = http
+        .post(format!("{iris}/act/reset?session={stamp}"))
+        .send()
+        .await;
+    let focus = send(
+        &mut seat,
+        StageAction::Focus,
+        "give the application the keyboard",
+    )
+    .await;
     log_line(&trajectory, json!({"t": 0.0, "focus": focus}));
     let started = Instant::now();
     let deadline = started + Duration::from_secs(tier as u64);
@@ -155,7 +216,13 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
     // decision before it keeps playing: its chunk (the controls planned for the next frames)
     // is carried out on a 60 Hz clock, so the game gets input every frame even when a decision
     // takes several. One connection does both, in turn: the Stage's sequence check is global.
-    let surface_width = seat.world.surfaces_of(&task.app_id).next().map(|s| s.width).unwrap_or(0).max(1) as f32;
+    let surface_width = seat
+        .world
+        .surfaces_of(&task.app_id)
+        .next()
+        .map(|s| s.width)
+        .unwrap_or(0)
+        .max(1) as f32;
     let mut clock = tokio::time::interval(Duration::from_millis(16));
     clock.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut decision: Option<Decision> = None;
@@ -163,7 +230,9 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
     while Instant::now() < deadline {
         let tick = Instant::now();
         let elapsed = started.elapsed().as_secs_f32();
-        let Some(step) = step_at(&plan.steps, elapsed).cloned() else { break };
+        let Some(step) = step_at(&plan.steps, elapsed).cloned() else {
+            break;
+        };
         let window = match seat.frame(FRAME_WIDTH).await {
             Ok(frame) => frame,
             Err(error) => {
@@ -177,18 +246,31 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         // Window pixels per frame pixel: where IRIS points goes back to the window with it.
         let scale = (surface_width / window.width.max(1) as f32).max(1.0);
         // The popup's teal was counted on full-size captures; a smaller frame has fewer pixels.
-        if resets.observe(teal_pixels(&window.pixels), (150.0 / (scale * scale)).ceil() as usize) {
-            log_line(&trajectory, json!({"t": elapsed, "event": "flip_reset_popup"}));
+        if resets.observe(
+            teal_pixels(&window.pixels),
+            (150.0 / (scale * scale)).ceil() as usize,
+        ) {
+            log_line(
+                &trajectory,
+                json!({"t": elapsed, "event": "flip_reset_popup"}),
+            );
         }
         if elapsed as i64 > last_saved {
             last_saved = elapsed as i64;
-            let _ = std::fs::write(frames.join(format!("{:04}.png", ticks)), window.png());
+            let _ = std::fs::write(frames.join(format!("{ticks:04}.png")), window.png());
         }
-        let mut url = format!("{iris}/act?session={stamp}&instruction={}&skill={}", urlencode(&step.what), urlencode(&skill));
+        let mut url = format!(
+            "{iris}/act?session={stamp}&instruction={}&skill={}",
+            urlencode(&step.what),
+            urlencode(&skill)
+        );
         if let Some(app) = &record {
             url.push_str(&format!("&record={stamp}&app={}", urlencode(app)));
         }
-        let ask = http.post(&url).body(archie_arena::image::ppm(&window)).send();
+        let ask = http
+            .post(&url)
+            .body(archie_arena::image::ppm(&window))
+            .send();
         tokio::pin!(ask);
         let mut played = Vec::new();
         let answer = loop {
@@ -213,13 +295,19 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
                 Ok(control) => control,
                 Err(error) => {
                     failed += 1;
-                    log_line(&trajectory, json!({"t": elapsed, "iris": error.to_string()}));
+                    log_line(
+                        &trajectory,
+                        json!({"t": elapsed, "iris": error.to_string()}),
+                    );
                     continue;
                 }
             },
             Err(error) => {
                 failed += 1;
-                log_line(&trajectory, json!({"t": elapsed, "iris": error.to_string()}));
+                log_line(
+                    &trajectory,
+                    json!({"t": elapsed, "iris": error.to_string()}),
+                );
                 continue;
             }
         };
@@ -230,7 +318,11 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         }
         act_ms.push(control.latency_ms);
         decisions += 1;
-        let current = Decision { number: decisions, control, frame_ms };
+        let current = Decision {
+            number: decisions,
+            control,
+            frame_ms,
+        };
         let now_ms = started.elapsed().as_millis();
         let (mut actions, unsupported) = held.actions_towards(&current.at(now_ms), now_ms);
         // A GUI step IRIS says is a click lands where it points, once per decision.
@@ -241,7 +333,11 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         };
         if let (Some(button), true) = (click, task.judge == "gui") {
             if let [x, y] = current.control.pointer[..] {
-                actions.push(StageAction::Click { x: (x * scale).round() as i32, y: (y * scale).round() as i32, button });
+                actions.push(StageAction::Click {
+                    x: (x * scale).round() as i32,
+                    y: (y * scale).round() as i32,
+                    button,
+                });
             }
         }
         let mut outcomes = Vec::new();
@@ -256,11 +352,14 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
             outcomes.push(format!("{kind}:{said}"));
         }
         ticks += 1;
-        log_line(&trajectory, json!({"t": elapsed, "step": step.what, "keys": current.control.keys,
+        log_line(
+            &trajectory,
+            json!({"t": elapsed, "step": step.what, "keys": current.control.keys,
                                      "buttons": current.control.buttons, "step_type": current.control.step_type,
                                      "chunk": current.control.chunk.len(), "act_ms": current.control.latency_ms,
                                      "look_ms": look_ms, "tick_ms": tick.elapsed().as_millis(),
-                                     "sent": outcomes, "played_from_chunk": played, "unsupported": unsupported}));
+                                     "sent": outcomes, "played_from_chunk": played, "unsupported": unsupported}),
+        );
         decision = Some(current);
     }
     for action in held.release_all() {
@@ -271,7 +370,9 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
     // Only a run the judge counted a success in teaches anything.
     let verified = task.judge == "flip_reset" && resets.resets > 0;
     let learning = match &record {
-        Some(app) => keep_or_discard(&http, &iris, app, &stamp, verified, &rem_spool, &rem_day).await,
+        Some(app) => {
+            keep_or_discard(&http, &iris, app, &stamp, verified, &rem_spool, &rem_day).await
+        }
         None => json!(null),
     };
     let result = json!({
@@ -281,7 +382,11 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
         "iris_act_ms_p50": act_ms.get(act_ms.len() / 2), "flip_resets": resets.resets,
         "score": if task.judge == "flip_reset" { json!(resets.resets) } else { json!(null) },
     });
-    std::fs::write(out.join("result.json"), serde_json::to_string_pretty(&result).unwrap_or_default()).map_err(|e| e.to_string())?;
+    std::fs::write(
+        out.join("result.json"),
+        serde_json::to_string_pretty(&result).unwrap_or_default(),
+    )
+    .map_err(|e| e.to_string())?;
     log_line(&out_root.join("results.jsonl"), result.clone());
     println!("{result}");
     Ok(ExitCode::SUCCESS)
@@ -305,7 +410,10 @@ async fn keep_or_discard(
     }
     // IRIS answers once every window it queued is on disk, so this may take a few seconds.
     let asked = http
-        .post(format!("{iris}/act/recorded?app={}&run={run}", urlencode(app)))
+        .post(format!(
+            "{iris}/act/recorded?app={}&run={run}",
+            urlencode(app)
+        ))
         .timeout(Duration::from_secs(120))
         .send()
         .await;
@@ -314,12 +422,15 @@ async fn keep_or_discard(
             .json::<serde_json::Value>()
             .await
             .map_err(|e| e.to_string())
-            .and_then(|body| serde_json::from_value(body["samples"].clone()).map_err(|e| e.to_string())),
+            .and_then(|body| {
+                serde_json::from_value(body["samples"].clone()).map_err(|e| e.to_string())
+            }),
         Err(error) => Err(error.to_string()),
     };
     let kept = samples.and_then(|samples| {
         let buffer = DayBuffer::open(day).map_err(|e| e.to_string())?;
-        keep_run(&buffer, spool, app, run, Verified::TaskOutcome, &samples).map_err(|e| e.to_string())
+        keep_run(&buffer, spool, app, run, Verified::TaskOutcome, &samples)
+            .map_err(|e| e.to_string())
     });
     match kept {
         Ok(count) => json!({"kept": count}),
@@ -334,7 +445,9 @@ async fn keep_or_discard(
 fn urlencode(text: &str) -> String {
     text.bytes()
         .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
             _ => format!("%{b:02X}"),
         })
         .collect()

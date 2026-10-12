@@ -16,9 +16,7 @@ pub mod print;
 
 use super::{body, client, endpoint, MAX_BODY};
 use crate::{
-    contracts::{
-        validate_id, Command, CommandKind, Observation, ObservationOrigin, ResourceState,
-    },
+    contracts::{validate_id, Command, CommandKind, Observation, ObservationOrigin, ResourceState},
     engine::{AdapterAck, AdapterError, EdgeAdapter},
     registry::ResourceDescriptor,
 };
@@ -430,7 +428,12 @@ pub fn encode_print_job(
     attribute(&mut bytes, 0x48, "attributes-natural-language", b"en")?;
     attribute(&mut bytes, 0x45, "printer-uri", uri.as_bytes())?;
     attribute(&mut bytes, 0x42, "job-name", job_name.as_bytes())?;
-    attribute(&mut bytes, 0x49, "document-format", document_format.as_bytes())?;
+    attribute(
+        &mut bytes,
+        0x49,
+        "document-format",
+        document_format.as_bytes(),
+    )?;
     bytes.push(3);
     Ok(bytes)
 }
@@ -606,7 +609,10 @@ impl EdgeAdapter for IppAdapter {
     /// `idle` is true only for printer-state 3 (idle); 4 (processing) and
     /// 5 (stopped) are not idle. `job_present` is the first not-completed
     /// queue entry named `archie-*`, else None.
-    async fn observe(&mut self, resource: &ResourceDescriptor) -> Result<Observation, AdapterError> {
+    async fn observe(
+        &mut self,
+        resource: &ResourceDescriptor,
+    ) -> Result<Observation, AdapterError> {
         self.resource_check(resource)?;
         let attributes_request = self.next_request();
         let attributes = self.ipp.get_printer_attributes(attributes_request).await?;
@@ -636,10 +642,7 @@ impl EdgeAdapter for IppAdapter {
         command: &Command,
     ) -> Result<AdapterAck, AdapterError> {
         command.validate().map_err(|_| AdapterError::Protocol)?;
-        let Command::PrintSubmit {
-            sha256, format, ..
-        } = command
-        else {
+        let Command::PrintSubmit { sha256, format, .. } = command else {
             return Err(AdapterError::Unsupported);
         };
         self.resource_check(resource)?;

@@ -170,7 +170,10 @@ impl crate::Runtime {
     /// Read-only driver planning for one configured printer: a live
     /// Get-Printer-Attributes probe followed by `drivers::analyze`. This never
     /// installs or executes anything; the planned command line is data.
-    pub async fn sentry_printer_doctor(&self, resource_id: &str) -> crate::control::ControlResponse {
+    pub async fn sentry_printer_doctor(
+        &self,
+        resource_id: &str,
+    ) -> crate::control::ControlResponse {
         use crate::control::ControlResponse;
         if archie_sentry::contracts::validate_id(resource_id).is_err() {
             return ControlResponse::error("invalid Sentry printer resource");
