@@ -4,6 +4,7 @@
 pub mod adapters;
 pub mod contracts;
 pub mod engine;
+pub mod feed;
 pub mod journal;
 mod postgres_journal;
 pub mod registry;

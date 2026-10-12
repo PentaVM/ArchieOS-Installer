@@ -1,5 +1,22 @@
 # Bitácora — ArchieOS-Nvidia
 
+## 2026-10-11 — Claude — Solo `main`, pendientes en un PR, Kdenlive en la imagen
+
+Codex se quedó sin créditos a mitad de la consolidación; esto la cierra.
+
+- **Fusionado**: el prototipo de GUI de Xavi (`4b282cd`, PR #31). Codex ya había
+  fusionado los PR #28, #29 y #30 y la voz (`e5cf04a`).
+- **Ramas**: borradas las doce ramas remotas; cada una se comprobó contenida en `main`
+  antes de borrarla. Queda `main` y la rama del PR de pendientes.
+- **Pendientes**: `../docs/PENDIENTES.md` es la lista única, por área y con dueño. El PR
+  en borrador `todo/pendientes` la lleva como lista de tareas.
+- **Operador WSL**: `archie-operate --app kdenlive`, `archie-session run PROGRAMA`, la
+  política de Kdenlive, y `build-operator.sh` pide `kdenlive mlt ffmpeg` y los binarios
+  `archie-bridges` y `archie-mcp-server`. **Solo revisado por sintaxis**: no se
+  construyó imagen (2 GB libres en el constructor) ni se abrió Kdenlive en el Stage.
+- **Pre-release `wsl-operator-2026.10.11`**: no contiene todo. Salió de `b22625e`, antes
+  de la voz y de Kdenlive. Ver la sección 1 de los pendientes.
+
 ## 2026-10-11 — Claude — Captura en vivo, auditoría continua e impresión
 
 Para Codex: leer `../docs/HANDOFF-2026-10-11-SENTRY-AUDITORIA.md`. El dueño pide que lo

@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -26,6 +26,12 @@ struct Args {
 
     #[arg(long)]
     text_logs: bool,
+
+    /// Unified LAN device view (`archie-sentry-devices-v1`), as written by
+    /// `archie sentry-devices --json`. Read at startup and on every poll tick;
+    /// a rejected or unreadable file keeps the last known device graph.
+    #[arg(long)]
+    lan_view: Option<std::path::PathBuf>,
 }
 
 #[tokio::main]
@@ -48,10 +54,14 @@ async fn main() -> std::process::ExitCode {
         }
     };
     let service = Arc::new(WorldService::live_usgs());
+    if let Some(path) = &args.lan_view {
+        refresh_lan_view(&service, path).await;
+    }
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
     let refresher = {
         let service = service.clone();
+        let lan_view = args.lan_view.clone();
         let mut shutdown = shutdown_rx.clone();
         let interval = Duration::from_millis(args.poll_ms.max(10_000));
         tokio::spawn(async move {
@@ -60,7 +70,12 @@ async fn main() -> std::process::ExitCode {
             loop {
                 tokio::select! {
                     _ = shutdown.changed() => if *shutdown.borrow() { return; },
-                    _ = ticker.tick() => service.refresh().await,
+                    _ = ticker.tick() => {
+                        service.refresh().await;
+                        if let Some(path) = &lan_view {
+                            refresh_lan_view(&service, path).await;
+                        }
+                    },
                 }
             }
         })
@@ -93,6 +108,29 @@ async fn main() -> std::process::ExitCode {
     let _ = tokio::time::timeout(Duration::from_secs(3), serving).await;
     let _ = tokio::time::timeout(Duration::from_secs(3), refresher).await;
     std::process::ExitCode::SUCCESS
+}
+
+/// Read the unified device view and fold it into the world graph. A missing or
+/// rejected file keeps the last known graph; the log says which happened.
+async fn refresh_lan_view(service: &WorldService, path: &std::path::Path) {
+    let size = match tokio::fs::metadata(path).await {
+        Ok(metadata) => metadata.len(),
+        Err(error) => {
+            warn!(%error, "lan view unreadable; keeping the last known device graph");
+            return;
+        }
+    };
+    if size > archie_worldd::lan::MAX_VIEW_BYTES as u64 {
+        warn!("lan view exceeds the size limit; keeping the last known device graph");
+        return;
+    }
+    match tokio::fs::read(path).await {
+        Ok(bytes) => match service.ingest_lan_view(&bytes).await {
+            Ok(report) => info!(devices = report.devices, "lan view ingested into the world graph"),
+            Err(error) => warn!(%error, "lan view rejected; keeping the last known device graph"),
+        },
+        Err(error) => warn!(%error, "lan view unreadable; keeping the last known device graph"),
+    }
 }
 
 #[cfg(unix)]
