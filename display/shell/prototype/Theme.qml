@@ -73,9 +73,30 @@ QtObject {
     readonly property int barH: 32
     readonly property int dockIcon: 56
 
-    // Motion: the handoff defines no motion table yet, so only simple state transitions animate.
-    readonly property int fast: reducedMotion ? 0 : 120
-    readonly property int base: reducedMotion ? 0 : 180
+    // Motion (handoff MOVIMIENTO.md): four profiles. Only transform and opacity ever animate;
+    // never blur or shadows. The person's setting decides the profile; `reducedMotion` (also what
+    // the OS "reduce motion" preference forces) kills every spatial movement. The default is the
+    // handoff's recommendation (Balanced); it is an open owner decision (DECISIONES.md, 10).
+    property string motion: "balanced"   // full | balanced | quiet
+    readonly property string profile: reducedMotion ? "reduced" : motion
+    function pick(full, balanced, quiet) { return profile === "full" ? full : profile === "balanced" ? balanced : profile === "quiet" ? quiet : 0 }
+    // Quiet keeps only opacity: no translation or scale.
+    readonly property bool spatial: profile === "full" || profile === "balanced"
+    readonly property int durOpen: pick(220, 160, 100)
+    readonly property int durClose: pick(160, 120, 100)
+    readonly property int durPanel: pick(200, 150, 100)       // control center, activity, workspace menu
+    readonly property int durPalette: pick(180, 140, 100)     // palette and search, opening
+    readonly property int durPaletteClose: pick(120, 100, 100)
+    readonly property int durNav: pick(200, 150, 100)         // folders, list/grid switch
+    readonly property int durToast: pick(240, 180, 100)
+    readonly property int durToastOut: pick(200, 150, 100)
+    readonly property int durDock: pick(160, 120, 100)
+    readonly property int durSel: profile === "reduced" ? 0 : 100
+    readonly property int durPulse: pick(600, 400, 120)
+    // Curves: Salida (out), Entrada (in), Estándar; as cubic-bezier control points.
+    readonly property var easeOut: [0.16, 1, 0.3, 1, 1, 1]
+    readonly property var easeIn: [0.4, 0, 1, 1, 1, 1]
+    readonly property var easeStd: [0.4, 0, 0.2, 1, 1, 1]
 
     // Tinted chip fills: only warn, bad and arch carry a background tint.
     function tint(c, a) { return Qt.rgba(c.r, c.g, c.b, a) }

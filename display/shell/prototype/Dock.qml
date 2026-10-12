@@ -18,8 +18,9 @@ Panel {
             delegate: Item {
                 id: cell
                 width: Theme.dockIcon; height: Theme.dockIcon
-                scale: ma.pressed ? 0.96 : (ma.containsMouse ? 1.12 : 1.0)
-                Behavior on scale { NumberAnimation { duration: Theme.fast; easing.type: Easing.OutCubic } }
+                // Quiet and reduced motion: no scaling, only the highlight below.
+                scale: !Theme.spatial ? 1.0 : (ma.pressed ? 0.96 : (ma.containsMouse ? 1.12 : 1.0))
+                Behavior on scale { NumberAnimation { duration: Theme.durDock; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }
                 // active outline
                 Rectangle { visible: dock.current === modelData.id; anchors.fill: parent; anchors.margins: -4.5; radius: Theme.rDockIcon + 4.5
                     color: "transparent"; border.width: 1.5; border.color: Theme.acc }
@@ -35,6 +36,9 @@ Panel {
                     }
                     Rectangle { anchors.fill: parent; radius: parent.radius; color: "transparent"; border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.14) }
                     Rectangle { anchors.fill: parent; radius: parent.radius; color: Qt.rgba(0, 0, 0, ma.pressed ? 0.18 : 0) }
+                    Rectangle { anchors.fill: parent; radius: parent.radius; color: "white"
+                        opacity: (!Theme.spatial && ma.containsMouse) ? 0.12 : 0
+                        Behavior on opacity { NumberAnimation { duration: Theme.durDock } } }
                     Icon { anchors.centerIn: parent; name: modelData.icon; size: 28; color: "#ffffff" }
                 }
                 Rectangle { visible: modelData.running; width: 4; height: 4; radius: 2; color: Theme.t1

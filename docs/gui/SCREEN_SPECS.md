@@ -55,3 +55,7 @@ Capturas `C-*` en `screenshots/`: `C-real-daemon-unreachable` (trama **real**: `
 ## Actualización: diseño Archie Mac
 
 Las capturas de `screenshots/` y su nomenclatura se sustituyeron por las del diseño Archie Mac (ver `DESIGN_ARCHIE_MAC.md`); los nombres `0x-synthesis`, `C-*`, `S-*` y `A-*` de arriba corresponden al diseño anterior y están en el historial de git. Las posiciones y tamaños de ventanas y paneles son ahora las del diseño.
+
+## Actualización: segunda entrega de Claude Design
+
+Renderizadas ahora, rotuladas «Diseño · datos de ejemplo»: Alt-Tab (8), notificaciones y diálogo de autorización (6), Forge (10), inspector IRIS/Cortex (12), Ajustes (13), bloqueo/arranque/instalador (14), selector de espacio y hueco del Orbe (15) y búsqueda (9). Con las anteriores, **las 15 superficies tienen render**; ninguna de las nuevas tiene datos reales detrás. Detalle, estados y decisiones abiertas en `DESIGN_ARCHIE_MAC.md` §8. Capturas `screenshots/11` a `28`.

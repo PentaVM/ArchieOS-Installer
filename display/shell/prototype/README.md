@@ -13,6 +13,13 @@ qml display/shell/prototype/Main.qml
 Teclas: `Ctrl+K` paleta · `C` centro de control · `A` actividad · `S` Sentry · `G` lista/cuadrícula ·
 `M` movimiento reducido · `O` superficies opacas · `B` desenfoque del compositor (cristal) · `Esc` cerrar.
 
+Superficies de ejemplo de la segunda entrega (todas "Diseño · datos de ejemplo", sin datos reales):
+`W` Alt-Tab · `N` centro de notificaciones · `T` avisos + diálogo de autorización · `F` Forge ·
+`I` inspector IRIS/Cortex · `,` Ajustes · `L` bloqueo/arranque · `Mayús+L` asistente de instalación ·
+`X` selector de espacio (o el chip «Dominio») · `/` búsqueda. `V` recorre los estados
+(normal, vacío, error, offline, degradado, desactualizado) de esas superficies, `.` activa el anillo
+de foco, `H` deja el escritorio vacío, `P` cambia el perfil de movimiento (Full / Balanced / Quiet).
+
 Aspecto: diseño Archie Mac de Claude Design; ver `docs/gui/DESIGN_ARCHIE_MAC.md` (qué se aplicó, desviaciones
 y correcciones a la verdad). Fuentes: `../fonts` (OFL). Referencia: `../design/archie-mac-handoff`.
 Las capturas de `docs/gui/screenshots/` se generaron con Qt 6.12 (PySide6, API gráfica de software,

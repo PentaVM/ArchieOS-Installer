@@ -14,7 +14,7 @@ body{margin:0}
 .root,.root *{box-sizing:border-box}
 .root{--disp:'Space Grotesk','Inter',system-ui,sans-serif;--desktop:#07080c;--bar:rgba(16,17,23,.62);--bar-blur:blur(30px) saturate(1.4);--dock:rgba(20,21,28,.55);--dock-blur:blur(36px);--win:rgba(18,19,26,.78);--win-blur:blur(40px);--side:rgba(26,27,36,.66);--raised:rgba(255,255,255,.05);--hover:rgba(255,255,255,.08);--pressed:rgba(255,255,255,.11);--hair:rgba(255,255,255,.09);--inner:rgba(255,255,255,.06);--t1:#f2f1ee;--t2:#b9b8c4;--t3:#8d8c9c;--tdis:#5e5d6b;--acc:#6fc8f5;--arch:#f0bb78;--ok:#47d18b;--warn:#f0b429;--bad:#f2626b;--info:#6fe3f5;--unk:#8d8c9c;--sel:rgba(111,200,245,.16);font-family:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;font-size:13px;line-height:18px;color:var(--t1);font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
 .root.opaque{--bar:#101117;--bar-blur:none;--dock:#14151c;--dock-blur:none;--win:#12131a;--win-blur:none;--side:#1a1b24;--raised:#22232a;--hover:#2a2b32;--pressed:#31323a;--hair:#2c2d36;--inner:#25262e;--sel:#1f3a4a}
-.root button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:default;text-align:inherit}
+.root :where(button){font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:default;text-align:inherit}
 .root button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .ico{flex:none;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:var(--sw,1.5)}
 .ico .dot{stroke-width:calc(var(--sw,1.5) * 2.2)}
@@ -114,15 +114,13 @@ body{margin:0}
 .dk.set{background:linear-gradient(165deg,rgba(255,255,255,.10),rgba(0,0,0,.14)),#6b7686}
 .dk.act{outline:1.5px solid var(--acc);outline-offset:3px}
 .dk .run{position:absolute;left:50%;bottom:-11px;width:4px;height:4px;margin-left:-2px;border-radius:50%;background:var(--t1)}
+.sph{position:absolute;left:410px;top:14px;width:1100px;height:1052px;background:url(/_blob/c3b3bf3e53c322d2a8d8cce317287da4) center/100% 100% no-repeat;-webkit-mask-image:radial-gradient(closest-side,#000 58%,transparent 100%);mask-image:radial-gradient(closest-side,#000 58%,transparent 100%);pointer-events:none}
 </style>
 </helmet>
 <div class="root {{themeClass}}" style="position:relative;width:1920px;height:1080px;overflow:hidden">
 
 <div class="bg"></div>
-<svg width="1920" height="1080" viewBox="0 0 1920 1080" aria-hidden="true" style="position:absolute;left:0;top:0">
-<path d="M260 140 520 90 840 120 1120 70 1460 130 1740 90M260 140 430 330 700 300 980 250 1280 310 1590 260 1820 380M430 330 160 420M700 300 620 520 900 470 1180 520 1450 480 1700 610M980 250 900 470M1280 310 1180 520M1590 260 1450 480M160 420 380 620 120 700M380 620 620 520M620 520 580 820 300 900M580 820 860 760 1140 820 1420 760 1680 880 1840 1000M900 470 860 760M1180 520 1140 820M1450 480 1420 760M1700 610 1680 880M860 760 1000 1000 1140 820M520 90 430 330M840 120 700 300M1120 70 980 250M1460 130 1280 310M1740 90 1590 260" fill="none" stroke="rgba(170,200,215,0.14)" stroke-width="1"/>
-<path d="M260 140h.01M520 90h.01M840 120h.01M1120 70h.01M1460 130h.01M1740 90h.01M160 420h.01M430 330h.01M700 300h.01M980 250h.01M1280 310h.01M1590 260h.01M1820 380h.01M120 700h.01M380 620h.01M620 520h.01M900 470h.01M1180 520h.01M1450 480h.01M1700 610h.01M300 900h.01M580 820h.01M860 760h.01M1140 820h.01M1420 760h.01M1680 880h.01M1840 1000h.01M1000 1000h.01" fill="none" stroke="rgba(190,215,225,0.42)" stroke-width="5" stroke-linecap="round"/>
-</svg>
+<div class="sph" aria-hidden="true"></div>
 
 <div class="bar">
   <div class="bl">

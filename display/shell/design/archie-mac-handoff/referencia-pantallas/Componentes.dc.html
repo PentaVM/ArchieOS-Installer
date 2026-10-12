@@ -13,7 +13,7 @@
 body{margin:0}
 .root,.root *{box-sizing:border-box}
 .root{--disp:'Space Grotesk','Inter',system-ui,sans-serif;--bar:rgba(16,17,23,.62);--dock:rgba(20,21,28,.55);--raised:rgba(255,255,255,.05);--hover:rgba(255,255,255,.08);--pressed:rgba(255,255,255,.11);--hair:rgba(255,255,255,.09);--inner:rgba(255,255,255,.06);--t1:#f2f1ee;--t2:#b9b8c4;--t3:#8d8c9c;--tdis:#5e5d6b;--acc:#6fc8f5;--arch:#f0bb78;--ok:#47d18b;--warn:#f0b429;--bad:#f2626b;--info:#6fe3f5;--unk:#8d8c9c;--sel:rgba(111,200,245,.16);font-family:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;font-size:13px;line-height:18px;color:var(--t1);font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
-.root button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:default;text-align:inherit}
+.root :where(button){font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:default;text-align:inherit}
 .root button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 .ico{flex:none;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:var(--sw,1.5)}
 .ico .dot{stroke-width:calc(var(--sw,1.5) * 2.2)}

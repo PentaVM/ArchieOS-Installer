@@ -33,7 +33,7 @@ Panel {
         Rectangle { id: seg; anchors.right: parent.right; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter
             width: 76; height: 28; radius: 9; color: Theme.raised; border.width: 1; border.color: Theme.hair
             Rectangle { x: win.gridView ? 38 : 2; y: 2; width: 34; height: 24; radius: 7; color: Theme.pressed
-                Behavior on x { NumberAnimation { duration: Theme.fast; easing.type: Easing.OutCubic } } }
+                Behavior on x { NumberAnimation { duration: Theme.durNav; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeStd } } }
             Item { x: 2; y: 2; width: 34; height: 24; Icon { anchors.centerIn: parent; name: "list"; size: 16; color: win.gridView ? Theme.t3 : Theme.t1 }
                 MouseArea { anchors.fill: parent; onClicked: win.gridView = false } }
             Item { x: 38; y: 2; width: 34; height: 24; Icon { anchors.centerIn: parent; name: "grid"; size: 16; color: win.gridView ? Theme.t1 : Theme.t3 }

@@ -84,3 +84,9 @@ Casos negativos: nadie escucha (`displayd_offline`), respuesta que no cumple el 
 ## Rediseño visual Archie Mac (Claude Design)
 
 Sin cambios en Rust ni en el modelo de datos. `BridgeModelTest.qml`: 21 comprobaciones, 0 fallos. Las 10 pantallas del prototipo y dos a 1440p cargan con 0 avisos de QML (Qt 6.12, render por software). Verificación visual: **contra el código de los mockups, no contra una imagen del diseño** (el paquete declara que no se renderizó nunca y sus `.dc.html` no se pueden abrir sin su runtime). Defectos hallados al renderizar y corregidos: texto que se transparentaba a través de paneles sin desenfoque (ahora `Theme.blur`), barra de progreso de la cola pegada al texto, texto del resumen del sistema que se salía de su caja y falta de aire bajo los chips del centro de control. No verificado: Quickshell, desenfoque real, lectores de pantalla, rendimiento. Ver `DESIGN_ARCHIE_MAC.md` §4–5.
+
+## Segunda entrega de diseño (8 superficies, movimiento)
+
+- `BridgeModelTest.qml`: 21 comprobaciones, 0 fallos (el modelo de datos no se tocó).
+- Render por software (Qt 6.12, PySide6, `offscreen`) de las 8 superficies nuevas y de sus seis estados, más Vault, paleta y escritorio: **0 mensajes de QML**. Se compararon el escritorio y Vault en cuadrícula con las capturas anteriores: sólo difiere el chip de enlace, porque las anteriores se hicieron con una trama reproducida.
+- **No se probó**: que las animaciones se vean y duren como la tabla de movimiento (sólo se comprobó que cargan sin errores); Quickshell; desenfoque real; lectores de pantalla; rendimiento. No hay pruebas automáticas de las superficies nuevas.

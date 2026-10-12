@@ -7,7 +7,7 @@ Estado: **rediseño visual aplicado al prototipo Qt Quick** (`display/shell/prot
 Entregado por Claude Design a partir del sistema de diseño "Archie Mac" (paquete `archie-mac-handoff`, copiado sin modificar a `display/shell/design/archie-mac-handoff/`):
 
 - `DISENO_ARCHIE_MAC.md`: especificación; `tokens.css` / `tokens.json`; `componentes.css`; `icons.json` / `icons.svg` (69 iconos de línea 24×24); `referencia-pantallas/` (10 mockups `.dc.html`, que usan un motor de plantillas propio y no se pueden abrir sin su `support.js`, que no viene en el paquete).
-- **El propio paquete declara que ninguna pantalla se abrió ni se renderizó**: todo sale del código de los mockups. Por eso lo aplicado se comparó contra el *código* de los mockups (estructura, tamaños, textos), **no contra una imagen del diseño**.
+- **La primera entrega declaraba que ninguna pantalla se había renderizado**: todo salía del código de los mockups, y se comparó contra el *código* (estructura, tamaños, textos), no contra una imagen. La **segunda entrega** (§8) dice haber renderizado y revisado sus pantallas nuevas en un navegador de pruebas; yo tampoco he visto esos renders (los `.dc.html` no se abren sin `support.js`, que no viene), así que lo aplicado sigue comparándose contra el código.
 
 ## 2. Qué se aplicó
 
@@ -48,9 +48,62 @@ Desviaciones técnicas (Qt Quick no puede reproducirlo igual):
 ## 5. No verificado
 
 - Quickshell, Wayland, NVIDIA; desenfoque real del compositor; lectores de pantalla; contraste medido sobre el fondo real (el diseño lo asume sobre `--desktop`); rendimiento.
-- Las 8 superficies que el sistema pidió y el paquete no incluye (Alt-Tab, notificaciones, Forge, inspector de IRIS/Cortex, Ajustes, bloqueo, coexistencia con el Orbe, búsqueda), la tabla de movimiento, la lista de decisiones y las versiones 2560×1440 de todas las pantallas: **el propio paquete los declara pendientes**. Se renderizaron a 1440p sólo el escritorio y la actividad.
+- Las 8 superficies, la tabla de movimiento y la lista de decisiones llegaron en la segunda entrega (§8). Se renderizaron a 1440p sólo el escritorio y la actividad; las versiones 2560×1440 del paquete no se han aplicado ni comparado (son la misma shell a escala 1,333×).
 - La esfera: no se tocó ni se ha visto renderizada; el fondo del prototipo es el provisional del diseño.
 
 ## 6. Capturas
 
 `docs/gui/screenshots/`: `01-escritorio`, `02-vault-cuadricula`, `03-centro-sin-respuesta` (trama **real**), `04-centro-en-vivo` (trama **sintética**), `05-actividad` (bridge real sobre un espacio de trabajo sintético), `06-sentry-dispositivos` (inventario sintético), `07-sentry-sin-escaner` (trama **real**), `08-paleta`, `09-opaca`, `10-cristal-con-blur`, y `01-escritorio-1440p`, `05-actividad-1440p`. Generadas con Qt 6.12 (PySide6, render por software, `offscreen`).
+
+## 8. Segunda entrega: 8 superficies, movimiento y decisiones
+
+Paquete `archie-mac-handoff actualizado` (copiado sin modificar a `display/shell/design/archie-mac-handoff/`). Tokens idénticos; cambian `componentes.css` (selectores de botón con `:where`), los iconos (81, +12: `bell`, `windows`, `plug`, `trace`, `key`, `cloud`, `power`, `lines`, `stack`, `spaces`, `bug`, `enter`; los 69 anteriores no cambian), y se añaden `MOVIMIENTO.md`, `DECISIONES.md`, `assets/esfera-crop.jpg` y los mockups nuevos (8 superficies × normal / 2560 / estados, más movimiento y decisiones).
+
+**Aplicado** (todo sobre `display/shell/prototype`; teclas en el `README.md` de esa carpeta):
+
+| Superficie | Archivo | Tecla |
+|---|---|---|
+| Alt-Tab / vista general | `WindowSwitcher.qml` | `W` |
+| Notificaciones: centro, avisos emergentes, diálogo de autorización | `NotificationCenter.qml`, `Toasts.qml`, `AuthDialog.qml` | `N`, `T` |
+| Forge | `ForgeWindow.qml` (también desde el dock) | `F` |
+| Inspector IRIS / Cortex | `InspectorPanel.qml` | `I` |
+| Ajustes (4 secciones) | `SettingsWindow.qml` (también desde el dock) | `,` |
+| Bloqueo, arranque, asistente de instalación | `LockScreen.qml` | `L`, `Mayús+L` |
+| Selector de espacio de trabajo + hueco del Orbe | `WorkspaceMenu.qml`, `OrbHole.qml` | `X` o el chip «Dominio» |
+| Búsqueda | `SearchPanel.qml` | `/` |
+
+Cada una dibuja sus estados (normal, vacío, error, offline, degradado, desactualizado) y el anillo de foco visible, gobernados por `Demo.qml` (`V` cambia de estado, `.` el foco, `H` deja el escritorio vacío como en los tableros del diseño). Componentes compartidos: `StateChip`, `VoidBox`, `ErrBox`, `NoteBox`, `Why`, `Btn`, `FootHints`, `Kbd`, `Eyebrow`, `ListRow`, `AppWindow`, `SideRow`, `DomainDot`. Capturas: `screenshots/11` a `20` (normal) y `21` a `28` (hojas de seis estados).
+
+**Movimiento** (`MOVIMIENTO.md` → `Theme.qml`): cuatro perfiles (Full, Balanced, Quiet, Movimiento reducido) con las duraciones y curvas del paquete; sólo `transform` y `opacity`. Paneles y ventanas aparecen y desaparecen con fundido más deslizamiento o escala (`Panel.shown`); el dock y el conmutador lista/cuadrícula usan los mismos perfiles; en Quiet no hay escalado y en reducido todo es instantáneo. `P` cambia de perfil, `M` fuerza movimiento reducido. **No hay disparo real** para copia con progreso, diálogo de autorización ni etapas de Forge: se dibujan rotulados «Diseño».
+
+**Correcciones a la verdad** (misma regla aprobada para la primera entrega): el diseño rotula casi todo «Real · bridge» o «Real · shell», pero el bridge no entrega ventanas, historial de notificaciones, catálogo de puentes, trayectorias de Cortex, proveedores, modelos, política de apps ni diagnóstico. Todas esas superficies dicen **«Diseño · datos de ejemplo»**. La búsqueda no lleva chip propio, igual que el diseño: la rotula el aviso «Datos de diseño» de la shell. Los trabajos largos reales del bridge siguen viéndose en el panel de Actividad, no en estas muestras.
+
+**Cambios de comportamiento que el diseño introduce y que hay que aprobar** (no son sólo visuales):
+- El chip «Dominio» de la barra ahora abre el selector de espacio (decisión 5 del paquete). El chip sigue diciendo «sin lectura»; el menú es de ejemplo.
+- Los iconos Forge y Ajustes del dock abren sus ventanas de ejemplo.
+- La búsqueda (`/`) es una superficie distinta de la paleta (`Ctrl+K`): la lupa de la barra sigue abriendo la paleta. El paquete no aclara cuál de las dos debe abrir la lupa.
+- El perfil de movimiento por omisión es **Balanced** (recomendación del paquete); antes la animación era única.
+
+**Desviaciones:** la tipografía monoespaciada es la del sistema (el diseño usa `ui-monospace`); la ventana de Ajustes tiene alto fijo de 520 (el diseño dice `min-height`); `OrbHole` sólo se ve con el escritorio vacío (`H`) para no tapar Vault; sombras aproximadas como antes; sin versiones 2560×1440 propias.
+
+### Decisiones abiertas del dueño (`DECISIONES.md`)
+
+Ninguna cambia lo entregado hasta que se elija. Lo que hizo el prototipo mientras tanto:
+
+| # | Decisión | Recomendación del diseño | Estado en el prototipo |
+|---|---|---|---|
+| 1 | Escala en 2560×1440 | seguir la escala del sistema | sin resolver; se renderiza proporcional |
+| 2 | Fondo con la esfera | campo 3D en vivo, imagen de respaldo | **no tocado**: fondo provisional de nodos; `assets/esfera-crop.jpg` queda en el paquete y no se usa |
+| 3 | Color de la esfera frente al grafito | dejarlos | sin efecto aquí |
+| 4 | Alt-Tab con miniaturas | icono + título | aplicado icono + título |
+| 5 | Dónde vive el selector de espacio | sólo en el chip «Dominio» | aplicado (ver arriba) |
+| 6 | Escalada de autorización | diálogo central | aplicado como diálogo de ejemplo con «Permitir» deshabilitado |
+| 7 | Agrupar notificaciones | por origen | aplicado por origen |
+| 8 | Indicador del arranque | lista de servicios | aplicado, sin porcentaje |
+| 9 | Modo opaco | automático + ajuste manual | sólo el ajuste manual (`O`); no lee la preferencia del sistema |
+| 10 | Perfil de movimiento por omisión | Balanced | aplicado Balanced |
+| 11 | Alojamiento de tipografías | empaquetarlas | ya empaquetadas (`display/shell/fonts`) |
+
+### No verificado en la segunda entrega
+
+Quickshell, desenfoque real, lectores de pantalla, rendimiento y que el movimiento se vea como el diseño (no hay referencia renderizada). Las animaciones se comprobaron sólo por ausencia de errores de QML; no se midió su duración real.

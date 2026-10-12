@@ -1,3 +1,4 @@
 singleton Theme 1.0 Theme.qml
 singleton Synthetic 1.0 Synthetic.qml
 singleton Icons 1.0 Icons.qml
+singleton Demo 1.0 Demo.qml

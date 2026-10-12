@@ -9,6 +9,22 @@ Item {
     property string kind: "panel"       // window | panel | dock
     default property alias data: holder.data
     property alias contentItem: holder
+    // Reveal (MOVIMIENTO.md): opacity plus a short slide (panels) or scale (windows); only
+    // transform and opacity. Quiet keeps opacity alone; reduced motion shows or hides at once.
+    property bool shown: true
+    property real enterDy: 0
+    property real enterScale: 1
+    property int durIn: Theme.durPanel
+    property int durOut: Theme.durPanel
+    property var easeIn: Theme.easeOut
+    property var easeOut: Theme.easeIn
+    opacity: shown ? 1 : 0
+    visible: opacity > 0
+    scale: (shown || !Theme.spatial) ? 1 : enterScale
+    transform: Translate { y: (p.shown || !Theme.spatial) ? 0 : p.enterDy
+        Behavior on y { NumberAnimation { duration: p.shown ? p.durIn : p.durOut; easing.type: Easing.BezierSpline; easing.bezierCurve: p.shown ? p.easeIn : p.easeOut } } }
+    Behavior on opacity { NumberAnimation { duration: p.shown ? p.durIn : p.durOut; easing.type: Easing.BezierSpline; easing.bezierCurve: p.shown ? p.easeIn : p.easeOut } }
+    Behavior on scale { NumberAnimation { duration: p.shown ? p.durIn : p.durOut; easing.type: Easing.BezierSpline; easing.bezierCurve: p.shown ? p.easeIn : p.easeOut } }
     readonly property int radius: kind === "window" ? Theme.rWindow : kind === "dock" ? Theme.rDock : Theme.rPanel
     readonly property color fill: kind === "window" ? Theme.win : kind === "dock" ? Theme.dock : Theme.panel
     readonly property int shY: kind === "window" ? 18 : kind === "dock" ? 8 : 24

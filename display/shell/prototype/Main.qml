@@ -5,7 +5,10 @@ import QtQuick
 // The Quickshell host layer (PanelWindow, layer-shell) is not part of this file and is untested.
 //
 //   Ctrl+K palette   C control center   A activity   S sentry   G grid/list
-//   M reduced motion   O opaque surfaces   B compositor blur (glass)   Esc close
+//   W windows (Alt-Tab)   N notifications   T toasts + authorization   F forge   I inspector
+//   , settings   L lock   Shift+L installer   X workspace menu   / search
+//   V cycle the state shown by the design-sample surfaces   . visible-focus ring   H bare desktop
+//   M reduced motion   P motion profile (full / balanced / quiet)   O opaque   B glass   Esc close
 //
 // Positions follow the design's 1920x1080 board: Vault 88/100 (list) or 88/92 (grid), Stage
 // 110 px from the right edge, right panels 24 px from the right edge, Sentry and palette centred.
@@ -37,6 +40,8 @@ Item {
         for (var i = 0; i < lines.length; i++) if (lines[i].trim() !== "") bridgeModel.ingest(lines[i])
     }
 
+    function toggle(name) { overlay = overlay === name ? "" : name }
+
     Keys.onPressed: function (e) {
         if (e.key === Qt.Key_Escape) overlay = ""
         else if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_K) overlay = overlay === "palette" ? "" : "palette"
@@ -44,6 +49,19 @@ Item {
         else if (e.key === Qt.Key_S) overlay = overlay === "sentry" ? "" : "sentry"
         else if (e.key === Qt.Key_A) overlay = overlay === "activity" ? "" : "activity"
         else if (e.key === Qt.Key_G) vault.gridView = !vault.gridView
+        else if (e.key === Qt.Key_W) toggle("switcher")
+        else if (e.key === Qt.Key_N) toggle("notif")
+        else if (e.key === Qt.Key_T) toggle("avisos")
+        else if (e.key === Qt.Key_F) toggle("forge")
+        else if (e.key === Qt.Key_I) toggle("inspector")
+        else if (e.key === Qt.Key_Comma) toggle("settings")
+        else if (e.key === Qt.Key_L) { lock.installer = !!(e.modifiers & Qt.ShiftModifier); toggle("lock") }
+        else if (e.key === Qt.Key_X) toggle("workspace")
+        else if (e.key === Qt.Key_Slash) toggle("search")
+        else if (e.key === Qt.Key_V) Demo.next()
+        else if (e.key === Qt.Key_Period) Demo.focusRing = !Demo.focusRing
+        else if (e.key === Qt.Key_H) Demo.bare = !Demo.bare
+        else if (e.key === Qt.Key_P) Theme.motion = Theme.motion === "full" ? "balanced" : (Theme.motion === "balanced" ? "quiet" : "full")
         else if (e.key === Qt.Key_M) Theme.reducedMotion = !Theme.reducedMotion
         else if (e.key === Qt.Key_O) Theme.opaque = !Theme.opaque
         else if (e.key === Qt.Key_B) Theme.blur = !Theme.blur
@@ -52,17 +70,17 @@ Item {
     Background { anchors.fill: parent }
 
     TopBar { id: bar; width: parent.width; overlay: root.overlay; bridge: bridgeModel
-        app: root.overlay === "sentry" ? "Sentry" : "Vault"
+        app: root.overlay === "sentry" ? "Sentry" : root.overlay === "forge" ? "Forge" : root.overlay === "settings" ? "Ajustes" : "Vault"
         onToggle: function (n) { root.overlay = root.overlay === n ? "" : n } }
 
     DesignBanner { x: 14; y: 42 }
 
     // Vault: list 1060x720 at (88,100); grid 1060x840 at (88,92).
-    VaultWindow { id: vault; x: 88; y: gridView ? 92 : 100; width: 1060; height: gridView ? 840 : 720 }
+    VaultWindow { id: vault; visible: !Demo.bare; x: 88; y: gridView ? 92 : 100; width: 1060; height: gridView ? 840 : 720 }
 
     // Stage: a window of its own program. Its inside (compositor, agent cursor, captions) is
     // outside this redesign.
-    Panel { kind: "window"; x: root.width - 600 - 110; y: 172; width: 600; height: 400
+    Panel { kind: "window"; visible: !Demo.bare; x: root.width - 600 - 110; y: 172; width: 600; height: 400
         Item { width: parent.width; height: 52
             Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.hair }
             Row { x: 16; anchors.verticalCenter: parent.verticalCenter; spacing: 8
@@ -85,13 +103,31 @@ Item {
                     Text { anchors.horizontalCenter: parent.horizontalCenter; text: "otro programa · fuera de este rediseño"; color: Theme.t3; font.family: Theme.font; font.pixelSize: 11 } } } } }
 
     Dock { id: dock; anchors.horizontalCenter: parent.horizontalCenter; y: parent.height - height - 14
-        onLaunched: function (id) { if (id === "sentry") root.overlay = root.overlay === "sentry" ? "" : "sentry" } }
+        onLaunched: function (id) {
+            if (id === "sentry") root.toggle("sentry")
+            else if (id === "forge") root.toggle("forge")
+            else if (id === "set") root.toggle("settings") } }
 
-    Item { anchors.fill: parent; visible: root.overlay !== ""
-        MouseArea { anchors.fill: parent; onClicked: root.overlay = "" }
-        ControlCenter { bridge: bridgeModel; visible: root.overlay === "control"; x: root.width - width - 24; y: 44 }
-        ActivityCenter { bridge: bridgeModel; visible: root.overlay === "activity"; x: root.width - width - 24; y: 44 }
-        SentryPanel { bridge: bridgeModel; visible: root.overlay === "sentry"; x: (root.width - width) / 2; y: 110 }
-        CommandPalette { visible: root.overlay === "palette"; x: (root.width - width) / 2; y: 140 }
+    // Overlays. Each panel reveals itself with `shown` (opacity plus a short slide or scale; see
+    // Theme motion tokens), so closing fades out instead of vanishing.
+    Item { anchors.fill: parent
+        MouseArea { anchors.fill: parent; enabled: root.overlay !== "" && root.overlay !== "lock"; onClicked: root.overlay = "" }
+        ControlCenter { bridge: bridgeModel; shown: root.overlay === "control"; enterDy: -8; x: root.width - width - 24; y: 44 }
+        ActivityCenter { bridge: bridgeModel; shown: root.overlay === "activity"; enterDy: -8; x: root.width - width - 24; y: 44 }
+        SentryPanel { bridge: bridgeModel; shown: root.overlay === "sentry"; enterDy: -8; x: (root.width - width) / 2; y: 110 }
+        CommandPalette { shown: root.overlay === "palette"; enterDy: -8; durIn: Theme.durPalette; durOut: Theme.durPaletteClose; x: (root.width - width) / 2; y: 140 }
+
+        // Surfaces added by the second handoff. All design samples (see Demo.qml).
+        WindowSwitcher { shown: root.overlay === "switcher"; enterDy: -8; durIn: Theme.durPalette; durOut: Theme.durPaletteClose; x: (root.width - width) / 2; y: 250 }
+        NotificationCenter { shown: root.overlay === "notif"; enterDy: -8; x: root.width - width - 24; y: 44 }
+        Toasts { shown: root.overlay === "avisos"; x: root.width - width - 14; y: 44 }
+        AuthDialog { shown: root.overlay === "avisos"; x: 620; y: 340; onRejected: root.overlay = "" }
+        ForgeWindow { shown: root.overlay === "forge"; x: 460; y: 130; width: 1000; height: 560 }
+        InspectorPanel { shown: root.overlay === "inspector"; enterDy: -8; x: root.width - width - 24; y: 44 }
+        SettingsWindow { shown: root.overlay === "settings"; x: 490; y: 140; width: 940; height: 520 }
+        OrbHole { visible: root.overlay === "workspace" && Demo.bare; x: 700; y: 250 }
+        WorkspaceMenu { shown: root.overlay === "workspace"; x: 1338; y: 42 }
+        SearchPanel { shown: root.overlay === "search"; x: (root.width - width) / 2; y: 140 }
     }
+    LockScreen { id: lock; visible: root.overlay === "lock" }
 }

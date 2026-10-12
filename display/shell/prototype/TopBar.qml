@@ -42,7 +42,10 @@ Rectangle {
         LinkChip { bridge: bar.bridge; anchors.verticalCenter: parent.verticalCenter }
         // No source is wired for these two yet (GUI-SENTRY-002, GUI-CEREBRA-002): they say so.
         Chip { text: "Cámara y micro"; sub: "sin lectura"; icon: "unknown"; tone: "unk"; anchors.verticalCenter: parent.verticalCenter }
-        Chip { text: "Dominio"; sub: "sin lectura"; icon: "unknown"; tone: "unk"; anchors.verticalCenter: parent.verticalCenter }
+        // Opens the workspace menu (decision 5 of the handoff: the selector lives in this chip).
+        Item { width: dom.width; height: dom.height; anchors.verticalCenter: parent.verticalCenter
+            Chip { id: dom; text: "Dominio"; sub: "sin lectura"; icon: "unknown"; tone: "unk" }
+            MouseArea { anchors.fill: parent; onClicked: bar.toggle("workspace") } }
         Item { width: 13; height: 14; anchors.verticalCenter: parent.verticalCenter
             Rectangle { anchors.centerIn: parent; width: 1; height: 14; color: Theme.hair } }
         IconButton { icon: "search"; active: bar.overlay === "palette"; onClicked: bar.toggle("palette"); anchors.verticalCenter: parent.verticalCenter }
