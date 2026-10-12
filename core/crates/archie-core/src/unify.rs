@@ -205,6 +205,9 @@ pub struct NetwatchDevice {
     pub asked: BTreeSet<String>,
     /// Bytes sent to each place outside the LAN. Not copied into the view either.
     pub sent_to: BTreeMap<String, u64>,
+    /// The device's learned usual sending. Accepted, not copied into the view.
+    #[serde(default)]
+    pub baseline: Option<serde_json::Value>,
 }
 
 /// An `archie-netwatch-state-v1` document, validated at the boundary.

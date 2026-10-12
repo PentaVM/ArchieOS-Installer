@@ -85,6 +85,7 @@ fn severity_for_rule(rule: &str) -> Option<AlertSeverity> {
         "address-moved" => Some(AlertSeverity::Notice),
         "cleartext-login" => Some(AlertSeverity::Warning),
         "dns-tunnel-suspect" => Some(AlertSeverity::Warning),
+        "traffic-surge" => Some(AlertSeverity::Warning),
         "port-scan" => Some(AlertSeverity::High),
         "host-sweep" => Some(AlertSeverity::High),
         _ => None,

@@ -98,8 +98,11 @@ fixture se reporta como fixture, no como dispositivo real. Un PR por avance, con
   `address-moved`, `host-sweep`. En WSL el DNS sale por loopback; hace falta Linux real o
   capturar en `any`. *Hecho cuando:* cada una salta con tráfico generado y queda el
   comando que lo reproduce.
-- [ ] **7. Baselines por dispositivo**: volumen y destinos habituales, alerta por
-  desviación. Los umbrales actuales (100 puertos, 50 hosts, entropía 4,0) son criterio,
+- [~] **7. Baselines por dispositivo**: volumen y destinos habituales, alerta por
+  desviación. **Parcial (Claude, 2026-10-12):** volumen, sí: `traffic-surge`, con media
+  y varianza móviles por tramos de 10 minutos, persistidas en `state.json`, aprendidas
+  durante un día y avisadas como mucho una vez por hora. Destinos habituales, no. La
+  tasa de falsos positivos sigue sin medir. Los umbrales actuales (100 puertos, 50 hosts, entropía 4,0) son criterio,
   no medida. *Hecho cuando:* hay una tasa de falsos positivos medida sobre una captura
   real de al menos un día.
 - [x] **8. Adaptador del router** (DHCP, vecinos, Wi-Fi), según el firmware real: el de

@@ -160,6 +160,9 @@ pub fn spoken_for(rule: &str, severity: Severity) -> &'static str {
             "Sentry: un equipo de la red está probando el mismo puerto en muchos otros."
         }
         ("cleartext-login", _) => "Sentry: un equipo abrió una sesión sin cifrar.",
+        ("traffic-surge", _) => {
+            "Sentry: un equipo está enviando mucho más tráfico de lo habitual."
+        }
         ("dns-tunnel-suspect", _) => {
             "Sentry: un equipo hace consultas DNS que parecen llevar datos."
         }

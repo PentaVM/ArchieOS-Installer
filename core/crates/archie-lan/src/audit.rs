@@ -14,6 +14,7 @@
 //! | `host-sweep` | one device opens the same port on 50 LAN hosts within a minute |
 //! | `cleartext-login` | a device opens Telnet or FTP, which carry passwords in the clear |
 //! | `dns-tunnel-suspect` | a DNS question is long and random enough to be carrying data |
+//! | `traffic-surge` | a device that has been learned for a day sends far more in ten minutes than it usually does |
 //!
 //! Time is the frames' own, so a capture file is audited exactly as the live network is.
 
@@ -39,6 +40,19 @@ const MOVED_COOLDOWN_MS: u64 = 60 * 60 * 1000;
 const WINDOW_MS: u64 = 60_000;
 const SCAN_PORTS: usize = 100;
 const SWEEP_HOSTS: usize = 50;
+/// A device's sending is measured in buckets of this length.
+const BUCKET_MS: u64 = 10 * 60 * 1000;
+/// Buckets learned before a device's usual sending is trusted: one day.
+const BASELINE_BUCKETS: u32 = 144;
+/// How fast the usual moves: a bucket counts as much as about a day of history.
+const BASELINE_ALPHA: f64 = 1.0 / 144.0;
+/// A bucket is a surge only above all three: this many bytes, this many times the
+/// usual, and this many deviations above it. Criterion, not measurement.
+const SURGE_MIN_BYTES: u64 = 50 * 1024 * 1024;
+const SURGE_FACTOR: f64 = 4.0;
+const SURGE_SIGMAS: f64 = 6.0;
+/// One device's surges are told at most once in this long.
+const SURGE_COOLDOWN_MS: u64 = 60 * 60 * 1000;
 const STATE_FORMAT: &str = "archie-netwatch-state-v1";
 const TOLD_FORMAT: &str = "archie-netwatch-told-v1";
 
@@ -55,6 +69,77 @@ pub struct Device {
     pub asked: BTreeSet<String>,
     /// Bytes sent to each place outside the LAN, by server name where one was seen.
     pub sent_to: BTreeMap<String, u64>,
+    /// How much it usually sends. Absent in files written before it existed.
+    #[serde(default)]
+    pub baseline: Baseline,
+}
+
+/// A device's usual sending, learned per ten-minute bucket as an exponentially
+/// weighted mean and variance, so it follows the device without keeping history.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Baseline {
+    /// Start of the bucket being filled.
+    pub bucket_start_ms: u64,
+    /// Bytes sent in it so far.
+    pub bucket_bytes: u64,
+    /// Buckets closed so far, saturating.
+    pub buckets: u32,
+    pub mean: f64,
+    pub variance: f64,
+}
+
+impl Baseline {
+    /// Whether enough has been learned to judge a bucket against it.
+    pub fn learned(&self) -> bool {
+        self.buckets >= BASELINE_BUCKETS
+    }
+
+    /// The bytes above which the open bucket is a surge.
+    pub fn surge_line(&self) -> u64 {
+        let usual = self.mean.max(0.0);
+        let spread = usual + SURGE_SIGMAS * self.variance.max(0.0).sqrt();
+        (SURGE_MIN_BYTES as f64)
+            .max(usual * SURGE_FACTOR)
+            .max(spread)
+            .min(u64::MAX as f64) as u64
+    }
+
+    fn close(&mut self, bytes: f64) {
+        if self.buckets == 0 {
+            self.mean = bytes;
+            self.variance = 0.0;
+        } else {
+            let delta = bytes - self.mean;
+            self.mean += BASELINE_ALPHA * delta;
+            self.variance =
+                (1.0 - BASELINE_ALPHA) * (self.variance + BASELINE_ALPHA * delta * delta);
+        }
+        self.buckets = self.buckets.saturating_add(1);
+    }
+
+    /// Counts bytes sent at a time. Returns true the moment the open bucket crosses
+    /// the surge line of a learned baseline, once per bucket.
+    pub fn add(&mut self, at_ms: u64, bytes: u64) -> bool {
+        let start = at_ms - at_ms % BUCKET_MS;
+        let fresh = self.buckets == 0 && self.bucket_bytes == 0 && self.bucket_start_ms == 0;
+        if fresh {
+            self.bucket_start_ms = start;
+        } else if start > self.bucket_start_ms {
+            // Close the bucket, and every empty one since: quiet is part of the usual.
+            let gone = (start - self.bucket_start_ms) / BUCKET_MS;
+            self.close(self.bucket_bytes as f64);
+            for _ in 1..gone.min(u64::from(BASELINE_BUCKETS)) {
+                self.close(0.0);
+            }
+            self.bucket_start_ms = start;
+            self.bucket_bytes = 0;
+        }
+        // A frame from before the open bucket (a reordered capture) counts in it.
+        let line = self.surge_line();
+        let before = self.bucket_bytes;
+        self.bucket_bytes = self.bucket_bytes.saturating_add(bytes);
+        self.learned() && before <= line && self.bucket_bytes > line
+    }
 }
 
 /// What survives a restart.
@@ -288,6 +373,25 @@ impl Told {
         }
     }
 
+    /// True when a key was never told or last told at least `cooldown_ms` ago; then it
+    /// counts as told now.
+    fn cooled(&mut self, key: &str, at_ms: u64, cooldown_ms: u64) -> bool {
+        match self.records.get_mut(key) {
+            Some(record) if at_ms.saturating_sub(record.at_ms) >= cooldown_ms => {
+                record.at_ms = at_ms;
+                record.count = record.count.saturating_add(1);
+                true
+            }
+            Some(_) => false,
+            None => {
+                self.make_room();
+                self.records
+                    .insert(key.to_string(), ToldRecord { at_ms, count: 1 });
+                true
+            }
+        }
+    }
+
     /// Room for one more, forgetting the oldest first.
     fn make_room(&mut self) {
         if self.records.len() < MAX_REMEMBERED {
@@ -465,6 +569,13 @@ impl Audit {
         device.last_seen_ms = packet.at_ms;
         device.frames += 1;
         device.bytes += packet.length;
+        let surge = device.baseline.add(packet.at_ms, packet.length).then(|| {
+            format!(
+                "sent over {} MB in ten minutes; it usually sends about {} MB",
+                device.baseline.surge_line() / 1_000_000,
+                (device.baseline.mean.max(0.0) / 1_000_000.0).round() as u64
+            )
+        });
         if device.addresses.len() < 16 {
             device.addresses.insert(source);
         }
@@ -499,6 +610,20 @@ impl Audit {
                     mac,
                     format!("asked for {shown} under {zone}"),
                 );
+            }
+        }
+        if let Some(detail) = surge {
+            if self
+                .told
+                .cooled(&format!("surge {mac}"), packet.at_ms, SURGE_COOLDOWN_MS)
+            {
+                alerts.push(Alert {
+                    at_ms: packet.at_ms,
+                    severity: Severity::Warning,
+                    rule: "traffic-surge".into(),
+                    device: mac.into(),
+                    detail,
+                });
             }
         }
         if packet.opening {
@@ -811,6 +936,81 @@ mod tests {
             arp: Some((mac.into(), ip.parse().unwrap())),
             ..Packet::default()
         }
+    }
+
+    #[test]
+    fn a_device_sending_far_more_than_it_usually_does_is_a_surge_told_once_an_hour() {
+        let mut audit = Audit::new(State::default(), learned());
+        let sent = |at_ms: u64, length: u64| Packet {
+            length,
+            ..from(TV, "192.168.1.84", at_ms)
+        };
+        // A day and a bit of ordinary sending: 2 MB per ten minutes.
+        let day = u64::from(BASELINE_BUCKETS) + 6;
+        for bucket in 0..day {
+            assert!(audit
+                .see(&sent(bucket * BUCKET_MS + 1, 2_000_000))
+                .is_empty());
+        }
+        let baseline = &audit.state.devices[TV].baseline;
+        assert!(baseline.learned());
+        assert!(
+            (baseline.mean - 2_000_000.0).abs() < 1.0,
+            "{}",
+            baseline.mean
+        );
+
+        // Then 60 MB inside one bucket: told once, when it crosses the line.
+        let now = day * BUCKET_MS + 1;
+        let mut told = Vec::new();
+        for i in 0..60 {
+            told.extend(audit.see(&sent(now + i * 1_000, 1_000_000)));
+        }
+        assert_eq!(rules(&told), ["traffic-surge"]);
+        assert_eq!(told[0].severity, Severity::Warning);
+        assert!(
+            told[0].detail.contains("usually sends about 2 MB"),
+            "{}",
+            told[0].detail
+        );
+
+        // The next bucket surges too, inside the hour: not told again.
+        let next = now + BUCKET_MS;
+        let quiet: Vec<Alert> = (0..60)
+            .flat_map(|i| audit.see(&sent(next + i * 1_000, 1_000_000)))
+            .collect();
+        assert!(quiet.is_empty());
+        // After the hour, it is.
+        let later = now + SURGE_COOLDOWN_MS + BUCKET_MS;
+        let again: Vec<Alert> = (0..200)
+            .flat_map(|i| audit.see(&sent(later + i * 1_000, 1_000_000)))
+            .collect();
+        assert_eq!(rules(&again), ["traffic-surge"]);
+    }
+
+    #[test]
+    fn nothing_is_judged_before_a_day_is_learned_and_small_devices_have_a_floor() {
+        let mut audit = Audit::new(State::default(), learned());
+        // A burst on the first day is learning, not news.
+        let burst: Vec<Alert> = (0..100)
+            .flat_map(|i| {
+                audit.see(&Packet {
+                    length: 1_000_000,
+                    ..from(TV, "192.168.1.84", 1 + i * 1_000)
+                })
+            })
+            .collect();
+        assert!(burst.is_empty());
+        // A device that usually sends nothing still needs the floor to surge.
+        let quiet = Baseline {
+            buckets: BASELINE_BUCKETS,
+            ..Baseline::default()
+        };
+        assert_eq!(quiet.surge_line(), SURGE_MIN_BYTES);
+        // A state written before baselines loads with an empty one.
+        let old = r#"{"first_seen_ms":1,"last_seen_ms":2,"addresses":[],"hostname":null,"frames":1,"bytes":1,"asked":[],"sent_to":{}}"#;
+        let device: Device = serde_json::from_str(old).unwrap();
+        assert_eq!(device.baseline, Baseline::default());
     }
 
     fn advert(mac: &str, ip: &str, at_ms: u64) -> Packet {
