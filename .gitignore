@@ -30,6 +30,7 @@ var/
 
 # Secrets — never commit key material
 *.key
+*.token
 !**/*.key.example
 secrets/
 .env

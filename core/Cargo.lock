@@ -138,6 +138,8 @@ dependencies = [
  "archie-stage",
  "archie-types",
  "archie-vault",
+ "fs2",
+ "ring",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -730,6 +732,7 @@ dependencies = [
  "archie-stage",
  "archie-types",
  "archie-vault",
+ "archie-wanda",
  "axum",
  "base64",
  "futures-util",
@@ -747,6 +750,30 @@ dependencies = [
  "time",
  "tokio",
  "zeroize",
+]
+
+[[package]]
+name = "archie-wanda"
+version = "0.1.0"
+dependencies = [
+ "archie-cerebra",
+ "archie-model-runtime",
+ "archie-registry",
+ "archie-router",
+ "archie-types",
+ "archie-vault",
+ "axum",
+ "clap",
+ "fs2",
+ "reqwest",
+ "ring",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "toml",
 ]
 
 [[package]]

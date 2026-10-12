@@ -10,6 +10,10 @@
 #include <utility>
 
 #if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 #include <process.h>
 #else
 #include <unistd.h>
@@ -46,6 +50,10 @@ std::string_view describe(StoreError error) noexcept {
         case StoreError::MissingOwner:
             return "the file declares no owner, so nothing in it has a root to be justified "
                    "against";
+        case StoreError::TooLarge:
+            return "the graph exceeds the 4 MiB input or record limit";
+        case StoreError::LockUnavailable:
+            return "the graph transaction lock could not be acquired";
     }
     return "unknown error";
 }
@@ -132,6 +140,11 @@ std::vector<std::string_view> split(std::string_view line, char sep) {
             return fields;
         }
         fields.push_back(line.substr(start, at - start));
+        // No valid v1 record has more than seven fields. Bound a malformed line's
+        // field vector before allocating for every tab an untrusted file supplies.
+        if (sep == '\t' && fields.size() == 8) {
+            return fields;
+        }
         start = at + 1;
     }
 }
@@ -182,7 +195,7 @@ constexpr std::array kRelationKinds{
     RelationKind::Colleague, RelationKind::Employer,  RelationKind::Coauthor,
     RelationKind::PublishedBy, RelationKind::Represents, RelationKind::Household,
     RelationKind::Family,    RelationKind::Friend,    RelationKind::EmergencyContact,
-    RelationKind::AuthorizedGuest};
+    RelationKind::AuthorizedGuest, RelationKind::Partner, RelationKind::Manager};
 
 constexpr std::array kEdgeBases{EdgeBasis::OwnerDeclared, EdgeBasis::SubjectDeclared,
                                 EdgeBasis::PublicRecord, EdgeBasis::ModelHypothesis,
@@ -258,6 +271,9 @@ std::optional<EdgeRefusal> refuse_hypothesis(const RelationEdge& edge,
 }  // namespace
 
 std::expected<LoadResult, StoreError> parse(std::string_view text) {
+    if (text.size() > kMaxGraphBytes || std::ranges::count(text, '\n') > 65536) {
+        return std::unexpected(StoreError::TooLarge);
+    }
     LoadResult result;
     std::map<std::string, std::size_t, std::less<>> index_of;  // subject id -> profile index
 
@@ -478,11 +494,32 @@ std::expected<LoadResult, StoreError> GraphStore::load() const {
         return std::unexpected(StoreError::NotFound);
     }
 
+    if (!std::filesystem::is_regular_file(path_, ec) || ec) {
+        return std::unexpected(StoreError::Unreadable);
+    }
+    const auto size = std::filesystem::file_size(path_, ec);
+    if (ec) {
+        return std::unexpected(StoreError::Unreadable);
+    }
+    if (size > kMaxGraphBytes) {
+        return std::unexpected(StoreError::TooLarge);
+    }
+
     std::ifstream in(path_, std::ios::binary);
     if (!in) {
         return std::unexpected(StoreError::Unreadable);
     }
-    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    std::string text;
+    text.reserve(static_cast<std::size_t>(size));
+    std::array<char, 8192> buffer{};
+    while (in) {
+        in.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+        const auto read = static_cast<std::size_t>(in.gcount());
+        if (read > kMaxGraphBytes - text.size()) {
+            return std::unexpected(StoreError::TooLarge);
+        }
+        text.append(buffer.data(), read);
+    }
     if (in.bad()) {
         return std::unexpected(StoreError::Unreadable);
     }
@@ -490,7 +527,58 @@ std::expected<LoadResult, StoreError> GraphStore::load() const {
     return parse(text);
 }
 
+namespace {
+// Count the exact escaped v1 size before copying a caller's graph or allocating its
+// serialised text. The same bound applies on write so a successful save is loadable.
+bool fits_storage(const PersonGraph& graph) {
+    std::size_t bytes = 0;
+    std::size_t records = 0;
+    const auto field = [&bytes](std::string_view text) {
+        if (text.size() > kMaxGraphBytes - bytes) { return false; }
+        bytes += text.size();
+        for (const char c : text) {
+            if (c == '\\' || c == '\t' || c == '\r' || c == '\n') {
+                if (bytes == kMaxGraphBytes) { return false; }
+                ++bytes;
+            }
+        }
+        return true;
+    };
+    const auto record = [&field, &bytes, &records](std::initializer_list<std::string_view> fields) {
+        // Structural separators are already encoded; only field contents are escaped.
+        if (++records > 65536 || fields.size() > kMaxGraphBytes - bytes) { return false; }
+        bytes += fields.size();
+        for (const auto text : fields) {
+            if (!field(text)) { return false; }
+        }
+        return true;
+    };
+    if (!record({"v", "1"}) || !record({"owner", graph.owner_id})) { return false; }
+    for (const auto& profile : graph.profiles) {
+        if (!record({"subject", profile.subject.subject_id, name(profile.subject.kind),
+                     profile.subject.display_label})) { return false; }
+        for (const auto& trait : profile.traits) {
+            if (!record({"trait", profile.subject.subject_id, trait.key, trait.value,
+                         name(trait.basis), trait.declared_sensitivity ? name(*trait.declared_sensitivity) : kAbsent,
+                         trait.source_note})) { return false; }
+        }
+    }
+    for (const auto& edge : graph.asserted_edges) {
+        if (!record({"edge", edge.from_id, edge.to_id, name(edge.kind), name(edge.basis),
+                     edge.declarer_id, edge.source_note})) { return false; }
+    }
+    for (const auto& edge : graph.hypotheses) {
+        if (!record({"hyp", edge.from_id, edge.to_id, name(edge.kind), name(edge.basis),
+                     edge.declarer_id, edge.source_note})) { return false; }
+    }
+    return true;
+}
+}  // namespace
+
 std::expected<std::size_t, StoreError> GraphStore::save(const PersonGraph& graph) const {
+    if (!fits_storage(graph)) {
+        return std::unexpected(StoreError::TooLarge);
+    }
     // Refuse first, write second. Persisting a record that cannot be loaded back produces a
     // store that silently loses data on every round trip, and the loss would look like a
     // load bug rather than a save one.
@@ -564,9 +652,17 @@ std::expected<std::size_t, StoreError> GraphStore::save(const PersonGraph& graph
         }
     }
 
+    // Windows filesystem::rename refuses an existing destination. Use the native
+    // atomic replacement instead, preserving the POSIX rename behaviour on Linux.
+    bool renamed;
+#if defined(_WIN32)
+    renamed = MoveFileExW(temp.c_str(), path_.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
     std::error_code ec;
     std::filesystem::rename(temp, path_, ec);
-    if (ec) {
+    renamed = !ec;
+#endif
+    if (!renamed) {
         std::error_code ignored;
         std::filesystem::remove(temp, ignored);
         return std::unexpected(StoreError::Unwritable);

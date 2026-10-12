@@ -1,0 +1,183 @@
+use archie_vault::{ContextDomain, VaultRef};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Actor {
+    ConfirmedOwner,
+    PresumedOwner,
+    Unknown,
+    ConfirmedOther,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Author {
+    Owner,
+    Counterparty,
+    System,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EventSource {
+    AndroidNotification,
+    WhatsappVisibleDom,
+    IrisSemantic,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Coverage {
+    NotificationPreview,
+    VisibleChat,
+    SemanticObservation,
+}
+
+/// The content channel is independent from Sentry's metadata capture event.
+/// A producer never supplies the storage domain or a filesystem path.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WandaEvent {
+    pub schema_version: u16,
+    pub event_id: String,
+    pub device_id: String,
+    pub actor: Actor,
+    pub author: Author,
+    pub source: EventSource,
+    pub chat_id: String,
+    pub sender: String,
+    pub source_message_id: Option<String>,
+    pub sent_at_ms: Option<i64>,
+    pub observed_at_ms: i64,
+    pub text: String,
+    pub media_omitted: bool,
+    pub coverage: Coverage,
+    #[serde(default)]
+    pub monitor_id: Option<String>,
+    #[serde(default)]
+    pub window_id: Option<String>,
+}
+impl std::fmt::Debug for WandaEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("WandaEvent(redacted)")
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredEvent {
+    pub domain: ContextDomain,
+    pub evidence_ref: VaultRef,
+    pub event: WandaEvent,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct IngestReport {
+    pub accepted: usize,
+    pub duplicates: usize,
+    pub rejected: usize,
+    pub reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TraitView {
+    pub key: String,
+    pub value: Option<String>,
+    pub basis: String,
+    pub sensitivity: String,
+    pub source_note: String,
+    pub redacted: bool,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PersonView {
+    pub id: String,
+    pub label: String,
+    pub kind: String,
+    pub degree: Option<usize>,
+    pub path_to_owner: Option<Vec<String>>,
+    pub tags: Vec<TraitView>,
+    pub traits: Vec<TraitView>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RelationView {
+    pub from_id: String,
+    pub to_id: String,
+    pub kind: String,
+    pub basis: String,
+    pub declarer_id: String,
+    pub source_note: String,
+    pub standing: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PersonProjection {
+    pub schema_version: u16,
+    pub owner_id: String,
+    pub nodes: Vec<PersonView>,
+    pub edges: Vec<RelationView>,
+}
+
+/// An interpretation is advisory and never establishes a relationship or consent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Recommendation {
+    pub id: String,
+    pub kind: String,
+    pub title: String,
+    pub explanation: String,
+    pub suggestion: String,
+    pub subject_ids: Vec<String>,
+    pub evidence_refs: Vec<String>,
+    pub standing: String,
+    #[serde(default)]
+    pub alternatives: Vec<String>,
+    pub expires_at_ms: i64,
+    #[serde(default)]
+    pub review_condition: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueryResponse {
+    pub recommendations: Vec<Recommendation>,
+    pub model: Option<String>,
+    pub state: String,
+    pub reason: Option<String>,
+}
+impl QueryResponse {
+    pub fn speech_text(&self) -> String {
+        let text = self
+            .recommendations
+            .iter()
+            .take(3)
+            .map(|r| format!("{} {}", r.explanation, r.suggestion))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let answer = if text.is_empty() {
+            self.reason.clone().unwrap_or_else(|| {
+                "Todavía no tengo contexto suficiente para recomendarte algo.".into()
+            })
+        } else {
+            text
+        };
+        answer.chars().take(1200).collect()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceView {
+    pub device_id: String,
+    pub source: EventSource,
+    pub coverage: Option<Coverage>,
+    pub last_observed_at_ms: Option<i64>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WandaView {
+    pub schema_version: u16,
+    pub domain: ContextDomain,
+    pub generated_at_ms: i64,
+    pub availability: String,
+    pub graph: Option<PersonProjection>,
+    pub recommendations: Vec<Recommendation>,
+    pub sources: Vec<SourceView>,
+    pub pending_events: usize,
+}

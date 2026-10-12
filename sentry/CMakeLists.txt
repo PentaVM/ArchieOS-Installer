@@ -64,6 +64,8 @@ add_library(sentry::world ALIAS sentry-world)
 # ---------------------------------------------------------------------------
 add_library(sentry-store STATIC
     src/store/graph_store.cpp
+    src/store/graph_transaction.cpp
+    src/store/wanda_projection.cpp
 )
 
 target_link_libraries(sentry-store PUBLIC sentry::world)
@@ -232,6 +234,25 @@ if(SENTRY_BUILD_TESTS)
     )
 
     add_test(NAME sentry.store COMMAND sentry-store-tests)
+
+    add_executable(sentry-wanda-projection tests/test_wanda_projection.cpp)
+    target_link_libraries(sentry-wanda-projection PRIVATE sentry::store)
+    target_include_directories(sentry-wanda-projection PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    target_compile_options(sentry-wanda-projection PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Werror>
+    )
+    add_test(NAME sentry.wanda_projection COMMAND sentry-wanda-projection)
+
+    add_executable(sentry-lock-holder tests/lock_holder.cpp)
+    target_link_libraries(sentry-lock-holder PRIVATE sentry::store)
+    # Python's standard library validates real subprocess/JSON behaviour, without a
+    # runtime dependency in the library or ISO. Only register when Python is available.
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME sentry.graph_cli COMMAND ${Python3_EXECUTABLE}
+                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_graph_cli.py $<TARGET_FILE:archie-sentry>)
+        set_tests_properties(sentry.graph_cli PROPERTIES TIMEOUT 90)
+    endif()
 
     add_executable(sentry-ingest tests/test_ingest.cpp)
     target_link_libraries(sentry-ingest PRIVATE sentry::world)

@@ -48,6 +48,7 @@ members = [
     "crates/archie-paint",
     "crates/archie-arena",
     "crates/archie-cerebra",
+    "crates/archie-wanda",
     "crates/archie-workstation",
     "crates/archie-iris",
     "crates/archie-orb",
@@ -104,6 +105,7 @@ archie-a11y = { path = "crates/archie-a11y" }
 archie-reflex = { path = "crates/archie-reflex" }
 archie-paint = { path = "crates/archie-paint" }
 archie-cerebra = { path = "crates/archie-cerebra" }
+archie-wanda = { path = "crates/archie-wanda" }
 archie-workstation = { path = "crates/archie-workstation" }
 archie-iris = { path = "crates/archie-iris" }
 archie-orb = { path = "crates/archie-orb" }

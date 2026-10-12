@@ -507,6 +507,43 @@ void a_failed_save_leaves_the_previous_graph_intact() {
     std::filesystem::remove(path, ec);
 }
 
+void record_limits_do_not_truncate_a_valid_graph() {
+    CASE("field bounds apply to fields, never to the graph's record list");
+    auto graph = sample();
+    for (int i = 0; i < 24; ++i) {
+        graph.profiles.push_back(subject("person-" + std::to_string(i), SubjectKind::ConsentedPerson));
+    }
+    const auto loaded = parse(serialise(graph));
+    CHECK(loaded.has_value());
+    if (loaded) { CHECK_EQ(loaded->graph.profiles.size(), graph.profiles.size()); }
+}
+
+void the_exact_file_budget_is_loadable_and_a_larger_save_preserves_it() {
+    CASE("a save at the input budget can be loaded without losing its previous file");
+    PersonGraph graph;
+    graph.owner_id = "owner";
+    graph.profiles.push_back(subject("owner", SubjectKind::Owner));
+    graph.profiles[0].traits.push_back(trait("note", "", TraitBasis::OwnerDeclared));
+    const auto overhead = serialise(graph).size();
+    graph.profiles[0].traits[0].value.assign(kMaxGraphBytes - overhead, 'x');
+    const auto path = scratch("bounded.tsv");
+    const GraphStore store{path};
+    const auto saved = store.save(graph);
+    CHECK(saved.has_value());
+    if (saved) {
+        CHECK_EQ(std::filesystem::file_size(path), kMaxGraphBytes);
+        const auto loaded = store.load();
+        CHECK(loaded.has_value());
+        graph.profiles[0].traits[0].value += "x";
+        const auto too_large = store.save(graph);
+        CHECK(!too_large.has_value());
+        if (!too_large) { CHECK_EQ(too_large.error(), StoreError::TooLarge); }
+        CHECK_EQ(std::filesystem::file_size(path), kMaxGraphBytes);
+    }
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+}
+
 }  // namespace
 
 int main() {
@@ -534,6 +571,8 @@ int main() {
     saving_and_loading_a_real_file();
     saving_refuses_what_loading_would_refuse();
     a_failed_save_leaves_the_previous_graph_intact();
+    record_limits_do_not_truncate_a_valid_graph();
+    the_exact_file_budget_is_loadable_and_a_larger_save_preserves_it();
 
     return sentry::test::report();
 }

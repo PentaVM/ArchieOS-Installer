@@ -11,6 +11,8 @@ build = "build.rs"
 # Nemotron 3.5 ASR and Magpie TTS through NVIDIA NeMo-Speech.cpp's C ABI. Needs the SDK
 # installed and NEMO_SPEECH_PREFIX pointing at it when building.
 nemo = []
+# Scoped Wanda client without a speech SDK; `live` uses the same adapter.
+wanda = ["dep:archie-wanda"]
 # The microphone and the speaker, through PulseAudio (a Linux desktop, or WSLg).
 pulse = ["dep:libpulse-binding", "dep:libpulse-simple-binding"]
 # A spoken conversation: both of the above.
@@ -20,7 +22,7 @@ rvc = ["dep:ort", "dep:serde"]
 # A live session reached from a browser: its microphone, speaker and camera over a
 # WebSocket, IRIS for eyes, and curiosity (identify and search) for what is in front.
 live = [
-    "nemo", "dep:axum", "dep:reqwest", "dep:futures-util", "dep:serde", "dep:base64", "dep:png",
+    "nemo", "wanda", "dep:axum", "dep:reqwest", "dep:futures-util", "dep:serde", "dep:base64", "dep:png",
     "dep:jpeg-decoder", "dep:archie-search", "dep:archie-vault", "dep:ring", "dep:zeroize",
 ]
 
@@ -34,6 +36,7 @@ archie-sight.workspace = true
 archie-a11y.workspace = true
 archie-iris.workspace = true
 archie-policy.workspace = true
+archie-wanda = { workspace = true, optional = true }
 hex.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

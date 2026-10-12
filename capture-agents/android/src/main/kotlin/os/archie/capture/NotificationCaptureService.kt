@@ -13,7 +13,11 @@ import android.service.notification.StatusBarNotification
  * violate a platform's terms and get an account banned. This is what "sesión abierta y
  * persistente" actually is on a phone: the OS's own live stream, not a scraped login.
  *
- * What it extracts, and what it refuses to:
+ * The original metadata channel remains body-free. An independently paired, disabled-by-
+ * default Wanda channel can send notification previews through [WandaPoster], with the
+ * actor gate checked before text is extracted. The rules below describe metadata only.
+ *
+ * What the metadata channel extracts, and what it refuses to:
  *
  *  - The *fact* of a message and *who* it is with (the counterparty), as metadata. That the
  *    owner is in contact with someone is what the graph keeps.
@@ -30,6 +34,7 @@ class NotificationCaptureService : NotificationListenerService() {
     private lateinit var actor: ActorSession
     private lateinit var poster: EventPoster
     private lateinit var deviceId: String
+    private lateinit var wanda: WandaPoster
 
     override fun onCreate() {
         super.onCreate()
@@ -37,6 +42,7 @@ class NotificationCaptureService : NotificationListenerService() {
         deviceId = config.deviceId
         actor = ActorSession(applicationContext)
         poster = EventPoster(config)
+        wanda = WandaPoster(applicationContext, deviceId, actor)
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
@@ -65,6 +71,12 @@ class NotificationCaptureService : NotificationListenerService() {
             CaptureEvent.Author.COUNTERPARTY,
             counterparty = counterparty,
         )
+        wanda.accept(sbn)
+    }
+
+    override fun onDestroy() {
+        wanda.close()
+        super.onDestroy()
     }
 
     private fun emit(

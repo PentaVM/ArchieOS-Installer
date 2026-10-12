@@ -101,6 +101,7 @@ struct Asking {
     grade: PrivacyGrade,
     runtime: tokio::runtime::Runtime,
     cognitive: NemotronCognitive<NebiusSource>,
+    wanda_access: archie_voice::wanda::WandaVoiceAccess,
     clock: String,
 }
 
@@ -195,13 +196,16 @@ fn asking(
         Some(url) => ProviderEndpoint::nvidia_nim(url, Locality::Local),
     }
     .map_err(|error| error.to_string())?;
-    let client = InferenceClient::new(endpoint).map_err(|error| error.to_string())?;
-    let source = NebiusSource::new(
-        client,
-        descriptor(&model, "voice", local.is_none(), grade)?,
-        grade,
+    // Private tool context is graded Restricted for the entire local continuation.
+    // The public/cloud path retains its caller's original grade.
+    let source_grade = if local.is_some() { PrivacyGrade::Restricted } else { grade };
+    let source = NebiusSource::from_endpoint(
+        endpoint,
+        descriptor(&model, "voice", local.is_none(), source_grade)?,
+        source_grade,
         runtime.handle().clone(),
-    );
+    ).map_err(|error|error.to_string())?;
+    let wanda_access=source.wanda_access();
     let mut cognitive = NemotronCognitive::new(
         source,
         model.clone(),
@@ -232,6 +236,7 @@ fn asking(
         grade,
         runtime,
         cognitive,
+        wanda_access,
         clock: clock(offset),
     })
 }
@@ -844,7 +849,7 @@ fn live(asking: Asking, speech: SpeechFlags, flags: LiveFlags) -> Result<ExitCod
             "off (no TAVILY_API_KEY)"
         }
     );
-    let senses = live::Senses::new(audio_in, identifier, researcher, rate, flags.curiosity);
+    let senses = live::Senses::new_with_wanda(audio_in, identifier, researcher, rate, flags.curiosity, asking.wanda_access);
     let eyes = eyes::IrisEyes::new(&flags.iris, 0.35)?;
     {
         let senses = senses.clone();

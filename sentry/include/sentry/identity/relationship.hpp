@@ -57,12 +57,16 @@ enum class RelationKind {
     PublishedBy,
     // An official and the body they speak for.
     Represents,
+    // `from_id` is managed by `to_id`; distinct from the employing organisation.
+    Manager,
 
     // --- Personal. Declared, never derived.
     Household,
     Family,
     Friend,
     EmergencyContact,
+    // A declared romantic partnership. Never established from public record/inference.
+    Partner,
 
     // --- Operational. About this node, not about the people.
     // Someone the operator has granted access to a space or device.
@@ -83,12 +87,14 @@ enum class RelationKind {
         case RelationKind::Family:
         case RelationKind::Friend:
         case RelationKind::EmergencyContact:
+        case RelationKind::Partner:
             return true;
         case RelationKind::Colleague:
         case RelationKind::Employer:
         case RelationKind::Coauthor:
         case RelationKind::PublishedBy:
         case RelationKind::Represents:
+        case RelationKind::Manager:
         case RelationKind::AuthorizedGuest:
             return false;
     }
