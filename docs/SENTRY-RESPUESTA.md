@@ -24,8 +24,8 @@ archie-netwatch ──► alerts.jsonl ──► archie sentry-follow ──┬�
   dos veces.
 - Se guardan como máximo 256 avisos. Primero salen los acusados más viejos; los
   pendientes sólo salen cuando ya no queda otra cosa.
-- El archivo tiene modo 0600 y se escribe de forma atómica. Toda lectura-modificación-escritura
-  pasa por `Board::update`, con lock exclusivo sobre `notices.lock`: el follower,
+- El archivo tiene modo 0640 (grupo `archie`: displayd lo lee; «otros», nunca) y se
+  escribe de forma atómica. Toda lectura-modificación-escritura pasa por `Board::update`, con lock exclusivo sobre `notices.lock`: el follower,
   `--ack` y la voz no se pisan (probado con 8 hilos y 80 avisos).
 - Un tablón dañado se aparta como `notices.bad` y se empieza uno vacío. El informe lo
   dice (`notices_reset`). Displayd no lo muestra como vacío: responde `unavailable` con
@@ -74,8 +74,9 @@ curl 127.0.0.1:7666/api/notices             # lo que lee el Observatory
 
 - No hay panel QML que dibuje `/api/notices`: la GUI es de Claude/Xavi.
 - La voz no los dice todavía (ver el contrato).
-- Displayd corre sin privilegios. Si el tablón pertenece a otro usuario con modo 0600,
-  `/api/notices` responde `unavailable` con el error de permisos; en el despliegue hay
-  que darle lectura (grupo) o correr ambos con el mismo usuario.
+- En la ISO, `archie-sentry-follow.service` (instalado, no habilitado) corre el
+  follower como `archie` y deja el tablón 0640. Displayd (`archie-display`, grupo
+  `archie`) lo lee. Si se despliega de otra forma y no puede leerlo, `/api/notices`
+  responde `unavailable` con el error de permisos, nunca un vacío.
 - Las pruebas son con alertas sintéticas y archivos temporales. Nada se probó contra
   tráfico real.

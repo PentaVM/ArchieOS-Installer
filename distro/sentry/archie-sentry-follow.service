@@ -1,0 +1,48 @@
+[Unit]
+Description=ARCHIE Sentry: tell the owner and Cerebra what the traffic audit saw
+Documentation=file:/usr/share/doc/archie-os/SENTRY-RESPUESTA.md
+# It reads what archie-netwatch writes; with no audit configured there is nothing to do.
+ConditionPathExists=/etc/archie/netwatch.env
+After=archie-netwatch.service
+Wants=archie-netwatch.service
+
+[Service]
+Type=simple
+# The control plane's account: it owns the Cerebra vault and the notice board under
+# /var/lib/archie, and reads netwatch's 0640 files as group `archie`.
+User=archie
+Group=archie
+ExecStart=/usr/bin/archie sentry-follow --state-dir /var/lib/archie/netwatch
+Restart=on-failure
+RestartSec=10s
+StateDirectory=archie
+StateDirectoryMode=0750
+# The notice board is 0640: displayd (group archie) reads it for the Observatory.
+UMask=0027
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+# Everything it does is local files: no network at all.
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

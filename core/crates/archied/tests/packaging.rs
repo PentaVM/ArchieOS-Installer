@@ -1332,7 +1332,37 @@ fn the_netwatch_unit_runs_as_its_static_account_with_the_capture_group() {
         "sysusers must create the non-login {user} account"
     );
 
+    // The follower reads what netwatch writes, as the control plane's account, with
+    // no network and no capabilities.
+    let follow = unit_directives(
+        &std::fs::read_to_string(root.join("distro/sentry/archie-sentry-follow.service"))
+            .expect("the follower unit exists"),
+    );
+    assert_eq!(follow.get("User").map(String::as_str), Some("archie"));
+    assert_eq!(follow.get("Group").map(String::as_str), Some("archie"));
+    let state_dir = unit
+        .get("ExecStart")
+        .and_then(|e| e.split("--state-dir ").nth(1))
+        .expect("netwatch names its state directory");
+    assert_eq!(
+        follow.get("ExecStart").map(String::as_str),
+        Some(format!("/usr/bin/archie sentry-follow --state-dir {state_dir}").as_str()),
+        "the follower must read the directory netwatch writes"
+    );
+    assert_eq!(
+        follow.get("CapabilityBoundingSet").map(String::as_str),
+        Some("")
+    );
+    assert_eq!(
+        follow.get("RestrictAddressFamilies").map(String::as_str),
+        Some("AF_UNIX")
+    );
+
     let build = std::fs::read_to_string(root.join("distro/archiso/build.sh")).unwrap();
+    assert!(
+        build.contains("distro/sentry/archie-sentry-follow.service"),
+        "the ISO must stage the follower unit"
+    );
     assert!(
         build.contains("distro/sentry/archie-netwatch.sysusers")
             && build.contains("sysusers.d/archie-netwatch.conf"),

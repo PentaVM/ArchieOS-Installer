@@ -14,6 +14,9 @@
 //! - `spoken`, a fixed sentence per rule that names no device, address or DNS name, so
 //!   it can be said aloud in a shared room. The voice reads `spoken` and nothing else.
 //!
+//! The file is 0640: under the units its group is `archie`, so `archie-displayd` (in that
+//! group) can show it, and nobody else reads it.
+//!
 //! A notice's id is derived from its content, so the follower re-reading alerts after a
 //! crash posts nothing twice.
 
@@ -284,7 +287,8 @@ impl Board {
         outcome
     }
 
-    /// Writes the board atomically, readable by its owner only. Concurrent writers
+    /// Writes the board atomically: its owner writes it, its group reads it (under the
+    /// units, `archie`, so displayd can show it), others get nothing. Concurrent writers
     /// go through [`Board::update`].
     pub fn save(&self, path: &Path) -> Result<(), NoticeError> {
         if let Some(parent) = path.parent() {
@@ -302,7 +306,7 @@ impl Board {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
+                options.mode(0o640);
             }
             let mut file = options.open(&temporary).map_err(|e| io(&temporary, e))?;
             file.write_all(text.as_bytes())
@@ -544,7 +548,7 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt;
             let mode = std::fs::metadata(&path).unwrap().permissions().mode();
-            assert_eq!(mode & 0o777, 0o600);
+            assert_eq!(mode & 0o777, 0o640, "group reads, others never");
         }
         assert_eq!(Board::load(&path).unwrap(), board);
 
