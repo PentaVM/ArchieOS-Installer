@@ -148,6 +148,28 @@ fixture se reporta como fixture, no como dispositivo real. Un PR por avance, con
   `adapter_for` del flujo revisado los construyen. CLI: `archie sentry-node
   wake|lock|unlock|volume|launch` — cada uno pasa por Intent → aprobación →
   postcondición medida, sin atajo.
+  **Ola 3 (Claude, 2026-10-12):** Chromecast ya no declara su ausencia: CAST v2 real
+  sobre TLS 8009 (`rustls`/`tokio-rustls` + `prost`), LAUNCH/STOP/volumen/mute con
+  postcondición medida contra el RECEIVER_STATUS del propio receptor, certificado fijado
+  por SHA-256 (sin cadena ni autenticación de dispositivo de Google: documentado en el
+  módulo). Config `[[sentry.chromecasts]]`, CLI `archie sentry launch|stop|volume|mute|
+  unmute` y `archie sentry cast-probe <ip>`. Sigue abierto: nada de esto ni de lo
+  anterior se ha probado contra hardware real.
+- [x] **15. Feeder unificado con perfiles de foco.** *Hecho cuando:* un solo camino lleva
+  alertas, dispositivos y Wanda a `PillarContext`, y un perfil decide qué entra, con qué
+  prioridad y qué se descarta, sin cruzar dominios ni bajar `restricted`.
+  **Hecho (Claude, 2026-10-12):** `archie_cerebra::{feeder, focus}`, perfiles
+  `pantalla-1`, `trabajo`, `personal`, `red`; productor nuevo de cambios de dispositivo;
+  `archie focus <perfil>`. Detalle: [`SENTRY-FOCO.md`](SENTRY-FOCO.md). Pesos y umbrales
+  son criterio, no medida.
+- [x] **16. Fixtures enlatados → servidores de protocolo con estado.** *Hecho cuando:*
+  cada adaptador pasa por el motor completo contra un servidor loopback que guarda el
+  estado de verdad. **Hecho (Claude, 2026-10-12):** `archie-sentry/tests/servers/`
+  (Roku, HA, broker MQTT con dispositivos, IPP con cola, ONVIF con digest, IGD con
+  tabla, Matter tras chip-tool, CAST v2) y `tests/protocol_servers.rs`. Encontraron dos
+  defectos reales, ya corregidos: Roku en inicio (`<app>Roku</app>`) y la carrera del
+  informe MQTT. Matter no habla Matter en el cable: el servidor emula chip-tool. Son
+  pruebas de protocolo, no dispositivos verificados.
 - [ ] **13. `archie-netwatch.service` bajo systemd real.** No se sabe si `DynamicUser`
   con capacidades ambientales basta para `dumpcap` en Arch.
 - [ ] 14. IPv6: `address-moved` solo mira ARP; falta Neighbor Discovery.
@@ -170,6 +192,9 @@ fixture se reporta como fixture, no como dispositivo real. Un PR por avance, con
   (`[sentry.chat_exports] watch_dir` + `salt`), con journal de hashes de contenido
   para que reiniciar no duplique. CLI: `archie wanda-watch [--once]` y
   `archie wanda-ingest <archivo>`.
+  **Feeder (Claude, 2026-10-12):** todo lo que producen Sentry y Wanda, más los cambios
+  de dispositivo, llega a Cerebra por un solo `feeder::plan` con perfil de foco
+  (sección 3, punto 15).
 
 ## 5. Voz
 

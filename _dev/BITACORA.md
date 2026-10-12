@@ -252,3 +252,61 @@ Publicación observada: push normal y remoto comprobado en
 `b0e2e77eac8afefc1606917be55a8add11cb724a`, working tree limpio. El commit posterior
 solo registra esta evidencia y el estado del plan; también se publica y se compara
 su HEAD con origin/main antes de la respuesta final.
+
+## 2026-10-12 — Sentry, ola 3 (Claude, relevo de Kimi K3)
+
+### Contexto
+
+Kimi K3 se quedó sin créditos a mitad de ola. Rama `claude/sentry-ola3-cast-focos-servidores`
+desde `todo/pendientes` (`6a977c4`, 8 commits de Kimi fuera de `main`; el PR #32 ya se
+había fusionado en `28d03f8`). Lo que Kimi tenía sin commitear se perdió y no se intentó
+reconstruir. Se fusionó `origin/main` (`ac9c1d2`: voz, Bonsai 4B, bridge del shell) con
+merge, sin conflictos.
+
+### Verificación del trabajo heredado
+
+Kimi informó 484 pruebas verdes en Windows. En Linux, tras la fusión, fueron 463
+aprobadas y **28 fallidas**: `adapters_host` (18) y `adapters_router` (10) usaban rutas
+`C:/…` para ssh y la clave, que no son absolutas fuera de Windows, y `SshConfig` las
+rechaza. Se corrigieron los fixtures, no la validación (`0970b1b`).
+
+### Lo hecho
+
+1. **Chromecast CAST v2 real** (`5551856`): TLS 8009 con `rustls`/`tokio-rustls`
+   (ring, ya en el lockfile por reqwest) y `prost` (derive, sin `protoc`). Tramas con
+   prefijo de longitud, CONNECT/CLOSE, PING/PONG, GET_STATUS, LAUNCH, STOP, SET_VOLUME.
+   Contratos nuevos `AppStop` y `MuteSet`, estado `ResourceState::Cast`. Se verifica:
+   SHA-256 del certificado hoja igual al pin del operador y firma del handshake con su
+   clave. No se verifica: cadena, nombre, fechas ni `tp.deviceauth`. Prueba de bytes
+   protobuf escritos a mano para no validar el códec contra sí mismo.
+2. **Feeder unificado con perfiles de foco** (`84efe05`): `archie_cerebra::{feeder,focus}`,
+   `archie focus <perfil>`, `docs/SENTRY-FOCO.md`. Los umbrales de Wanda se calibraron a
+   su escala real (un «urgente» pesa unos 12), no a la supuesta.
+3. **Servidores de protocolo con estado** (`98a3c7e`, `8fd6788`): ver README del crate.
+   Defectos encontrados y corregidos: Roku en la pantalla de inicio y carrera del informe
+   MQTT tras `apply`.
+
+### Resultados
+
+```
+cargo test --locked --no-fail-fast -p archie-sentry -p archie-cerebra -p archie-core -p archie-cli -p archie-workstation
+530 aprobadas; 0 fallos; 37 omitidas (PostgreSQL aislado y hardware)
+```
+
+`cargo fmt` (rustfmt de los archivos nuevos) y `clippy --tests` sin avisos en lo propio;
+los avisos que quedan en `archie-vault`, `contracts.rs` y `archie-cerebra` son anteriores.
+Humo con el binario real: `archie wanda-ingest` de un volcado de notificaciones y luego
+`archie focus personal` → 3 referencias admitidas, `refused:NoLocalModel`.
+
+**Nada se probó contra hardware real**: ni Chromecast, ni Roku, ni impresora, ni router,
+ni Matter. Las pruebas nuevas son de protocolo en loopback. A mitad de la verificación se
+agotó el disco (22 GiB de `target`); `cargo clean` y se repitió completa.
+
+### Relevo
+
+- Probar `archie sentry cast-probe` y una acción contra un Chromecast real; medir si la
+  rotación del certificado ocurre y cada cuánto.
+- Autenticación de dispositivo Cast (`tp.deviceauth`) si se quiere probar «Google
+  genuino» y no sólo «el mismo equipo».
+- Los perfiles de foco son criterio; ajustarlos con uso real del dueño.
+- No se tocó la GUI Quickshell/Vault, la generación WSL ni `archie-iris-runtime`.
