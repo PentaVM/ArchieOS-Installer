@@ -23,6 +23,9 @@ stage=${STAGE:?STAGE is the built archie-stage}
 # NeMo-Speech.cpp's SDK (scripts/models/install-nemotron-speech.sh builds it). archie-voice
 # must have been built with NEMO_SPEECH_PREFIX=/opt/archie/nemo-speech, where it goes here.
 nemo_sdk=${NEMO_SDK:?NEMO_SDK is the installed NeMo-Speech.cpp SDK}
+# PrismML's llama.cpp, built for the CPU: bin/llama-server and the libraries beside it.
+# It runs Bonsai, the optional reasoning model on the machine (archie-local).
+llama=${LLAMA:?LLAMA is the directory holding the built llama-server and its libraries}
 bin=${BIN:?BIN is the cargo release directory}
 # ARCHIE_WSL_WORK_DIR: where the root is assembled, when /var/tmp has no room for 5 GB.
 work_dir=${ARCHIE_WSL_WORK_DIR:-/var/tmp/archieos-wsl-operator}
@@ -52,15 +55,18 @@ rm -rf "${rootfs:?}/var/cache/pacman/pkg"/*
 
 rm -f "$rootfs/etc/resolv.conf" "$rootfs/boot"/vmlinuz-* "$rootfs/boot"/initramfs-*
 cp -a "$repo_root/distro/wsl-operator/rootfs/." "$rootfs/"
-chmod 0755 "$rootfs"/usr/bin/archie-{setup,session,operate,talk,video,design}
+chmod 0755 "$rootfs"/usr/bin/archie-{setup,session,operate,talk,video,design,local}
 
 install -m 0755 "$stage" "$rootfs/usr/bin/archie-stage"
 # archie-bridges and archie-mcp-server serve the video bridge: timelines rendered by MLT
 # without a window, each with a project Kdenlive opens.
 for binary in archie-arena-live archie-stage-cli archie-ask archie-lan archie-netwatch archie-print archie-sentry-probe \
-  archie-bridges archie-mcp-server archie-voice; do
+  archie-bridges archie-mcp-server archie-voice archie-shell-bridge; do
   install -m 0755 "$bin/$binary" "$rootfs/usr/bin/$binary"
 done
+install -Dm 0755 "$llama/llama-server" "$rootfs/opt/archie/llama/bin/llama-server"
+install -d "$rootfs/opt/archie/llama/lib"
+cp -a "$llama"/*.so* "$rootfs/opt/archie/llama/lib/"
 
 # The voice: the recogniser's runtime, the launcher, Piper's adapter and the script that
 # fetches its two voices. The models themselves arrive with archie-setup.
@@ -100,7 +106,7 @@ rm -rf "${hub:?}/.git" "${hub:?}/notebooks" "${hub:?}/assets" "${hub:?}/tests"
 arch-chroot "$rootfs" useradd --uid 1000 --create-home --shell /bin/bash archie
 arch-chroot "$rootfs" passwd -l archie
 install -d -o 1000 -g 1000 "$rootfs/var/lib/archie/models/iris" "$rootfs/var/lib/archie/models/asr" \
-  "$rootfs/var/lib/archie/models/piper" "$rootfs/opt/archie/iris-venv"
+  "$rootfs/var/lib/archie/models/piper" "$rootfs/var/lib/archie/models/local" "$rootfs/opt/archie/iris-venv"
 chown -R 1000:1000 "$rootfs/opt/archie/torch"
 printf '%s\n' 'ArchieOS Operator. First time: archie-setup. Then: archie-talk, archie-operate, archie-video, archie-design.' > "$rootfs/etc/motd"
 

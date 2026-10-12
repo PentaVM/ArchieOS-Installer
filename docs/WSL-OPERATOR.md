@@ -58,7 +58,22 @@ Moving your mouse over the Stage takes control back from it.
 
 Hearing (Nemotron 3.5 ASR) and speaking (Piper) run on your machine, on the CPU. Only
 the words of what you ask go to the reasoning model on Nebius, so talk as you would in
-public.
+public. It answers with the essential first, in a sentence or two, and says more when
+the conversation calls for it or you ask.
+
+### A reasoning model on the machine (experimental)
+
+```bash
+archie-local setup 4b      # Bonsai 4B, 572 MB; or: archie-local setup 1.7b (248 MB)
+archie-talk --local
+```
+
+Bonsai (PrismML, Apache 2.0) runs on the CPU and nothing said leaves the machine. It
+is not the default because of what it did on the six-core laptop this image was built
+on: the 4B took 40 to 60 seconds to answer and chose tools badly (asked what two plus
+two is, it proposed typing text); the 1.7B answered in 1 to 3 seconds and was often
+wrong ("dos más dos es dos"). A faster processor will do better. A CUDA build of the
+runtime, which this image does not have, is what would make it quick.
 
 ## Operate a screen
 
@@ -131,6 +146,8 @@ Checked, in the image or with its own binaries:
 - **IRIS itself.** The machine this was built on has no NVIDIA GPU and 7 GB of memory;
   loading IRIS on its CPU was killed for lack of memory. On a GPU this is its first run.
   If it does not start, `~/.archie/run/iris.log` says why.
+- **Xavi's shell bridge** (`archie-shell-bridge`) is in the image; `archie-design` does
+  not feed the preview from it yet, so the preview's link chip reads "sin lectura".
 - **The voice, end to end.** `archie-voice` was built and starts; a conversation through
   a microphone and speakers in WSLg was not held from this image.
 - **Kdenlive in the Stage**, by voice or with IRIS.
