@@ -47,7 +47,7 @@ impl Service {
             .find(|b| &b.domain == domain)
             .and_then(|b| std::fs::metadata(&b.graph_path).ok())
             .and_then(|m| m.modified().ok());
-        format!("{:?}:{:?}", refs, modified)
+        format!("{refs:?}:{modified:?}")
     }
     /// Coalesced caller-owned timer, not a separate cognitive engine. An unavailable
     /// model keeps evidence pending. One inference may run; there is no request queue.

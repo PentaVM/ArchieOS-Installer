@@ -112,11 +112,11 @@ impl WandaClient {
         if !response.status().is_success() {
             return Err(WandaError::Transport);
         }
-        if !response
+        if response
             .headers()
             .get("content-type")
             .and_then(|v| v.to_str().ok())
-            .is_some_and(|v| v.split(';').next() == Some("application/json"))
+            .is_none_or(|v| v.split(';').next() != Some("application/json"))
             || response
                 .content_length()
                 .is_some_and(|n| n > MAX_REQUEST_BYTES as u64)

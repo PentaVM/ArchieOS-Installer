@@ -101,6 +101,7 @@ struct Asking {
     grade: PrivacyGrade,
     runtime: tokio::runtime::Runtime,
     cognitive: NemotronCognitive<NebiusSource>,
+    #[cfg(feature = "live")]
     wanda_access: archie_voice::wanda::WandaVoiceAccess,
     clock: String,
 }
@@ -210,6 +211,7 @@ fn asking(
         runtime.handle().clone(),
     )
     .map_err(|error| error.to_string())?;
+    #[cfg(feature = "live")]
     let wanda_access = source.wanda_access();
     let mut cognitive = NemotronCognitive::new(
         source,
@@ -243,6 +245,7 @@ fn asking(
         grade,
         runtime,
         cognitive,
+        #[cfg(feature = "live")]
         wanda_access,
         clock: clock(offset),
     })

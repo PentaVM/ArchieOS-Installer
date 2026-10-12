@@ -73,7 +73,11 @@ fn replay_is_idempotent_while_changed_content_is_a_collision() {
     let original = event("one");
     assert_eq!(
         store
-            .ingest("device-secret-fixture", &[original.clone()], 1_000)
+            .ingest(
+                "device-secret-fixture",
+                std::slice::from_ref(&original),
+                1_000
+            )
             .unwrap()
             .accepted,
         1

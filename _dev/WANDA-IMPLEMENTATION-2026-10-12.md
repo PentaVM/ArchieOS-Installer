@@ -77,6 +77,21 @@ Main integration checkpoint:
   SDK/device, real WhatsApp/model/audio, all-monitor producer, offers, sender resolution,
   relevant graph retrieval, explicit combined schedule authority and WSL packaging.
 
+Delivery checkpoint:
+- Draft PR #38 created and attached: https://github.com/PentaVM/ArchieOS-Nvidia/pull/38.
+- CLI consumer compile check passed on Windows; the combined branch is clean and
+  retains origin/main 8e0cf22 as an ancestor. Main itself has not been modified.
+- GitHub native-contracts passed, including Linux C++ graph transactions/projection.
+  Rust 1.88 workspace check and tests passed; formatting was repaired after the first
+  CI run. The next run identified Clippy style findings in Wanda's client/config/view.
+  They are corrected without changing behavior; local focused Clippy now passes.
+- Local toolchain is Rust 1.98, CI is 1.88. Unfiltered local Clippy stopped on a newer
+  pre-existing Orbe lint; left Orbe unchanged and verified the affected crates with
+  --no-deps. Voice compile and config/service regressions also passed after fixes.
+- Independent review, live hardware/model/phone/audio, full-monitor source, relevant
+  retrieval/person resolution, verified offers and WSL packaging remain open in the
+  Draft's TODO. The already uploaded image is not rebuilt or replaced by these commits.
+
 Ruling: typed references and inferred standing are necessary validation, but do not
 prove the truth of generated prose. Real-model accuracy and subtle social interpretations
 require evals and user review; current DOM tests establish fixture behavior only.

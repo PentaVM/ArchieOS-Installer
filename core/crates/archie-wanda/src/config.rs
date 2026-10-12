@@ -99,14 +99,14 @@ impl WandaConfig {
             &mut config.models_dir,
             &mut config.operator_token_file,
         ] {
-            resolve(&base, path);
+            resolve(base, path);
         }
         for binding in &mut config.domains {
-            resolve(&base, &mut binding.graph_path);
+            resolve(base, &mut binding.graph_path);
         }
         for source in &mut config.sources {
             if let Some(path) = &mut source.token_file {
-                resolve(&base, path);
+                resolve(base, path);
             }
         }
         config.validate()?;
