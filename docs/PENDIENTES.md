@@ -80,7 +80,11 @@ fixture se reporta como fixture, no como dispositivo real. Un PR por avance, con
   deduplica, guarda en Vault (Restricted, con su propio timestamp) y entra como referencia
   Sentry; el pase gradúa `restricted` y sin modelo local queda el rechazo `NoLocalModel`
   registrado en la traza. La prueba recorre el port-scan de punta a punta (fixture).
-  Falta el llamador en vivo (quien sigue `alerts.jsonl` y dispara el pase).
+  **Llamador en vivo (2026-10-12):** `archie_cerebra::alert_follower` sigue
+  `alerts.jsonl` (offset en journal atómico, rotación `alerts.1.jsonl` drenada, línea
+  parcial retenida), recupera el conteo de `address-moved` desde `told.json` y dispara
+  un pase por lote; el Vault persiste sellado en disco (`vault_io`). CLI:
+  `archie sentry-follow [--once]`, con `[sentry.netwatch] state_dir` en la config.
 - [x] **4. Persistir lo que ya se avisó.** ~~La deduplicación de alertas vive en memoria~~
   **Hecho (Kimi, 2026-10-11):** `told.json` (0600, atómico, acotado, expulsa las más
   viejas). Reiniciar no repite alertas; `address-moved` ahora sigue la dirección: un
@@ -139,6 +143,11 @@ fixture se reporta como fixture, no como dispositivo real. Un PR por avance, con
   `AppLaunch` verifica contra el proceso en primer plano. Runner de procesos acotado
   (`adapters/process.rs`): binario absoluto, sin shell, entorno limpio, salida acotada,
   timeout con kill.
+  **Cableado en vivo (2026-10-12):** `[sentry.router]` (host, IGD control URL, SSH
+  user/key), `[sentry.wol]` y `[sentry.android]` en `sentry_config.rs`; el registro y
+  `adapter_for` del flujo revisado los construyen. CLI: `archie sentry-node
+  wake|lock|unlock|volume|launch` — cada uno pasa por Intent → aprobación →
+  postcondición medida, sin atajo.
 - [ ] **13. `archie-netwatch.service` bajo systemd real.** No se sabe si `DynamicUser`
   con capacidades ambientales basta para `dumpcap` en Arch.
 - [ ] 14. IPv6: `address-moved` solo mira ARP; falta Neighbor Discovery.
@@ -156,7 +165,11 @@ fixture se reporta como fixture, no como dispositivo real. Un PR por avance, con
   categorías con saliencia 0–100 (ES/EN) y lo registra con `record_chat_context`:
   Vault en grado Restricted + referencia `PillarContext` del pilar Wanda. El seudónimo
   usa doble FNV (sha2 no es dependencia de cerebra): es seudónimo, no protección.
-  Faltan Vault, IRIS y Forge, y el llamador en vivo que siga los exports.
+  Faltan Vault, IRIS y Forge. **Llamador en vivo (2026-10-12):**
+  `archie_cerebra::wanda_watcher` sigue el directorio configurado
+  (`[sentry.chat_exports] watch_dir` + `salt`), con journal de hashes de contenido
+  para que reiniciar no duplique. CLI: `archie wanda-watch [--once]` y
+  `archie wanda-ingest <archivo>`.
 
 ## 5. Voz
 

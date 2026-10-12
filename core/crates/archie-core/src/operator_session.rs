@@ -6,7 +6,7 @@ use crate::{
 };
 use archie_policy::{Action, CapabilityRequest, Constraints, Principal, Resource, Scope};
 use archie_sentry::{
-    adapters::{ipp::IppAdapter, roku::Roku},
+    adapters::{ipp::IppAdapter, process::ProcessRunner, roku::Roku, router::RouterAdapter},
     contracts::{Command, CommandKind, Intent},
     engine::{CoreAuthority, EdgeAdapter, EngineError, ExecutionGuard},
     journal::Journal,
@@ -131,6 +131,52 @@ impl OperatorSession {
                 })?;
             }
         }
+        if let Some(wol) = &sentry.wol {
+            for node in &wol.nodes {
+                registry.register(ResourceDescriptor {
+                    resource_id: node.resource_id.clone(),
+                    edge_id: "local-core".into(),
+                    adapter_id: "wol".into(),
+                    paired: self.paired_device(
+                        &node.resource_id,
+                        archie_state::DeviceClass::Host,
+                    )?,
+                    capabilities: vec![CommandKind::WakeHost],
+                })?;
+            }
+        }
+        if let Some(android) = &sentry.android {
+            for node in &android.nodes {
+                registry.register(ResourceDescriptor {
+                    resource_id: node.resource_id.clone(),
+                    edge_id: "local-core".into(),
+                    adapter_id: "adb".into(),
+                    paired: self.paired_device(
+                        &node.resource_id,
+                        archie_state::DeviceClass::Mobile,
+                    )?,
+                    capabilities: vec![
+                        CommandKind::AppLaunch,
+                        CommandKind::SessionLock,
+                        CommandKind::VolumeSet,
+                    ],
+                })?;
+            }
+        }
+        if let Some(router) = &sentry.router {
+            if let Some((_, capabilities)) = sentry.actuable_route(&router.resource_id) {
+                registry.register(ResourceDescriptor {
+                    resource_id: router.resource_id.clone(),
+                    edge_id: "local-core".into(),
+                    adapter_id: "router".into(),
+                    paired: self.paired_device(
+                        &router.resource_id,
+                        archie_state::DeviceClass::Router,
+                    )?,
+                    capabilities,
+                })?;
+            }
+        }
         Ok(self.core.sentry_service(Arc::new(Mutex::new(registry))))
     }
     /// Builds the owning adapter for one configured actuable resource, opening
@@ -187,6 +233,39 @@ impl OperatorSession {
                     .adapter()
                     .map_err(|_| EngineError::Authority)?,
             ),
+            "wol" => Box::new(
+                sentry
+                    .wol
+                    .as_ref()
+                    .ok_or(EngineError::Authority)?
+                    .adapter()
+                    .map_err(|_| EngineError::Authority)?,
+            ),
+            "adb" => Box::new(
+                sentry
+                    .android
+                    .as_ref()
+                    .ok_or(EngineError::Authority)?
+                    .adapter()
+                    .map_err(|_| EngineError::Authority)?,
+            ),
+            "router" => {
+                let binding = sentry.router.as_ref().ok_or(EngineError::Authority)?;
+                let (config, capabilities) = binding
+                    .to_router_config()
+                    .map_err(|_| EngineError::Authority)?;
+                Box::new(
+                    RouterAdapter::new(
+                        "local-core",
+                        "router",
+                        &binding.resource_id,
+                        config,
+                        capabilities,
+                        Arc::new(ProcessRunner::default()),
+                    )
+                    .map_err(|_| EngineError::Authority)?,
+                )
+            }
             _ => return Err(EngineError::Authority),
         };
         Ok(adapter)

@@ -9,6 +9,7 @@ pub mod freecad;
 pub mod harness;
 pub mod health;
 pub mod host;
+pub mod live;
 pub mod provider;
 pub mod speech;
 pub mod trace;

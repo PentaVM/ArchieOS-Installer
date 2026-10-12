@@ -1,11 +1,15 @@
 //! Trusted operator configuration; secret contents never serialize into this type.
 use archie_sentry::{
     adapters::{
+        adb::{Adb, AndroidTarget},
         home_assistant::HomeAssistant,
         ipp::{IppAdapter, IppClient},
         mqtt::{Mqtt, MqttBinding, MqttKind},
         onvif::OnvifProbe,
+        process::ProcessRunner,
         roku::Roku,
+        router::{RouterCapabilities, RouterConfig, SshConfig},
+        wol::{Wol, WolTarget},
     },
     contracts::{validate_id, CommandKind},
     engine::AdapterError,
@@ -14,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -30,6 +35,17 @@ pub struct SentrySection {
     pub onvif_cameras: Vec<OnvifCameraBinding>,
     /// Local IRIS context-feed defaults for `archie context-feed`.
     pub context_feed: Option<ContextFeedSection>,
+    /// The one router Sentry administers, when configured.
+    pub router: Option<RouterBinding>,
+    /// Wake-on-LAN nodes behind one broadcast address.
+    pub wol: Option<WolSection>,
+    /// Android nodes reachable through adb (USB or wireless debugging).
+    pub android: Option<AndroidSection>,
+    /// Where the netwatch binary keeps `alerts.jsonl` / `told.json`, for
+    /// `archie sentry-follow`.
+    pub netwatch: Option<NetwatchSection>,
+    /// The chat-export drop folder Wanda ingests, and the sender-hash salt.
+    pub chat_exports: Option<ChatExportSection>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -256,6 +272,262 @@ impl ContextFeedSection {
     }
 }
 
+/// The router Sentry administers. `host` is its LAN address; `control_url` is the
+/// WANIPConnection control URL when the firmware exposes UPnP IGD; `ssh` is the
+/// admin channel when it exposes one. The on-site probe (`adapters::router::probe`)
+/// decides what the channels actually answer; this section only names where they
+/// are.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouterBinding {
+    pub resource_id: String,
+    /// The router's LAN IPv4 address.
+    pub host: String,
+    /// The internal host that receives mapped ports (the internal port equals
+    /// the external one; see `RouterConfig`).
+    pub lan_client: String,
+    /// WANIPConnection control URL, e.g. `http://192.168.1.1/.../control`.
+    #[serde(default)]
+    pub control_url: Option<String>,
+    /// The SSH admin channel, when the firmware exposes one.
+    #[serde(default)]
+    pub ssh: Option<RouterSshBinding>,
+}
+
+/// SSH access to the router: key-based only, matching `SshConfig` — no password
+/// field exists here by construction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouterSshBinding {
+    pub user: String,
+    /// Absolute path of the private key file; absent means the agent/default key.
+    #[serde(default)]
+    pub identity_file: Option<String>,
+    /// Absolute path of the ssh binary; defaults to `/usr/bin/ssh`.
+    #[serde(default)]
+    pub binary: Option<String>,
+    #[serde(default)]
+    pub port: Option<u16>,
+}
+
+impl RouterBinding {
+    fn validate(&self) -> Result<(), AdapterError> {
+        validate_id(&self.resource_id).map_err(|_| AdapterError::Protocol)?;
+        if self.host.parse::<std::net::Ipv4Addr>().is_err()
+            || self.lan_client.parse::<std::net::Ipv4Addr>().is_err()
+        {
+            return Err(AdapterError::Protocol);
+        }
+        if self.control_url.is_none() && self.ssh.is_none() {
+            // A router with no channel can be observed by netwatch; it is not
+            // something Sentry can administer, and config should say so.
+            return Err(AdapterError::Protocol);
+        }
+        self.to_router_config().map(|_| ())
+    }
+
+    /// The adapter-facing configuration, plus the capabilities this section
+    /// asserts. `igd`/`ssh` mean "configured"; whether they answer is the
+    /// probe's question, and `radio_tools` stays empty until one runs — so a
+    /// `WifiSet` intent against an unprobed radio is honestly `Unsupported`.
+    pub fn to_router_config(&self) -> Result<(RouterConfig, RouterCapabilities), AdapterError> {
+        use archie_sentry::adapters::router::IgdClient;
+        let host = self
+            .host
+            .parse::<std::net::Ipv4Addr>()
+            .map_err(|_| AdapterError::Protocol)?;
+        let lan_client = self
+            .lan_client
+            .parse::<std::net::Ipv4Addr>()
+            .map_err(|_| AdapterError::Protocol)?;
+        if let Some(url) = &self.control_url {
+            IgdClient::new(url)?;
+        }
+        let ssh = match &self.ssh {
+            Some(binding) => {
+                // The platform's stock ssh; an operator override names an
+                // absolute path, and `SshConfig` re-checks absoluteness.
+                let default_binary = if cfg!(windows) {
+                    "C:/Windows/System32/OpenSSH/ssh.exe"
+                } else {
+                    "/usr/bin/ssh"
+                };
+                let binary = binding.binary.as_deref().unwrap_or(default_binary);
+                let mut config = SshConfig::new(
+                    binary,
+                    &binding.user,
+                    host,
+                    binding.identity_file.clone(),
+                )?;
+                if let Some(port) = binding.port {
+                    config = config.with_port(port)?;
+                }
+                Some(config)
+            }
+            None => None,
+        };
+        let capabilities = RouterCapabilities {
+            igd: self.control_url.is_some(),
+            ssh: ssh.is_some(),
+            radio_tools: Vec::new(),
+            dhcp_leases_path: None,
+            firmware_hint: None,
+        };
+        Ok((
+            RouterConfig {
+                control_url: self.control_url.clone(),
+                lan_client,
+                ssh,
+            },
+            capabilities,
+        ))
+    }
+}
+
+/// Wake-on-LAN wiring: one subnet broadcast address, the neighbor-cache tool
+/// used for the measured postcondition, and the nodes themselves.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WolSection {
+    /// `"<ipv4>"` or `"<ipv4>:<port>"` the magic packet is sent to, e.g. the
+    /// subnet broadcast `192.168.1.255`.
+    pub broadcast: String,
+    /// Absolute path of `ip` (Linux) or `arp` (Windows): the reachability
+    /// check after the packet is a neighbor-cache read, never a ping.
+    pub arp_tool: String,
+    pub nodes: Vec<WolNodeBinding>,
+}
+
+/// One WoL node: a name, its hardware address, and its IP for the
+/// neighbor-cache postcondition.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WolNodeBinding {
+    pub resource_id: String,
+    /// Lowercase hex with colons, e.g. `7c:10:c9:55:aa:01`.
+    pub mac: String,
+    pub ip: String,
+}
+
+impl WolSection {
+    fn targets(&self) -> BTreeMap<String, WolTarget> {
+        self.nodes
+            .iter()
+            .map(|n| {
+                (
+                    n.resource_id.clone(),
+                    WolTarget {
+                        mac: n.mac.clone(),
+                        ip: n.ip.clone(),
+                    },
+                )
+            })
+            .collect()
+    }
+    /// Construction probe: bounds and address shapes live in the adapter.
+    pub fn adapter(&self) -> Result<Wol, AdapterError> {
+        Wol::new(
+            "local-core",
+            "wol",
+            &self.broadcast,
+            &self.arp_tool,
+            self.targets(),
+            Arc::new(ProcessRunner::default()),
+        )
+    }
+}
+
+/// Android nodes reached through adb. `adb` is the absolute binary path; the
+/// runner re-checks existence before any process exists.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AndroidSection {
+    pub adb: String,
+    pub nodes: Vec<AndroidNodeBinding>,
+}
+
+/// One Android node: a name and its `adb devices` serial.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AndroidNodeBinding {
+    pub resource_id: String,
+    /// USB serial, or `<ip>:<port>` with `network: true` for wireless debugging.
+    pub serial: String,
+    #[serde(default)]
+    pub network: bool,
+}
+
+impl AndroidSection {
+    fn targets(&self) -> BTreeMap<String, AndroidTarget> {
+        self.nodes
+            .iter()
+            .map(|n| {
+                (
+                    n.resource_id.clone(),
+                    AndroidTarget {
+                        serial: n.serial.clone(),
+                        network: n.network,
+                    },
+                )
+            })
+            .collect()
+    }
+    /// Construction probe: serial shapes and bounds live in the adapter.
+    pub fn adapter(&self) -> Result<Adb, AdapterError> {
+        Adb::new(
+            "local-core",
+            "adb",
+            &self.adb,
+            self.targets(),
+            Arc::new(ProcessRunner::default()),
+        )
+    }
+}
+
+/// Where netwatch keeps its state, for the live alert follower
+/// (`archie sentry-follow`): `alerts.jsonl`, `told.json` and `state.json` all
+/// live in this one directory.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NetwatchSection {
+    pub state_dir: String,
+}
+impl NetwatchSection {
+    fn validate(&self) -> Result<(), AdapterError> {
+        if self.state_dir.is_empty()
+            || self.state_dir.len() > 512
+            || !Path::new(&self.state_dir).is_absolute()
+        {
+            return Err(AdapterError::Protocol);
+        }
+        Ok(())
+    }
+}
+
+/// The chat-export drop folder Wanda ingests (`archie wanda-watch`,
+/// `archie wanda-ingest`). The salt keys the sender-hash pseudonyms; it lives
+/// here in local config and never in a record — a pseudonym, not a defence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChatExportSection {
+    pub watch_dir: String,
+    /// 1..=128 bytes, matching the bridge's salt bound.
+    pub salt: String,
+}
+impl ChatExportSection {
+    fn validate(&self) -> Result<(), AdapterError> {
+        if self.watch_dir.is_empty()
+            || self.watch_dir.len() > 512
+            || !Path::new(&self.watch_dir).is_absolute()
+            || self.salt.is_empty()
+            || self.salt.len() > 128
+        {
+            return Err(AdapterError::Protocol);
+        }
+        Ok(())
+    }
+}
+
 /// A secret reference is `env:VARIABLE` or an absolute path to a private file.
 /// Inline secrets do not exist in this configuration surface by construction.
 fn validate_secret_ref(reference: &str) -> Result<(), AdapterError> {
@@ -404,6 +676,41 @@ impl SentrySection {
         if let Some(feed) = &self.context_feed {
             feed.validate().map_err(|_| invalid())?;
         }
+        if let Some(router) = &self.router {
+            router.validate().map_err(|_| invalid())?;
+            if !resources.insert(&router.resource_id) {
+                return Err(invalid());
+            }
+        }
+        if let Some(wol) = &self.wol {
+            if wol.nodes.len() > 256 {
+                return Err(invalid());
+            }
+            // Construction probe: bounds and address shapes live in the adapter.
+            wol.adapter().map_err(|_| invalid())?;
+            for node in &wol.nodes {
+                if !resources.insert(&node.resource_id) {
+                    return Err(invalid());
+                }
+            }
+        }
+        if let Some(android) = &self.android {
+            if android.nodes.len() > 64 {
+                return Err(invalid());
+            }
+            android.adapter().map_err(|_| invalid())?;
+            for node in &android.nodes {
+                if !resources.insert(&node.resource_id) {
+                    return Err(invalid());
+                }
+            }
+        }
+        if let Some(netwatch) = &self.netwatch {
+            netwatch.validate().map_err(|_| invalid())?;
+        }
+        if let Some(chat) = &self.chat_exports {
+            chat.validate().map_err(|_| invalid())?;
+        }
         Ok(())
     }
 
@@ -429,6 +736,39 @@ impl SentrySection {
         if let Some(mqtt) = &self.mqtt {
             if let Some(binding) = mqtt.resources.get(resource_id) {
                 return Some(("mqtt", mqtt_capabilities(binding)));
+            }
+        }
+        if let Some(wol) = &self.wol {
+            if wol.nodes.iter().any(|n| n.resource_id == resource_id) {
+                return Some(("wol", vec![CommandKind::WakeHost]));
+            }
+        }
+        if let Some(android) = &self.android {
+            if android.nodes.iter().any(|n| n.resource_id == resource_id) {
+                return Some((
+                    "adb",
+                    vec![
+                        CommandKind::AppLaunch,
+                        CommandKind::SessionLock,
+                        CommandKind::VolumeSet,
+                    ],
+                ));
+            }
+        }
+        if let Some(router) = &self.router {
+            if router.resource_id == resource_id {
+                let mut capabilities = Vec::new();
+                if router.control_url.is_some() {
+                    capabilities.push(CommandKind::PortMapping);
+                }
+                if router.ssh.is_some() {
+                    // The adapter declares Unsupported for the radio until an
+                    // on-site probe names a tool; configuration alone does not.
+                    capabilities.push(CommandKind::WifiSet);
+                }
+                if !capabilities.is_empty() {
+                    return Some(("router", capabilities));
+                }
             }
         }
         None

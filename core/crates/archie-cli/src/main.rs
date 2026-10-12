@@ -105,6 +105,61 @@ enum Command {
         #[command(subcommand)]
         action: SentryIoT,
     },
+    /// Act on a configured node: wake it (WoL), lock/unlock its session, set
+    /// its volume, or launch an app on it (SSH/ADB per node type).
+    ///
+    /// Every action is an intent that goes through the same reviewed
+    /// prepare/approve flow as `sentry-execute`, with the adapter's measured
+    /// postcondition; there is no bypass.
+    SentryNode {
+        #[command(subcommand)]
+        action: SentryNodeAction,
+    },
+    /// Follow the netwatch alerts file: every new alert is validated, deduped
+    /// against the vault's content-derived references, sealed at Restricted and
+    /// considered in one Cerebra pass per batch, with its trace.
+    ///
+    /// Entirely local. On a node with no local model the restricted pass is
+    /// refused and the refusal is reported, which is the designed outcome.
+    /// The state directory falls back to `[sentry.netwatch]` when the flag is
+    /// absent.
+    SentryFollow {
+        /// Netwatch state directory (holds `alerts.jsonl` and `told.json`).
+        #[arg(long)]
+        state_dir: Option<std::path::PathBuf>,
+        /// One pass instead of a poll loop.
+        #[arg(long)]
+        once: bool,
+        /// Poll interval when looping (500..=60000 ms; default 5000).
+        #[arg(long)]
+        poll_ms: Option<u64>,
+    },
+    /// Ingest one chat export file into Wanda's context: WhatsApp `.txt`,
+    /// Instagram `.json` or notification-dump `.jsonl`. Local and idempotent:
+    /// a file whose content is already ingested is skipped.
+    WandaIngest {
+        /// The export file.
+        file: std::path::PathBuf,
+        /// Sender-hash salt; defaults to `[sentry.chat_exports]` salt.
+        #[arg(long)]
+        salt: Option<String>,
+    },
+    /// Ingest every chat export in the watch directory into Wanda's context.
+    /// The directory and salt fall back to `[sentry.chat_exports]`.
+    WandaWatch {
+        /// Directory of `.txt` / `.json` / `.jsonl` exports.
+        #[arg(long)]
+        dir: Option<std::path::PathBuf>,
+        /// Sender-hash salt; defaults to `[sentry.chat_exports]` salt.
+        #[arg(long)]
+        salt: Option<String>,
+        /// One pass instead of a poll loop.
+        #[arg(long)]
+        once: bool,
+        /// Poll interval when looping (500..=60000 ms; default 5000).
+        #[arg(long)]
+        poll_ms: Option<u64>,
+    },
     /// Build the local IRIS context feed from watchdog and offline exports.
     ///
     /// Works with the daemon down: reads the router watchdog directory, optional
@@ -327,9 +382,69 @@ impl RemoteKeyArg {
     }
 }
 
+/// Node actions with a measurable postcondition; each maps to exactly one
+/// Sentry contract command, so an invalid one fails at the CLI.
 #[derive(Debug, Subcommand)]
-enum SentryIoT {
-    /// Send one verifiable remote key to a paired Roku resource (reviewed flow).
+enum SentryNodeAction {
+    /// Wake a configured WoL node with a magic packet (verified by the
+    /// neighbor cache afterwards — the packet itself proves nothing).
+    Wake {
+        /// Resource ID from the node's Sentry configuration (`[sentry.wol]`).
+        host: String,
+    },
+    /// Lock a configured Android node's session (verified against `dumpsys`).
+    Lock {
+        /// Resource ID from `[sentry.android]`.
+        host: String,
+    },
+    /// Unlock a configured Android node's session (verified against `dumpsys`).
+    Unlock {
+        /// Resource ID from `[sentry.android]`.
+        host: String,
+    },
+    /// Set a configured Android node's output volume (verified against
+    /// `dumpsys audio` afterwards).
+    Volume {
+        /// Resource ID from `[sentry.android]`.
+        host: String,
+        #[arg(value_parser = clap::value_parser!(u8).range(0..=100))]
+        percent: u8,
+    },
+    /// Launch an application on a configured Android node (verified against
+    /// the foreground process the device reports).
+    Launch {
+        /// Resource ID from `[sentry.android]`.
+        host: String,
+        /// Application package name, e.g. `com.example.app`.
+        app: String,
+    },
+}
+impl SentryNodeAction {
+    fn command(&self) -> archie_core::control::SentryCommand {
+        use archie_core::control::SentryCommand;
+        match self {
+            Self::Wake { .. } => SentryCommand::WakeHost,
+            Self::Lock { .. } => SentryCommand::SessionLock { locked: true },
+            Self::Unlock { .. } => SentryCommand::SessionLock { locked: false },
+            Self::Volume { percent, .. } => SentryCommand::VolumeSet { percent: *percent },
+            Self::Launch { app, .. } => SentryCommand::AppLaunch {
+                app_id: app.clone(),
+            },
+        }
+    }
+    fn host(&self) -> &str {
+        match self {
+            Self::Wake { host }
+            | Self::Lock { host }
+            | Self::Unlock { host }
+            | Self::Volume { host, .. }
+            | Self::Launch { host, .. } => host,
+        }
+    }
+}
+
+#[derive(Debug, Subcommand)]
+enum SentryIoT {    /// Send one verifiable remote key to a paired Roku resource (reviewed flow).
     Key {
         /// Resource ID from the node's Sentry configuration.
         resource_id: String,
@@ -425,6 +540,10 @@ impl Command {
             Self::SentryReceipt { intent_id } => ControlRequest::SentryReceipt {
                 intent_id: intent_id.clone(),
             },
+            Self::SentryNode { action } => ControlRequest::SentryPrepare {
+                resource_id: action.host().to_owned(),
+                command: action.command(),
+            },
             Self::DeviceOperations { limit } => ControlRequest::DeviceOperations { limit: *limit },
             Self::CortexTrajectories { limit } => {
                 ControlRequest::CortexTrajectories { limit: *limit }
@@ -434,7 +553,7 @@ impl Command {
             Self::Metrics => ControlRequest::Metrics,
             Self::Audit { limit } => ControlRequest::Audit { limit: *limit },
             Self::Ping => ControlRequest::Ping,
-            Self::Enrol { .. } | Self::SentryNetworkAnalyze { .. } | Self::SentryDevices { .. } | Self::ContextFeed { .. } => {
+            Self::Enrol { .. } | Self::SentryNetworkAnalyze { .. } | Self::SentryDevices { .. } | Self::ContextFeed { .. } | Self::SentryFollow { .. } | Self::WandaIngest { .. } | Self::WandaWatch { .. } => {
                 return None
             }
         })
@@ -923,6 +1042,20 @@ async fn main() -> std::process::ExitCode {
                 *once,
                 cli.json,
             ),
+            Command::SentryFollow {
+                state_dir,
+                once,
+                poll_ms,
+            } => sentry_follow(&paths, state_dir.as_deref(), *poll_ms, *once, cli.json),
+            Command::WandaIngest { file, salt } => {
+                wanda_ingest(&paths, file, salt.as_deref(), cli.json)
+            }
+            Command::WandaWatch {
+                dir,
+                salt,
+                once,
+                poll_ms,
+            } => wanda_watch(&paths, dir.as_deref(), salt.as_deref(), *poll_ms, *once, cli.json),
             other => local_command(other, &workstation_root(cli.root.as_deref()), cli.json).await,
         };
     };
@@ -938,6 +1071,7 @@ async fn main() -> std::process::ExitCode {
     if matches!(
         cli.command,
         Command::SentryExecute { .. }
+            | Command::SentryNode { .. }
             | Command::Sentry {
                 action: SentryIoT::Key { .. } | SentryIoT::Launch { .. } | SentryIoT::Print { .. },
             }
@@ -1302,6 +1436,206 @@ fn context_feed(
                 );
                 println!("sentry execution receipts: skipped (the journal has no offline reader)");
             }
+            if once {
+                return Ok(());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(poll_ms));
+        }
+    };
+    match run() {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(message) => {
+            eprintln!("archie: {message}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+/// Resolve the `[sentry.netwatch]` / `[sentry.chat_exports]` fallbacks once.
+fn load_sentry_config(paths: &StatePaths) -> Result<archie_core::config::ArchieConfig, String> {
+    archie_core::config::ArchieConfig::load(paths.main_config())
+        .map_err(|e| format!("cannot load configuration: {e}"))
+}
+
+/// One pass (or a poll loop) of the live alert follower. Entirely local: the
+/// netwatch state directory and the follower vault are files. The pass runs
+/// against an empty model registry, so on a node without a local model every
+/// batch's refusal is `NoLocalModel` — the designed outcome, reported as such.
+fn sentry_follow(
+    paths: &StatePaths,
+    state_dir: Option<&std::path::Path>,
+    poll_ms: Option<u64>,
+    once: bool,
+    json: bool,
+) -> std::process::ExitCode {
+    let run = || -> Result<(), String> {
+        let state_dir = match state_dir.map(std::path::PathBuf::from) {
+            Some(dir) => dir,
+            None => load_sentry_config(paths)?
+                .sentry
+                .netwatch
+                .map(|n| std::path::PathBuf::from(n.state_dir))
+                .ok_or_else(|| {
+                    "no netwatch state directory: pass --state-dir or configure [sentry.netwatch]"
+                        .to_owned()
+                })?,
+        };
+        let poll_ms = poll_ms.unwrap_or(5000);
+        if !(500..=60000).contains(&poll_ms) {
+            return Err("poll_ms must be within 500..=60000".to_owned());
+        }
+        let vault_dir = archie_workstation::live::cerebra_vault_dir(&paths.state_dir);
+        loop {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_millis() as i64);
+            let report = archie_workstation::live::follow_alerts_once(&state_dir, &vault_dir, now_ms)
+                .map_err(|e| format!("alert follower failed: {e}"))?;
+            let refused = report.refused_no_local_model();
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "lines_read": report.lines_read,
+                        "malformed_lines": report.malformed_lines,
+                        "alerts_fed": report.alerts_fed,
+                        "alerts_rejected": report.alerts_rejected,
+                        "passes": report.passes.len(),
+                        "refused_no_local_model": refused,
+                        "journal_reset": report.journal_reset,
+                        "rotation_reset": report.rotation_reset,
+                    })
+                );
+            } else {
+                println!(
+                    "sentry follow: {} alerts fed ({} malformed lines, {} rejected), {} passes, {} refused without a local model",
+                    report.alerts_fed,
+                    report.malformed_lines,
+                    report.alerts_rejected,
+                    report.passes.len(),
+                    refused,
+                );
+            }
+            if once {
+                return Ok(());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(poll_ms));
+        }
+    };
+    match run() {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(message) => {
+            eprintln!("archie: {message}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+fn wanda_salt(paths: &StatePaths, salt: Option<&str>) -> Result<String, String> {
+    match salt {
+        Some(salt) if !salt.is_empty() && salt.len() <= 128 => Ok(salt.to_owned()),
+        Some(_) => Err("the salt must be 1..=128 bytes".to_owned()),
+        None => load_sentry_config(paths)?
+            .sentry
+            .chat_exports
+            .map(|c| c.salt)
+            .ok_or_else(|| "no salt: pass --salt or configure [sentry.chat_exports]".to_owned()),
+    }
+}
+
+fn print_watch_report(report: &archie_workstation::live::WatchReport, json: bool) {
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "files_seen": report.files_seen,
+                "files_ingested": report.files_ingested,
+                "files_already_known": report.files_already_known,
+                "messages_recorded": report.messages_recorded,
+                "chats_recorded": report.chats_recorded,
+                "failures": report.failures,
+            })
+        );
+    } else {
+        println!(
+            "wanda ingest: {} files ingested ({} already known), {} messages, {} chat aggregates",
+            report.files_ingested,
+            report.files_already_known,
+            report.messages_recorded,
+            report.chats_recorded,
+        );
+        for failure in &report.failures {
+            println!("  failed: {failure}");
+        }
+    }
+}
+
+/// Manually ingest one chat export file into Wanda's context. Local and
+/// idempotent: the content-hash journal skips what is already ingested.
+fn wanda_ingest(
+    paths: &StatePaths,
+    file: &std::path::Path,
+    salt: Option<&str>,
+    json: bool,
+) -> std::process::ExitCode {
+    let run = || -> Result<(), String> {
+        let salt = wanda_salt(paths, salt)?;
+        let vault_dir = archie_workstation::live::cerebra_vault_dir(&paths.state_dir);
+        let report = archie_workstation::live::ingest_export_file(file, &vault_dir, &salt)
+            .map_err(|e| format!("wanda ingest failed: {e}"))?;
+        print_watch_report(&report, json);
+        if report.files_ingested == 0 && report.files_already_known == 0 {
+            return Err("nothing ingested".to_owned());
+        }
+        Ok(())
+    };
+    match run() {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(message) => {
+            eprintln!("archie: {message}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+/// One pass (or a poll loop) over the chat-export watch directory.
+fn wanda_watch(
+    paths: &StatePaths,
+    dir: Option<&std::path::Path>,
+    salt: Option<&str>,
+    poll_ms: Option<u64>,
+    once: bool,
+    json: bool,
+) -> std::process::ExitCode {
+    let run = || -> Result<(), String> {
+        let configured = if dir.is_none() || salt.is_none() {
+            Some(load_sentry_config(paths)?)
+        } else {
+            None
+        };
+        let chat = configured.as_ref().and_then(|c| c.sentry.chat_exports.as_ref());
+        let dir = dir
+            .map(std::path::PathBuf::from)
+            .or_else(|| chat.map(|c| std::path::PathBuf::from(&c.watch_dir)))
+            .ok_or_else(|| {
+                "no watch directory: pass --dir or configure [sentry.chat_exports]".to_owned()
+            })?;
+        let salt = match salt {
+            Some(salt) if !salt.is_empty() && salt.len() <= 128 => salt.to_owned(),
+            Some(_) => return Err("the salt must be 1..=128 bytes".to_owned()),
+            None => chat
+                .map(|c| c.salt.clone())
+                .ok_or_else(|| "no salt: pass --salt or configure [sentry.chat_exports]".to_owned())?,
+        };
+        let poll_ms = poll_ms.unwrap_or(5000);
+        if !(500..=60000).contains(&poll_ms) {
+            return Err("poll_ms must be within 500..=60000".to_owned());
+        }
+        let vault_dir = archie_workstation::live::cerebra_vault_dir(&paths.state_dir);
+        loop {
+            let report = archie_workstation::live::watch_exports_once(&dir, &vault_dir, &salt)
+                .map_err(|e| format!("wanda watch failed: {e}"))?;
+            print_watch_report(&report, json);
             if once {
                 return Ok(());
             }
@@ -2295,5 +2629,80 @@ mod tests {
         assert!(sentry_devices_render(Some(&dir.join("missing.json")), None, None, false).is_err());
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The new live-wiring verbs parse to the exact typed commands they mean.
+    #[test]
+    fn sentry_node_verbs_parse_to_typed_commands() {
+        use archie_core::control::{ControlRequest, SentryCommand};
+
+        let cli = Cli::try_parse_from(["archie", "sentry-node", "wake", "living-pc"]).unwrap();
+        let Some(ControlRequest::SentryPrepare { resource_id, command }) = cli.command.to_request()
+        else {
+            panic!("wake prepares an intent");
+        };
+        assert_eq!(resource_id, "living-pc");
+        assert_eq!(command, SentryCommand::WakeHost);
+
+        let cli = Cli::try_parse_from(["archie", "sentry-node", "lock", "pixel"]).unwrap();
+        let Some(ControlRequest::SentryPrepare { command, .. }) = cli.command.to_request() else {
+            panic!("lock prepares an intent");
+        };
+        assert_eq!(command, SentryCommand::SessionLock { locked: true });
+
+        let cli = Cli::try_parse_from(["archie", "sentry-node", "unlock", "pixel"]).unwrap();
+        let Some(ControlRequest::SentryPrepare { command, .. }) = cli.command.to_request() else {
+            panic!("unlock prepares an intent");
+        };
+        assert_eq!(command, SentryCommand::SessionLock { locked: false });
+
+        let cli = Cli::try_parse_from(["archie", "sentry-node", "volume", "pixel", "40"]).unwrap();
+        let Some(ControlRequest::SentryPrepare { command, .. }) = cli.command.to_request() else {
+            panic!("volume prepares an intent");
+        };
+        assert_eq!(command, SentryCommand::VolumeSet { percent: 40 });
+
+        let cli =
+            Cli::try_parse_from(["archie", "sentry-node", "launch", "pixel", "com.example.app"]).unwrap();
+        let Some(ControlRequest::SentryPrepare { command, .. }) = cli.command.to_request() else {
+            panic!("launch prepares an intent");
+        };
+        assert_eq!(
+            command,
+            SentryCommand::AppLaunch {
+                app_id: "com.example.app".into()
+            }
+        );
+
+        // Volume is bounded at the CLI, before any intent exists.
+        assert!(Cli::try_parse_from(["archie", "sentry-node", "volume", "pixel", "101"]).is_err());
+        assert!(Cli::try_parse_from(["archie", "sentry-node", "wake"]).is_err());
+    }
+
+    /// The follower and Wanda verbs are local commands: they never reach the
+    /// daemon, like `context-feed` and `sentry-devices`.
+    #[test]
+    fn follower_and_wanda_verbs_are_local_and_parse() {
+        let cli = Cli::try_parse_from(["archie", "sentry-follow", "--once"]).unwrap();
+        assert!(cli.command.to_request().is_none());
+
+        let cli = Cli::try_parse_from(["archie", "wanda-ingest", "chat.txt"]).unwrap();
+        assert!(cli.command.to_request().is_none());
+
+        let cli = Cli::try_parse_from([
+            "archie",
+            "wanda-watch",
+            "--dir",
+            "/tmp/exports",
+            "--salt",
+            "fixture-salt",
+            "--poll-ms",
+            "1000",
+        ])
+        .unwrap();
+        assert!(cli.command.to_request().is_none());
+
+        // wanda-ingest needs the file argument.
+        assert!(Cli::try_parse_from(["archie", "wanda-ingest"]).is_err());
     }
 }
