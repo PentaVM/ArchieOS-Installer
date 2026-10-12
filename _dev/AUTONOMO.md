@@ -19,7 +19,7 @@ deja commiteada y empujada en `claude/sentry-ola3-cast-focos-servidores` (PR #36
 
 ## Cola
 
-- [~] **CI verde.** `cargo fmt` del workspace (sólo estilo), `#include <array>` en
+- [x] **CI verde.** `cargo fmt` del workspace (sólo estilo), `#include <array>` en
   `sentry/src/cli/main.cpp`, clippy `-D warnings` con toolchain 1.88, `cargo test
   --workspace`, `ctest` de cortex/sentry/visual/osm.
 - [x] **Sentry 11 — primera respuesta reversible.** Aviso por voz/Observatory de una
@@ -29,8 +29,17 @@ deja commiteada y empujada en `claude/sentry-ola3-cast-focos-servidores` (PR #36
   alerta por desviación) con prueba; la tasa de falsos positivos queda sin medir.
 - [x] **Sentry 13 — unidad systemd.** `systemd-analyze verify` y endurecimiento de
   `archie-netwatch.service`; documentar lo que sólo puede comprobarse en Arch real.
-- [~] **Endurecimiento general.** Revisar `unwrap`/`expect` en rutas de producción de
+- [x] **Endurecimiento general.** Revisar `unwrap`/`expect` en rutas de producción de
   `archie-sentry` y `archie-cerebra`, timeouts y límites de tamaño en E/S de red.
+
+- [ ] **CI en el último head**, con el paso nuevo de TShark e2e. Si falla, es lo primero.
+- [ ] **Sentry 7b — destinos inusuales.** Un dispositivo aprendido que manda mucho
+  volumen a un destino que nunca usó (no cada destino nuevo: eso sería ruido).
+- [ ] **Sección 4 — productores de contexto.** Averiguar qué exponen Vault, IRIS y Forge
+  hacia `PillarContext` y hacer el primero que no requiera la GUI ni IRIS runtime.
+- [ ] **Sólo propuesta, no implementar sin Nelson:** bloqueo de un dispositivo como
+  `Intent` (`Command::DeviceBlock` por el router). Toca contratos y policy, y el
+  firmware del MitraStar es desconocido.
 
 ## Hecho
 
@@ -44,3 +53,8 @@ deja commiteada y empujada en `claude/sentry-ola3-cast-focos-servidores` (PR #36
 - Unidad de netwatch (`1154eca`): cuenta estática, `wireshark`, 0640; exposición 5.1→3.5.
 - Follower (`0e05975`): sin `alerts.jsonl` (nodo nuevo o rotación) ya no muere.
 - `archie-sentry-follow.service` (`01e61e3`): exposición 2.4; tablón 0640 para displayd.
+- Auditoría de E/S de los adaptadores (`705a38f`): panic por stderr no ASCII, trabajo
+  bloqueante fuera del runtime (el plazo del Intent no podía aplicarse) y tope de
+  sesiones. Cada arreglo tiene una prueba que falla sin él.
+- e2e con TShark 4.2.2 real (`5c9e47b`), también en el CI.
+- CI verde en GitHub en `4625bb7` (rust + native-contracts). Descripción del PR al día.
