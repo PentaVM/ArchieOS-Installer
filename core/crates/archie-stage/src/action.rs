@@ -547,9 +547,10 @@ impl StageAction {
             Self::Stroke { .. } | Self::Strokes { .. } => ActionKind::Stroke,
             Self::Focus => ActionKind::Focus,
             Self::Snapshot { .. } | Self::Frame { .. } => ActionKind::Snapshot,
-            Self::KeyDown { .. } | Self::KeyUp { .. } | Self::ButtonDown { .. } | Self::ButtonUp { .. } => {
-                ActionKind::Hold
-            }
+            Self::KeyDown { .. }
+            | Self::KeyUp { .. }
+            | Self::ButtonDown { .. }
+            | Self::ButtonUp { .. } => ActionKind::Hold,
         }
     }
 

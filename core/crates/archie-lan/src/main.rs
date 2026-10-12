@@ -36,12 +36,18 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 
 fn main() -> ExitCode {
     let mut arguments: Vec<String> = std::env::args().skip(1).collect();
-    let seconds = take(&mut arguments, "--seconds").and_then(|s| s.parse().ok()).unwrap_or(4u64).clamp(1, 30);
+    let seconds = take(&mut arguments, "--seconds")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(4u64)
+        .clamp(1, 30);
     let listen = Duration::from_secs(seconds);
     match arguments.first().map(String::as_str) {
         Some("scan") => match scan(listen) {
             Ok(inventory) => {
-                println!("{}", serde_json::to_string_pretty(&inventory).expect("an inventory serializes"));
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&inventory).expect("an inventory serializes")
+                );
                 ExitCode::SUCCESS
             }
             Err(error) => {
@@ -54,14 +60,21 @@ fn main() -> ExitCode {
                 eprintln!("archie-lan: watch needs --out FILE");
                 return ExitCode::from(2);
             };
-            let every = take(&mut arguments, "--every").and_then(|s| s.parse().ok()).unwrap_or(300u64).max(30);
+            let every = take(&mut arguments, "--every")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(300u64)
+                .max(30);
             loop {
                 match scan(listen) {
                     Ok(inventory) => {
                         // Beside the file, then renamed: a reader never sees half an inventory.
                         let partial = out.with_extension("partial");
-                        let written = write_private(&partial, &serde_json::to_vec_pretty(&inventory).expect("an inventory serializes"))
-                            .and_then(|()| std::fs::rename(&partial, &out));
+                        let written = write_private(
+                            &partial,
+                            &serde_json::to_vec_pretty(&inventory)
+                                .expect("an inventory serializes"),
+                        )
+                        .and_then(|()| std::fs::rename(&partial, &out));
                         if let Err(error) = written {
                             eprintln!("archie-lan: {}: {error}", out.display());
                         }

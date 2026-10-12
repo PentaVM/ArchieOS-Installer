@@ -63,7 +63,11 @@ fn domain() -> ContextDomain {
 }
 
 fn cerebra() -> Cerebra {
-    Cerebra::new(Router::default(), ContextGateway::new(), CerebraConfig::default())
+    Cerebra::new(
+        Router::default(),
+        ContextGateway::new(),
+        CerebraConfig::default(),
+    )
 }
 
 fn local_model() -> ModelDescriptor {
@@ -120,7 +124,11 @@ fn a_fixture_port_scan_travels_alerts_to_pillar_references_to_a_traced_pass() {
     assert_eq!(pass.trace.trace_id, trace_id);
     assert_eq!(records.len(), 3);
     for record in &records {
-        assert!(domain.contains(record.reference()), "{}", record.reference());
+        assert!(
+            domain.contains(record.reference()),
+            "{}",
+            record.reference()
+        );
         assert_eq!(record.origin(), AlertOrigin::Measurement);
     }
     let capsule = pass.intent.capsule().expect("reasoning holds a capsule");
@@ -128,8 +136,14 @@ fn a_fixture_port_scan_travels_alerts_to_pillar_references_to_a_traced_pass() {
     assert_eq!(capsule.entries().len(), 3);
     // §4: the pass is graded restricted, and the trace says so wherever it handled it.
     assert_eq!(pass.trace.peak_privacy(), Some(PrivacyGrade::Restricted));
-    assert!(pass.trace.last(Stage::Contextualize).is_some_and(|r| r.outcome.proceeded()));
-    assert!(pass.trace.last(Stage::Reason).is_some_and(|r| r.outcome.proceeded()));
+    assert!(pass
+        .trace
+        .last(Stage::Contextualize)
+        .is_some_and(|r| r.outcome.proceeded()));
+    assert!(pass
+        .trace
+        .last(Stage::Reason)
+        .is_some_and(|r| r.outcome.proceeded()));
     // The observation was stamped with the newest alert's own time, not the caller's.
     assert_eq!(pass.trace.started_at_ms, 15_000);
 }
@@ -151,7 +165,11 @@ fn without_a_local_model_the_restricted_pass_is_refused_and_the_refusal_is_recor
     .unwrap();
 
     let (pass, refusal, records) = match outcome {
-        AlertPassOutcome::Refused { pass, refusal, records } => (pass, refusal, records),
+        AlertPassOutcome::Refused {
+            pass,
+            refusal,
+            records,
+        } => (pass, refusal, records),
         other => {
             panic!("restricted context with no local model is a refusal, not silence: {other:?}")
         }
@@ -159,10 +177,15 @@ fn without_a_local_model_the_restricted_pass_is_refused_and_the_refusal_is_recor
     assert_eq!(refusal, PassRefusal::NoLocalModel);
     assert_eq!(pass.trace.trace_id, trace_id);
     assert!(pass.intent.is_silent());
-    let reason = pass.trace.last(Stage::Reason).expect("the refusal is in the trace");
+    let reason = pass
+        .trace
+        .last(Stage::Reason)
+        .expect("the refusal is in the trace");
     assert_eq!(
         reason.outcome,
-        StageOutcome::Refused { reason: "no_model_permitted".into() }
+        StageOutcome::Refused {
+            reason: "no_model_permitted".into()
+        }
     );
     assert_eq!(reason.privacy, Some(PrivacyGrade::Restricted));
     // The evidence was still recorded: the refusal does not lose the alert.
@@ -195,7 +218,13 @@ fn a_malformed_or_oversized_batch_is_rejected_without_touching_the_vault() {
             "device",
         ),
         (
-            AlertInput::measured(1, AlertSeverity::High, "port-scan", FIXTURE_DEVICE, "two\nlines"),
+            AlertInput::measured(
+                1,
+                AlertSeverity::High,
+                "port-scan",
+                FIXTURE_DEVICE,
+                "two\nlines",
+            ),
             "detail",
         ),
         (fixture_port_scan(1).with_occurrences(0), "occurrences"),
@@ -223,13 +252,20 @@ fn a_hypothesis_is_recorded_as_a_hypothesis_never_a_measurement() {
     let batch = record_alerts(&mut vault, &domain(), "t", &[hypothesis]).unwrap();
     let record = &batch.records()[0];
     assert_eq!(record.origin(), AlertOrigin::Hypothesis);
-    assert!(record.content().contains("\"origin\":\"hypothesis\""), "{}", record.content());
+    assert!(
+        record.content().contains("\"origin\":\"hypothesis\""),
+        "{}",
+        record.content()
+    );
     assert!(!record.content().contains("measurement"));
     // And what the vault holds says the same, verbatim.
     let disclosure = vault
         .disclose("test", record.reference(), PrivacyGrade::Restricted, 20_000)
         .unwrap();
-    assert!(disclosure.text().unwrap().contains("\"origin\":\"hypothesis\""));
+    assert!(disclosure
+        .text()
+        .unwrap()
+        .contains("\"origin\":\"hypothesis\""));
 }
 
 #[test]
@@ -300,10 +336,17 @@ fn severity_comes_from_the_rule_and_is_never_lowered() {
     assert_eq!(recorded_severity(&domain, &low), AlertSeverity::High);
     // The alert said high — the gateway case of address-moved — and the table's
     // notice does not lower it.
-    let gateway = AlertInput::measured(1, AlertSeverity::High, "address-moved", FIXTURE_DEVICE, "d");
+    let gateway =
+        AlertInput::measured(1, AlertSeverity::High, "address-moved", FIXTURE_DEVICE, "d");
     assert_eq!(recorded_severity(&domain, &gateway), AlertSeverity::High);
     // A rule the table does not know keeps the alert's own severity.
-    let unknown = AlertInput::measured(1, AlertSeverity::Warning, "future-rule", FIXTURE_DEVICE, "d");
+    let unknown = AlertInput::measured(
+        1,
+        AlertSeverity::Warning,
+        "future-rule",
+        FIXTURE_DEVICE,
+        "d",
+    );
     assert_eq!(recorded_severity(&domain, &unknown), AlertSeverity::Warning);
 }
 

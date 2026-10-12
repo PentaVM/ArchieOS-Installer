@@ -34,9 +34,9 @@ use axum::routing::get;
 use axum::Router;
 use curiosity::{Buffer, Identifier, Researcher};
 use eyes::{IrisEyes, Scene};
+use futures_util::{SinkExt, StreamExt};
 use memory::Memory;
 use persistent::PersistentMemory;
-use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
@@ -138,8 +138,13 @@ async fn visual_command(action: &str, value: &str, enabled: Option<bool>) -> Str
     let valid = match action {
         "scene" => matches!(value, "orb" | "forge" | "world"),
         "cinematic" => matches!(value, "field" | "crown" | "atlas" | "dense"),
-        "overlay" => enabled.is_some()
-            && matches!(value, "hud" | "shell" | "ambient" | "guides" | "links" | "pulses" | "bloom"),
+        "overlay" => {
+            enabled.is_some()
+                && matches!(
+                    value,
+                    "hud" | "shell" | "ambient" | "guides" | "links" | "pulses" | "bloom"
+                )
+        }
         _ => false,
     };
     if !valid {
@@ -164,14 +169,19 @@ async fn visual_command(action: &str, value: &str, enabled: Option<bool>) -> Str
             .await
             .map_err(|e| e.to_string())?;
         Ok::<bool, String>(&reply == b"ok\n")
-    }).await;
+    })
+    .await;
     match sent {
         Ok(Ok(true)) => format!(
             "Observatory actualizado: {action} {value}{}.",
-            enabled.map(|on| if on { " on" } else { " off" }).unwrap_or("")
+            enabled
+                .map(|on| if on { " on" } else { " off" })
+                .unwrap_or("")
         ),
         Ok(Ok(false)) => "El Observatory rechazó ese cambio visual.".into(),
-        Ok(Err(_)) | Err(_) => "No pude cambiar el Observatory: la ventana local no responde.".into(),
+        Ok(Err(_)) | Err(_) => {
+            "No pude cambiar el Observatory: la ventana local no responde.".into()
+        }
     }
 }
 
@@ -249,7 +259,12 @@ impl Senses {
     /// Remembers what was just heard (before the turn that answers it asks for context).
     pub fn heard(&self, text: &str) {
         *self.last_heard.lock().expect("heard lock") = text.to_string();
-        if let Some(memory) = self.persistent.lock().expect("persistent memory lock").as_mut() {
+        if let Some(memory) = self
+            .persistent
+            .lock()
+            .expect("persistent memory lock")
+            .as_mut()
+        {
             if let Err(error) = memory.record_utterance(text, unix_ms()) {
                 eprintln!("personal memory write failed: {error}");
             }
@@ -258,7 +273,12 @@ impl Senses {
 
     /// Local OCR and notification adapters can send source-attributed text here.
     pub fn captured_text(&self, source: &str, text: &str, at_ms: i64, durable: bool) {
-        if let Some(memory) = self.persistent.lock().expect("persistent memory lock").as_mut() {
+        if let Some(memory) = self
+            .persistent
+            .lock()
+            .expect("persistent memory lock")
+            .as_mut()
+        {
             if let Err(error) = memory.record_external_text(source, text, at_ms, durable) {
                 eprintln!("external text memory write failed: {error}");
             }
@@ -274,7 +294,10 @@ impl Senses {
     pub fn context(&self, clock: &str) -> String {
         let scene = {
             let scene = self.scene.lock().expect("scene lock");
-            self.memory.lock().expect("memory lock").describe(&scene, Instant::now())
+            self.memory
+                .lock()
+                .expect("memory lock")
+                .describe(&scene, Instant::now())
         };
         let known = self.buffer.lock().expect("buffer lock").describe();
         let heard = self.last_heard.lock().expect("heard lock").clone();
@@ -291,28 +314,46 @@ impl Senses {
             _ => "La persona te habló en español: responde en español.",
         };
         let memory_policy = "Memoria personal: usa remember en T1 para fallecimientos, cambios familiares, salud y hechos estables; T3 para planes de la semana; T4 para contexto del día y deseos puntuales, que caducan a los pocos días. No guardes cada frase ni conviertas algo dicho por alguien en un hecho verificado.";
-        [clock.to_string(), scene, remembered, known, memory_policy.to_string(), answer_in.to_string()]
-            .into_iter()
-            .filter(|part| !part.is_empty())
-            .collect::<Vec<_>>()
-            .join("\n")
+        [
+            clock.to_string(),
+            scene,
+            remembered,
+            known,
+            memory_policy.to_string(),
+            answer_in.to_string(),
+        ]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
     }
 
     /// Carries out a live tool; `None` when the tool is not one of them.
     pub async fn handle_tool(&self, name: &str, raw_arguments: &str) -> Option<String> {
         let arguments: serde_json::Value = serde_json::from_str(raw_arguments).unwrap_or_default();
         match name {
-            "identify" => Some(self.identify(arguments["what"].as_str().unwrap_or("")).await),
-            "web_search" => Some(self.web_search(arguments["query"].as_str().unwrap_or("")).await),
+            "identify" => Some(
+                self.identify(arguments["what"].as_str().unwrap_or(""))
+                    .await,
+            ),
+            "web_search" => Some(
+                self.web_search(arguments["query"].as_str().unwrap_or(""))
+                    .await,
+            ),
             "remember" => Some(self.remember(
                 arguments["text"].as_str().unwrap_or(""),
                 arguments["tier"].as_str().unwrap_or("t4"),
             )),
-            "observatory_scene" => Some(
-                visual_command("scene", arguments["scene"].as_str().unwrap_or(""), None).await,
-            ),
+            "observatory_scene" => {
+                Some(visual_command("scene", arguments["scene"].as_str().unwrap_or(""), None).await)
+            }
             "orb_cinematic" => Some(
-                visual_command("cinematic", arguments["profile"].as_str().unwrap_or(""), None).await,
+                visual_command(
+                    "cinematic",
+                    arguments["profile"].as_str().unwrap_or(""),
+                    None,
+                )
+                .await,
             ),
             "orb_overlay" => Some(
                 visual_command(
@@ -340,7 +381,8 @@ impl Senses {
         };
         let mut memory = self.persistent.lock().expect("persistent memory lock");
         let Some(memory) = memory.as_mut() else {
-            return "No pude guardar el recuerdo porque la memoria local no está disponible.".into();
+            return "No pude guardar el recuerdo porque la memoria local no está disponible."
+                .into();
         };
         match memory.classify_utterance(text, tier, unix_ms()) {
             Ok(()) => "Recuerdo guardado con su hora y como frase reportada por la persona.".into(),
@@ -350,7 +392,10 @@ impl Senses {
 
     async fn identify(&self, what: &str) -> String {
         let scene = self.scene.lock().expect("scene lock").clone();
-        if scene.at.is_none_or(|at| at.elapsed() > Duration::from_secs(10)) {
+        if scene
+            .at
+            .is_none_or(|at| at.elapsed() > Duration::from_secs(10))
+        {
             let evidence = self
                 .persistent
                 .lock()
@@ -398,7 +443,9 @@ impl Senses {
         {
             return spoken(&known);
         }
-        match curiosity::look_closer(&scene, &seen, &self.identifier, self.researcher.as_ref()).await {
+        match curiosity::look_closer(&scene, &seen, &self.identifier, self.researcher.as_ref())
+            .await
+        {
             Ok(known) => {
                 let told = spoken(&known);
                 self.publish(json!({"type": "known", "known": &known}));
@@ -418,7 +465,8 @@ impl Senses {
         }
         match researcher.search(query).await {
             Ok(results) if !results.is_empty() => {
-                let titles: Vec<String> = results.iter().map(|(title, _, _)| title.clone()).collect();
+                let titles: Vec<String> =
+                    results.iter().map(|(title, _, _)| title.clone()).collect();
                 format!(
                     "Fuentes: {}. Dicen: {}",
                     titles.join("; "),
@@ -455,23 +503,37 @@ fn spoken(known: &curiosity::Known) -> String {
 pub fn moment_json(moment: &Moment) -> serde_json::Value {
     match moment {
         Moment::Heard { text, .. } => json!({"type": "heard", "text": text}),
-        Moment::Floor { action, reason, .. } => json!({"type": "floor", "action": action, "reason": reason}),
-        Moment::Said { text, first_audio_ms, stopped, .. } => {
+        Moment::Floor { action, reason, .. } => {
+            json!({"type": "floor", "action": action, "reason": reason})
+        }
+        Moment::Said {
+            text,
+            first_audio_ms,
+            stopped,
+            ..
+        } => {
             json!({"type": "said", "text": text, "first_audio_ms": first_audio_ms, "stopped": stopped})
         }
         Moment::Speaking { text } => json!({"type": "speaking", "text": text}),
-        Moment::Proposed { tool, arguments } => json!({"type": "tool", "tool": tool, "arguments": arguments}),
+        Moment::Proposed { tool, arguments } => {
+            json!({"type": "tool", "tool": tool, "arguments": arguments})
+        }
         Moment::Did { report } => json!({"type": "did", "report": report}),
         Moment::Interrupted => json!({"type": "interrupted"}),
         Moment::Alert(message) => json!({"type": "alert", "text": message}),
-        Moment::Level { level, voiced } => json!({"type": "level", "level": level, "voiced": voiced}),
+        Moment::Level { level, voiced } => {
+            json!({"type": "level", "level": level, "voiced": voiced})
+        }
         Moment::Ready => json!({"type": "ready"}),
     }
 }
 
 /// Carries the voice to the page: a thread, because the conversation's voice is a
 /// `std` channel and the page's socket lives on the runtime.
-pub fn forward_voice(voice: mpsc::Receiver<VoiceOut>, senses: Arc<Senses>) -> std::thread::JoinHandle<()> {
+pub fn forward_voice(
+    voice: mpsc::Receiver<VoiceOut>,
+    senses: Arc<Senses>,
+) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         for out in voice {
             match out {
@@ -511,7 +573,12 @@ async fn compact_memory(senses: Arc<Senses>) {
     let mut tick = tokio::time::interval_at(start, Duration::from_secs(60 * 60));
     loop {
         tick.tick().await;
-        if let Some(memory) = senses.persistent.lock().expect("persistent memory lock").as_mut() {
+        if let Some(memory) = senses
+            .persistent
+            .lock()
+            .expect("persistent memory lock")
+            .as_mut()
+        {
             if let Err(error) = memory.compact_now() {
                 eprintln!("personal memory compaction failed: {error}");
             }
@@ -559,8 +626,12 @@ async fn session(socket: WebSocket, senses: Arc<Senses>) {
     while let Some(Ok(message)) = stream.next().await {
         if counted.0.elapsed() >= Duration::from_secs(5) && counted.1 > 0 {
             let rate = counted.1 as f32 / counted.0.elapsed().as_secs_f32();
-            eprintln!("microphone: {rate:.0} samples/s (the ears want 16000), peak {:.3}", counted.2);
-            senses.publish(json!({"type": "mic", "samples_per_s": rate.round(), "peak": counted.2}));
+            eprintln!(
+                "microphone: {rate:.0} samples/s (the ears want 16000), peak {:.3}",
+                counted.2
+            );
+            senses
+                .publish(json!({"type": "mic", "samples_per_s": rate.round(), "peak": counted.2}));
             counted = (Instant::now(), 0, 0.0);
         }
         match message {
@@ -610,16 +681,23 @@ async fn see(senses: Arc<Senses>, eyes: IrisEyes) {
                         .seen
                         .iter()
                         .enumerate()
-                        .map(|(index, item)| json!({
-                            "phrase": item.phrase, "score": item.score, "box": item.bbox,
-                            "id": memory.id_of(index),
-                        }))
+                        .map(|(index, item)| {
+                            json!({
+                                "phrase": item.phrase, "score": item.score, "box": item.bbox,
+                                "id": memory.id_of(index),
+                            })
+                        })
                         .collect();
                     let recalled = memory.recall(Instant::now());
                     let held_events = memory.take_held_events();
                     (seen, recalled, held_events)
                 };
-                if let Some(memory) = senses.persistent.lock().expect("persistent memory lock").as_mut() {
+                if let Some(memory) = senses
+                    .persistent
+                    .lock()
+                    .expect("persistent memory lock")
+                    .as_mut()
+                {
                     for held in &held_events {
                         if let Err(error) = memory.record_held_frames(held, &clip_scenes) {
                             eprintln!("visual memory write failed: {error}");
@@ -644,24 +722,39 @@ impl Senses {
         const MAX_BYTES: usize = 8 * 1024 * 1024;
         const SAMPLE_MS: i64 = 250;
         const WINDOW_MS: i64 = 2_000;
-        let Some(at_ms) = scene.observed_at_ms else { return vec![scene.clone()] };
+        let Some(at_ms) = scene.observed_at_ms else {
+            return vec![scene.clone()];
+        };
         let mut recent = self.recent_scenes.lock().expect("recent scenes lock");
         let should_sample = recent.back().is_none_or(|last| {
-            last.observed_at_ms.is_none_or(|previous| at_ms.saturating_sub(previous) >= SAMPLE_MS)
+            last.observed_at_ms
+                .is_none_or(|previous| at_ms.saturating_sub(previous) >= SAMPLE_MS)
         });
         if should_sample {
             recent.push_back(scene.clone());
         }
         while recent.len() > MAX_SCENES
-            || recent.iter().map(|sample| sample.frame.len()).sum::<usize>() > MAX_BYTES
+            || recent
+                .iter()
+                .map(|sample| sample.frame.len())
+                .sum::<usize>()
+                > MAX_BYTES
         {
             recent.pop_front();
         }
-        let mut clip: Vec<Scene> = recent.iter()
-            .filter(|sample| sample.observed_at_ms.is_some_and(|sample_at| at_ms.saturating_sub(sample_at) <= WINDOW_MS))
+        let mut clip: Vec<Scene> = recent
+            .iter()
+            .filter(|sample| {
+                sample
+                    .observed_at_ms
+                    .is_some_and(|sample_at| at_ms.saturating_sub(sample_at) <= WINDOW_MS)
+            })
             .cloned()
             .collect();
-        if clip.last().is_none_or(|last| last.observed_at_ms != scene.observed_at_ms) {
+        if clip
+            .last()
+            .is_none_or(|last| last.observed_at_ms != scene.observed_at_ms)
+        {
             clip.push(scene.clone());
         }
         clip
@@ -695,20 +788,35 @@ async fn wonder(senses: Arc<Senses>) {
             continue;
         }
         let scene = senses.scene.lock().expect("scene lock").clone();
-        if scene.at.is_none_or(|at| at.elapsed() > Duration::from_secs(3)) {
+        if scene
+            .at
+            .is_none_or(|at| at.elapsed() > Duration::from_secs(3))
+        {
             continue;
         }
-        let Some(seen) = curiosity::next_to_look_at(&scene, &senses.buffer.lock().expect("buffer lock")).cloned() else {
+        let Some(seen) =
+            curiosity::next_to_look_at(&scene, &senses.buffer.lock().expect("buffer lock"))
+                .cloned()
+        else {
             continue;
         };
         *senses.last_look.lock().expect("look lock") = Some(Instant::now());
         senses.curiosity_left.fetch_sub(1, Ordering::Relaxed);
-        match curiosity::look_closer(&scene, &seen, &senses.identifier, senses.researcher.as_ref()).await {
+        match curiosity::look_closer(
+            &scene,
+            &seen,
+            &senses.identifier,
+            senses.researcher.as_ref(),
+        )
+        .await
+        {
             Ok(known) => {
                 senses.publish(json!({"type": "known", "known": &known}));
                 senses.buffer.lock().expect("buffer lock").remember(known);
             }
-            Err(error) => senses.publish(json!({"type": "alert", "text": format!("curiosidad: {error}")})),
+            Err(error) => {
+                senses.publish(json!({"type": "alert", "text": format!("curiosidad: {error}")}))
+            }
         }
     }
 }

@@ -49,11 +49,30 @@ pub struct Observatory {
     /// operator most wants to know whether the machine is thrashing or overheating.
     kernel: KernelService,
     orb: OrbService,
+    /// The owner notice board Sentry's alert follower writes; `None` for a fixture.
+    notices: Option<std::path::PathBuf>,
+}
+
+/// What `/api/notices` serves: the pending owner notices, most serious first, or why
+/// there are none to show. Read-only: acknowledging is `archie sentry-notices --ack`.
+#[derive(Debug, serde::Serialize)]
+pub struct NoticesView {
+    /// `live`, `fixture`, or `unavailable` when the board could not be read.
+    pub source: &'static str,
+    pub pending: Vec<archie_notices::Notice>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// The board's place under a node's state directory, as the CLI writes it.
+pub fn notice_board_path(paths: &StatePaths) -> std::path::PathBuf {
+    paths.state_dir.join("cerebra/notices.json")
 }
 
 impl Observatory {
     pub fn live(paths: StatePaths) -> Self {
         Self {
+            notices: Some(notice_board_path(&paths)),
             bridge: Bridge::new(paths),
             cache: Arc::new(RwLock::new(None)),
             fixture: None,
@@ -66,6 +85,7 @@ impl Observatory {
     /// Run the local observatory without connecting to the isolated world adapter.
     pub fn live_without_world(paths: StatePaths) -> Self {
         Self {
+            notices: Some(notice_board_path(&paths)),
             bridge: Bridge::new(paths),
             cache: Arc::new(RwLock::new(None)),
             fixture: None,
@@ -89,6 +109,7 @@ impl Observatory {
             world: WorldService::disabled(WorldDataSource::Fixture),
             kernel: KernelService::default(),
             orb: OrbService::default(),
+            notices: None,
         }
     }
 
@@ -190,6 +211,40 @@ impl Observatory {
         self.orb.receive(path).await
     }
 
+    /// The pending owner notices. The file is small and capped; it is read off the
+    /// runtime's worker threads so a slow disk never stalls another route.
+    pub async fn current_notices(&self) -> NoticesView {
+        let Some(path) = self.notices.clone() else {
+            return NoticesView {
+                source: "fixture",
+                pending: Vec::new(),
+                error: None,
+            };
+        };
+        let read = tokio::task::spawn_blocking(move || archie_notices::Board::load(&path)).await;
+        match read {
+            Ok(Ok(board)) => {
+                let mut pending: Vec<_> = board.pending().cloned().collect();
+                pending.sort_by_key(|n| (std::cmp::Reverse(n.severity), n.at_ms));
+                NoticesView {
+                    source: "live",
+                    pending,
+                    error: None,
+                }
+            }
+            Ok(Err(e)) => NoticesView {
+                source: "unavailable",
+                pending: Vec::new(),
+                error: Some(e.to_string()),
+            },
+            Err(e) => NoticesView {
+                source: "unavailable",
+                pending: Vec::new(),
+                error: Some(format!("the notice reader stopped: {e}")),
+            },
+        }
+    }
+
     /// Dispatch one request.
     pub async fn route(&self, request: Request) -> Response {
         match request.path.as_str() {
@@ -268,6 +323,17 @@ impl Observatory {
                         content_type: "application/json; charset=utf-8",
                         body: format!(r#"{{"error":"cannot encode geofabric snapshot: {e}"}}"#)
                             .into_bytes(),
+                    },
+                }
+            }
+            "/api/notices" => {
+                let view = self.current_notices().await;
+                match serde_json::to_vec(&view) {
+                    Ok(body) => Response::json(body),
+                    Err(e) => Response {
+                        status: 500,
+                        content_type: "application/json; charset=utf-8",
+                        body: format!(r#"{{"error":"cannot encode notices: {e}"}}"#).into_bytes(),
                     },
                 }
             }
@@ -490,6 +556,68 @@ mod tests {
             .await;
         let body = String::from_utf8(response.body).unwrap();
         assert!(body.contains(r#""source":"fixture""#));
+    }
+
+    #[tokio::test]
+    async fn notices_are_served_pending_and_most_serious_first() {
+        let root = std::env::temp_dir().join(format!("archie-obs-notices-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let paths = StatePaths::rooted(&root);
+        let observatory = Observatory::live_without_world(paths.clone());
+        let get = || {
+            observatory.route(Request {
+                method: "GET".into(),
+                path: "/api/notices".into(),
+                query: String::new(),
+            })
+        };
+        // No board yet: live, and honestly empty.
+        let empty: serde_json::Value = serde_json::from_slice(&get().await.body).unwrap();
+        assert_eq!(empty["source"], "live");
+        assert_eq!(empty["pending"].as_array().unwrap().len(), 0);
+
+        let mut board = archie_notices::Board::default();
+        let policy = archie_notices::Policy {
+            min_severity: archie_notices::Severity::Notice,
+        };
+        for (at_ms, severity, rule) in [
+            (1, archie_notices::Severity::Warning, "port-scan"),
+            (2, archie_notices::Severity::High, "address-moved"),
+            (3, archie_notices::Severity::Notice, "new-device"),
+        ] {
+            board.post(
+                &archie_notices::Raised {
+                    at_ms,
+                    severity,
+                    rule,
+                    device: "de:ad:be:ef:00:02",
+                    detail: "seen",
+                },
+                policy,
+            );
+        }
+        let acknowledged = board.notices[2].id.clone();
+        board.acknowledge(&acknowledged, 9);
+        board.save(&notice_board_path(&paths)).unwrap();
+
+        let view: serde_json::Value = serde_json::from_slice(&get().await.body).unwrap();
+        let rules: Vec<&str> = view["pending"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| n["rule"].as_str().unwrap())
+            .collect();
+        assert_eq!(rules, ["address-moved", "port-scan"]);
+
+        // A damaged board is reported, never served as if it were empty and fine.
+        std::fs::write(notice_board_path(&paths), b"garbage").unwrap();
+        let broken: serde_json::Value = serde_json::from_slice(&get().await.body).unwrap();
+        assert_eq!(broken["source"], "unavailable");
+        assert!(broken["error"].as_str().is_some());
+
+        let fixture_view = Observatory::from_fixture(fixture()).current_notices().await;
+        assert_eq!(fixture_view.source, "fixture");
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[tokio::test]

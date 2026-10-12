@@ -75,7 +75,9 @@ fn train(mut args: Vec<String>) -> Result<ExitCode, String> {
         training.momentum = momentum.parse().map_err(|_| "--momentum is a number")?;
     }
     if let Some(weight) = take(&mut args, "--presence-weight") {
-        training.presence_weight = weight.parse().map_err(|_| "--presence-weight is a number")?;
+        training.presence_weight = weight
+            .parse()
+            .map_err(|_| "--presence-weight is a number")?;
     }
     if !args.is_empty() {
         return Err(format!("unexpected arguments: {args:?}"));
@@ -120,20 +122,26 @@ fn train(mut args: Vec<String>) -> Result<ExitCode, String> {
         .map(|index| samples[*index].clone())
         .collect();
     println!("scored on {} windows it never saw", judged.len());
-    report("as trained", &scored(&judged, |sample| {
-        detector
-            .detect(sample.tile.pixels(), 500)
-            .into_iter()
-            .map(|prediction| (prediction.control, prediction.confidence_permille))
-            .collect()
-    }));
-    report("as deployed", &scored(&judged, |sample| {
-        deployed
-            .detect(&sample.tile, 500)
-            .into_iter()
-            .map(|prediction| (prediction.control, prediction.confidence_permille))
-            .collect()
-    }));
+    report(
+        "as trained",
+        &scored(&judged, |sample| {
+            detector
+                .detect(sample.tile.pixels(), 500)
+                .into_iter()
+                .map(|prediction| (prediction.control, prediction.confidence_permille))
+                .collect()
+        }),
+    );
+    report(
+        "as deployed",
+        &scored(&judged, |sample| {
+            deployed
+                .detect(&sample.tile, 500)
+                .into_iter()
+                .map(|prediction| (prediction.control, prediction.confidence_permille))
+                .collect()
+        }),
+    );
     Ok(ExitCode::SUCCESS)
 }
 
@@ -149,7 +157,9 @@ fn check(mut args: Vec<String>) -> Result<ExitCode, String> {
         training.seed = seed.parse().map_err(|_| "--seed is a number")?;
     }
     let least: Vec<u16> = match take(&mut args, "--least-confidence") {
-        Some(value) => vec![value.parse().map_err(|_| "--least-confidence is a number")?],
+        Some(value) => vec![value
+            .parse()
+            .map_err(|_| "--least-confidence is a number")?],
         None => vec![500, 600, 700, 800, 900],
     };
     if !args.is_empty() {
@@ -167,13 +177,16 @@ fn check(mut args: Vec<String>) -> Result<ExitCode, String> {
         judged.len()
     );
     for least in least {
-        report(&format!("sure {least}/1000 or more"), &scored(&judged, |sample| {
-            deployed
-                .detect(&sample.tile, least)
-                .into_iter()
-                .map(|prediction| (prediction.control, prediction.confidence_permille))
-                .collect()
-        }));
+        report(
+            &format!("sure {least}/1000 or more"),
+            &scored(&judged, |sample| {
+                deployed
+                    .detect(&sample.tile, least)
+                    .into_iter()
+                    .map(|prediction| (prediction.control, prediction.confidence_permille))
+                    .collect()
+            }),
+        );
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -196,7 +209,9 @@ fn look(mut args: Vec<String>) -> Result<ExitCode, String> {
             .in_window(tile.source_width, tile.source_height);
         println!(
             "{:?} at {x},{y} {width}x{height}  sure {}/1000  unsure of its kind {}/1000",
-            prediction.control.kind, prediction.confidence_permille, prediction.uncertainty_permille
+            prediction.control.kind,
+            prediction.confidence_permille,
+            prediction.uncertainty_permille
         );
     }
     println!("{} controls in {:?}", found.len(), took);

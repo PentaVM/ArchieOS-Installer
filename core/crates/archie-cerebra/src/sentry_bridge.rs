@@ -85,6 +85,8 @@ fn severity_for_rule(rule: &str) -> Option<AlertSeverity> {
         "address-moved" => Some(AlertSeverity::Notice),
         "cleartext-login" => Some(AlertSeverity::Warning),
         "dns-tunnel-suspect" => Some(AlertSeverity::Warning),
+        "traffic-surge" => Some(AlertSeverity::Warning),
+        "unusual-destination" => Some(AlertSeverity::Warning),
         "port-scan" => Some(AlertSeverity::High),
         "host-sweep" => Some(AlertSeverity::High),
         _ => None,
@@ -180,7 +182,10 @@ pub enum BridgeError {
     #[error("an alert batch holds {found} alerts; the most one pass may carry is {cap}")]
     BatchTooLarge { found: usize, cap: usize },
     #[error("invalid alert: {field}: {reason}")]
-    InvalidAlert { field: &'static str, reason: &'static str },
+    InvalidAlert {
+        field: &'static str,
+        reason: &'static str,
+    },
     #[error("a different record already holds {reference}")]
     ReferenceCollision { reference: VaultRef },
     #[error("pillar context refused the alert: {0}")]
@@ -270,7 +275,7 @@ struct AlertContent<'a> {
 /// a dedup key and a path component, and a collision is caught by comparing the full
 /// stored content rather than trusted. It is stable across compiler versions, which a
 /// persisted reference must be.
-fn content_id(bytes: &[u8]) -> String {
+pub(crate) fn content_id(bytes: &[u8]) -> String {
     const fn fnv1a(bytes: &[u8], basis: u64) -> u64 {
         let mut hash = basis;
         let mut index = 0;
@@ -287,12 +292,19 @@ fn content_id(bytes: &[u8]) -> String {
 }
 
 fn validate(alert: &AlertInput) -> Result<(), BridgeError> {
-    let invalid = |field: &'static str, reason: &'static str| BridgeError::InvalidAlert { field, reason };
+    let invalid =
+        |field: &'static str, reason: &'static str| BridgeError::InvalidAlert { field, reason };
     if alert.at_ms == 0 {
-        return Err(invalid("at_ms", "an alert without a source time is not an observation"));
+        return Err(invalid(
+            "at_ms",
+            "an alert without a source time is not an observation",
+        ));
     }
     if i64::try_from(alert.at_ms).is_err() {
-        return Err(invalid("at_ms", "the source time does not fit the trace's clock"));
+        return Err(invalid(
+            "at_ms",
+            "the source time does not fit the trace's clock",
+        ));
     }
     if alert.rule.is_empty()
         || alert.rule.len() > MAX_RULE_LEN
@@ -307,16 +319,25 @@ fn validate(alert: &AlertInput) -> Result<(), BridgeError> {
         || alert.device.len() > MAX_DEVICE_LEN
         || alert.device.bytes().any(|b| b.is_ascii_control())
     {
-        return Err(invalid("device", "a subject is a bounded identifier without control characters"));
+        return Err(invalid(
+            "device",
+            "a subject is a bounded identifier without control characters",
+        ));
     }
     if alert.detail.is_empty()
         || alert.detail.len() > MAX_DETAIL_LEN
         || alert.detail.bytes().any(|b| b.is_ascii_control())
     {
-        return Err(invalid("detail", "a detail is bounded text without control characters"));
+        return Err(invalid(
+            "detail",
+            "a detail is bounded text without control characters",
+        ));
     }
     if alert.occurrences == Some(0) {
-        return Err(invalid("occurrences", "a dedup count of zero counts nothing"));
+        return Err(invalid(
+            "occurrences",
+            "a dedup count of zero counts nothing",
+        ));
     }
     if alert.provenance.len() > MAX_PROVENANCE {
         return Err(invalid("provenance", "too many evidence ids"));
@@ -326,7 +347,10 @@ fn validate(alert: &AlertInput) -> Result<(), BridgeError> {
             || id.len() > MAX_PROVENANCE_LEN
             || id.bytes().any(|b| b.is_ascii_control())
         {
-            return Err(invalid("provenance", "an evidence id is bounded text without control characters"));
+            return Err(invalid(
+                "provenance",
+                "an evidence id is bounded text without control characters",
+            ));
         }
     }
     Ok(())
@@ -357,9 +381,12 @@ fn alert_record(domain: &ContextDomain, alert: &AlertInput) -> Result<AlertRecor
         detail: &alert.detail,
         provenance: &provenance,
     };
-    let content = serde_json::to_string(&content)
-        .map_err(|_| BridgeError::InvalidAlert { field: "detail", reason: "the record could not be encoded" })?;
-    let reference = domain.reference(&format!("sentry/alerts/{}", content_id(content.as_bytes())))?;
+    let content = serde_json::to_string(&content).map_err(|_| BridgeError::InvalidAlert {
+        field: "detail",
+        reason: "the record could not be encoded",
+    })?;
+    let reference =
+        domain.reference(&format!("sentry/alerts/{}", content_id(content.as_bytes())))?;
     Ok(AlertRecord {
         reference,
         rule: alert.rule.clone(),
@@ -434,7 +461,10 @@ pub fn record_alerts(
     let mut records: Vec<AlertRecord> = Vec::new();
     for alert in alerts {
         let record = alert_record(domain, alert)?;
-        match records.iter().find(|existing| existing.reference == record.reference) {
+        match records
+            .iter()
+            .find(|existing| existing.reference == record.reference)
+        {
             Some(existing) if existing.content == record.content => continue,
             Some(_) => {
                 return Err(BridgeError::ReferenceCollision {
@@ -450,7 +480,12 @@ pub fn record_alerts(
     for record in &records {
         if vault.contains(&record.reference) {
             let existing = vault
-                .disclose(ACTOR, &record.reference, PrivacyGrade::Restricted, record.at_ms)
+                .disclose(
+                    ACTOR,
+                    &record.reference,
+                    PrivacyGrade::Restricted,
+                    record.at_ms,
+                )
                 .ok()
                 .and_then(|disclosure| disclosure.text().map(str::to_owned));
             match existing {
@@ -499,7 +534,10 @@ pub enum AlertPassOutcome {
     /// An empty batch: nothing was stored, no pass ran, no trace exists. Not an error.
     NoAlerts,
     /// The pass assembled the alert context and a local model was chosen for it.
-    Reasoning { pass: Pass, records: Vec<AlertRecord> },
+    Reasoning {
+        pass: Pass,
+        records: Vec<AlertRecord>,
+    },
     /// The pass was refused, and the refusal is the recorded outcome: typed here, and
     /// in the trace as the closing stage.
     Refused {
@@ -536,7 +574,7 @@ impl AlertPassOutcome {
     }
 }
 
-fn classify(reason: &'static str) -> PassRefusal {
+pub(crate) fn classify(reason: &'static str) -> PassRefusal {
     match reason {
         "no_model_permitted" => PassRefusal::NoLocalModel,
         "escalation_required" => PassRefusal::EscalationRequired,

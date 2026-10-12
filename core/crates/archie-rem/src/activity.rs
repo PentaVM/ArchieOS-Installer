@@ -30,7 +30,10 @@ impl Activity {
             std::fs::create_dir_all(parent)?;
         }
         let partial = path.with_extension("partial");
-        std::fs::write(&partial, serde_json::to_vec(self).expect("an activity serializes"))?;
+        std::fs::write(
+            &partial,
+            serde_json::to_vec(self).expect("an activity serializes"),
+        )?;
         std::fs::rename(&partial, path)
     }
 }
@@ -65,7 +68,8 @@ mod tests {
             inference_pending: false,
         };
         activity.write(&path).unwrap();
-        let written: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let written: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         let object = written.as_object().unwrap();
         let mut names: Vec<&str> = object.keys().map(String::as_str).collect();
         names.sort_unstable();

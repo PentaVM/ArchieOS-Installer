@@ -196,7 +196,10 @@ pub fn crop_png(jpeg: &[u8], bbox: [f32; 4], faces: &[[f32; 4]]) -> Result<Vec<u
     let (out_w, out_h) = ((x1 - x0).div_ceil(stride), (y1 - y0).div_ceil(stride));
     let hidden = |x: usize, y: usize| {
         faces.iter().any(|face| {
-            (x as f32) >= face[0] && (x as f32) <= face[2] && (y as f32) >= face[1] && (y as f32) <= face[3]
+            (x as f32) >= face[0]
+                && (x as f32) <= face[2]
+                && (y as f32) >= face[1]
+                && (y as f32) <= face[3]
         })
     };
     let mut rgb = Vec::with_capacity(out_w * out_h * 3);

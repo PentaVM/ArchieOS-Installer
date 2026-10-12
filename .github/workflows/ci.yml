@@ -11,6 +11,11 @@ permissions:
 jobs:
   rust:
     runs-on: ubuntu-latest
+    # Without debug info the workspace's test binaries fit the runner's disk: with it,
+    # linking archied and the archie-core tests ran out of space. Tests are unchanged.
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     defaults:
       run:
         working-directory: core
@@ -27,6 +32,9 @@ jobs:
       - run: cargo check --workspace --locked
       - run: cargo test --workspace --locked
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # The audit through the real TShark: proves capture::FIELDS exist in it.
+      - run: sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y tshark
+      - run: cargo test -p archie-lan --test tshark_e2e --locked -- --ignored
 
   native-contracts:
     runs-on: ubuntu-latest

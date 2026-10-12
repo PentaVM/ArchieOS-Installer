@@ -176,14 +176,17 @@ fn parse_power(xml: &str) -> Result<bool, AdapterError> {
         _ => Err(AdapterError::Protocol),
     }
 }
-/// `query/active-app` → (showing_home, active_app id). No `<app>` element — or
-/// the home app itself — means the home screen is showing.
+/// `query/active-app` → (showing_home, active_app id). No `<app>` element, an
+/// `<app>` without attributes (a Roku on its home screen answers
+/// `<app>Roku</app>`), or the home app itself means the home screen is
+/// showing. An `<app>` with attributes but no `id` is malformed.
 fn parse_active_app(xml: &str) -> Result<(bool, Option<String>), AdapterError> {
     if !xml.contains("<active-app") {
         return Err(AdapterError::Protocol);
     }
     match open_tag(xml, "app") {
         None => Ok((true, None)),
+        Some(tag) if tag.trim().is_empty() => Ok((true, None)),
         Some(tag) => match attr(tag, "id") {
             None => Err(AdapterError::Protocol),
             Some(id) if id == "tvins.home" => Ok((true, None)),
@@ -239,7 +242,10 @@ impl EdgeAdapter for Roku {
     fn adapter_id(&self) -> &str {
         &self.adapter
     }
-    async fn observe(&mut self, resource: &ResourceDescriptor) -> Result<Observation, AdapterError> {
+    async fn observe(
+        &mut self,
+        resource: &ResourceDescriptor,
+    ) -> Result<Observation, AdapterError> {
         let base = self.endpoint_of(resource)?.clone();
         let info = self.get_xml(&base, "query/device-info").await?;
         let power_on = parse_power(&info)?;

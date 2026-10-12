@@ -161,7 +161,12 @@ fn verification_requires_fresh_measurement_from_exact_target_after_dispatch() {
     assert!(!Command::MediaPlay.matches(&value.state));
 }
 
-fn tv(power_on: bool, showing_home: bool, active_app: Option<&str>, playing: Option<bool>) -> ResourceState {
+fn tv(
+    power_on: bool,
+    showing_home: bool,
+    active_app: Option<&str>,
+    playing: Option<bool>,
+) -> ResourceState {
     ResourceState::Tv {
         power_on,
         showing_home,
@@ -284,6 +289,131 @@ fn measured_tv_and_printer_observations_are_bounded() {
         ..observation()
     };
     assert!(bad_job
+        .validate_after(&request, "ha-home", Timestamp(1100), Timestamp(1250))
+        .is_err());
+}
+
+fn host(
+    reachable: bool,
+    awake: Option<bool>,
+    session_locked: Option<bool>,
+    volume_percent: Option<u8>,
+    foreground_app: Option<&str>,
+) -> ResourceState {
+    ResourceState::Host {
+        reachable,
+        awake,
+        session_locked,
+        volume_percent,
+        foreground_app: foreground_app.map(str::to_string),
+    }
+}
+
+#[test]
+fn host_and_router_commands_match_only_their_measurable_postcondition() {
+    // Wake-on-LAN: the packet proves nothing; the host answering does.
+    assert!(Command::WakeHost.matches(&host(true, None, None, None, None)));
+    assert!(!Command::WakeHost.matches(&host(false, None, None, None, None)));
+
+    // Port mappings verify against the router's own list, never the request.
+    let add = Command::PortMapping {
+        present: true,
+        external_port: 25565,
+        protocol: PortProtocol::Tcp,
+    };
+    assert!(add.matches(&ResourceState::Router {
+        mapping_present: Some(true),
+        wifi_enabled: None,
+    }));
+    assert!(!add.matches(&ResourceState::Router {
+        mapping_present: Some(false),
+        wifi_enabled: None,
+    }));
+    // A router that cannot say never verifies.
+    assert!(!add.matches(&ResourceState::Router {
+        mapping_present: None,
+        wifi_enabled: None,
+    }));
+    let mut bad = intent();
+    bad.command = Command::PortMapping {
+        present: true,
+        external_port: 0,
+        protocol: PortProtocol::Udp,
+    };
+    assert!(bad.validate().is_err());
+
+    assert!(
+        Command::WifiSet { on: false }.matches(&ResourceState::Router {
+            mapping_present: None,
+            wifi_enabled: Some(false),
+        })
+    );
+    assert!(
+        !Command::WifiSet { on: true }.matches(&ResourceState::Router {
+            mapping_present: None,
+            wifi_enabled: Some(false),
+        })
+    );
+
+    assert!(Command::SessionLock { locked: true }.matches(&host(
+        true,
+        None,
+        Some(true),
+        None,
+        None
+    )));
+    assert!(!Command::SessionLock { locked: true }.matches(&host(
+        true,
+        None,
+        Some(false),
+        None,
+        None
+    )));
+    assert!(!Command::SessionLock { locked: true }.matches(&host(true, None, None, None, None)));
+
+    assert!(Command::VolumeSet { percent: 40 }.matches(&host(true, None, None, Some(40), None)));
+    assert!(!Command::VolumeSet { percent: 40 }.matches(&host(true, None, None, Some(41), None)));
+    let mut bad = intent();
+    bad.command = Command::VolumeSet { percent: 101 };
+    assert!(bad.validate().is_err());
+
+    // Android app launch: foreground app is the proof, on an awake device.
+    let launch = Command::AppLaunch {
+        app_id: "com.whatsapp".into(),
+    };
+    assert!(launch.matches(&host(true, Some(true), None, None, Some("com.whatsapp"))));
+    assert!(!launch.matches(&host(true, Some(false), None, None, Some("com.whatsapp"))));
+    assert!(!launch.matches(&host(true, Some(true), None, None, Some("com.other"))));
+}
+
+#[test]
+fn measured_host_observations_are_bounded() {
+    let request = intent();
+    let good = Observation {
+        state: host(
+            true,
+            Some(true),
+            Some(false),
+            Some(65),
+            Some("com.whatsapp"),
+        ),
+        ..observation()
+    };
+    assert!(good
+        .validate_after(&request, "ha-home", Timestamp(1100), Timestamp(1250))
+        .is_ok());
+    let bad_volume = Observation {
+        state: host(true, None, None, Some(101), None),
+        ..observation()
+    };
+    assert!(bad_volume
+        .validate_after(&request, "ha-home", Timestamp(1100), Timestamp(1250))
+        .is_err());
+    let bad_app = Observation {
+        state: host(true, None, None, None, Some("http://other")),
+        ..observation()
+    };
+    assert!(bad_app
         .validate_after(&request, "ha-home", Timestamp(1100), Timestamp(1250))
         .is_err());
 }

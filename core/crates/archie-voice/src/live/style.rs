@@ -135,7 +135,11 @@ fn low_pass(samples: &mut [f32], cutoff: f32, rate: u32) {
     let alpha = w.sin() / std::f32::consts::SQRT_2;
     let cos = w.cos();
     let a0 = 1.0 + alpha;
-    let (b0, b1, b2) = ((1.0 - cos) / 2.0 / a0, (1.0 - cos) / a0, (1.0 - cos) / 2.0 / a0);
+    let (b0, b1, b2) = (
+        (1.0 - cos) / 2.0 / a0,
+        (1.0 - cos) / a0,
+        (1.0 - cos) / 2.0 / a0,
+    );
     let (a1, a2) = (-2.0 * cos / a0, (1.0 - alpha) / a0);
     let (mut x1, mut x2, mut y1, mut y2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
     for sample in samples.iter_mut() {
@@ -242,7 +246,10 @@ mod tests {
 
     /// The strongest frequency, by counting upward zero crossings.
     fn pitch(samples: &[f32], rate: u32) -> f32 {
-        let crossings = samples.windows(2).filter(|w| w[0] <= 0.0 && w[1] > 0.0).count();
+        let crossings = samples
+            .windows(2)
+            .filter(|w| w[0] <= 0.0 && w[1] > 0.0)
+            .count();
         crossings as f32 * rate as f32 / samples.len() as f32
     }
 
@@ -254,21 +261,32 @@ mod tests {
         let ratio = slowed.len() as f32 / voice.len() as f32;
         assert!((ratio - 1.25).abs() < 0.03, "{ratio}");
         let middle = &slowed[slowed.len() / 4..slowed.len() * 3 / 4];
-        assert!((pitch(middle, rate) - 150.0).abs() < 4.0, "{}", pitch(middle, rate));
+        assert!(
+            (pitch(middle, rate) - 150.0).abs() < 4.0,
+            "{}",
+            pitch(middle, rate)
+        );
     }
 
     #[test]
     fn the_tape_lowers_pitch_and_slows_together() {
         let rate = 22050;
         let lowered = tape(&tone(200.0, 1.0, rate), 0.94);
-        assert!((pitch(&lowered, rate) - 188.0).abs() < 3.0, "{}", pitch(&lowered, rate));
+        assert!(
+            (pitch(&lowered, rate) - 188.0).abs() < 3.0,
+            "{}",
+            pitch(&lowered, rate)
+        );
         assert!((lowered.len() as f32 / rate as f32 - 1.0 / 0.94).abs() < 0.01);
     }
 
     #[test]
     fn a_gentle_sentence_is_longer_lower_and_as_loud() {
         let rate = 22050;
-        let pcm: Vec<i16> = tone(150.0, 1.0, rate).iter().map(|s| (s * 32767.0) as i16).collect();
+        let pcm: Vec<i16> = tone(150.0, 1.0, rate)
+            .iter()
+            .map(|s| (s * 32767.0) as i16)
+            .collect();
         let shaped = shape(&pcm, Style::Gentle, rate);
         assert!(shaped.len() as f32 > pcm.len() as f32 * 1.12);
         let peak = shaped.iter().map(|s| s.unsigned_abs()).max().unwrap();

@@ -92,7 +92,10 @@ async fn a_missing_transport_cannot_report_delivery_or_open_credentials() {
 #[test]
 fn an_adapter_bound_to_no_project_sees_no_project_s_work() {
     let mut task = Task::new("plans", TraceId::new(), QueueClass::Background);
-    assert!(adapter().context_visible(&task), "a task from before domains existed");
+    assert!(
+        adapter().context_visible(&task),
+        "a task from before domains existed"
+    );
     task.labels
         .insert("archie.context_domain".into(), "work/studio/house".into());
     assert!(!adapter().context_visible(&task));

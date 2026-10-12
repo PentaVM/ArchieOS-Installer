@@ -555,6 +555,11 @@ impl CgroupController {
 pub fn parse_self_cgroup(text: &str) -> Result<CgroupPath, CgroupError> {
     for line in text.lines() {
         if let Some(path) = line.strip_prefix("0::") {
+            // `0::/` is the root of the unified hierarchy: a container or a hybrid
+            // v1/v2 host. There is no cgroup of our own to manage there.
+            if path.trim_matches('/').is_empty() {
+                return Err(CgroupError::Unsupported);
+            }
             return CgroupPath::new(path);
         }
     }
@@ -913,6 +918,17 @@ mod tests {
             "0"
         );
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn the_root_of_the_hierarchy_is_not_a_cgroup_of_our_own() {
+        let hybrid = "4:memory:/process_api/x\n1:cpu:/\n0::/\n";
+        assert!(matches!(
+            parse_self_cgroup(hybrid),
+            Err(CgroupError::Unsupported)
+        ));
+        let unit = parse_self_cgroup("0::/system.slice/archie-executord.service\n").unwrap();
+        assert_eq!(unit.unit_name(), Some("archie-executord.service"));
     }
 
     #[test]

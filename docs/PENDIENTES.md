@@ -44,6 +44,9 @@ tiene y dónde está el detalle. Se marca aquí cuando se cierra.
 
 ## 3. Sentry — Kimi K3 trabaja aquí
 
+**Lo último (2026-10-12):** [`HANDOFF-2026-10-12-SENTRY-OLA3.md`](HANDOFF-2026-10-12-SENTRY-OLA3.md),
+con la lista de validación en hardware, en orden, y las decisiones pendientes de Nelson.
+
 **Empieza por leer**, en este orden: [`HANDOFF-2026-10-11-SENTRY-AUDITORIA.md`](HANDOFF-2026-10-11-SENTRY-AUDITORIA.md)
 (qué se probó, qué no, doce defectos conocidos), [`SENTRY-NETWATCH.md`](SENTRY-NETWATCH.md),
 [`SENTRY-LAN.md`](SENTRY-LAN.md) y `core/crates/archie-sentry/README.md`.
@@ -87,7 +90,11 @@ fixture se reporta como fixture, no como dispositivo real. Un PR por avance, con
   deduplica, guarda en Vault (Restricted, con su propio timestamp) y entra como referencia
   Sentry; el pase gradúa `restricted` y sin modelo local queda el rechazo `NoLocalModel`
   registrado en la traza. La prueba recorre el port-scan de punta a punta (fixture).
-  Falta el llamador en vivo (quien sigue `alerts.jsonl` y dispara el pase).
+  **Llamador en vivo (2026-10-12):** `archie_cerebra::alert_follower` sigue
+  `alerts.jsonl` (offset en journal atómico, rotación `alerts.1.jsonl` drenada, línea
+  parcial retenida), recupera el conteo de `address-moved` desde `told.json` y dispara
+  un pase por lote; el Vault persiste sellado en disco (`vault_io`). CLI:
+  `archie sentry-follow [--once]`, con `[sentry.netwatch] state_dir` en la config.
 - [x] **4. Persistir lo que ya se avisó.** ~~La deduplicación de alertas vive en memoria~~
   **Hecho (Kimi, 2026-10-11):** `told.json` (0600, atómico, acotado, expulsa las más
   viejas). Reiniciar no repite alertas; `address-moved` ahora sigue la dirección: un
@@ -101,14 +108,33 @@ fixture se reporta como fixture, no como dispositivo real. Un PR por avance, con
   `address-moved`, `host-sweep`. En WSL el DNS sale por loopback; hace falta Linux real o
   capturar en `any`. *Hecho cuando:* cada una salta con tráfico generado y queda el
   comando que lo reproduce.
-- [ ] **7. Baselines por dispositivo**: volumen y destinos habituales, alerta por
-  desviación. Los umbrales actuales (100 puertos, 50 hosts, entropía 4,0) son criterio,
+  **Parcial (Claude, 2026-10-12):** con TShark real, no con red real.
+  `archie-lan/tests/tshark_e2e.rs` construye byte a byte una captura con ARP spoofing
+  del router, su gemelo IPv6 (Neighbor Advertisement), un túnel DNS y un barrido de 50
+  hosts, la pasa por `archie-netwatch read` y comprueba cada alerta. El CI instala
+  tshark y la ejecuta (`--ignored`). Reproducir:
+  `cargo test -p archie-lan --test tshark_e2e -- --ignored`. Falta el tráfico vivo.
+- [~] **7. Baselines por dispositivo**: volumen y destinos habituales, alerta por
+  desviación. **Parcial (Claude, 2026-10-12):** volumen, sí: `traffic-surge`, con media
+  y varianza móviles por tramos de 10 minutos, persistidas en `state.json`, aprendidas
+  durante un día y avisadas como mucho una vez por hora. Destinos: `unusual-destination`,
+  que salta con más de 25 MB a un destino que el dispositivo no usaba al aprender. La
+  tasa de falsos positivos sigue sin medir. Los umbrales actuales (100 puertos, 50 hosts, entropía 4,0) son criterio,
   no medida. *Hecho cuando:* hay una tasa de falsos positivos medida sobre una captura
   real de al menos un día.
-- [ ] **8. Adaptador del router** (DHCP, vecinos, Wi-Fi), según el firmware real: el de
+- [x] **8. Adaptador del router** (DHCP, vecinos, Wi-Fi), según el firmware real: el de
   Nelson es un MitraStar GPT-2741GNAC. Sin eso o un puerto espejo, un nodo conmutado
   solo ve su propio tráfico. *Hecho cuando:* la lista de clientes del router entra a la
   vista del punto 1, solo lectura.
+  **Hecho (Kimi, 2026-10-12), como administración, no solo lectura:**
+  `adapters/router/` — sonda de capacidades (`probe.rs`) que declara honestamente qué
+  expone el firmware; clientes reales (`clients.rs`); UPnP IGD con
+  AddPortMapping/DeletePortMapping/GetSpecific/GetGeneric (acotado a 256) y
+  GetStatusInfo (`igd.rs`); canal SSH con tablas de comandos permitidos por familia de
+  firmware (`ssh.rs`). Todo write pasa por Intent → policy → aprobación → postcondición
+  medida (`PortMapping` presente en GetSpecific). Lo que el MitraStar no exponga queda
+  `Unsupported` declarado, nunca omitido en silencio. 25 pruebas. Falta probarlo contra
+  el router real.
 - [x] **9. Imprimir dentro del motor.** ~~`archie-print` habla IPP directo~~
   **Hecho (Kimi, 2026-10-11):** `Command::PrintSubmit` con policy, journal y aprobación
   por digest; la postcondición es la propuesta aquí: «la impresora tiene el trabajo» —
@@ -119,17 +145,73 @@ fixture se reporta como fixture, no como dispositivo real. Un PR por avance, con
   flujo normal de intents. `archie-print` queda como herramienta de operador.
 - [ ] **10. Imprimir en una impresora real.** La Brother DCP-T720DW no respondía. *Hecho
   cuando:* sale una página y el recibo dice `completed`, con el formato que aceptó.
-- [ ] **11. Respuesta.** Hoy todo es observación. Primera respuesta reversible: aviso
+- [~] **11. Respuesta.** Hoy todo es observación. Primera respuesta reversible: aviso
   por voz y por el Observatory. Bloqueo o cuarentena solo como `Intent` aprobado.
+  **Parcial (Claude, 2026-10-12):** tablón de avisos del dueño (`archie-notices`), que
+  `sentry-follow` alimenta aunque no haya modelo local. Lo leen `archie sentry-notices`
+  (listar y acusar) y `GET /api/notices` de displayd. Cada aviso trae una frase hablable
+  que no nombra nada de la red. Umbral en `[sentry.response] min_severity`. Faltan el
+  panel QML (GUI de Claude/Xavi) y que la voz los diga: el contrato está en
+  [`SENTRY-RESPUESTA.md`](SENTRY-RESPUESTA.md). El bloqueo como `Intent` sigue sin
+  existir.
 - [~] **12. Control más allá de Home Assistant.** **Parcial (Kimi, 2026-10-11):** Roku
   ECP actúa (teclas con postcondición medible y lanzamiento de apps, verificado contra el
   propio dispositivo); MQTT actúa switches/luces/clima con estado medido; ONVIF observa
   (sin PTZ: sin postcondición medible); Chromecast declara su ausencia (CAST v2 necesita
   TLS+protobuf que el crate no tiene). Falta Matter. Cada adaptador con su prueba (mocks
   loopback; falta hardware real).
-- [ ] **13. `archie-netwatch.service` bajo systemd real.** No se sabe si `DynamicUser`
+  **Ampliado (Kimi, 2026-10-12):** WoL (paquete mágico de 102 bytes, verificación por
+  tabla ARP / `ip neigh`, sin ping) y ADB para Android (`adapters/adb.rs`): lanzar apps
+  (monkey), bloquear sesión (keyevent solo si el estado difiere), volumen con índice
+  leído de `dumpsys audio`, `adb connect` + `adb devices` antes de actuar; pausa/play
+  multimedia declara `Unsupported` por no tener postcondición medible. Nuevos contratos:
+  `WakeHost`, `WifiSet`, `SessionLock`, `VolumeSet` y `PortMapping`; el estado del Host
+  ahora sigue `reachable/awake/session_locked/volume_percent/foreground_app` y
+  `AppLaunch` verifica contra el proceso en primer plano. Runner de procesos acotado
+  (`adapters/process.rs`): binario absoluto, sin shell, entorno limpio, salida acotada,
+  timeout con kill.
+  **Cableado en vivo (2026-10-12):** `[sentry.router]` (host, IGD control URL, SSH
+  user/key), `[sentry.wol]` y `[sentry.android]` en `sentry_config.rs`; el registro y
+  `adapter_for` del flujo revisado los construyen. CLI: `archie sentry-node
+  wake|lock|unlock|volume|launch` — cada uno pasa por Intent → aprobación →
+  postcondición medida, sin atajo.
+  **Ola 3 (Claude, 2026-10-12):** Chromecast ya no declara su ausencia: CAST v2 real
+  sobre TLS 8009 (`rustls`/`tokio-rustls` + `prost`), LAUNCH/STOP/volumen/mute con
+  postcondición medida contra el RECEIVER_STATUS del propio receptor, certificado fijado
+  por SHA-256 (sin cadena ni autenticación de dispositivo de Google: documentado en el
+  módulo). Config `[[sentry.chromecasts]]`, CLI `archie sentry launch|stop|volume|mute|
+  unmute` y `archie sentry cast-probe <ip>`. Sigue abierto: nada de esto ni de lo
+  anterior se ha probado contra hardware real.
+- [x] **15. Feeder unificado con perfiles de foco.** *Hecho cuando:* un solo camino lleva
+  alertas, dispositivos y Wanda a `PillarContext`, y un perfil decide qué entra, con qué
+  prioridad y qué se descarta, sin cruzar dominios ni bajar `restricted`.
+  **Hecho (Claude, 2026-10-12):** `archie_cerebra::{feeder, focus}`, perfiles
+  `pantalla-1`, `trabajo`, `personal`, `red`; productor nuevo de cambios de dispositivo;
+  `archie focus <perfil>`. Detalle: [`SENTRY-FOCO.md`](SENTRY-FOCO.md). Pesos y umbrales
+  son criterio, no medida.
+- [x] **16. Fixtures enlatados → servidores de protocolo con estado.** *Hecho cuando:*
+  cada adaptador pasa por el motor completo contra un servidor loopback que guarda el
+  estado de verdad. **Hecho (Claude, 2026-10-12):** `archie-sentry/tests/servers/`
+  (Roku, HA, broker MQTT con dispositivos, IPP con cola, ONVIF con digest, IGD con
+  tabla, Matter tras chip-tool, CAST v2) y `tests/protocol_servers.rs`. Encontraron dos
+  defectos reales, ya corregidos: Roku en inicio (`<app>Roku</app>`) y la carrera del
+  informe MQTT. Matter no habla Matter en el cable: el servidor emula chip-tool. Son
+  pruebas de protocolo, no dispositivos verificados.
+- [~] **13. `archie-netwatch.service` bajo systemd real.** No se sabe si `DynamicUser`
   con capacidades ambientales basta para `dumpcap` en Arch.
-- [ ] 14. IPv6: `address-moved` solo mira ARP; falta Neighbor Discovery.
+  **Parcial (Claude, 2026-10-12):** no bastaba, por dos motivos que se ven sin hardware.
+  En Arch, `dumpcap` es `root:wireshark` 0754 y un usuario dinámico no puede ni
+  ejecutarlo. Además, el estado de un `DynamicUser` vive en `/var/lib/private` (0700) y
+  el follower no podía leer las alertas. Ahora corre con una cuenta estática
+  `archie-netwatch` (sysusers), `Group=archie`, `SupplementaryGroups=wireshark` y
+  archivos 0640. `systemd-analyze verify` pasa y la exposición baja de 5.1 a 3.5. Hay
+  una prueba en `packaging.rs`. Falta arrancarla en un Arch real con una interfaz.
+- [x] 14. IPv6: `address-moved` solo mira ARP; falta Neighbor Discovery. **Hecho (Claude,
+  2026-10-12):** TShark lee `icmpv6.nd.na.target_address`; una Neighbor Advertisement
+  por otra MAC es un movimiento, grave si es la dirección del router (`--gateway` acepta
+  v4 o v6; en vivo se toma de `/proc/net/ipv6_route`). `owners` pasa a `IpAddr` y los
+  estados viejos cargan igual. Probado con líneas de TShark sintéticas, no en una red
+  IPv6 real.
 
 ## 4. Contexto personal y trabajo
 
@@ -138,6 +220,28 @@ fixture se reporta como fixture, no como dispositivo real. Un PR por avance, con
   que Cerebra gradúe por contenido y use `ask_private` (el velo).
 - [ ] **Transporte Enterprise.** `POST /sync` responde 501: no hay envío a ningún tablero.
 - [ ] Productores reales de Sentry, Wanda, Vault, IRIS y Forge hacia `PillarContext`.
+  **Parcial (Kimi, 2026-10-12):** Sentry (punto 3 de la sección 3) y Wanda ya producen —
+  `archie_cerebra::wanda_bridge` parsea exports de WhatsApp (.txt), Instagram (JSON) y
+  notificaciones on-device (JSONL), clasifica cada conversación en un vector de 10
+  categorías con saliencia 0–100 (ES/EN) y lo registra con `record_chat_context`:
+  Vault en grado Restricted + referencia `PillarContext` del pilar Wanda. El seudónimo
+  usa doble FNV (sha2 no es dependencia de cerebra): es seudónimo, no protección.
+  Faltan Vault, IRIS y Forge. **Llamador en vivo (2026-10-12):**
+  `archie_cerebra::wanda_watcher` sigue el directorio configurado
+  (`[sentry.chat_exports] watch_dir` + `salt`), con journal de hashes de contenido
+  para que reiniciar no duplique. CLI: `archie wanda-watch [--once]` y
+  `archie wanda-ingest <archivo>`.
+  **Feeder (Claude, 2026-10-12):** todo lo que producen Sentry y Wanda, más los cambios
+  de dispositivo, llega a Cerebra por un solo `feeder::plan` con perfil de foco
+  (sección 3, punto 15).
+  **Vault (Claude, 2026-10-12):** `archie_cerebra::vault_bridge` sella los documentos
+  del dueño (`.md`, `.txt`, hasta 256 KiB) como `Document`/`Restricted` en un dominio
+  explícito y los incluye como `Pillar::Vault`. El tipo (encargo, restricción, versión,
+  nota) sale del front-matter `kind:` o del nombre del archivo, nunca de adivinar por la
+  prosa. CLI `archie vault-docs --dir … --domain work/<org>/<proyecto>`. El feeder los
+  pesa (encargo 90, restricción 80, versión 60, nota 40): entran en `trabajo` y
+  `personal`, nunca en `pantalla-1`. Faltan IRIS (nada escribe sus episodios ni sus
+  recibos a disco) y Forge (`core.forge` no tiene worker).
 
 ## 5. Voz
 

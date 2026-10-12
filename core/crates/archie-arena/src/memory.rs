@@ -41,8 +41,11 @@ impl Memory {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         let temporary = path.with_extension("tmp");
-        std::fs::write(&temporary, serde_json::to_string_pretty(self).map_err(|e| e.to_string())?)
-            .map_err(|e| e.to_string())?;
+        std::fs::write(
+            &temporary,
+            serde_json::to_string_pretty(self).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
         std::fs::rename(&temporary, path).map_err(|e| e.to_string())
     }
 
@@ -60,7 +63,12 @@ impl Memory {
             ranked
         };
         let mut chosen = best(&|r| r.task == task && r.tier == tier, 2);
-        chosen.extend(self.runs.iter().rev().find(|r| r.task == task && r.tier == tier));
+        chosen.extend(
+            self.runs
+                .iter()
+                .rev()
+                .find(|r| r.task == task && r.tier == tier),
+        );
         chosen.extend(best(&|r| r.task == task && r.tier != tier, 1));
         chosen.extend(best(&|r| r.task != task, 1));
         let mut out: Vec<String> = Vec::new();
@@ -78,7 +86,11 @@ impl Memory {
 
     /// The best score so far of `task` at `tier`, if it was ever run.
     pub fn best(&self, task: &str, tier: u32) -> Option<f32> {
-        self.runs.iter().filter(|r| r.task == task && r.tier == tier).map(|r| r.score).max_by(f32::total_cmp)
+        self.runs
+            .iter()
+            .filter(|r| r.task == task && r.tier == tier)
+            .map(|r| r.score)
+            .max_by(f32::total_cmp)
     }
 }
 #[cfg(test)]
@@ -100,9 +112,21 @@ mod tests {
         let memory = Memory {
             runs: vec![
                 run("a", "mona", 15, 30.0, &["one decision, no second round"]),
-                run("b", "dama", 60, 55.0, &["the face is at 370,450", "brush is B"]),
+                run(
+                    "b",
+                    "dama",
+                    60,
+                    55.0,
+                    &["the face is at 370,450", "brush is B"],
+                ),
                 run("c", "mona", 60, 20.0, &["paint the face early"]),
-                run("d", "mona", 60, 10.0, &["brush is B", "close the colour dialog"]),
+                run(
+                    "d",
+                    "mona",
+                    60,
+                    10.0,
+                    &["brush is B", "close the colour dialog"],
+                ),
                 run("e", "noche", 60, 5.0, &["swirls"]),
             ],
         };

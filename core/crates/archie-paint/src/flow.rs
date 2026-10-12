@@ -368,10 +368,7 @@ fn what_fits_in_the_time(
             tiles
         })
         .collect();
-    let lengths: Vec<f32> = lines
-        .iter()
-        .map(|(_, stroke)| length_of(stroke))
-        .collect();
+    let lengths: Vec<f32> = lines.iter().map(|(_, stroke)| length_of(stroke)).collect();
     // How heavy each line should be: the darkest go over twice or three times, which is
     // what a hand does by pressing, and what a pointer that cannot press has instead.
     let weights: Vec<u32> = says
@@ -692,14 +689,27 @@ mod tests {
     #[test]
     fn it_leaves_the_light_alone_and_groups_by_colour() {
         let white = Picture::from_grey(vec![255; 80 * 80], 80, 80).unwrap();
-        assert!(plan(&white, Canvas::new(0, 0, 80, 80), &Flow::default(), &[[0, 0, 0]], 64).is_empty());
+        assert!(plan(
+            &white,
+            Canvas::new(0, 0, 80, 80),
+            &Flow::default(),
+            &[[0, 0, 0]],
+            64
+        )
+        .is_empty());
 
         // A dark band with something to follow, red on its left half and blue on its right:
         // two groups, one for each swatch. A field of flat colour has no form and is left
         // alone, which is what the line above tests.
         let band = band(80);
         let colour: Vec<[u8; 3]> = (0..80 * 80)
-            .map(|at| if (at % 80) < 40 { [200, 20, 20] } else { [20, 20, 200] })
+            .map(|at| {
+                if (at % 80) < 40 {
+                    [200, 20, 20]
+                } else {
+                    [20, 20, 200]
+                }
+            })
             .collect();
         let picture = band.with_colour(colour);
         let groups = plan(
@@ -821,7 +831,11 @@ mod tests {
             .iter()
             .flat_map(|(_, plan)| plan.strokes.clone())
             .collect();
-        assert!(lines.len() > 4, "enough lines to have an order: {}", lines.len());
+        assert!(
+            lines.len() > 4,
+            "enough lines to have an order: {}",
+            lines.len()
+        );
 
         let walked = |order: &[Vec<StrokePoint>]| -> f32 {
             order
@@ -883,4 +897,3 @@ mod tests {
         );
     }
 }
-

@@ -593,21 +593,24 @@ pub fn converse<S: TurnSource>(
             }
             // ASR may finish after the overlapping sound has ended. The acoustic
             // evidence belongs to this playback, not only to the current frame.
-            if archie_talking && setup.headphones && overlap_detected {
-                if !yielded && (!overlap_words.trim().is_empty() || overlap_ms >= 320) {
-                    let decision = session.floor_moved(&over_archie(&overlap_words));
-                    if decision.action == FloorAction::Yield {
-                        yielded = true;
-                        generation.fetch_add(1, Ordering::SeqCst);
-                        let _ = to_voice.send(ToVoice::Hush);
-                        report(Moment::Interrupted);
-                        publish(&signal(SignalKind::Think {
-                            active: false,
-                            trace_id: format!("voz-{turn_number}"),
-                            working_set: BTreeMap::new(),
-                        }));
-                        turn = None;
-                    }
+            if archie_talking
+                && setup.headphones
+                && overlap_detected
+                && !yielded
+                && (!overlap_words.trim().is_empty() || overlap_ms >= 320)
+            {
+                let decision = session.floor_moved(&over_archie(&overlap_words));
+                if decision.action == FloorAction::Yield {
+                    yielded = true;
+                    generation.fetch_add(1, Ordering::SeqCst);
+                    let _ = to_voice.send(ToVoice::Hush);
+                    report(Moment::Interrupted);
+                    publish(&signal(SignalKind::Think {
+                        active: false,
+                        trace_id: format!("voz-{turn_number}"),
+                        working_set: BTreeMap::new(),
+                    }));
+                    turn = None;
                 }
             }
             // The ears did not call it, but the person has plainly stopped.

@@ -16,7 +16,7 @@ frames' own clock. `report` prints the devices and the most recent alerts as JSO
 ## What it reads
 
 TShark does the capture and the dissection (`wireshark-cli`). From each frame it is asked
-for the time, the length, hardware and IP addresses, the sender an ARP frame names, TCP
+for the time, the length, hardware and IP addresses, the sender an ARP frame names, the address an IPv6 Neighbor Advertisement answers for, TCP
 and UDP ports, the SYN and ACK flags, and three names: a DNS question, a DHCP host name
 and a TLS server name. No payload is asked for, and only the first 768 bytes of a frame
 are copied off the interface.
@@ -44,11 +44,13 @@ says a great deal about the people who use it.
 | Rule | Severity | Raised when |
 |---|---|---|
 | `new-device` | notice | a hardware address not seen before sends from a LAN address, after the learning time (`--learn`, 600 s) |
-| `address-moved` | high for the router's address, else notice | an IPv4 address is claimed over ARP by a different device than before |
+| `address-moved` | high for the router's address (v4 or v6), else notice | an address is claimed by a different device than before: IPv4 over ARP, IPv6 by a Neighbor Advertisement (`icmpv6.nd.na.target_address`) |
 | `port-scan` | high | one device opens connections to 100 ports of one host within a minute |
 | `host-sweep` | high | one device opens the same port on 50 hosts of the network within a minute |
 | `cleartext-login` | warning | a device opens Telnet or FTP |
 | `dns-tunnel-suspect` | warning | a DNS question is over 180 characters, or has a label of 40 or more near-random characters |
+| `unusual-destination` | warning | a device learned for a day sends over 25 MB to an outside destination (server name, else address) first used after it was learned; told once per device and destination. Which destinations are new is kept in memory, so a restart can only make it quieter; past the 64 destinations a device keeps, a new one is not tracked and cannot be told |
+| `traffic-surge` | warning | a device learned for a day (144 ten-minute buckets) sends, in one bucket, more than all of: 50 MB, 4× its usual, and its usual plus 6 deviations; told at most once an hour per device. The usual is an exponentially weighted mean and variance kept in `state.json` (`baseline`), so a restart keeps it. Thresholds are a criterion, not a measurement: a nightly backup will trip it until the false-positive rate is measured on a real capture |
 
 An alert is a reason to look, with what was seen. It is not a verdict, and nothing here
 acts on a device or on the network. Each is told once for its subject, and the telling
@@ -64,8 +66,19 @@ echo 'ARCHIE_NETWATCH_INTERFACE=eth0' | sudo tee /etc/archie/netwatch.env
 sudo systemctl enable --now archie-netwatch
 ```
 
-It runs as a transient user holding only `CAP_NET_RAW` and `CAP_NET_ADMIN`, which is what
-`dumpcap` needs to open the interface.
+It runs as the static account `archie-netwatch` (`distro/sentry/archie-netwatch.sysusers`)
+with `Group=archie`, holding only `CAP_NET_RAW` and `CAP_NET_ADMIN`, which is what
+`dumpcap` needs to open the interface. Why not `DynamicUser`:
+
+- Arch's `wireshark-cli` installs `dumpcap` as `root:wireshark` mode 0754, so the
+  account must be in `wireshark` (`SupplementaryGroups=wireshark`) even to execute it.
+- A dynamic user's `StateDirectory` lives under `/var/lib/private` (0700 root), where
+  `archie sentry-follow`, running as `archie`, could never read `alerts.jsonl`.
+
+Its files are 0640 in a 0750 directory: the control plane (group `archie`) reads them,
+nobody else does. `systemd-analyze security` puts the unit at 3.5 (it was 5.1 before
+this change). Not verified on a running Arch system: that `dumpcap` opens the interface
+under these settings with `NoNewPrivileges=yes`.
 
 ## What it can see
 
