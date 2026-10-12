@@ -180,8 +180,15 @@ fixture se reporta como fixture, no como dispositivo real. Un PR por avance, con
   defectos reales, ya corregidos: Roku en inicio (`<app>Roku</app>`) y la carrera del
   informe MQTT. Matter no habla Matter en el cable: el servidor emula chip-tool. Son
   pruebas de protocolo, no dispositivos verificados.
-- [ ] **13. `archie-netwatch.service` bajo systemd real.** No se sabe si `DynamicUser`
+- [~] **13. `archie-netwatch.service` bajo systemd real.** No se sabe si `DynamicUser`
   con capacidades ambientales basta para `dumpcap` en Arch.
+  **Parcial (Claude, 2026-10-12):** no bastaba, por dos motivos que se ven sin hardware.
+  En Arch, `dumpcap` es `root:wireshark` 0754 y un usuario dinámico no puede ni
+  ejecutarlo. Además, el estado de un `DynamicUser` vive en `/var/lib/private` (0700) y
+  el follower no podía leer las alertas. Ahora corre con una cuenta estática
+  `archie-netwatch` (sysusers), `Group=archie`, `SupplementaryGroups=wireshark` y
+  archivos 0640. `systemd-analyze verify` pasa y la exposición baja de 5.1 a 3.5. Hay
+  una prueba en `packaging.rs`. Falta arrancarla en un Arch real con una interfaz.
 - [x] 14. IPv6: `address-moved` solo mira ARP; falta Neighbor Discovery. **Hecho (Claude,
   2026-10-12):** TShark lee `icmpv6.nd.na.target_address`; una Neighbor Advertisement
   por otra MAC es un movimiento, grave si es la dirección del router (`--gateway` acepta

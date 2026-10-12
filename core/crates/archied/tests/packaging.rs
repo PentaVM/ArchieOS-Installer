@@ -1286,3 +1286,56 @@ fn display_failure_cannot_block_archied_or_the_boot_target() {
         "distro/display/README.md must not pretend the native display was tested on hardware"
     );
 }
+
+/// The traffic audit's unit, its account and the ISO staging agree, and the audit's
+/// files can reach the alert follower (group `archie`) and never anyone else.
+#[test]
+fn the_netwatch_unit_runs_as_its_static_account_with_the_capture_group() {
+    let root = repo_root();
+    let unit_text = std::fs::read_to_string(root.join("distro/sentry/archie-netwatch.service"))
+        .expect("the netwatch unit exists");
+    let unit = unit_directives(&unit_text);
+    // A DynamicUser's state lives under /var/lib/private (0700 root): the follower,
+    // running as `archie`, could never read alerts.jsonl there.
+    assert!(
+        !unit.contains_key("DynamicUser"),
+        "netwatch must not run as a DynamicUser"
+    );
+    let user = unit.get("User").expect("netwatch names its account");
+    assert_eq!(unit.get("Group").map(String::as_str), Some("archie"));
+    // dumpcap is root:wireshark 0754 on Arch: no group, no capture.
+    assert!(unit
+        .get("SupplementaryGroups")
+        .is_some_and(|groups| groups.split_whitespace().any(|g| g == "wireshark")));
+    assert_eq!(unit.get("UMask").map(String::as_str), Some("0027"));
+    assert_eq!(
+        unit.get("StateDirectoryMode").map(String::as_str),
+        Some("0750")
+    );
+    assert_eq!(
+        unit.get("CapabilityBoundingSet").map(String::as_str),
+        Some("CAP_NET_RAW CAP_NET_ADMIN")
+    );
+
+    let sysusers = std::fs::read_to_string(root.join("distro/sentry/archie-netwatch.sysusers"))
+        .expect("the netwatch account is declared");
+    let records: Vec<Vec<&str>> = sysusers
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(|l| l.split_whitespace().collect())
+        .collect();
+    assert!(
+        records.iter().any(|r| r.first() == Some(&"u")
+            && r.get(1) == Some(&user.as_str())
+            && r.last() == Some(&"/usr/bin/nologin")),
+        "sysusers must create the non-login {user} account"
+    );
+
+    let build = std::fs::read_to_string(root.join("distro/archiso/build.sh")).unwrap();
+    assert!(
+        build.contains("distro/sentry/archie-netwatch.sysusers")
+            && build.contains("sysusers.d/archie-netwatch.conf"),
+        "the ISO must stage the netwatch account with its unit"
+    );
+}

@@ -33,6 +33,9 @@ fn take(arguments: &mut Vec<String>, flag: &str) -> Option<String> {
     })
 }
 
+/// Opens a file for the audit's own account and its group, never for others. Under the
+/// unit the group is `archie`, so the alert follower (the control plane) can read the
+/// alerts; the frames' DNS questions in state.json reach nobody outside it.
 fn private(path: &Path, append: bool) -> std::io::Result<std::fs::File> {
     let mut options = std::fs::OpenOptions::new();
     options
@@ -41,7 +44,7 @@ fn private(path: &Path, append: bool) -> std::io::Result<std::fs::File> {
         .append(append)
         .truncate(!append);
     #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o640);
     options.open(path)
 }
 
@@ -437,7 +440,8 @@ mod tests {
                 .permissions()
                 .mode()
                 & 0o777;
-            assert_eq!(mode, 0o600, "{name} is for its owner only");
+            assert_eq!(mode & 0o007, 0, "{name} is never for others");
+            assert_eq!(mode & 0o020, 0, "{name} is never group-writable");
         }
         std::fs::remove_dir_all(&dir).ok();
     }

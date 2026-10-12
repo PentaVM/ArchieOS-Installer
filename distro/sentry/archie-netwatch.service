@@ -13,10 +13,15 @@ EnvironmentFile=/etc/archie/netwatch.env
 ExecStart=/usr/bin/archie-netwatch live --interface ${ARCHIE_NETWATCH_INTERFACE} --state-dir /var/lib/archie/netwatch
 Restart=on-failure
 RestartSec=30s
-DynamicUser=yes
+# A static account (archie-netwatch.sysusers) in group `archie`, so the alert follower
+# can read what this writes; see that file for why not DynamicUser.
+User=archie-netwatch
+Group=archie
+# dumpcap is root:wireshark 0754 on Arch: without the group it cannot even be executed.
+SupplementaryGroups=wireshark
 StateDirectory=archie/netwatch
-StateDirectoryMode=0700
-UMask=0077
+StateDirectoryMode=0750
+UMask=0027
 # What dumpcap needs to open the interface, and nothing else.
 AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
 CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
@@ -29,6 +34,12 @@ ProtectHostname=yes
 ProtectKernelLogs=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
+ProtectKernelTunables=yes
+ProtectProc=invisible
+PrivateDevices=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_PACKET
+SystemCallArchitectures=native
 LockPersonality=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes

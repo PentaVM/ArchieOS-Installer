@@ -65,8 +65,19 @@ echo 'ARCHIE_NETWATCH_INTERFACE=eth0' | sudo tee /etc/archie/netwatch.env
 sudo systemctl enable --now archie-netwatch
 ```
 
-It runs as a transient user holding only `CAP_NET_RAW` and `CAP_NET_ADMIN`, which is what
-`dumpcap` needs to open the interface.
+It runs as the static account `archie-netwatch` (`distro/sentry/archie-netwatch.sysusers`)
+with `Group=archie`, holding only `CAP_NET_RAW` and `CAP_NET_ADMIN`, which is what
+`dumpcap` needs to open the interface. Why not `DynamicUser`:
+
+- Arch's `wireshark-cli` installs `dumpcap` as `root:wireshark` mode 0754, so the
+  account must be in `wireshark` (`SupplementaryGroups=wireshark`) even to execute it.
+- A dynamic user's `StateDirectory` lives under `/var/lib/private` (0700 root), where
+  `archie sentry-follow`, running as `archie`, could never read `alerts.jsonl`.
+
+Its files are 0640 in a 0750 directory: the control plane (group `archie`) reads them,
+nobody else does. `systemd-analyze security` puts the unit at 3.5 (it was 5.1 before
+this change). Not verified on a running Arch system: that `dumpcap` opens the interface
+under these settings with `NoNewPrivileges=yes`.
 
 ## What it can see
 
