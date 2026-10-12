@@ -29,6 +29,11 @@ pub enum CommandKind {
     RemoteKey,
     AppLaunch,
     PrintSubmit,
+    WakeHost,
+    PortMapping,
+    WifiSet,
+    SessionLock,
+    VolumeSet,
 }
 
 /// Remote keys with a measurable postcondition. Navigation keys (directions,
@@ -78,6 +83,41 @@ pub enum Command {
     RemoteKey { key: RemoteKeyName },
     AppLaunch { app_id: String },
     PrintSubmit { sha256: String, format: PrintFormat, pages: u16 },
+    /// Wake a host with a magic packet. The postcondition is the host
+    /// answering on the network afterwards - the packet itself proves nothing.
+    WakeHost,
+    /// Add or remove a router port mapping. The postcondition is the mapping
+    /// being listed (or gone) when the router is asked afterwards.
+    PortMapping {
+        present: bool,
+        external_port: u16,
+        protocol: PortProtocol,
+    },
+    /// Toggle a router's wireless radios. The postcondition is the router
+    /// reporting the radios in the requested state.
+    WifiSet { on: bool },
+    /// Lock or unlock a workstation session. The postcondition is the session
+    /// manager reporting the requested lock state.
+    SessionLock { locked: bool },
+    /// Set a node's output volume. The postcondition is the mixer reporting
+    /// the requested level.
+    VolumeSet { percent: u8 },
+}
+
+/// Transport protocol of a router port mapping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PortProtocol {
+    Tcp,
+    Udp,
+}
+impl PortProtocol {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Tcp => "TCP",
+            Self::Udp => "UDP",
+        }
+    }
 }
 impl Command {
     pub fn capability(&self) -> CommandKind {
@@ -90,6 +130,11 @@ impl Command {
             Self::RemoteKey { .. } => CommandKind::RemoteKey,
             Self::AppLaunch { .. } => CommandKind::AppLaunch,
             Self::PrintSubmit { .. } => CommandKind::PrintSubmit,
+            Self::WakeHost => CommandKind::WakeHost,
+            Self::PortMapping { .. } => CommandKind::PortMapping,
+            Self::WifiSet { .. } => CommandKind::WifiSet,
+            Self::SessionLock { .. } => CommandKind::SessionLock,
+            Self::VolumeSet { .. } => CommandKind::VolumeSet,
         }
     }
     /// The job name a printer must report for this submission. Stable and
@@ -118,6 +163,14 @@ impl Command {
             }
             Self::AppLaunch { app_id } => {
                 validate_id(app_id).map_err(|_| ContractError("invalid application id"))
+            }
+            Self::PortMapping {
+                external_port,
+                protocol: _,
+                ..
+            } if *external_port == 0 => Err(ContractError("port outside 1..=65535")),
+            Self::VolumeSet { percent } if *percent > 100 => {
+                Err(ContractError("volume outside 0..=100 percent"))
             }
             Self::PrintSubmit {
                 sha256,
@@ -179,6 +232,35 @@ impl Command {
                 ResourceState::Printer { job_present, .. },
             ) => job_present.as_deref()
                 == Self::print_job_name(sha256).ok().as_deref(),
+            (Self::WakeHost, ResourceState::Host { reachable, .. }) => *reachable,
+            (
+                Self::PortMapping { present, .. },
+                ResourceState::Router {
+                    mapping_present, ..
+                },
+            ) => *mapping_present == Some(*present),
+            (
+                Self::WifiSet { on },
+                ResourceState::Router { wifi_enabled, .. },
+            ) => *wifi_enabled == Some(*on),
+            (
+                Self::SessionLock { locked },
+                ResourceState::Host { session_locked, .. },
+            ) => *session_locked == Some(*locked),
+            (
+                Self::VolumeSet { percent },
+                ResourceState::Host { volume_percent, .. },
+            ) => *volume_percent == Some(*percent),
+            // An Android app launch is verified through the foreground app the
+            // device itself reports; `awake` plays the role `power_on` does on a TV.
+            (
+                Self::AppLaunch { app_id },
+                ResourceState::Host {
+                    awake,
+                    foreground_app,
+                    ..
+                },
+            ) => *awake == Some(true) && foreground_app.as_deref() == Some(app_id.as_str()),
             _ => false,
         }
     }
@@ -200,6 +282,21 @@ pub enum ResourceState {
     Printer {
         idle: bool,
         job_present: Option<String>,
+    },
+    /// A router's own answers. `mapping_present` is about the exact mapping the
+    /// command named, asked again after acting; `None` means the router could
+    /// not say, which never verifies anything.
+    Router {
+        mapping_present: Option<bool>,
+        wifi_enabled: Option<bool>,
+    },
+    /// A computer or phone's own answers.
+    Host {
+        reachable: bool,
+        awake: Option<bool>,
+        session_locked: Option<bool>,
+        volume_percent: Option<u8>,
+        foreground_app: Option<String>,
     },
     Unknown,
 }
@@ -320,6 +417,14 @@ impl Observation {
             {
                 Err(ContractError("invalid measured print job"))
             }
+            ResourceState::Host {
+                volume_percent: Some(v),
+                ..
+            } if v > 100 => Err(ContractError("invalid measured volume")),
+            ResourceState::Host {
+                foreground_app: Some(ref a),
+                ..
+            } if validate_id(a).is_err() => Err(ContractError("invalid measured foreground app")),
             _ => Ok(()),
         }
     }

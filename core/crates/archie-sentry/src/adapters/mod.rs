@@ -5,7 +5,10 @@ pub mod home_assistant;
 pub mod ipp;
 pub mod mqtt;
 pub mod onvif;
+pub mod process;
 pub mod roku;
+pub mod router;
+pub mod wol;
 
 use crate::engine::AdapterError;
 use reqwest::{Client, Response, Url};
