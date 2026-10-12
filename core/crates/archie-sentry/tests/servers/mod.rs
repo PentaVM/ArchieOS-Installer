@@ -9,6 +9,14 @@
 #![allow(dead_code)]
 
 pub mod cast;
+pub mod home_assistant;
+pub mod http;
+pub mod igd;
+pub mod ipp;
+pub mod matter;
+pub mod mqtt;
+pub mod onvif;
+pub mod roku;
 
 use archie_policy::{
     Action, Constraints, Lease, PolicyConfig, PolicyEngine, Principal, Resource, Scope,

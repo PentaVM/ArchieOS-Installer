@@ -150,6 +150,35 @@ Probado contra un receptor CAST v2 en proceso sobre TLS loopback
 (`tests/servers/cast.rs`), que exige CONNECT, hace PING antes de responder, difunde
 cambios y cuantiza el volumen. **No probado contra un Chromecast físico.**
 
+## Servidores de protocolo en proceso
+
+`tests/servers/` implementa cada protocolo con estado propio, y
+`tests/protocol_servers.rs` hace pasar cada adaptador por el motor completo (Intent →
+policy → aprobación → observación → envío → observación) contra ellos:
+
+| Servidor | Estado que guarda | Lo que exige |
+|---|---|---|
+| Roku ECP (`roku.rs`) | encendido, app activa, canales instalados, reproductor | con el panel apagado sólo PowerOn actúa; 404 para un canal no instalado |
+| Home Assistant (`home_assistant.rs`) | entidades, atributos, `last_reported` | token Bearer; servicios por dominio; unidad de temperatura |
+| MQTT 3.1.1 (`mqtt.rs`) | mensajes retenidos, suscripciones con `+`/`#` | CONNECT con credenciales; los dispositivos son clientes TCP aparte que guardan su estado y publican retenido |
+| IPP (`ipp.rs`) | cola de trabajos (pendiente → procesando → completado) | `document-format-supported`; bytes que no son del formato declarado abortan el trabajo |
+| ONVIF (`onvif.rs`) | perfiles, nonces vistos | digest WS-Security verificado y nonce no repetido |
+| UPnP IGD (`igd.rs`) | tabla de mapeos | 718 si otro cliente tiene el puerto, 714/713 como un router |
+| Matter (`matter.rs`) | nodos comisionados y sus clusters | un nodo no comisionado no responde; restricciones de setpoint |
+| CAST v2 (`cast.rs`) | apps, sesiones, volumen, mute | TLS, CONNECT, PING/PONG, difusión de cambios, cuantización del volumen |
+
+Matter no habla Matter en el cable: `chip-tool` es quien lo hace, así que el servidor es
+un `CommandRunner` que interpreta el argv de chip-tool e imprime su formato de informe.
+Los fixtures enlatados que quedan en `tests/adapters_*.rs` cubren respuestas malformadas u
+hostiles que un servidor correcto no produce. **Todo esto es prueba de protocolo en
+loopback; ningún dispositivo físico ha sido verificado.**
+
+Lo que los servidores encontraron: un Roku en su pantalla de inicio responde
+`<app>Roku</app>` sin `id` y el adaptador lo rechazaba; y el adaptador MQTT publicaba y
+desconectaba, de modo que la observación posterior competía con el informe del
+dispositivo. Ahora `apply` se suscribe al tema de estado antes de publicar y espera
+(acotado a 3 s) el informe en vivo; la evidencia sigue siendo la observación del motor.
+
 ## Diagnóstico
 
 El daemon actualizado ofrece `archie sentry-printer <resource-id>`. Core busca

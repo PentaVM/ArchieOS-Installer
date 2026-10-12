@@ -1,5 +1,7 @@
 //! Integration tests for the IoT protocol adapters: MQTT 3.1.1 over TCP,
 //! observation-only ONVIF over SOAP. Chromecast lives in `adapters_cast.rs`.
+mod servers;
+
 use archie_sentry::{
     adapters::{
         mqtt::{Mqtt, MqttBinding},
@@ -116,23 +118,39 @@ fn mqtt_adapter(address: &str, binding: MqttBinding) -> Mqtt {
 
 // ---------- MQTT tests ----------
 
+/// A device on the stateful broker that records every command payload it
+/// receives and reports `report` as its new state.
+async fn recording_device(
+    broker: &servers::mqtt::Broker,
+    command: &str,
+    state: &str,
+    initial: &[u8],
+    report: &'static [u8],
+) -> std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>> {
+    let seen: std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>> = Default::default();
+    let record = seen.clone();
+    servers::mqtt::Device::attach(
+        &broker.address,
+        "recorder",
+        command,
+        state,
+        initial,
+        None,
+        Box::new(move |_, payload| {
+            record.lock().unwrap().push(payload.to_vec());
+            Some(report.to_vec())
+        }),
+    )
+    .await;
+    seen
+}
+
 #[tokio::test]
 async fn mqtt_switch_publish_matches_expected_topic_and_payload_then_disconnects() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let task = tokio::spawn(async move {
-        let (mut stream, _) = listener.accept().await.unwrap();
-        let (header, _) = mqtt_read_packet(&mut stream).await;
-        assert_eq!(header >> 4, 1, "CONNECT");
-        stream.write_all(&[0x20, 0x02, 0x00, 0x00]).await.unwrap(); // CONNACK accept
-        let (header, body) = mqtt_read_packet(&mut stream).await;
-        assert_eq!(header, 0x30, "PUBLISH qos 0");
-        let (header, disconnect) = mqtt_read_packet(&mut stream).await;
-        assert_eq!((header, disconnect.is_empty()), (0xE0, true), "DISCONNECT");
-        body
-    });
+    let broker = servers::mqtt::Broker::start(None).await;
+    let seen = recording_device(&broker, "home/lamp/set", "home/lamp/state", b"OFF", b"ON").await;
     let mut adapter = mqtt_adapter(
-        &address.to_string(),
+        &broker.address,
         MqttBinding::switch("home/lamp/set", "home/lamp/state", "ON", "OFF"),
     );
     let ack = adapter
@@ -143,26 +161,33 @@ async fn mqtt_switch_publish_matches_expected_topic_and_payload_then_disconnects
         .await
         .unwrap();
     assert!(ack.accepted);
-    let body = task.await.unwrap();
-    let length = usize::from(u16::from_be_bytes([body[0], body[1]]));
-    assert_eq!(&body[2..2 + length], b"home/lamp/set");
-    assert_eq!(&body[2 + length..], b"ON");
+    assert_eq!(*seen.lock().unwrap(), vec![b"ON".to_vec()]);
+    // The adapter listened on the state topic before it commanded.
+    let log: Vec<String> = broker
+        .log()
+        .into_iter()
+        .filter(|l| l.starts_with("archie-"))
+        .map(|l| l.split_once(':').unwrap().1.to_owned())
+        .collect();
+    assert_eq!(
+        log,
+        ["CONNECT", "SUBSCRIBE home/lamp/state", "PUBLISH home/lamp/set"]
+    );
 }
 
 #[tokio::test]
 async fn mqtt_climate_temperature_is_rendered_as_celsius_with_one_decimal() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let task = tokio::spawn(async move {
-        let (mut stream, _) = listener.accept().await.unwrap();
-        mqtt_read_packet(&mut stream).await;
-        stream.write_all(&[0x20, 0x02, 0x00, 0x00]).await.unwrap();
-        let (_, body) = mqtt_read_packet(&mut stream).await;
-        mqtt_read_packet(&mut stream).await; // DISCONNECT
-        body
-    });
+    let broker = servers::mqtt::Broker::start(None).await;
+    let seen = recording_device(
+        &broker,
+        "home/thermostat/set",
+        "home/thermostat/state",
+        b"20.0",
+        b"22.5",
+    )
+    .await;
     let mut adapter = mqtt_adapter(
-        &address.to_string(),
+        &broker.address,
         MqttBinding::climate("home/thermostat/set", "home/thermostat/state", "set {celsius}"),
     );
     adapter
@@ -174,10 +199,7 @@ async fn mqtt_climate_temperature_is_rendered_as_celsius_with_one_decimal() {
         )
         .await
         .unwrap();
-    let body = task.await.unwrap();
-    let length = usize::from(u16::from_be_bytes([body[0], body[1]]));
-    assert_eq!(&body[2..2 + length], b"home/thermostat/set");
-    assert_eq!(&body[2 + length..], b"set 22.5");
+    assert_eq!(*seen.lock().unwrap(), vec![b"set 22.5".to_vec()]);
 }
 
 #[tokio::test]
