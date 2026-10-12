@@ -64,3 +64,4 @@ deja commiteada y empujada en `claude/sentry-ola3-cast-focos-servidores` (PR #36
   rechazado.
 - Productor de Vault (`vault_bridge`, `archie vault-docs`, feeder y perfiles). Humo:
   3 documentos → `focus trabajo` admite 3 (90/80/60); `personal` no ve ninguno.
+- `sentry-notices --claim` (`f7f7572`) y el relevo `docs/HANDOFF-2026-10-12-SENTRY-OLA3.md`.

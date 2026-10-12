@@ -360,3 +360,29 @@ y 0640 desde `01e61e3`.
 **Nada se probó en hardware ni en una red real.** El modo `live` de `archie-voice` no
 compila aquí (necesita el SDK de NeMo): la voz no dice los avisos todavía, y el contrato
 está en `docs/SENTRY-RESPUESTA.md`.
+
+### Continuación (Claude, 2026-10-12, 11:20–11:50 UTC)
+
+- **CI:** verde completo en GitHub desde `4625bb7` (`rust` + `native-contracts`). El
+  paso nuevo de TShark e2e pasa en el runner (`5c9e47b`).
+- **Inestable en el CI, con causa raíz** (`8977076`): el nonce WS-Security de ONVIF se
+  repetía dentro de un milisegundo y el servidor de prueba lo rechazaba como reutilizado,
+  igual que haría una cámara real. Ahora lleva un contador de proceso.
+- **Auditoría de E/S de los adaptadores** (`705a38f`), cada arreglo con una prueba que
+  falla sin él:
+  - panic por cortar por bytes un stderr no ASCII; con `panic=abort` mataba el proceso;
+  - ADB, BLE, Matter y WoL bloqueaban un hilo de Tokio y el plazo del Intent no podía
+    aplicarse;
+  - tope de sesiones `loginctl`.
+- **e2e con TShark real** (`5c9e47b`): una captura construida byte a byte pasa por
+  `archie-netwatch read`.
+- **`unusual-destination`** (`88670e7`).
+- **Productor del pilar Vault** (`531c860`): `vault_bridge`, `archie vault-docs` y la
+  integración con el feeder.
+- **`sentry-notices --claim`** (`f7f7572`): una sola llamada para que la voz diga los
+  avisos.
+- **Relevo:** `docs/HANDOFF-2026-10-12-SENTRY-OLA3.md`, con la validación en hardware
+  paso a paso y las decisiones que son de Nelson.
+
+Humo con binarios reales: pcap → netwatch → follower → tablón → displayd
+`/api/notices`; `vault-docs` → `focus trabajo`; `--claim` tres veces y luego `null`.
