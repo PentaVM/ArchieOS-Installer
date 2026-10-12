@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# The video bridge on the shared folder: ~/ArchieOS, which is the ArchieOS folder on the
+# Windows desktop. Put clips there; renders appear in its renders/ folder, each with a
+# project Kdenlive opens.
+#
+#   archie-video                    what is in the folder
+#   archie-video probe FILE         a clip's size and length
+#   archie-video guide              how a timeline is described
+#   archie-video serve              the same tools over MCP, for a planner
+#   archie-video open               Kdenlive, in the Stage
+set -euo pipefail
+folder=$HOME/ArchieOS
+[ -d "$folder" ] || { echo "archie-video: $folder is not there; make it, or run the installer again" >&2; exit 1; }
+case "${1:-sources}" in
+  sources) archie-bridges call video video_sources '{}' --workspace "$folder" ;;
+  probe) archie-bridges call video video_probe "$(jq -n --arg f "${2:?archie-video probe FILE}" '{file: $f}')" --workspace "$folder" ;;
+  guide) archie-bridges guide video ;;
+  serve) exec archie-mcp-server --bridge "video=$folder" ;;
+  open) archie-session up && archie-session run kdenlive ;;
+  *) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
+esac
