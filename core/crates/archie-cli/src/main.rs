@@ -123,6 +123,17 @@ enum Command {
     /// refused and the refusal is reported, which is the designed outcome.
     /// The state directory falls back to `[sentry.netwatch]` when the flag is
     /// absent.
+    SentryFollow {
+        /// Netwatch state directory (holds `alerts.jsonl` and `told.json`).
+        #[arg(long)]
+        state_dir: Option<std::path::PathBuf>,
+        /// One pass instead of a poll loop.
+        #[arg(long)]
+        once: bool,
+        /// Poll interval when looping (500..=60000 ms; default 5000).
+        #[arg(long)]
+        poll_ms: Option<u64>,
+    },
     /// One pass of the unified feeder: every netwatch alert, device change and
     /// Wanda record already sealed in the local vault, filtered and ordered by
     /// a focus profile (`pantalla-1`, `trabajo`, `personal`, `red`), then one
@@ -137,16 +148,21 @@ enum Command {
         #[arg(long, default_value_t = 0)]
         since_ms: i64,
     },
-    SentryFollow {
-        /// Netwatch state directory (holds `alerts.jsonl` and `told.json`).
+    /// The owner notice board: what Sentry told the owner, pending first.
+    /// `sentry-follow` posts to it every alert at or above the floor
+    /// (`[sentry.response] min_severity`, default `warning`); the voice says
+    /// each one's fixed sentence once, and the Observatory shows them. A notice
+    /// changes nothing on the network. Acknowledging ends it.
+    SentryNotices {
+        /// Show acknowledged notices too.
         #[arg(long)]
-        state_dir: Option<std::path::PathBuf>,
-        /// One pass instead of a poll loop.
+        all: bool,
+        /// Acknowledge one notice by id (or a unique prefix of 6+ characters).
+        #[arg(long, conflicts_with = "ack_all")]
+        ack: Option<String>,
+        /// Acknowledge every pending notice.
         #[arg(long)]
-        once: bool,
-        /// Poll interval when looping (500..=60000 ms; default 5000).
-        #[arg(long)]
-        poll_ms: Option<u64>,
+        ack_all: bool,
     },
     /// Ingest one chat export file into Wanda's context: WhatsApp `.txt`,
     /// Instagram `.json` or notification-dump `.jsonl`. Local and idempotent:
@@ -617,6 +633,7 @@ impl Command {
             | Self::ContextFeed { .. }
             | Self::SentryFollow { .. }
             | Self::Focus { .. }
+            | Self::SentryNotices { .. }
             | Self::WandaIngest { .. }
             | Self::WandaWatch { .. } => return None,
         })
@@ -1142,6 +1159,9 @@ async fn main() -> std::process::ExitCode {
             Command::Sentry {
                 action: SentryIoT::CastProbe { address, port },
             } => cast_probe(*address, *port, cli.json).await,
+            Command::SentryNotices { all, ack, ack_all } => {
+                sentry_notices(&paths, *all, ack.as_deref(), *ack_all, cli.json)
+            }
             Command::Focus {
                 profile,
                 domain,
@@ -1606,6 +1626,96 @@ fn load_sentry_config(paths: &StatePaths) -> Result<archie_core::config::ArchieC
         .map_err(|e| format!("cannot load configuration: {e}"))
 }
 
+/// The notice floor from `[sentry.response]`, or the default (`warning`).
+fn notice_policy(
+    config: Option<&archie_core::config::ArchieConfig>,
+) -> archie_workstation::live::notices::Policy {
+    use archie_workstation::live::notices::{Policy, Severity};
+    config
+        .and_then(|c| c.sentry.response.as_ref())
+        .and_then(|r| Severity::parse(&r.min_severity))
+        .map_or_else(Policy::default, |min_severity| Policy { min_severity })
+}
+
+/// Lists the owner notice board, or acknowledges notices on it.
+fn sentry_notices(
+    paths: &StatePaths,
+    all: bool,
+    ack: Option<&str>,
+    ack_all: bool,
+    json: bool,
+) -> std::process::ExitCode {
+    use archie_workstation::live::notices::Board;
+    let run = || -> Result<(), String> {
+        let vault_dir = archie_workstation::live::cerebra_vault_dir(&paths.state_dir);
+        let path = archie_workstation::live::notice_board_path(&vault_dir);
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() as u64);
+        if ack.is_some() || ack_all {
+            let mut changed = 0;
+            Board::update(&path, |board| {
+                changed = match ack {
+                    Some(id) => board.acknowledge(id, now_ms),
+                    None => board.acknowledge_all(now_ms),
+                };
+                changed > 0
+            })
+            .map_err(|e| e.to_string())?;
+            if json {
+                println!("{}", serde_json::json!({ "acknowledged": changed }));
+            } else if changed == 0 {
+                return Err(match ack {
+                    Some(id) => format!("no single pending notice matches {id:?}"),
+                    None => "nothing pending".to_owned(),
+                });
+            } else {
+                println!("acknowledged {changed}");
+            }
+            return Ok(());
+        }
+        let board = Board::load(&path).map_err(|e| e.to_string())?;
+        let shown: Vec<_> = board
+            .notices
+            .iter()
+            .filter(|n| all || n.pending())
+            .collect();
+        if json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&shown).map_err(|e| e.to_string())?
+            );
+        } else if shown.is_empty() {
+            println!("no pending notices");
+        } else {
+            for notice in shown {
+                let state = match (notice.acknowledged_ms, notice.spoken_ms) {
+                    (Some(_), _) => "acknowledged",
+                    (None, Some(_)) => "said",
+                    (None, None) => "pending",
+                };
+                println!(
+                    "{}  {:<7} {:<18} {:<12} {}  [{}]",
+                    &notice.id[..12],
+                    notice.severity.as_str(),
+                    notice.rule,
+                    state,
+                    notice.detail,
+                    notice.device,
+                );
+            }
+        }
+        Ok(())
+    };
+    match run() {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(message) => {
+            eprintln!("archie: {message}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
 /// One pass (or a poll loop) of the live alert follower. Entirely local: the
 /// netwatch state directory and the follower vault are files. The pass runs
 /// against an empty model registry, so on a node without a local model every
@@ -1618,17 +1728,28 @@ fn sentry_follow(
     json: bool,
 ) -> std::process::ExitCode {
     let run = || -> Result<(), String> {
+        // The config is needed for the state directory only when the flag is absent;
+        // with the flag, a config that does not load costs only the notice floor.
+        let config = match (state_dir, load_sentry_config(paths)) {
+            (_, Ok(config)) => Some(config),
+            (None, Err(e)) => return Err(e),
+            (Some(_), Err(e)) => {
+                eprintln!("archie: {e}; using the default notice floor (warning)");
+                None
+            }
+        };
         let state_dir = match state_dir.map(std::path::PathBuf::from) {
             Some(dir) => dir,
-            None => load_sentry_config(paths)?
-                .sentry
-                .netwatch
-                .map(|n| std::path::PathBuf::from(n.state_dir))
+            None => config
+                .as_ref()
+                .and_then(|c| c.sentry.netwatch.as_ref())
+                .map(|n| std::path::PathBuf::from(&n.state_dir))
                 .ok_or_else(|| {
                     "no netwatch state directory: pass --state-dir or configure [sentry.netwatch]"
                         .to_owned()
                 })?,
         };
+        let notice_policy = notice_policy(config.as_ref());
         let poll_ms = poll_ms.unwrap_or(5000);
         if !(500..=60000).contains(&poll_ms) {
             return Err("poll_ms must be within 500..=60000".to_owned());
@@ -1638,9 +1759,13 @@ fn sentry_follow(
             let now_ms = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_millis() as i64);
-            let report =
-                archie_workstation::live::follow_alerts_once(&state_dir, &vault_dir, now_ms)
-                    .map_err(|e| format!("alert follower failed: {e}"))?;
+            let report = archie_workstation::live::follow_alerts_once(
+                &state_dir,
+                &vault_dir,
+                notice_policy,
+                now_ms,
+            )
+            .map_err(|e| format!("alert follower failed: {e}"))?;
             let refused = report.refused_no_local_model();
             if json {
                 println!(
@@ -1654,17 +1779,25 @@ fn sentry_follow(
                         "refused_no_local_model": refused,
                         "journal_reset": report.journal_reset,
                         "rotation_reset": report.rotation_reset,
+                        "notices_posted": report.notices_posted,
+                        "notices_reset": report.notices_reset,
                     })
                 );
             } else {
                 println!(
-                    "sentry follow: {} alerts fed ({} malformed lines, {} rejected), {} passes, {} refused without a local model",
+                    "sentry follow: {} alerts fed ({} malformed lines, {} rejected), {} passes, {} refused without a local model, {} notices posted",
                     report.alerts_fed,
                     report.malformed_lines,
                     report.alerts_rejected,
                     report.passes.len(),
                     refused,
+                    report.notices_posted,
                 );
+                if report.notices_reset {
+                    eprintln!(
+                        "archie: the notice board did not parse; it was set aside as notices.bad"
+                    );
+                }
             }
             if once {
                 return Ok(());

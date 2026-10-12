@@ -47,6 +47,8 @@ pub struct SentrySection {
     /// Where the netwatch binary keeps `alerts.jsonl` / `told.json`, for
     /// `archie sentry-follow`.
     pub netwatch: Option<NetwatchSection>,
+    /// The first, reversible response: which alerts become owner notices.
+    pub response: Option<ResponseSection>,
     /// The chat-export drop folder Wanda ingests, and the sender-hash salt.
     pub chat_exports: Option<ChatExportSection>,
     /// Chromecasts over CAST v2 (TLS 8009), each with the certificate
@@ -503,6 +505,25 @@ impl NetwatchSection {
     }
 }
 
+/// Which netwatch alerts become owner notices (`archie sentry-notices`, the
+/// Observatory, the voice). Below the floor an alert is still recorded by
+/// Cerebra; it only does not interrupt anyone. Blocking or quarantine is never
+/// configured here: it is an approved `Intent`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResponseSection {
+    /// `notice`, `warning` (the default) or `high`.
+    pub min_severity: String,
+}
+impl ResponseSection {
+    fn validate(&self) -> Result<(), AdapterError> {
+        match self.min_severity.as_str() {
+            "notice" | "warning" | "high" => Ok(()),
+            _ => Err(AdapterError::Protocol),
+        }
+    }
+}
+
 /// The chat-export drop folder Wanda ingests (`archie wanda-watch`,
 /// `archie wanda-ingest`). The salt keys the sender-hash pseudonyms; it lives
 /// here in local config and never in a record — a pseudonym, not a defence.
@@ -719,6 +740,9 @@ impl SentrySection {
             if !resources.insert(&cast.resource_id) {
                 return Err(invalid());
             }
+        }
+        if let Some(response) = &self.response {
+            response.validate().map_err(|_| invalid())?;
         }
         if let Some(netwatch) = &self.netwatch {
             netwatch.validate().map_err(|_| invalid())?;

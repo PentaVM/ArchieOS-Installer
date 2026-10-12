@@ -72,6 +72,9 @@ pub struct FollowerPaths {
     pub journal: PathBuf,
     /// The directory [`crate::vault_io`] keeps the follower's vault in.
     pub vault_dir: PathBuf,
+    /// The owner notice board (`archie_notices`), and which alerts reach it. `None`
+    /// records alerts in Cerebra without telling anyone.
+    pub notices: Option<(PathBuf, archie_notices::Policy)>,
 }
 
 /// Why a follow pass failed. A malformed journal is not an error: it is set
@@ -176,6 +179,14 @@ enum WireSeverity {
 }
 
 impl WireSeverity {
+    fn notice(self) -> archie_notices::Severity {
+        match self {
+            Self::Notice => archie_notices::Severity::Notice,
+            Self::Warning => archie_notices::Severity::Warning,
+            Self::High => archie_notices::Severity::High,
+        }
+    }
+
     fn severity(self) -> AlertSeverity {
         match self {
             Self::Notice => AlertSeverity::Notice,
@@ -226,6 +237,10 @@ pub struct FollowReport {
     /// True when the alerts file shrank past the journal offset (rotation or
     /// recreation) and the offset restarted.
     pub rotation_reset: bool,
+    /// Alerts posted to the owner notice board (new ones; replays are not counted).
+    pub notices_posted: u64,
+    /// True when the notice board did not parse and was set aside as `.bad`.
+    pub notices_reset: bool,
 }
 
 impl FollowReport {
@@ -394,6 +409,7 @@ pub fn follow_alerts_once(
 
     let told = told_counts(paths.told.as_deref());
     let mut alerts = Vec::new();
+    let mut raised = Vec::new();
     for line in &lines {
         report.lines_read += 1;
         if line.len() > MAX_LINE_BYTES {
@@ -401,11 +417,47 @@ pub fn follow_alerts_once(
             continue;
         }
         match serde_json::from_str::<WireAlert>(line) {
-            Ok(wire) => alerts.push(to_input(wire, &told)),
+            Ok(wire) => {
+                raised.push((
+                    wire.at_ms,
+                    wire.severity.notice(),
+                    wire.rule.clone(),
+                    wire.device.clone(),
+                    wire.detail.clone(),
+                ));
+                alerts.push(to_input(wire, &told));
+            }
             Err(_) => report.malformed_lines += 1,
         }
     }
     report.alerts_fed = alerts.len() as u64;
+
+    // The owner is told before Cerebra reasons, and whether or not it can: a node with
+    // no local model still notices. The board is saved before the journal, so a crash
+    // re-reads these alerts and the content-derived ids post nothing twice.
+    if let Some((board_path, policy)) = &paths.notices {
+        if !raised.is_empty() {
+            let mut posted = 0;
+            let (_, reset) = archie_notices::Board::update(board_path, |board| {
+                for (at_ms, severity, rule, device, detail) in &raised {
+                    let alert = archie_notices::Raised {
+                        at_ms: *at_ms,
+                        severity: *severity,
+                        rule,
+                        device,
+                        detail,
+                    };
+                    if board.post(&alert, *policy) {
+                        posted += 1;
+                    }
+                }
+                posted > 0
+            })
+            .map_err(|e| FollowerError::Io(e.to_string()))?;
+            report.notices_posted = posted;
+            report.notices_reset = reset;
+        }
+    }
 
     if !alerts.is_empty() {
         let mut vault = vault_io::open_vault(&paths.vault_dir)?;
@@ -518,6 +570,7 @@ mod tests {
                 told: Some(dir.join("told.json")),
                 journal: dir.join("follower-journal.json"),
                 vault_dir: dir.join("vault"),
+                notices: Some((dir.join("notices.json"), archie_notices::Policy::default())),
             };
             Self { dir, paths }
         }
@@ -594,6 +647,52 @@ mod tests {
         assert_eq!(report.refused_no_local_model(), 1);
         // Both alerts are sealed in the vault under content-derived references.
         assert_eq!(fixture.vault_entries(), 2);
+    }
+
+    #[test]
+    fn the_owner_is_told_without_a_local_model_and_a_replay_tells_nothing_twice() {
+        let fixture = Fixture::new("notices");
+        fixture.append(&[&new_device_line(10_000), &port_scan_line(15_000)]);
+        let cerebra = cerebra();
+        let run = |now_ms| {
+            follow_alerts_once(
+                &cerebra,
+                &fixture.paths,
+                &ModelRegistry::new(),
+                "sentry-alerts",
+                now_ms,
+            )
+            .unwrap()
+        };
+        let first = run(20_000);
+        assert_eq!(first.refused_no_local_model(), 1);
+        // Below the default floor the new device is recorded but not told.
+        assert_eq!(first.notices_posted, 1);
+        let board_path = &fixture.paths.notices.as_ref().unwrap().0;
+        let board = archie_notices::Board::load(board_path).unwrap();
+        assert_eq!(board.notices.len(), 1);
+        assert_eq!(board.notices[0].rule, "port-scan");
+        assert!(!board.notices[0].spoken.contains(FIXTURE_DEVICE));
+
+        // Journal lost: everything is re-read and nothing is posted again.
+        std::fs::remove_file(&fixture.paths.journal).unwrap();
+        let replay = run(21_000);
+        assert_eq!(replay.alerts_fed, 2);
+        assert_eq!(replay.notices_posted, 0);
+        assert_eq!(
+            archie_notices::Board::load(board_path)
+                .unwrap()
+                .notices
+                .len(),
+            1
+        );
+
+        // A damaged board is set aside and the next alert still reaches the owner.
+        std::fs::write(board_path, b"garbage").unwrap();
+        fixture.append(&[&port_scan_line(30_000)]);
+        let after = run(31_000);
+        assert!(after.notices_reset);
+        assert_eq!(after.notices_posted, 1);
     }
 
     #[test]

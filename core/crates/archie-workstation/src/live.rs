@@ -22,10 +22,16 @@ use std::path::{Path, PathBuf};
 pub use archie_cerebra::alert_follower::{FollowReport, FollowerError, FollowerPaths, PassSummary};
 pub use archie_cerebra::vault_io;
 pub use archie_cerebra::wanda_watcher::{WatchReport, WatcherError};
+pub use archie_notices as notices;
 
 /// The vault directory the followers share, under the node's state dir.
 pub fn cerebra_vault_dir(state_dir: &Path) -> PathBuf {
     state_dir.join("cerebra/vault")
+}
+
+/// The owner notice board, next to the vault: `<state>/cerebra/notices.json`.
+pub fn notice_board_path(vault_dir: &Path) -> PathBuf {
+    vault_dir.parent().unwrap_or(vault_dir).join("notices.json")
 }
 
 /// One follow pass over the netwatch alerts file. `netwatch_state_dir` is the
@@ -34,6 +40,7 @@ pub fn cerebra_vault_dir(state_dir: &Path) -> PathBuf {
 pub fn follow_alerts_once(
     netwatch_state_dir: &Path,
     vault_dir: &Path,
+    notice_policy: archie_notices::Policy,
     now_ms: i64,
 ) -> Result<FollowReport, FollowerError> {
     let paths = FollowerPaths {
@@ -41,6 +48,7 @@ pub fn follow_alerts_once(
         told: Some(netwatch_state_dir.join("told.json")),
         journal: vault_dir.join("alert-follower-journal.json"),
         vault_dir: vault_dir.to_path_buf(),
+        notices: Some((notice_board_path(vault_dir), notice_policy)),
     };
     archie_cerebra::alert_follower::follow_alerts_once(
         &archie_cerebra::alert_follower::local_cerebra(),

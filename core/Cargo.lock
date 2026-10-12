@@ -129,6 +129,7 @@ dependencies = [
  "archie-mcp",
  "archie-memory",
  "archie-model-runtime",
+ "archie-notices",
  "archie-observability",
  "archie-policy",
  "archie-registry",
@@ -222,6 +223,7 @@ version = "0.1.0"
 dependencies = [
  "archie-core",
  "archie-geofabric",
+ "archie-notices",
  "archie-observability",
  "archie-orb",
  "archie-state",
@@ -394,6 +396,18 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.20",
  "tokio",
+]
+
+[[package]]
+name = "archie-notices"
+version = "0.1.0"
+dependencies = [
+ "fs2",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -758,6 +772,7 @@ version = "0.1.0"
 dependencies = [
  "archie-cerebra",
  "archie-model-runtime",
+ "archie-notices",
  "archie-policy",
  "archie-types",
  "archie-vault",

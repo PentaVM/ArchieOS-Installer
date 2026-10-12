@@ -42,6 +42,8 @@ fn config_text() -> String {
          network=true\n\
          [sentry.netwatch]\n\
          state_dir='{netwatch}'\n\
+         [sentry.response]\n\
+         min_severity='high'\n\
          [sentry.chat_exports]\n\
          watch_dir='{exports}'\n\
          salt='fixture-salt-not-a-secret'\n",
@@ -83,6 +85,7 @@ fn the_node_router_and_live_wiring_sections_are_accepted() {
     assert!(route.1.contains(&CommandKind::WifiSet));
 
     assert_eq!(sentry.netwatch.as_ref().unwrap().state_dir, abs("netwatch"));
+    assert_eq!(sentry.response.as_ref().unwrap().min_severity, "high");
     assert_eq!(
         sentry.chat_exports.as_ref().unwrap().watch_dir,
         abs("exports")
@@ -109,6 +112,10 @@ fn malformed_node_sections_are_refused() {
     // A router with neither an IGD control URL nor SSH administers nothing.
     let minimal = "[sentry]\n[sentry.router]\nresource_id='r'\nhost='192.168.1.1'\nlan_client='192.168.1.2'\n";
     assert!(ArchieConfig::from_toml(minimal).is_err());
+
+    // A notice floor that is not one of the audit's severities is refused.
+    let floor = config_text().replace("min_severity='high'", "min_severity='critical'");
+    assert!(ArchieConfig::from_toml(&floor).is_err());
 
     // A relative watch directory or an empty salt is refused.
     let rel = config_text().replace(&abs("exports"), "relative/exports");

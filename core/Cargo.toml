@@ -9,6 +9,7 @@
 resolver = "2"
 members = [
     "crates/archie-types",
+    "crates/archie-notices",
     "crates/archie-observability",
     "crates/archie-state",
     "crates/archie-postgres",
@@ -67,6 +68,7 @@ repository = "https://github.com/PentaVM/ArchieOS-Nvidia"
 [workspace.dependencies]
 # Internal crates.
 archie-types = { path = "crates/archie-types" }
+archie-notices = { path = "crates/archie-notices" }
 archie-observability = { path = "crates/archie-observability" }
 archie-state = { path = "crates/archie-state" }
 archie-postgres = { path = "crates/archie-postgres" }

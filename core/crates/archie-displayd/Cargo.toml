@@ -16,6 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 archie-core.workspace = true
+archie-notices.workspace = true
 archie-geofabric.workspace = true
 archie-observability.workspace = true
 archie-orb.workspace = true
