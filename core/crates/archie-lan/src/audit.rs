@@ -9,7 +9,7 @@
 //! | Rule | Raised when |
 //! |---|---|
 //! | `new-device` | a hardware address not seen before sends from a LAN address |
-//! | `address-moved` | an IPv4 address is claimed over ARP by another device than before |
+//! | `address-moved` | an IPv4 address is claimed over ARP by another device than before; a fight over one address is one alert, raised again only after a quiet hour, counting the moves |
 //! | `port-scan` | one device opens connections to 100 ports of one host within a minute |
 //! | `host-sweep` | one device opens the same port on 50 LAN hosts within a minute |
 //! | `cleartext-login` | a device opens Telnet or FTP, which carry passwords in the clear |
@@ -26,10 +26,21 @@ use std::net::{IpAddr, Ipv4Addr};
 const MAX_DEVICES: usize = 4096;
 const MAX_NAMES: usize = 512;
 const MAX_PEERS: usize = 64;
+const MAX_ADDRESSES: usize = 16;
 const MAX_REMEMBERED: usize = 16_384;
+const MAX_NAME_CHARS: usize = 1024;
+/// A state file larger than this is not a state this program wrote. A real one is
+/// kilobytes; every device of a full one with long names fits well inside.
+const MAX_STATE_BYTES: u64 = 256 * 1024 * 1024;
+/// Room for the most remembered alerts with long keys, times two.
+const MAX_TOLD_BYTES: u64 = 16 * 1024 * 1024;
+/// An address that keeps changing hands is told again after this much quiet.
+const MOVED_COOLDOWN_MS: u64 = 60 * 60 * 1000;
 const WINDOW_MS: u64 = 60_000;
 const SCAN_PORTS: usize = 100;
 const SWEEP_HOSTS: usize = 50;
+const STATE_FORMAT: &str = "archie-netwatch-state-v1";
+const TOLD_FORMAT: &str = "archie-netwatch-told-v1";
 
 /// One device, by the hardware address it sends from.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -54,6 +65,190 @@ pub struct State {
     pub devices: BTreeMap<String, Device>,
     /// Which device last claimed each IPv4 address over ARP.
     pub owners: BTreeMap<Ipv4Addr, String>,
+}
+
+/// The most a file on disk may hold: the same caps the audit applies as it learns, plus
+/// a byte cap on the file itself and a length cap on each stored name. Loading enforces
+/// them, so a tampered file is refused with the cap it broke instead of loaded whole.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Limits {
+    pub state_bytes: u64,
+    pub told_bytes: u64,
+    pub devices: usize,
+    pub names: usize,
+    pub peers: usize,
+    pub addresses: usize,
+    pub name_chars: usize,
+    pub told: usize,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            state_bytes: MAX_STATE_BYTES,
+            told_bytes: MAX_TOLD_BYTES,
+            devices: MAX_DEVICES,
+            names: MAX_NAMES,
+            peers: MAX_PEERS,
+            addresses: MAX_ADDRESSES,
+            name_chars: MAX_NAME_CHARS,
+            told: MAX_REMEMBERED,
+        }
+    }
+}
+
+/// Why a file on disk is not one this program will use. Each case names what is wrong:
+/// the cap that was broken, or the way the file is not the JSON this program writes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoadError {
+    /// The file is larger than the byte cap for it.
+    TooLarge { bytes: u64, cap: u64 },
+    /// The file is not the JSON this program writes.
+    Malformed(String),
+    /// A format marker written by another version.
+    UnknownFormat { found: String },
+    /// More of one thing than the audit keeps.
+    OverCap { what: &'static str, found: usize, cap: usize },
+}
+
+impl std::fmt::Display for LoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LoadError::TooLarge { bytes, cap } => write!(f, "the file is {bytes} bytes; the most it may hold is {cap}"),
+            LoadError::Malformed(error) => write!(f, "not the JSON this program writes: {error}"),
+            LoadError::UnknownFormat { found } => write!(f, "the format {found:?} is not one this version reads"),
+            LoadError::OverCap { what, found, cap } => write!(f, "{found} {what} is more than the {cap} this program keeps"),
+        }
+    }
+}
+
+impl std::error::Error for LoadError {}
+
+fn over(cap: usize, found: usize, what: &'static str) -> Result<(), LoadError> {
+    if found > cap { Err(LoadError::OverCap { what, found, cap }) } else { Ok(()) }
+}
+
+impl State {
+    /// Reads a saved state, refusing one over any cap the audit keeps. A state this
+    /// program saved always passes; a tampered one fails naming the cap it broke.
+    pub fn parse(bytes: &[u8]) -> Result<State, LoadError> {
+        Self::parse_within(bytes, &Limits::default())
+    }
+
+    /// The same, against other limits — for proving the limits hold.
+    pub fn parse_within(bytes: &[u8], limits: &Limits) -> Result<State, LoadError> {
+        if bytes.len() as u64 > limits.state_bytes {
+            return Err(LoadError::TooLarge { bytes: bytes.len() as u64, cap: limits.state_bytes });
+        }
+        let state: State = serde_json::from_slice(bytes).map_err(|e| LoadError::Malformed(e.to_string()))?;
+        state.check(limits)?;
+        Ok(state)
+    }
+
+    fn check(&self, limits: &Limits) -> Result<(), LoadError> {
+        if !self.format.is_empty() && self.format != STATE_FORMAT {
+            return Err(LoadError::UnknownFormat { found: self.format.clone() });
+        }
+        over(limits.devices, self.devices.len(), "devices")?;
+        over(limits.devices, self.owners.len(), "addresses with an owner")?;
+        for device in self.devices.values() {
+            over(limits.addresses, device.addresses.len(), "addresses of one device")?;
+            over(limits.names, device.asked.len(), "names asked by one device")?;
+            over(limits.peers, device.sent_to.len(), "outside peers of one device")?;
+            for name in device.asked.iter().chain(device.sent_to.keys()).chain(device.hostname.iter()) {
+                over(limits.name_chars, name.len(), "characters in one name")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// One remembered alert: when it was last raised, and for `address-moved` how many moves
+/// of its address have been seen in all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToldRecord {
+    pub at_ms: u64,
+    pub count: u64,
+}
+
+/// The alerts already raised. It is kept on disk next to the state, so a restart does
+/// not repeat them. It is bounded like everything here: past the cap, the oldest is
+/// forgotten first.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Told {
+    pub format: String,
+    pub records: BTreeMap<String, ToldRecord>,
+}
+
+impl Default for Told {
+    fn default() -> Self {
+        Self { format: TOLD_FORMAT.into(), records: BTreeMap::new() }
+    }
+}
+
+impl Told {
+    /// Reads a saved `told.json`, held to the same bounds as the live one.
+    pub fn parse(bytes: &[u8]) -> Result<Told, LoadError> {
+        Self::parse_within(bytes, &Limits::default())
+    }
+
+    /// The same, against other limits — for proving the limits hold.
+    pub fn parse_within(bytes: &[u8], limits: &Limits) -> Result<Told, LoadError> {
+        if bytes.len() as u64 > limits.told_bytes {
+            return Err(LoadError::TooLarge { bytes: bytes.len() as u64, cap: limits.told_bytes });
+        }
+        let told: Told = serde_json::from_slice(bytes).map_err(|e| LoadError::Malformed(e.to_string()))?;
+        if !told.format.is_empty() && told.format != TOLD_FORMAT {
+            return Err(LoadError::UnknownFormat { found: told.format });
+        }
+        over(limits.told, told.records.len(), "remembered alerts")?;
+        Ok(told)
+    }
+
+    /// True the first time a key is told, and not again while it is remembered.
+    fn is_new(&mut self, key: &str, at_ms: u64) -> bool {
+        if self.records.contains_key(key) {
+            return false;
+        }
+        self.make_room();
+        self.records.insert(key.to_string(), ToldRecord { at_ms, count: 1 });
+        true
+    }
+
+    /// `address-moved`: `Some` of every move seen so far when it should be told — the
+    /// first move, and later ones only once an hour of quiet has passed with the count
+    /// still growing — and `None` while the fight goes on inside the hour. So two devices
+    /// fighting over an address are one alert whose number keeps growing, not a stream
+    /// and not a silence.
+    fn moved(&mut self, key: &str, at_ms: u64) -> Option<u64> {
+        match self.records.get_mut(key) {
+            Some(record) => {
+                record.count = record.count.saturating_add(1);
+                if at_ms.saturating_sub(record.at_ms) >= MOVED_COOLDOWN_MS {
+                    record.at_ms = at_ms;
+                    Some(record.count)
+                } else {
+                    None
+                }
+            }
+            None => {
+                self.make_room();
+                self.records.insert(key.to_string(), ToldRecord { at_ms, count: 1 });
+                Some(1)
+            }
+        }
+    }
+
+    /// Room for one more, forgetting the oldest first.
+    fn make_room(&mut self) {
+        if self.records.len() < MAX_REMEMBERED {
+            return;
+        }
+        let oldest = self.records.iter().min_by_key(|(key, record)| (record.at_ms, *key)).map(|(key, _)| key.clone());
+        if let Some(oldest) = oldest {
+            self.records.remove(&oldest);
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -95,7 +290,8 @@ pub struct Audit {
     openings: HashMap<String, Openings>,
     /// Server names seen for outside addresses, to label the traffic that follows.
     named: HashMap<IpAddr, String>,
-    told: HashSet<String>,
+    /// The alerts already raised, kept on disk so a restart does not repeat them.
+    pub told: Told,
 }
 
 /// Shannon entropy of a label, in bits per character.
@@ -116,15 +312,12 @@ fn carries_data(question: &str) -> bool {
 
 impl Audit {
     pub fn new(mut state: State, settings: Settings) -> Self {
-        state.format = "archie-netwatch-state-v1".into();
-        Self { state, settings, openings: HashMap::new(), named: HashMap::new(), told: HashSet::new() }
+        state.format = STATE_FORMAT.into();
+        Self { state, settings, openings: HashMap::new(), named: HashMap::new(), told: Told::default() }
     }
 
     fn tell(&mut self, alerts: &mut Vec<Alert>, key: String, at_ms: u64, severity: Severity, rule: &str, device: &str, detail: String) {
-        if self.told.len() >= MAX_REMEMBERED {
-            self.told.clear();
-        }
-        if self.told.insert(key) {
+        if self.told.is_new(&key, at_ms) {
             alerts.push(Alert { at_ms, severity, rule: rule.into(), device: device.into(), detail });
         }
     }
@@ -206,7 +399,16 @@ impl Audit {
                 } else {
                     (Severity::Notice, "address now claimed by another device; usually a new DHCP lease")
                 };
-                self.tell(alerts, format!("moved {address} {mac}"), at_ms, severity, "address-moved", mac, format!("{address}: {what} (was {before})"));
+                // One alert per address, not one per pair of claimants: it is raised
+                // again only after a quiet hour, and it counts every move seen.
+                if let Some(count) = self.told.moved(&format!("moved {address}"), at_ms) {
+                    let detail = if count == 1 {
+                        format!("{address}: {what} (was {before})")
+                    } else {
+                        format!("{address}: {what}; it has now changed hands {count} times, most lately from {before}")
+                    };
+                    alerts.push(Alert { at_ms, severity, rule: "address-moved".into(), device: mac.into(), detail });
+                }
                 self.state.owners.insert(address, mac.to_string());
             }
             Some(_) => {}
@@ -357,5 +559,144 @@ mod tests {
         assert_eq!(audit.state.devices[TV].sent_to.get("api.roku.com"), Some(&200));
         let saved = serde_json::to_string(&audit.state).unwrap();
         assert_eq!(serde_json::from_str::<State>(&saved).unwrap(), audit.state);
+    }
+
+    fn claim(mac: &str, ip: &str, at_ms: u64) -> Packet {
+        Packet { at_ms, arp: Some((mac.into(), ip.parse().unwrap())), ..Packet::default() }
+    }
+
+    #[test]
+    fn an_address_fought_over_is_one_alert_whose_count_grows() {
+        let mut audit = Audit::new(State::default(), learned());
+        assert!(audit.see(&claim(ROUTER, "192.168.1.1", 1_000)).is_empty(), "the first claimer is just learned");
+        let first = audit.see(&claim(TV, "192.168.1.1", 2_000));
+        assert_eq!(rules(&first), ["address-moved"]);
+        assert!(first[0].detail.contains("(was"), "the first move is told plainly: {}", first[0].detail);
+        // The fight goes on inside the quiet hour: counted, not told again.
+        assert!(audit.see(&claim(ROUTER, "192.168.1.1", 3_000)).is_empty());
+        assert!(audit.see(&claim(TV, "192.168.1.1", 4_000)).is_empty());
+        // After the hour, one alert — counting every move seen, not one per move.
+        let again = audit.see(&claim(ROUTER, "192.168.1.1", 2_000 + MOVED_COOLDOWN_MS));
+        assert_eq!(rules(&again), ["address-moved"]);
+        assert!(again[0].detail.contains("4 times"), "every change counted: {}", again[0].detail);
+        // And the number keeps growing rather than the alert going silent.
+        let later = audit.see(&claim(TV, "192.168.1.1", 2_000 + 2 * MOVED_COOLDOWN_MS));
+        assert_eq!(rules(&later), ["address-moved"]);
+        assert!(later[0].detail.contains("5 times"), "{}", later[0].detail);
+    }
+
+    #[test]
+    fn the_oldest_remembered_alert_is_the_first_forgotten() {
+        let mut told = Told::default();
+        for i in 0..MAX_REMEMBERED as u64 {
+            assert!(told.is_new(&format!("alert {i}"), i));
+        }
+        assert_eq!(told.records.len(), MAX_REMEMBERED);
+        assert!(told.is_new("alert new", MAX_REMEMBERED as u64));
+        assert_eq!(told.records.len(), MAX_REMEMBERED, "the bound holds");
+        assert!(!told.records.contains_key("alert 0"), "the oldest went first");
+        assert!(told.records.contains_key("alert 1"));
+        assert!(!told.is_new("alert 1", 99_000), "still told");
+    }
+
+    #[test]
+    fn what_was_told_is_still_told_after_a_restart() {
+        let settings = || Settings { learn_ms: 0, gateway: None };
+        let telnet = Packet { destination: Some("192.168.1.1".parse().unwrap()), tcp: Some((50_000, 23)), opening: true, ..from(TV, "192.168.1.84", 2_000) };
+        let mut first = Audit::new(State::default(), settings());
+        assert_eq!(rules(&first.see(&from(TV, "192.168.1.84", 1_000))), ["new-device"]);
+        assert_eq!(rules(&first.see(&telnet)), ["cleartext-login"]);
+        // The process stops and starts: the state and what was told come back from disk.
+        let state = serde_json::to_vec(&first.state).unwrap();
+        let told = serde_json::to_vec(&first.told).unwrap();
+        let mut second = Audit::new(State::parse(&state).unwrap(), settings());
+        second.told = Told::parse(&told).unwrap();
+        assert!(second.see(&telnet).is_empty(), "not told again after the restart");
+    }
+
+    #[test]
+    fn a_saved_state_and_a_saved_told_load_again() {
+        let mut audit = Audit::new(State::default(), Settings { learn_ms: 0, gateway: None });
+        let packet = Packet {
+            dns_question: Some("connectivity-check.ubuntu.com".into()),
+            destination: Some("52.1.2.3".parse().unwrap()),
+            server_name: Some("api.roku.com".into()),
+            ..from(TV, "192.168.1.84", 1_000)
+        };
+        audit.see(&packet);
+        audit.see(&claim(TV, "192.168.1.84", 1_100));
+        audit.see(&claim(ROUTER, "192.168.1.84", 1_200));
+        let state = serde_json::to_vec(&audit.state).unwrap();
+        assert_eq!(State::parse(&state).unwrap(), audit.state, "a saved state loads");
+        let told = serde_json::to_vec(&audit.told).unwrap();
+        assert_eq!(Told::parse(&told).unwrap(), audit.told, "a saved told loads");
+    }
+
+    #[test]
+    fn a_state_beyond_each_cap_is_refused_naming_the_cap() {
+        let mut audit = Audit::new(State::default(), learned());
+        for (i, mac) in [TV, "aa:bb:cc:00:11:01", "aa:bb:cc:00:11:02"].into_iter().enumerate() {
+            audit.see(&from(mac, "192.168.1.84", 1_000 + i as u64));
+        }
+        let bytes = serde_json::to_vec(&audit.state).unwrap();
+
+        let tiny = Limits { state_bytes: 10, ..Limits::default() };
+        assert_eq!(State::parse_within(&bytes, &tiny), Err(LoadError::TooLarge { bytes: bytes.len() as u64, cap: 10 }));
+
+        let few_devices = Limits { devices: 2, ..Limits::default() };
+        assert_eq!(
+            State::parse_within(&bytes, &few_devices),
+            Err(LoadError::OverCap { what: "devices", found: 3, cap: 2 })
+        );
+
+        let mut named = audit.state.clone();
+        named.devices.get_mut(TV).unwrap().asked = (0..4).map(|i| format!("name-{i}.example.com")).collect();
+        let bytes = serde_json::to_vec(&named).unwrap();
+        let few_names = Limits { names: 3, ..Limits::default() };
+        assert_eq!(
+            State::parse_within(&bytes, &few_names),
+            Err(LoadError::OverCap { what: "names asked by one device", found: 4, cap: 3 })
+        );
+
+        let mut peering = audit.state.clone();
+        peering.devices.get_mut(TV).unwrap().sent_to = (0..3).map(|i| (format!("peer-{i}.example.com"), 100)).collect();
+        let bytes = serde_json::to_vec(&peering).unwrap();
+        let few_peers = Limits { peers: 2, ..Limits::default() };
+        assert_eq!(
+            State::parse_within(&bytes, &few_peers),
+            Err(LoadError::OverCap { what: "outside peers of one device", found: 3, cap: 2 })
+        );
+
+        let mut addressed = audit.state.clone();
+        addressed.devices.get_mut(TV).unwrap().addresses = (0..17u8).map(|i| IpAddr::from([10, 0, 0, i])).collect();
+        let bytes = serde_json::to_vec(&addressed).unwrap();
+        assert_eq!(
+            State::parse(&bytes),
+            Err(LoadError::OverCap { what: "addresses of one device", found: 17, cap: 16 })
+        );
+
+        let mut foreign = audit.state.clone();
+        foreign.format = "archie-netwatch-state-v0".into();
+        let bytes = serde_json::to_vec(&foreign).unwrap();
+        assert_eq!(State::parse(&bytes), Err(LoadError::UnknownFormat { found: "archie-netwatch-state-v0".into() }));
+
+        assert!(matches!(State::parse(b"{ not json"), Err(LoadError::Malformed(_))), "malformed is typed too");
+    }
+
+    #[test]
+    fn a_told_file_over_the_cap_is_refused_naming_the_cap() {
+        let mut told = Told::default();
+        for i in 0..3 {
+            told.records.insert(format!("alert {i}"), ToldRecord { at_ms: i, count: 1 });
+        }
+        let bytes = serde_json::to_vec(&told).unwrap();
+        let small = Limits { told: 2, ..Limits::default() };
+        assert_eq!(
+            Told::parse_within(&bytes, &small),
+            Err(LoadError::OverCap { what: "remembered alerts", found: 3, cap: 2 })
+        );
+        let tiny = Limits { told_bytes: 10, ..Limits::default() };
+        assert_eq!(Told::parse_within(&bytes, &tiny), Err(LoadError::TooLarge { bytes: bytes.len() as u64, cap: 10 }));
+        assert!(matches!(Told::parse(b"{ not json"), Err(LoadError::Malformed(_))));
     }
 }
