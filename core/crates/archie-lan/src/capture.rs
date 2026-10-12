@@ -6,10 +6,10 @@
 //! addresses, ports, flags and three kinds of name (a DNS question, a DHCP host name, a
 //! TLS server name). No payload is asked for, so none arrives.
 
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 /// The fields, in the order they are printed, one frame to a line, tab between.
-pub const FIELDS: [&str; 20] = [
+pub const FIELDS: [&str; 21] = [
     "frame.time_epoch",
     "frame.len",
     "eth.src",
@@ -30,6 +30,7 @@ pub const FIELDS: [&str; 20] = [
     "dns.qry.name",
     "dhcp.option.hostname",
     "tls.handshake.extensions_server_name",
+    "icmpv6.nd.na.target_address",
 ];
 
 /// Enough of each frame for the names above; the rest is never copied off the interface.
@@ -68,6 +69,9 @@ pub struct Packet {
     pub destination: Option<IpAddr>,
     /// The sender an ARP frame names: its hardware address and the IPv4 address it claims.
     pub arp: Option<(String, Ipv4Addr)>,
+    /// The IPv6 counterpart: a Neighbor Advertisement, by the hardware address that sent
+    /// it, and the address it answers for.
+    pub neighbor: Option<(String, Ipv6Addr)>,
     pub tcp: Option<(u16, u16)>,
     /// A TCP segment that opens a connection: SYN without ACK.
     pub opening: bool,
@@ -126,6 +130,12 @@ pub fn parse(line: &str) -> Option<Packet> {
                 .parse::<Ipv4Addr>()
                 .ok()
                 .filter(|ip| !ip.is_unspecified()),
+        ),
+        neighbor: mac(fields[2]).zip(
+            fields[20]
+                .parse::<Ipv6Addr>()
+                .ok()
+                .filter(|ip| !ip.is_unspecified() && !ip.is_multicast() && !ip.is_loopback()),
         ),
         tcp,
         opening: tcp.is_some() && flag(fields[12]) && !flag(fields[13]),
@@ -221,6 +231,28 @@ pub(crate) mod tests {
             .dhcp_hostname,
             None
         );
+    }
+
+    #[test]
+    fn a_neighbor_advertisement_names_who_answers_for_an_ipv6_address() {
+        let advert = [
+            ("frame.time_epoch", "1791749339.250000000"),
+            ("eth.src", "E4:AB:89:6E:1A:18"),
+            ("ipv6.src", "fe80::1"),
+            ("ipv6.dst", "ff02::1"),
+            ("icmpv6.nd.na.target_address", "fe80::1"),
+        ];
+        assert_eq!(
+            parse(&line(&advert)).unwrap().neighbor,
+            Some(("e4:ab:89:6e:1a:18".into(), "fe80::1".parse().unwrap()))
+        );
+        // A multicast target is no claim on an address.
+        let group = [
+            ("frame.time_epoch", "1791749339.250000000"),
+            ("eth.src", "e4:ab:89:6e:1a:18"),
+            ("icmpv6.nd.na.target_address", "ff02::1"),
+        ];
+        assert_eq!(parse(&line(&group)).unwrap().neighbor, None);
     }
 
     #[test]

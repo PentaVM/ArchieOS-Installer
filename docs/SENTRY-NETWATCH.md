@@ -16,7 +16,7 @@ frames' own clock. `report` prints the devices and the most recent alerts as JSO
 ## What it reads
 
 TShark does the capture and the dissection (`wireshark-cli`). From each frame it is asked
-for the time, the length, hardware and IP addresses, the sender an ARP frame names, TCP
+for the time, the length, hardware and IP addresses, the sender an ARP frame names, the address an IPv6 Neighbor Advertisement answers for, TCP
 and UDP ports, the SYN and ACK flags, and three names: a DNS question, a DHCP host name
 and a TLS server name. No payload is asked for, and only the first 768 bytes of a frame
 are copied off the interface.
@@ -44,7 +44,7 @@ says a great deal about the people who use it.
 | Rule | Severity | Raised when |
 |---|---|---|
 | `new-device` | notice | a hardware address not seen before sends from a LAN address, after the learning time (`--learn`, 600 s) |
-| `address-moved` | high for the router's address, else notice | an IPv4 address is claimed over ARP by a different device than before |
+| `address-moved` | high for the router's address (v4 or v6), else notice | an address is claimed by a different device than before: IPv4 over ARP, IPv6 by a Neighbor Advertisement (`icmpv6.nd.na.target_address`) |
 | `port-scan` | high | one device opens connections to 100 ports of one host within a minute |
 | `host-sweep` | high | one device opens the same port on 50 hosts of the network within a minute |
 | `cleartext-login` | warning | a device opens Telnet or FTP |

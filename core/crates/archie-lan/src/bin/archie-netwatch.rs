@@ -17,7 +17,7 @@
 use archie_lan::audit::{Alert, Audit, Settings, State, Told};
 use archie_lan::capture::{field_arguments, parse, SNAPLEN};
 use std::io::{BufRead, BufReader, Write};
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::time::{Duration, Instant};
@@ -105,6 +105,23 @@ fn default_gateway() -> Option<Ipv4Addr> {
     })
 }
 
+/// The router's IPv6 next hop for the default route, from the kernel's own table.
+fn default_gateway_v6() -> Option<Ipv6Addr> {
+    let table = std::fs::read_to_string("/proc/net/ipv6_route").ok()?;
+    table.lines().find_map(parse_ipv6_default_route)
+}
+
+/// One `/proc/net/ipv6_route` line: destination, its prefix length, source, its prefix
+/// length, next hop, all in hex. The default route is `::/0` with a next hop that is set.
+fn parse_ipv6_default_route(line: &str) -> Option<Ipv6Addr> {
+    let fields: Vec<&str> = line.split_whitespace().collect();
+    let hex = |text: &str| u128::from_str_radix(text, 16).ok().map(Ipv6Addr::from);
+    if fields.len() < 5 || fields[1] != "00" || hex(fields[0])? != Ipv6Addr::UNSPECIFIED {
+        return None;
+    }
+    hex(fields[4]).filter(|hop| !hop.is_unspecified())
+}
+
 fn audit(source: &[String], directory: &Path, settings: Settings) -> Result<(), String> {
     std::fs::create_dir_all(directory).map_err(|e| format!("{}: {e}", directory.display()))?;
     let mut audit = Audit::new(load(directory)?, settings);
@@ -176,7 +193,16 @@ fn report(directory: &Path, last: usize) -> Result<(), String> {
 fn main() -> ExitCode {
     let mut arguments: Vec<String> = std::env::args().skip(1).collect();
     let directory = take(&mut arguments, "--state-dir").map(PathBuf::from);
-    let gateway = take(&mut arguments, "--gateway").and_then(|g| g.parse().ok());
+    // `--gateway` may name the router by either address; each family keeps its own.
+    let gateway_ip: Option<IpAddr> = take(&mut arguments, "--gateway").and_then(|g| g.parse().ok());
+    let gateway = gateway_ip.and_then(|ip| match ip {
+        IpAddr::V4(v4) => Some(v4),
+        IpAddr::V6(_) => None,
+    });
+    let gateway_v6 = gateway_ip.and_then(|ip| match ip {
+        IpAddr::V6(v6) => Some(v6),
+        IpAddr::V4(_) => None,
+    });
     let learn = take(&mut arguments, "--learn").and_then(|s| s.parse::<u64>().ok());
     let outcome = match (arguments.first().map(String::as_str), directory) {
         (Some("interfaces"), _) => Command::new("tshark")
@@ -196,6 +222,7 @@ fn main() -> ExitCode {
             let settings = Settings {
                 learn_ms: learn.unwrap_or(600) * 1000,
                 gateway: gateway.or_else(default_gateway),
+                gateway_v6: gateway_v6.or_else(default_gateway_v6),
             };
             audit(&source, &directory, settings)
         }
@@ -207,6 +234,7 @@ fn main() -> ExitCode {
                 Settings {
                     learn_ms: learn.unwrap_or(0) * 1000,
                     gateway,
+                    gateway_v6,
                 },
             )
         }
@@ -240,6 +268,17 @@ mod tests {
 
     const TV: &str = "54:4e:f0:07:3d:e8";
 
+    #[test]
+    fn the_ipv6_default_route_names_the_router_by_its_next_hop() {
+        let default = "00000000000000000000000000000000 00 00000000000000000000000000000000 00 fe800000000000000000000000000001 00000400 00000001 00000000 00450003 eth0";
+        assert_eq!(parse_ipv6_default_route(default), "fe80::1".parse().ok());
+        // A link route has no next hop; a /64 is not the default route.
+        let onlink = "00000000000000000000000000000000 00 00000000000000000000000000000000 00 00000000000000000000000000000000 00000400 00000001 00000000 00200200 lo";
+        assert_eq!(parse_ipv6_default_route(onlink), None);
+        let prefix = "fd000000000000000000000000000000 40 00000000000000000000000000000000 00 00000000000000000000000000000000 00000100 00000001 00000000 00000001 eth0";
+        assert_eq!(parse_ipv6_default_route(prefix), None);
+    }
+
     /// A directory of one's own, emptied before and after.
     fn dir(name: &str) -> PathBuf {
         let dir =
@@ -265,6 +304,7 @@ mod tests {
         let settings = Settings {
             learn_ms: 0,
             gateway: None,
+            gateway_v6: None,
         };
         let telnet = Packet {
             destination: Some("192.168.1.1".parse().unwrap()),
@@ -363,6 +403,7 @@ mod tests {
             Settings {
                 learn_ms: 0,
                 gateway: None,
+                gateway_v6: None,
             },
         );
         audit.see(&from(TV, "192.168.1.84", 1_000));

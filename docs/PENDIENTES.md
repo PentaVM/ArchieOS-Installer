@@ -172,7 +172,12 @@ fixture se reporta como fixture, no como dispositivo real. Un PR por avance, con
   pruebas de protocolo, no dispositivos verificados.
 - [ ] **13. `archie-netwatch.service` bajo systemd real.** No se sabe si `DynamicUser`
   con capacidades ambientales basta para `dumpcap` en Arch.
-- [ ] 14. IPv6: `address-moved` solo mira ARP; falta Neighbor Discovery.
+- [x] 14. IPv6: `address-moved` solo mira ARP; falta Neighbor Discovery. **Hecho (Claude,
+  2026-10-12):** TShark lee `icmpv6.nd.na.target_address`; una Neighbor Advertisement
+  por otra MAC es un movimiento, grave si es la dirección del router (`--gateway` acepta
+  v4 o v6; en vivo se toma de `/proc/net/ipv6_route`). `owners` pasa a `IpAddr` y los
+  estados viejos cargan igual. Probado con líneas de TShark sintéticas, no en una red
+  IPv6 real.
 
 ## 4. Contexto personal y trabajo
 

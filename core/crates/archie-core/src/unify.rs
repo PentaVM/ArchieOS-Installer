@@ -15,7 +15,7 @@
 use crate::control::{NetworkAssetObservation, NetworkEvidence};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::IpAddr;
 
 /// The `format` value of the JSON document [`UnifiedView`] serializes to.
 pub const FORMAT: &str = "archie-sentry-devices-v1";
@@ -214,8 +214,9 @@ pub struct NetwatchState {
     pub format: String,
     pub started_ms: u64,
     pub devices: BTreeMap<String, NetwatchDevice>,
-    /// Which device last claimed each IPv4 address over ARP.
-    pub owners: BTreeMap<Ipv4Addr, String>,
+    /// Which device last claimed each address: IPv4 over ARP, IPv6 by Neighbor
+    /// Advertisement.
+    pub owners: BTreeMap<IpAddr, String>,
 }
 
 /// Reads one `archie-netwatch-state-v1` document. Malformed input is an error.

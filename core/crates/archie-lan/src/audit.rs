@@ -9,7 +9,7 @@
 //! | Rule | Raised when |
 //! |---|---|
 //! | `new-device` | a hardware address not seen before sends from a LAN address |
-//! | `address-moved` | an IPv4 address is claimed over ARP by another device than before; a fight over one address is one alert, raised again only after a quiet hour, counting the moves |
+//! | `address-moved` | an address is claimed by another device than before — IPv4 over ARP, IPv6 by a Neighbor Advertisement; a fight over one address is one alert, raised again only after a quiet hour, counting the moves |
 //! | `port-scan` | one device opens connections to 100 ports of one host within a minute |
 //! | `host-sweep` | one device opens the same port on 50 LAN hosts within a minute |
 //! | `cleartext-login` | a device opens Telnet or FTP, which carry passwords in the clear |
@@ -21,7 +21,7 @@ use crate::capture::Packet;
 use crate::is_lan;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 const MAX_DEVICES: usize = 4096;
 const MAX_NAMES: usize = 512;
@@ -63,8 +63,9 @@ pub struct State {
     pub format: String,
     pub started_ms: u64,
     pub devices: BTreeMap<String, Device>,
-    /// Which device last claimed each IPv4 address over ARP.
-    pub owners: BTreeMap<Ipv4Addr, String>,
+    /// Which device last claimed each address: IPv4 over ARP, IPv6 by Neighbor
+    /// Advertisement. Older files hold only IPv4 keys, and load as they are.
+    pub owners: BTreeMap<IpAddr, String>,
 }
 
 /// The most a file on disk may hold: the same caps the audit applies as it learns, plus
@@ -327,6 +328,8 @@ pub struct Settings {
     pub learn_ms: u64,
     /// The router. Another device claiming its address is the serious case of `address-moved`.
     pub gateway: Option<Ipv4Addr>,
+    /// The router's IPv6 address on this link, its link-local one as a rule.
+    pub gateway_v6: Option<Ipv6Addr>,
 }
 
 #[derive(Default)]
@@ -411,7 +414,10 @@ impl Audit {
             self.state.started_ms = packet.at_ms.max(1);
         }
         if let Some((mac, address)) = &packet.arp {
-            self.claim(&mut alerts, packet.at_ms, mac, *address);
+            self.claim(&mut alerts, packet.at_ms, mac, IpAddr::V4(*address));
+        }
+        if let Some((mac, address)) = &packet.neighbor {
+            self.claim(&mut alerts, packet.at_ms, mac, IpAddr::V6(*address));
         }
         // A frame from outside the LAN was put on the wire by the router: its hardware
         // address is the router's, and the traffic is not the router's own.
@@ -503,13 +509,16 @@ impl Audit {
         alerts
     }
 
-    fn claim(&mut self, alerts: &mut Vec<Alert>, at_ms: u64, mac: &str, address: Ipv4Addr) {
-        if !crate::is_lan_v4(address) {
-            return;
-        }
+    fn claim(&mut self, alerts: &mut Vec<Alert>, at_ms: u64, mac: &str, address: IpAddr) {
+        // An advertisement on this link speaks for an address on it, global ones too;
+        // an IPv4 claim counts only for a LAN address.
+        let gateway = match address {
+            IpAddr::V4(v4) if !crate::is_lan_v4(v4) => return,
+            IpAddr::V4(v4) => self.settings.gateway == Some(v4),
+            IpAddr::V6(v6) => self.settings.gateway_v6 == Some(v6),
+        };
         match self.state.owners.get(&address).cloned() {
             Some(before) if before != mac => {
-                let gateway = self.settings.gateway == Some(address);
                 let (severity, what) = if gateway {
                     (Severity::High, "the router's address is now claimed by another device; traffic may be passing through it")
                 } else {
@@ -630,6 +639,7 @@ mod tests {
         Settings {
             learn_ms: u64::MAX,
             gateway: None,
+            gateway_v6: None,
         }
     }
 
@@ -644,6 +654,7 @@ mod tests {
             Settings {
                 learn_ms: 60_000,
                 gateway: None,
+                gateway_v6: None,
             },
         );
         assert!(audit.see(&from(TV, "192.168.1.84", 1_000)).is_empty());
@@ -675,6 +686,7 @@ mod tests {
             Settings {
                 learn_ms: u64::MAX,
                 gateway: Some(gateway),
+                gateway_v6: None,
             },
         );
         let claim = |mac: &str, ip: &str, at_ms| Packet {
@@ -801,6 +813,56 @@ mod tests {
         }
     }
 
+    fn advert(mac: &str, ip: &str, at_ms: u64) -> Packet {
+        Packet {
+            at_ms,
+            neighbor: Some((mac.into(), ip.parse().unwrap())),
+            ..Packet::default()
+        }
+    }
+
+    #[test]
+    fn an_ipv6_address_answered_for_by_another_device_is_a_move_too() {
+        let mut audit = Audit::new(
+            State::default(),
+            Settings {
+                learn_ms: u64::MAX,
+                gateway: None,
+                gateway_v6: Some("fe80::1".parse().unwrap()),
+            },
+        );
+        assert!(audit.see(&advert(ROUTER, "fe80::1", 1_000)).is_empty());
+        assert!(audit.see(&advert(TV, "2001:db8::84", 1_100)).is_empty());
+        // Neighbor Advertisement spoofing is ARP spoofing's IPv6 twin.
+        let spoofed = audit.see(&advert("de:ad:be:ef:00:02", "fe80::1", 2_000));
+        assert_eq!(
+            (spoofed[0].rule.as_str(), spoofed[0].severity),
+            ("address-moved", Severity::High)
+        );
+        let other = audit.see(&advert("aa:bb:cc:00:11:22", "2001:db8::84", 3_000));
+        assert_eq!(
+            (other[0].rule.as_str(), other[0].severity),
+            ("address-moved", Severity::Notice)
+        );
+        // The same device answering again is no news.
+        assert!(audit
+            .see(&advert("aa:bb:cc:00:11:22", "2001:db8::84", 4_000))
+            .is_empty());
+    }
+
+    #[test]
+    fn a_state_written_before_ipv6_owners_still_loads() {
+        let old = r#"{"format":"archie-netwatch-state-v1","started_ms":5,"devices":{},"owners":{"192.168.1.1":"e4:ab:89:6e:1a:18"}}"#;
+        let state: State = serde_json::from_str(old).unwrap();
+        assert_eq!(
+            state
+                .owners
+                .get(&"192.168.1.1".parse::<IpAddr>().unwrap())
+                .map(String::as_str),
+            Some("e4:ab:89:6e:1a:18")
+        );
+    }
+
     #[test]
     fn an_address_fought_over_is_one_alert_whose_count_grows() {
         let mut audit = Audit::new(State::default(), learned());
@@ -854,6 +916,7 @@ mod tests {
         let settings = || Settings {
             learn_ms: 0,
             gateway: None,
+            gateway_v6: None,
         };
         let telnet = Packet {
             destination: Some("192.168.1.1".parse().unwrap()),
@@ -885,6 +948,7 @@ mod tests {
             Settings {
                 learn_ms: 0,
                 gateway: None,
+                gateway_v6: None,
             },
         );
         let packet = Packet {
