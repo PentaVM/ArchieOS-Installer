@@ -37,6 +37,9 @@ tiene y dónde está el detalle. Se marca aquí cuando se cierra.
 
 ## 3. Sentry — Kimi K3 trabaja aquí
 
+**Lo último (2026-10-12):** [`HANDOFF-2026-10-12-SENTRY-OLA3.md`](HANDOFF-2026-10-12-SENTRY-OLA3.md),
+con la lista de validación en hardware, en orden, y las decisiones pendientes de Nelson.
+
 **Empieza por leer**, en este orden: [`HANDOFF-2026-10-11-SENTRY-AUDITORIA.md`](HANDOFF-2026-10-11-SENTRY-AUDITORIA.md)
 (qué se probó, qué no, doce defectos conocidos), [`SENTRY-NETWATCH.md`](SENTRY-NETWATCH.md),
 [`SENTRY-LAN.md`](SENTRY-LAN.md) y `core/crates/archie-sentry/README.md`.
