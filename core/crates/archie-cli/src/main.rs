@@ -74,6 +74,23 @@ enum Command {
         #[arg(long)]
         baseline: Option<std::path::PathBuf>,
     },
+    /// One view of every device Sentry knows on the LAN: scan, watch and passive
+    /// import merged by hardware address, each source's claims kept under its name.
+    ///
+    /// Purely local and read-only: it reads the three files and merges them. No
+    /// config section names default paths for them yet, so at least one flag is
+    /// required; the sources given are the sources merged.
+    SentryDevices {
+        /// `archie-lan-inventory-v1` JSON, as `archie-lan scan` / `watch --out` writes.
+        #[arg(long)]
+        inventory: Option<std::path::PathBuf>,
+        /// `archie-netwatch-state-v1` JSON (`state.json` in the netwatch state dir).
+        #[arg(long)]
+        netwatch_state: Option<std::path::PathBuf>,
+        /// Offline TShark mDNS export (ip.src, udp.srcport, dns.ptr.domain_name).
+        #[arg(long)]
+        passive: Option<std::path::PathBuf>,
+    },
     /// Review and execute one paired device operation in an interactive Linux session.
     SentryExecute {
         resource_id: String,
@@ -417,7 +434,7 @@ impl Command {
             Self::Metrics => ControlRequest::Metrics,
             Self::Audit { limit } => ControlRequest::Audit { limit: *limit },
             Self::Ping => ControlRequest::Ping,
-            Self::Enrol { .. } | Self::SentryNetworkAnalyze { .. } | Self::ContextFeed { .. } => {
+            Self::Enrol { .. } | Self::SentryNetworkAnalyze { .. } | Self::SentryDevices { .. } | Self::ContextFeed { .. } => {
                 return None
             }
         })
@@ -884,6 +901,11 @@ async fn main() -> std::process::ExitCode {
                 input,
                 baseline,
             } => analyze_network(scope, input, baseline.as_deref(), cli.json),
+            Command::SentryDevices {
+                inventory,
+                netwatch_state,
+                passive,
+            } => sentry_devices(inventory.as_deref(), netwatch_state.as_deref(), passive.as_deref(), cli.json),
             Command::ContextFeed {
                 watchdog_dir,
                 out,
@@ -998,6 +1020,93 @@ fn analyze_network(
         }
         Err(error) => {
             eprintln!("archie: {error}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+/// Merge the three device-knowledge files into one view. Entirely local: the
+/// inventory, the audit state and the TShark export are files, and the merge is
+/// [`archie_core::unify`]. Returns the rendered output so tests see what the
+/// operator would.
+fn sentry_devices_render(
+    inventory: Option<&std::path::Path>,
+    netwatch_state: Option<&std::path::Path>,
+    passive: Option<&std::path::Path>,
+    json: bool,
+) -> Result<String, String> {
+    use std::io::Read;
+    fn read(path: &std::path::Path, what: &str, maximum: usize) -> Result<String, String> {
+        let file = std::fs::File::open(path).map_err(|_| format!("cannot open {what}"))?;
+        if !file.metadata().map_err(|_| format!("cannot inspect {what}"))?.is_file() {
+            return Err(format!("{what} must be a regular file"));
+        }
+        let mut bytes = Vec::new();
+        file.take(maximum as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| format!("cannot read {what}"))?;
+        if bytes.len() > maximum {
+            return Err(format!("{what} too large"));
+        }
+        String::from_utf8(bytes).map_err(|_| format!("{what} must be UTF-8"))
+    }
+    if inventory.is_none() && netwatch_state.is_none() && passive.is_none() {
+        return Err("no sources: pass --inventory, --netwatch-state and/or --passive".to_owned());
+    }
+    let inventory = inventory
+        .map(|path| read(path, "lan inventory", archie_core::unify::MAX_INVENTORY_BYTES))
+        .transpose()?
+        .map(|text| archie_core::unify::parse_inventory(&text).map_err(|e| format!("lan inventory rejected: {e}")))
+        .transpose()?;
+    let netwatch = netwatch_state
+        .map(|path| read(path, "netwatch state", archie_core::unify::MAX_STATE_BYTES))
+        .transpose()?
+        .map(|text| archie_core::unify::parse_netwatch_state(&text).map_err(|e| format!("netwatch state rejected: {e}")))
+        .transpose()?;
+    let passive = passive
+        .map(|path| read(path, "passive network export", archie_core::passive_network::MAX_EXPORT_BYTES))
+        .transpose()?
+        .map(|text| archie_core::passive_network::observations(&text).map_err(str::to_owned))
+        .transpose()?
+        .unwrap_or_default();
+    let generated_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let view = archie_core::unify::unify(inventory.as_ref(), netwatch.as_ref(), &passive, generated_unix)
+        .map_err(|e| format!("cannot unify the sources: {e}"))?;
+    if json {
+        return serde_json::to_string_pretty(&view).map_err(|e| format!("cannot render JSON: {e}"));
+    }
+    let keyed = view.devices.iter().filter(|d| d.mac.is_some()).count();
+    let mut out = format!(
+        "devices: {} ({} by hardware address, {} by address only)\n",
+        view.devices.len(),
+        keyed,
+        view.devices.len() - keyed
+    );
+    for device in &view.devices {
+        let ips = device.ips.iter().map(ToString::to_string).collect::<Vec<_>>().join(",");
+        let name = device.names.first().map(String::as_str).unwrap_or("-");
+        let sources = device.sources.keys().map(|s| s.as_str()).collect::<Vec<_>>().join("+");
+        let ips = if ips.is_empty() { "-".to_owned() } else { ips };
+        out.push_str(&format!("{}  {ips}  {name}  {sources}\n", device.identity));
+    }
+    Ok(out)
+}
+
+fn sentry_devices(
+    inventory: Option<&std::path::Path>,
+    netwatch_state: Option<&std::path::Path>,
+    passive: Option<&std::path::Path>,
+    json: bool,
+) -> std::process::ExitCode {
+    match sentry_devices_render(inventory, netwatch_state, passive, json) {
+        Ok(output) => {
+            print!("{output}");
+            std::process::ExitCode::SUCCESS
+        }
+        Err(message) => {
+            eprintln!("archie: {message}");
             std::process::ExitCode::FAILURE
         }
     }
@@ -2135,5 +2244,56 @@ mod tests {
         }
         .to_request()
         .is_none());
+    }
+
+    /// The device view reads files and nothing else; it never reaches the daemon.
+    #[test]
+    fn sentry_devices_is_not_a_daemon_request() {
+        assert!(Command::SentryDevices {
+            inventory: None,
+            netwatch_state: None,
+            passive: None,
+        }
+        .to_request()
+        .is_none());
+    }
+
+    /// Offline smoke test: fixture files only (the three sources describing one
+    /// device are fixtures, not a real network), merged without any daemon.
+    #[test]
+    fn sentry_devices_merges_fixture_files_into_one_device() {
+        let dir = std::env::temp_dir().join(format!("archie-sentry-devices-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let inventory = dir.join("lan.json");
+        let state = dir.join("state.json");
+        let passive = dir.join("passive.tsv");
+        std::fs::write(
+            &inventory,
+            r#"{"format":"archie-lan-inventory-v1","scanned_unix":1790000000,"devices":[{"address":"192.168.1.40","class":"television","name":"Living","manufacturer":"Roku","model":"3941X","services":["_airplay._tcp"],"seen_by":["ssdp","mdns"],"state":{"showing":"Netflix"}}]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            &state,
+            r#"{"format":"archie-netwatch-state-v1","started_ms":1789999000000,"devices":{"54:4e:f0:07:3d:e8":{"first_seen_ms":1789999000000,"last_seen_ms":1790000005000,"addresses":["192.168.1.40"],"hostname":"roku-living","frames":12,"bytes":3456,"asked":["api.roku.com"],"sent_to":{"api.roku.com":3456}}},"owners":{"192.168.1.40":"54:4e:f0:07:3d:e8"}}"#,
+        )
+        .unwrap();
+        std::fs::write(&passive, "192.168.1.40\t5353\tLiving._roku-ecp._tcp.local\n").unwrap();
+
+        let json = sentry_devices_render(Some(&inventory), Some(&state), Some(&passive), true).unwrap();
+        let view: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(view["devices"].as_array().unwrap().len(), 1, "one device, told by three sources");
+        let device = &view["devices"][0];
+        assert_eq!(device["mac"], "54:4e:f0:07:3d:e8");
+        let sources: Vec<&str> = device["sources"].as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(sources, ["lan-scan", "netwatch", "passive-import"]);
+
+        let human = sentry_devices_render(Some(&inventory), Some(&state), Some(&passive), false).unwrap();
+        assert!(human.contains("devices: 1 (1 by hardware address, 0 by address only)"));
+        assert!(human.contains("54:4e:f0:07:3d:e8  192.168.1.40  Living  lan-scan+netwatch+passive-import"));
+
+        assert!(sentry_devices_render(None, None, None, false).is_err(), "at least one source is required");
+        assert!(sentry_devices_render(Some(&dir.join("missing.json")), None, None, false).is_err());
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
