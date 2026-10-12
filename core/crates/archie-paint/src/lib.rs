@@ -11,12 +11,12 @@
 //! tone comes out of how much of the paper is left white.
 
 pub mod bench;
-mod image;
 mod flow;
+mod image;
 mod paper;
 
-pub use image::{Picture, PictureError};
 pub use flow::{length_of, plan as flow_plan, Flow};
+pub use image::{Picture, PictureError};
 pub use paper::{paper_in, PAPER};
 
 use archie_stage::StrokePoint;
@@ -101,8 +101,9 @@ impl Hatching {
             return self;
         };
         for pass in &mut self.passes {
-            pass.spacing =
-                ((pass.spacing as f32 / base as f32) * lightest as f32).round().max(1.0) as u32;
+            pass.spacing = ((pass.spacing as f32 / base as f32) * lightest as f32)
+                .round()
+                .max(1.0) as u32;
         }
         self
     }
@@ -403,14 +404,8 @@ pub fn preview(plan: &Plan, canvas: Canvas, width_px: u32) -> Vec<u8> {
     };
     for stroke in &plan.strokes {
         for step in stroke.windows(2) {
-            let (mut x, mut y) = (
-                (step[0].x - canvas.x) as i64,
-                (step[0].y - canvas.y) as i64,
-            );
-            let (to_x, to_y) = (
-                (step[1].x - canvas.x) as i64,
-                (step[1].y - canvas.y) as i64,
-            );
+            let (mut x, mut y) = ((step[0].x - canvas.x) as i64, (step[0].y - canvas.y) as i64);
+            let (to_x, to_y) = ((step[1].x - canvas.x) as i64, (step[1].y - canvas.y) as i64);
             // A line of whole pixels, the way a pen leaves one.
             let (dx, dy) = ((to_x - x).abs(), -(to_y - y).abs());
             let (sx, sy) = (if x < to_x { 1 } else { -1 }, if y < to_y { 1 } else { -1 });
@@ -545,9 +540,7 @@ mod tests {
     fn a_line_reaches_the_application_as_the_positions_it_had_time_to_see() {
         // Six hundred pixels at six hundred a second is one second, and an application that
         // looks sixty times a second sees sixty of them, however many were sent.
-        let sent: Vec<StrokePoint> = (0..=600)
-            .map(|at| StrokePoint { x: at, y: 0 })
-            .collect();
+        let sent: Vec<StrokePoint> = (0..=600).map(|at| StrokePoint { x: at, y: 0 }).collect();
         let seen = seen_by(&sent, 600.0, 60.0);
         assert!(
             (59..=62).contains(&seen.len()),
@@ -564,7 +557,6 @@ mod tests {
         assert!(seen_by(&sent, 200.0, 60.0).len() > seen.len() * 2);
     }
 }
-
 
 #[cfg(test)]
 mod ink_on_paper {

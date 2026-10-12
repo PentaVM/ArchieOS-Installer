@@ -252,3 +252,137 @@ Publicación observada: push normal y remoto comprobado en
 `b0e2e77eac8afefc1606917be55a8add11cb724a`, working tree limpio. El commit posterior
 solo registra esta evidencia y el estado del plan; también se publica y se compara
 su HEAD con origin/main antes de la respuesta final.
+
+## 2026-10-12 — Sentry, ola 3 (Claude, relevo de Kimi K3)
+
+### Contexto
+
+Kimi K3 se quedó sin créditos a mitad de ola. Rama `claude/sentry-ola3-cast-focos-servidores`
+desde `todo/pendientes` (`6a977c4`, 8 commits de Kimi fuera de `main`; el PR #32 ya se
+había fusionado en `28d03f8`). Lo que Kimi tenía sin commitear se perdió y no se intentó
+reconstruir. Se fusionó `origin/main` (`ac9c1d2`: voz, Bonsai 4B, bridge del shell) con
+merge, sin conflictos.
+
+### Verificación del trabajo heredado
+
+Kimi informó 484 pruebas verdes en Windows. En Linux, tras la fusión, fueron 463
+aprobadas y **28 fallidas**: `adapters_host` (18) y `adapters_router` (10) usaban rutas
+`C:/…` para ssh y la clave, que no son absolutas fuera de Windows, y `SshConfig` las
+rechaza. Se corrigieron los fixtures, no la validación (`0970b1b`).
+
+### Lo hecho
+
+1. **Chromecast CAST v2 real** (`5551856`): TLS 8009 con `rustls`/`tokio-rustls`
+   (ring, ya en el lockfile por reqwest) y `prost` (derive, sin `protoc`). Tramas con
+   prefijo de longitud, CONNECT/CLOSE, PING/PONG, GET_STATUS, LAUNCH, STOP, SET_VOLUME.
+   Contratos nuevos `AppStop` y `MuteSet`, estado `ResourceState::Cast`. Se verifica:
+   SHA-256 del certificado hoja igual al pin del operador y firma del handshake con su
+   clave. No se verifica: cadena, nombre, fechas ni `tp.deviceauth`. Prueba de bytes
+   protobuf escritos a mano para no validar el códec contra sí mismo.
+2. **Feeder unificado con perfiles de foco** (`84efe05`): `archie_cerebra::{feeder,focus}`,
+   `archie focus <perfil>`, `docs/SENTRY-FOCO.md`. Los umbrales de Wanda se calibraron a
+   su escala real (un «urgente» pesa unos 12), no a la supuesta.
+3. **Servidores de protocolo con estado** (`98a3c7e`, `8fd6788`): ver README del crate.
+   Defectos encontrados y corregidos: Roku en la pantalla de inicio y carrera del informe
+   MQTT tras `apply`.
+
+### Resultados
+
+```
+cargo test --locked --no-fail-fast -p archie-sentry -p archie-cerebra -p archie-core -p archie-cli -p archie-workstation
+530 aprobadas; 0 fallos; 37 omitidas (PostgreSQL aislado y hardware)
+```
+
+`cargo fmt` (rustfmt de los archivos nuevos) y `clippy --tests` sin avisos en lo propio;
+los avisos que quedan en `archie-vault`, `contracts.rs` y `archie-cerebra` son anteriores.
+Humo con el binario real: `archie wanda-ingest` de un volcado de notificaciones y luego
+`archie focus personal` → 3 referencias admitidas, `refused:NoLocalModel`.
+
+**Nada se probó contra hardware real**: ni Chromecast, ni Roku, ni impresora, ni router,
+ni Matter. Las pruebas nuevas son de protocolo en loopback. A mitad de la verificación se
+agotó el disco (22 GiB de `target`); `cargo clean` y se repitió completa.
+
+### Relevo
+
+- Probar `archie sentry cast-probe` y una acción contra un Chromecast real; medir si la
+  rotación del certificado ocurre y cada cuánto.
+- Autenticación de dispositivo Cast (`tp.deviceauth`) si se quiere probar «Google
+  genuino» y no sólo «el mismo equipo».
+- Los perfiles de foco son criterio; ajustarlos con uso real del dueño.
+- No se tocó la GUI Quickshell/Vault, la generación WSL ni `archie-iris-runtime`.
+
+## 2026-10-12 — Día autónomo (Claude)
+
+Nelson pidió trabajar solo durante el día: expandir el dominio y llevarlo hacia
+producción. La cola y el protocolo están en `_dev/AUTONOMO.md`. Una rutina horaria
+(`trig_01WLVcpbjBBHdU3DqZjsvKxK`, minuto 38) despierta esta sesión; se disparó a mano
+una vez para comprobar que entrega.
+
+### CI del PR #36
+
+Estaba rojo también en `main`:
+
+- `cargo fmt --check`: 130 archivos sin formato.
+- clippy `-D warnings` con 1.88: unos 30 avisos en orb, paint, arena, displayd, voice,
+  lan, desk, skill-node, types, sentry y cli.
+- `native-contracts`: faltaba `#include <array>` en `sentry/src/cli/main.cpp`.
+- Dos pruebas rotas:
+  - `archie-model-runtime`: `Content-Length: 32` para un cuerpo de 30 bytes.
+  - `archie-observability`: `0::/` (cgroup raíz) se trataba como ruta inválida y no
+    como `Unsupported`.
+- `cargo test --workspace` se quedaba sin disco en el runner. Se resolvió con
+  `CARGO_PROFILE_*_DEBUG=0` en el job: el `target` baja de unos 30 GiB a 5 GiB y las
+  pruebas no cambian.
+
+Local, con 1.88: fmt y clippy limpios; `cargo test --workspace`, 2329 aprobadas antes de
+las dos correcciones y 0 fallos después en los crates tocados; `ctest` de cortex,
+sentry, visual y osm, 40/40.
+
+### Dominio
+
+- **IPv6** (`e41b83d`): `address-moved` también por Neighbor Advertisement.
+- **Avisos al dueño** (`f16aef5`): crate `archie-notices`, follower, `archie
+  sentry-notices`, `GET /api/notices` y `[sentry.response]`. Lock exclusivo entre
+  escritores: 8 hilos, 80 avisos, ninguno perdido. Frase hablable sin datos de la red.
+  Ver `docs/SENTRY-RESPUESTA.md`.
+- **`traffic-surge`** (`b1501fc`): baseline de volumen por dispositivo. Umbrales de
+  criterio; sin tasa de falsos positivos medida.
+- **Unidad de netwatch** (`1154eca`): como `DynamicUser` no podía funcionar en Arch,
+  porque `dumpcap` es `root:wireshark` 0754 y el estado quedaba en `/var/lib/private`.
+- **Follower**: sin `alerts.jsonl` moría (`0e05975`); ahora tiene unidad propia
+  (`01e61e3`).
+
+Humo con el binario real: `sentry-follow --once` sobre dos alertas sintéticas publica 1
+aviso (el `new-device` queda por debajo del umbral); `sentry-notices` lista, acusa por
+prefijo y rechaza un id que no existe con salida 1. El archivo queda 0600 en esa prueba,
+y 0640 desde `01e61e3`.
+
+**Nada se probó en hardware ni en una red real.** El modo `live` de `archie-voice` no
+compila aquí (necesita el SDK de NeMo): la voz no dice los avisos todavía, y el contrato
+está en `docs/SENTRY-RESPUESTA.md`.
+
+### Continuación (Claude, 2026-10-12, 11:20–11:50 UTC)
+
+- **CI:** verde completo en GitHub desde `4625bb7` (`rust` + `native-contracts`). El
+  paso nuevo de TShark e2e pasa en el runner (`5c9e47b`).
+- **Inestable en el CI, con causa raíz** (`8977076`): el nonce WS-Security de ONVIF se
+  repetía dentro de un milisegundo y el servidor de prueba lo rechazaba como reutilizado,
+  igual que haría una cámara real. Ahora lleva un contador de proceso.
+- **Auditoría de E/S de los adaptadores** (`705a38f`), cada arreglo con una prueba que
+  falla sin él:
+  - panic por cortar por bytes un stderr no ASCII; con `panic=abort` mataba el proceso;
+  - ADB, BLE, Matter y WoL bloqueaban un hilo de Tokio y el plazo del Intent no podía
+    aplicarse;
+  - tope de sesiones `loginctl`.
+- **e2e con TShark real** (`5c9e47b`): una captura construida byte a byte pasa por
+  `archie-netwatch read`.
+- **`unusual-destination`** (`88670e7`).
+- **Productor del pilar Vault** (`531c860`): `vault_bridge`, `archie vault-docs` y la
+  integración con el feeder.
+- **`sentry-notices --claim`** (`f7f7572`): una sola llamada para que la voz diga los
+  avisos.
+- **Relevo:** `docs/HANDOFF-2026-10-12-SENTRY-OLA3.md`, con la validación en hardware
+  paso a paso y las decisiones que son de Nelson.
+
+Humo con binarios reales: pcap → netwatch → follower → tablón → displayd
+`/api/notices`; `vault-docs` → `focus trabajo`; `--claim` tres veces y luego `null`.

@@ -126,7 +126,10 @@ async fn refresh_lan_view(service: &WorldService, path: &std::path::Path) {
     }
     match tokio::fs::read(path).await {
         Ok(bytes) => match service.ingest_lan_view(&bytes).await {
-            Ok(report) => info!(devices = report.devices, "lan view ingested into the world graph"),
+            Ok(report) => info!(
+                devices = report.devices,
+                "lan view ingested into the world graph"
+            ),
             Err(error) => warn!(%error, "lan view rejected; keeping the last known device graph"),
         },
         Err(error) => warn!(%error, "lan view unreadable; keeping the last known device graph"),

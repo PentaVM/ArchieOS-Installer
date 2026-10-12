@@ -5,6 +5,7 @@ use archie_wanda::{
     WandaError,
 };
 #[tokio::test]
+#[ignore = "requires the separately built C++ authority; run with WANDA_TEST_GRAPH_BINARY and --ignored"]
 async fn real_graph_authority_projects_tags_without_promoting_hypotheses() {
     let binary = std::env::var_os("WANDA_TEST_GRAPH_BINARY")
         .expect("run with the built archie-sentry binary");

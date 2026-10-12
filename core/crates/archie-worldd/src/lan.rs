@@ -188,10 +188,7 @@ fn field(value: &str, what: &'static str) -> Result<(), LanIngestError> {
     Ok(())
 }
 
-fn times(
-    first_seen_unix: Option<u64>,
-    last_seen_unix: Option<u64>,
-) -> Result<(), LanIngestError> {
+fn times(first_seen_unix: Option<u64>, last_seen_unix: Option<u64>) -> Result<(), LanIngestError> {
     if let (Some(first), Some(last)) = (first_seen_unix, last_seen_unix) {
         if first > last {
             return Err(LanIngestError::Malformed("seen times out of order"));
@@ -303,7 +300,11 @@ impl LanGraph {
 
     /// Ingest one `archie-sentry-devices-v1` document. Atomic: on any error the
     /// graph is exactly what it was before the call.
-    pub fn ingest(&mut self, view: &[u8], now: Timestamp) -> Result<LanIngestReport, LanIngestError> {
+    pub fn ingest(
+        &mut self,
+        view: &[u8],
+        now: Timestamp,
+    ) -> Result<LanIngestReport, LanIngestError> {
         if view.len() > MAX_VIEW_BYTES {
             return Err(LanIngestError::TooLarge("lan view"));
         }
@@ -379,7 +380,9 @@ mod tests {
 
     fn ingested(now: Timestamp) -> LanGraph {
         let mut graph = LanGraph::new();
-        graph.ingest(FIXTURE, now).expect("the fixture is a valid view");
+        graph
+            .ingest(FIXTURE, now)
+            .expect("the fixture is a valid view");
         graph
     }
 
@@ -402,14 +405,27 @@ mod tests {
         // with its own event times.
         assert_eq!(
             tv.sources.keys().copied().collect::<Vec<_>>(),
-            [LanSource::LanScan, LanSource::Netwatch, LanSource::PassiveImport]
+            [
+                LanSource::LanScan,
+                LanSource::Netwatch,
+                LanSource::PassiveImport
+            ]
         );
-        assert_eq!(tv.sources[&LanSource::LanScan].first_seen_unix, Some(1_790_000_000));
-        assert_eq!(tv.sources[&LanSource::Netwatch].last_seen_unix, Some(1_790_000_005));
+        assert_eq!(
+            tv.sources[&LanSource::LanScan].first_seen_unix,
+            Some(1_790_000_000)
+        );
+        assert_eq!(
+            tv.sources[&LanSource::Netwatch].last_seen_unix,
+            Some(1_790_000_005)
+        );
         assert_eq!(tv.sources[&LanSource::PassiveImport].first_seen_unix, None);
         assert_eq!(tv.first_seen_unix, Some(1_789_999_000));
         assert_eq!(tv.last_seen_unix, Some(1_790_000_005));
-        assert_eq!(tv.ingested_at, now, "knowledge time, distinct from event time");
+        assert_eq!(
+            tv.ingested_at, now,
+            "knowledge time, distinct from event time"
+        );
 
         let printer = graph.get(PRINTER).expect("the printer");
         assert_eq!(printer.kind, "printer");
@@ -442,7 +458,11 @@ mod tests {
         assert_eq!(graph.ingested_at(), Some(later));
         let tv = graph.get(TV).unwrap();
         assert_eq!(tv.ingested_at, later);
-        assert_eq!(tv.first_seen_unix, Some(1_789_999_000), "event time untouched");
+        assert_eq!(
+            tv.first_seen_unix,
+            Some(1_789_999_000),
+            "event time untouched"
+        );
     }
 
     #[test]
@@ -452,7 +472,9 @@ mod tests {
         let before: Vec<LanDeviceEntity> = graph.entities().cloned().collect();
 
         assert!(graph.ingest(b"not json", now.plus_millis(1)).is_err());
-        assert!(graph.ingest(&vec![b' '; MAX_VIEW_BYTES + 1], now.plus_millis(1)).is_err());
+        assert!(graph
+            .ingest(&vec![b' '; MAX_VIEW_BYTES + 1], now.plus_millis(1))
+            .is_err());
         let wrong_format = serde_json::json!({
             "format": "archie-lan-inventory-v1", "generated_unix": 0, "devices": []
         });

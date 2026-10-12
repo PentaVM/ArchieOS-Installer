@@ -59,7 +59,7 @@
 //! model client refuses anything else before it leaves the machine. The credential comes
 //! from `NEBIUS_TOKEN_FACTORY_KEY` and is never printed.
 
-use archie_model_runtime::{InferenceClient, ProviderEndpoint};
+use archie_model_runtime::ProviderEndpoint;
 use archie_speech::{CognitiveEvent, CognitiveModelAdapter, CognitiveRequest, SpeechBudget};
 use archie_types::{
     Availability, Capability, DataRetention, Locality, ModelDescriptor, ModelId, PrivacyGrade,
@@ -218,7 +218,9 @@ fn asking(
     if let Some(path) = set("ARCHIE_VOICE_GUIDE") {
         let guide = std::fs::read_to_string(&path).map_err(|error| format!("{path}: {error}"))?;
         if guide.len() > 6 * 1024 {
-            return Err(format!("{path}: a guide is at most 6 KiB; a model reads it every turn"));
+            return Err(format!(
+                "{path}: a guide is at most 6 KiB; a model reads it every turn"
+            ));
         }
         // A SKILL.md opens with a block that describes it to whoever lists skills; the
         // model is given the guide itself.
@@ -637,6 +639,8 @@ fn speech_flags(args: &mut Vec<String>) -> Result<SpeechFlags, String> {
     })
 }
 
+// Read only by the live path (unix + `live`); other builds parse and drop them.
+#[cfg_attr(not(all(unix, feature = "live")), allow(dead_code))]
 struct LiveFlags {
     port: u16,
     iris: String,

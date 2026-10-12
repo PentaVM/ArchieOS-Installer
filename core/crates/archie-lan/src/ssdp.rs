@@ -42,10 +42,20 @@ pub fn parse_answer(from: IpAddr, datagram: &[u8]) -> Option<Answer> {
         .filter_map(|line| line.split_once(':'))
         .map(|(name, value)| (name.trim().to_ascii_lowercase(), value.trim()))
         .collect();
-    let field = |name: &str| headers.get(name).copied().unwrap_or("").chars().take(512).collect::<String>();
+    let field = |name: &str| {
+        headers
+            .get(name)
+            .copied()
+            .unwrap_or("")
+            .chars()
+            .take(512)
+            .collect::<String>()
+    };
     Some(Answer {
         from,
-        location: headers.get("location").map(|url| url.chars().take(512).collect()),
+        location: headers
+            .get("location")
+            .map(|url| url.chars().take(512).collect()),
         target: field("st"),
         server: field("server"),
         usn: field("usn"),
@@ -75,7 +85,11 @@ pub fn search(local: Ipv4Addr, listen: Duration) -> std::io::Result<Vec<Answer>>
                 }
             }
             Ok(_) => {}
-            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) => {}
             Err(e) => return Err(e),
         }
     }
@@ -94,7 +108,10 @@ mod tests {
     fn an_answer_is_read_whatever_case_its_headers_are_in() {
         let answer = parse_answer("192.168.1.40".parse().unwrap(), ROKU.as_bytes()).unwrap();
         assert_eq!(answer.target, "roku:ecp");
-        assert_eq!(answer.location.as_deref(), Some("http://192.168.1.40:8060/"));
+        assert_eq!(
+            answer.location.as_deref(),
+            Some("http://192.168.1.40:8060/")
+        );
         assert!(answer.server.starts_with("Roku/"));
         assert_eq!(answer.usn, "uuid:roku:ecp:YN00AB123456");
     }
@@ -104,7 +121,10 @@ mod tests {
         let from: IpAddr = "192.168.1.40".parse().unwrap();
         // Another machine's own search, and a device announcing itself unasked.
         assert_eq!(parse_answer(from, search_message(2).as_bytes()), None);
-        assert_eq!(parse_answer(from, b"NOTIFY * HTTP/1.1\r\nNT: upnp:rootdevice\r\n\r\n"), None);
+        assert_eq!(
+            parse_answer(from, b"NOTIFY * HTTP/1.1\r\nNT: upnp:rootdevice\r\n\r\n"),
+            None
+        );
         assert_eq!(parse_answer(from, &[0xff, 0xfe, 0x00]), None);
     }
 

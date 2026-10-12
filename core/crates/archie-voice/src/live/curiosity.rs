@@ -74,7 +74,9 @@ impl Buffer {
         self.entries.iter().any(|entry| {
             entry.seen_as == seen.phrase
                 && iou(&entry.bbox, &seen.bbox) > 0.25
-                && entry.at.is_some_and(|at| at.elapsed() < Duration::from_secs(180))
+                && entry
+                    .at
+                    .is_some_and(|at| at.elapsed() < Duration::from_secs(180))
         })
     }
 
@@ -88,7 +90,10 @@ impl Buffer {
             .iter()
             .take(8)
             .map(|entry| {
-                let mut line = format!("- lo que IRIS ve como «{}» es: {}", entry.seen_as, entry.name);
+                let mut line = format!(
+                    "- lo que IRIS ve como «{}» es: {}",
+                    entry.seen_as, entry.name
+                );
                 if let Some(at) = entry.at {
                     line.push_str(&format!(
                         " (lo miraste hace {}; puede que ya no esté)",
@@ -161,7 +166,10 @@ impl Identifier {
                 .map(|model| model.trim().to_string())
                 .filter(|model| !model.is_empty())
                 .collect(),
-            _ => DEFAULT_VISION_MODELS.iter().map(|model| model.to_string()).collect(),
+            _ => DEFAULT_VISION_MODELS
+                .iter()
+                .map(|model| model.to_string())
+                .collect(),
         };
         Ok(Self {
             http: reqwest::Client::builder()
@@ -176,7 +184,11 @@ impl Identifier {
     /// Which ways of finding out are configured, for the page and the log.
     pub fn means(&self) -> Vec<String> {
         match &self.key {
-            Some(_) => self.models.iter().map(|model| format!("nebius:{model}")).collect(),
+            Some(_) => self
+                .models
+                .iter()
+                .map(|model| format!("nebius:{model}"))
+                .collect(),
             None => Vec::new(),
         }
     }
@@ -228,11 +240,18 @@ impl Identifier {
             .await
             .map_err(|e| format!("{model}: {e}"))?
             .error_for_status()
-            .map_err(|e| format!("{model}: {}", e.status().map_or("failed".into(), |s| s.to_string())))?
+            .map_err(|e| {
+                format!(
+                    "{model}: {}",
+                    e.status().map_or("failed".into(), |s| s.to_string())
+                )
+            })?
             .json()
             .await
             .map_err(|e| format!("{model} answer: {e}"))?;
-        let text = answer["choices"][0]["message"]["content"].as_str().unwrap_or("");
+        let text = answer["choices"][0]["message"]["content"]
+            .as_str()
+            .unwrap_or("");
         Ok(parse_identification(text).map(|(name, facts)| Identified {
             name,
             by: "vision-model",
@@ -260,7 +279,9 @@ fn parse_identification(text: &str) -> Option<(String, String)> {
     let json = text
         .find('{')
         .zip(text.rfind('}'))
-        .and_then(|(start, end)| serde_json::from_str::<serde_json::Value>(&text[start..=end]).ok());
+        .and_then(|(start, end)| {
+            serde_json::from_str::<serde_json::Value>(&text[start..=end]).ok()
+        });
     let (name, facts) = match json {
         Some(value) => (
             value["name"].as_str().unwrap_or("").to_string(),
@@ -268,7 +289,11 @@ fn parse_identification(text: &str) -> Option<(String, String)> {
         ),
         None => (text.lines().next().unwrap_or("").to_string(), String::new()),
     };
-    let name = name.trim().trim_matches(|c: char| c == '.' || c == '"').trim().to_string();
+    let name = name
+        .trim()
+        .trim_matches(|c: char| c == '.' || c == '"')
+        .trim()
+        .to_string();
     (!name.is_empty() && !name.eq_ignore_ascii_case("unknown")).then_some((name, facts))
 }
 
@@ -296,7 +321,9 @@ impl Researcher {
         let reference = VaultRef::parse("vault:tavily/main").map_err(|e| e.to_string())?;
         let manifest = SearchProviderManifest::tavily(reference.clone());
         let mut registry = SearchRegistry::new();
-        registry.register(manifest.clone()).map_err(|e| e.to_string())?;
+        registry
+            .register(manifest.clone())
+            .map_err(|e| e.to_string())?;
         let mut seed = [0_u8; 32];
         SystemRandom::new()
             .fill(&mut seed)
@@ -326,17 +353,26 @@ impl Researcher {
     /// Up to three results for `query`, as (title, url, snippet). The query must be
     /// public: it leaves the machine.
     pub async fn search(&self, query: &str) -> Result<Vec<(String, String, String)>, String> {
-        let authority = SearchAuthority::new([well_known::network_internet()].into_iter().collect());
-        let proposal = SearchProposal::new(&self.manifest.id, query, PrivacyGrade::Public, "live", "live")
-            .with_options(SearchOptions {
-                depth: SearchDepth::Basic,
-                topic: SearchTopic::General,
-                max_results: 3,
-                ..SearchOptions::default()
-            });
+        let authority =
+            SearchAuthority::new([well_known::network_internet()].into_iter().collect());
+        let proposal = SearchProposal::new(
+            &self.manifest.id,
+            query,
+            PrivacyGrade::Public,
+            "live",
+            "live",
+        )
+        .with_options(SearchOptions {
+            depth: SearchDepth::Basic,
+            topic: SearchTopic::General,
+            max_results: 3,
+            ..SearchOptions::default()
+        });
         let search = match SearchGate::authorize(&self.registry, &authority, &proposal) {
             SearchAdmission::Allowed(search) => search,
-            SearchAdmission::NeedsApproval { reason, .. } => return Err(format!("needs approval: {reason}")),
+            SearchAdmission::NeedsApproval { reason, .. } => {
+                return Err(format!("needs approval: {reason}"))
+            }
             SearchAdmission::Refused(refusal) => return Err(format!("refused: {refusal}")),
         };
         let credential = self
@@ -391,8 +427,18 @@ pub async fn look_closer(
     let crop = eyes::crop_png(&scene.frame, seen.bbox, &eyes::faces(scene))?;
     let identified = identifier.identify(&crop, &seen.phrase).await?;
     let (name, by, mut facts, mut sources) = match identified {
-        Some(found) => (found.name, found.by.to_string(), found.facts, vec![format!("nebius:{}", found.model)]),
-        None => (seen.phrase.clone(), "iris".to_string(), String::new(), Vec::new()),
+        Some(found) => (
+            found.name,
+            found.by.to_string(),
+            found.facts,
+            vec![format!("nebius:{}", found.model)],
+        ),
+        None => (
+            seen.phrase.clone(),
+            "iris".to_string(),
+            String::new(),
+            Vec::new(),
+        ),
     };
     if by != "iris" {
         if let Some(researcher) = researcher {
@@ -400,7 +446,11 @@ pub async fn look_closer(
                 let read = facts_from(&results);
                 if !read.is_empty() {
                     // What the web says goes first; the model's own recollection after it.
-                    facts = if facts.is_empty() { read } else { format!("{read} (Y según el modelo de visión: {facts})") };
+                    facts = if facts.is_empty() {
+                        read
+                    } else {
+                        format!("{read} (Y según el modelo de visión: {facts})")
+                    };
                 }
                 sources.extend(results.into_iter().map(|(_, url, _)| url).take(2));
             }
@@ -431,7 +481,9 @@ pub fn next_to_look_at<'a>(scene: &'a Scene, buffer: &Buffer) -> Option<&'a Seen
         })
         .filter(|item| !buffer.covers(item))
         .max_by(|a, b| {
-            let weight = |item: &Seen| item.score * (item.bbox[2] - item.bbox[0]) * (item.bbox[3] - item.bbox[1]);
+            let weight = |item: &Seen| {
+                item.score * (item.bbox[2] - item.bbox[0]) * (item.bbox[3] - item.bbox[1])
+            };
             weight(a).total_cmp(&weight(b))
         })
 }
@@ -444,21 +496,42 @@ mod tests {
     #[test]
     fn a_vision_answer_is_read_as_json_or_as_its_first_line() {
         assert_eq!(
-            parse_identification("```json\n{\"name\": \"Froakie plush\", \"facts\": \"A Water-type Pokémon.\"}\n```"),
+            parse_identification(
+                "```json\n{\"name\": \"Froakie plush\", \"facts\": \"A Water-type Pokémon.\"}\n```"
+            ),
             Some(("Froakie plush".into(), "A Water-type Pokémon.".into()))
         );
-        assert_eq!(parse_identification("Eiffel Tower."), Some(("Eiffel Tower".into(), String::new())));
-        assert_eq!(parse_identification("{\"name\": \"unknown\", \"facts\": \"\"}"), None);
+        assert_eq!(
+            parse_identification("Eiffel Tower."),
+            Some(("Eiffel Tower".into(), String::new()))
+        );
+        assert_eq!(
+            parse_identification("{\"name\": \"unknown\", \"facts\": \"\"}"),
+            None
+        );
         assert_eq!(parse_identification(""), None);
         assert!(vision_question("toy").contains("Never name a person"));
     }
 
     fn seen(phrase: &str, score: f32, bbox: [f32; 4]) -> Seen {
-        Seen { phrase: phrase.into(), score, bbox, embedding: None }
+        Seen {
+            phrase: phrase.into(),
+            score,
+            bbox,
+            embedding: None,
+        }
     }
 
     fn scene(items: Vec<Seen>) -> Scene {
-        Scene { seen: items, width: 100, height: 100, frame: Arc::new(Vec::new()), at: Some(Instant::now()), observed_at_ms: Some(0), step: None }
+        Scene {
+            seen: items,
+            width: 100,
+            height: 100,
+            frame: Arc::new(Vec::new()),
+            at: Some(Instant::now()),
+            observed_at_ms: Some(0),
+            step: None,
+        }
     }
 
     #[test]
@@ -481,7 +554,10 @@ mod tests {
         });
         assert!(next_to_look_at(&scene, &buffer).is_none());
         let told = buffer.describe();
-        assert!(told.contains("Froakie plush") && told.contains("no lo digas por decirlo"), "{told}");
+        assert!(
+            told.contains("Froakie plush") && told.contains("no lo digas por decirlo"),
+            "{told}"
+        );
     }
 
     #[test]

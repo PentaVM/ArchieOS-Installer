@@ -50,8 +50,7 @@ pub fn signal(kind: SignalKind) -> Signal {
 /// the caller; only this fixed-size vector is suitable for the Orb transport.
 pub fn semantic_features(text: &str) -> Vec<f32> {
     let mut vector = vec![0.0_f32; TOKEN_DIMENSIONS];
-    let mut previous = 0_u32;
-    let mut terms = 0_u32;
+    let mut previous: Option<u32> = None;
     for word in text
         .split(|c: char| !c.is_alphanumeric())
         .filter(|w| !w.is_empty())
@@ -63,13 +62,12 @@ pub fn semantic_features(text: &str) -> Vec<f32> {
         let index = (hash as usize) & (TOKEN_DIMENSIONS - 1);
         let sign = if hash & 0x8000_0000 == 0 { 1.0 } else { -1.0 };
         vector[index] += sign;
-        if terms > 0 {
+        if let Some(previous) = previous {
             let bigram = hash.rotate_left(11) ^ previous.wrapping_mul(0x9e3779b9);
             let index = (bigram as usize) & (TOKEN_DIMENSIONS - 1);
             vector[index] += if bigram & 0x8000_0000 == 0 { 0.5 } else { -0.5 };
         }
-        previous = hash;
-        terms += 1;
+        previous = Some(hash);
     }
     let norm = vector.iter().map(|v| v * v).sum::<f32>().sqrt();
     if norm > f32::EPSILON {

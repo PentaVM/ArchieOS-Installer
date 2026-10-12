@@ -7,8 +7,8 @@
 use archie_cerebra::pillars::Pillar;
 use archie_cerebra::wanda_bridge::{
     parse_instagram_export, parse_notification_dump, parse_whatsapp_export, record_chat_context,
-    Category, ChatBatchOutcome, ChatMessage, ChatPlatform, ContextVector, ParseError, SenderIdentity,
-    WandaError, EXCERPT_SALIENCE_THRESHOLD, MAX_MESSAGES_PER_BATCH,
+    Category, ChatBatchOutcome, ChatMessage, ChatPlatform, ContextVector, ParseError,
+    SenderIdentity, WandaError, EXCERPT_SALIENCE_THRESHOLD, MAX_MESSAGES_PER_BATCH,
 };
 use archie_types::PrivacyGrade;
 use archie_vault::{AuditAction, ContextDomain, Vault, VaultKey};
@@ -65,7 +65,10 @@ fn whatsapp_export_parses_both_layouts_media_system_lines_and_multiline() {
     let outcome = parse_whatsapp_export("family", WHATSAPP_FIXTURE, SALT).unwrap();
     // Five messages: two plain, one media, one multiline, one from a number.
     assert_eq!(outcome.messages.len(), 5);
-    assert_eq!(outcome.system_lines, 1, "the encryption notice is skipped and counted");
+    assert_eq!(
+        outcome.system_lines, 1,
+        "the encryption notice is skipped and counted"
+    );
     assert_eq!(outcome.media_omitted, 1);
     assert_eq!(outcome.malformed, 0);
 
@@ -83,7 +86,10 @@ fn whatsapp_export_parses_both_layouts_media_system_lines_and_multiline() {
 
     // The multiline message is joined, with the newline folded to a space.
     let multiline = &outcome.messages[3];
-    assert_eq!(multiline.text(), "nos vemos mañana en la oficina para la presentación");
+    assert_eq!(
+        multiline.text(),
+        "nos vemos mañana en la oficina para la presentación"
+    );
 
     // The phone-number sender is hashed; the raw number is nowhere.
     let numbered = &outcome.messages[4];
@@ -94,7 +100,11 @@ fn whatsapp_export_parses_both_layouts_media_system_lines_and_multiline() {
 #[test]
 fn instagram_export_parses_shares_media_and_keeps_mojibake_as_decoded() {
     let outcome = parse_instagram_export(INSTAGRAM_FIXTURE, SALT).unwrap();
-    assert_eq!(outcome.messages.len(), 3, "the sender-less entry is malformed");
+    assert_eq!(
+        outcome.messages.len(),
+        3,
+        "the sender-less entry is malformed"
+    );
     assert_eq!(outcome.malformed, 1);
 
     // The chat id is derived from the participants, salted: stable, and never a name.
@@ -109,7 +119,11 @@ fn instagram_export_parses_shares_media_and_keeps_mojibake_as_decoded() {
     assert_eq!(plain.text(), "Ãsta es una prueba");
 
     let share = &outcome.messages[1];
-    assert_eq!(share.text(), "mira esto", "share text stands in for content");
+    assert_eq!(
+        share.text(),
+        "mira esto",
+        "share text stands in for content"
+    );
 
     let photo = &outcome.messages[2];
     assert!(photo.media_omitted());
@@ -145,7 +159,10 @@ fn a_number_sender_is_hashed_salted_and_never_the_raw_number() {
         panic!("a number sender is a hash");
     };
     // Stable, formatting-independent, salt-keyed, and shaped like a hash.
-    assert_eq!(one, two, "the same number hashes the same however formatted");
+    assert_eq!(
+        one, two,
+        "the same number hashes the same however formatted"
+    );
     assert_ne!(one, other_salt, "the salt keys the hash");
     assert_eq!(hash.len(), 32);
     assert!(hash.bytes().all(|b| b.is_ascii_hexdigit()));
@@ -180,7 +197,10 @@ fn the_categorizer_scores_bilingual_keywords_and_questions() {
     // An urgent question scores urgency and question; the question dominates.
     let urgent = ContextVector::categorize("¿Dónde estás? ¡Urgente!", false);
     assert!(urgent.score(Category::Urgency) >= 40);
-    assert!(urgent.score(Category::Question) >= 90, "mark plus keyword: {urgent:?}");
+    assert!(
+        urgent.score(Category::Question) >= 90,
+        "mark plus keyword: {urgent:?}"
+    );
     assert_eq!(urgent.dominant().unwrap().0, Category::Question);
 
     // Scores are clamped at 100 no matter how many keywords hit.
@@ -217,7 +237,12 @@ fn records_carry_source_times_restricted_grade_and_wanda_references() {
     // One chat aggregate for the one chat, and every reference is Wanda's.
     assert_eq!(batch.chats().len(), 1);
     assert_eq!(batch.chats()[0].message_count(), 5);
-    for record in batch.messages().iter().map(|r| r.reference()).chain(batch.chats().iter().map(|c| c.reference())) {
+    for record in batch
+        .messages()
+        .iter()
+        .map(|r| r.reference())
+        .chain(batch.chats().iter().map(|c| c.reference()))
+    {
         assert!(domain.contains(record), "{record}");
         assert!(batch.context().references()[record].contains(&Pillar::Wanda));
     }
@@ -266,20 +291,25 @@ fn raw_text_stays_out_of_the_vault_below_the_salience_threshold() {
     assert!(ContextVector::categorize(low.text(), false).salience() < EXCERPT_SALIENCE_THRESHOLD);
 
     let mut vault = open_vault();
-    let batch = match record_chat_context(&mut vault, &domain(), "wanda-ingest", &[low, high]).unwrap()
-    {
-        ChatBatchOutcome::Recorded(batch) => batch,
-        ChatBatchOutcome::NoMessages => panic!("two messages went in"),
-    };
+    let batch =
+        match record_chat_context(&mut vault, &domain(), "wanda-ingest", &[low, high]).unwrap() {
+            ChatBatchOutcome::Recorded(batch) => batch,
+            ChatBatchOutcome::NoMessages => panic!("two messages went in"),
+        };
     assert_eq!(batch.messages().len(), 2);
 
     let low_record = &batch.messages()[0];
     assert!(low_record.excerpt().is_none());
-    assert!(!low_record.content().contains("jaja"), "no excerpt below threshold");
+    assert!(
+        !low_record.content().contains("jaja"),
+        "no excerpt below threshold"
+    );
     assert!(!low_record.content().contains("\"excerpt\""));
 
     let high_record = &batch.messages()[1];
-    let excerpt = high_record.excerpt().expect("a high-salience message leaves an excerpt");
+    let excerpt = high_record
+        .excerpt()
+        .expect("a high-salience message leaves an excerpt");
     assert!(excerpt.chars().count() <= 280);
     assert!(excerpt.starts_with("URGENTE"));
     assert!(high_record.content().contains("\"excerpt\""));
@@ -298,11 +328,11 @@ fn a_missing_source_time_is_recorded_as_null_not_invented() {
     )
     .unwrap();
     let mut vault = open_vault();
-    let batch = match record_chat_context(&mut vault, &domain(), "wanda-ingest", &[message]).unwrap()
-    {
-        ChatBatchOutcome::Recorded(batch) => batch,
-        ChatBatchOutcome::NoMessages => panic!("one message went in"),
-    };
+    let batch =
+        match record_chat_context(&mut vault, &domain(), "wanda-ingest", &[message]).unwrap() {
+            ChatBatchOutcome::Recorded(batch) => batch,
+            ChatBatchOutcome::NoMessages => panic!("one message went in"),
+        };
     assert!(batch.messages()[0].content().contains("\"sent_at\":null"));
 }
 
@@ -327,11 +357,23 @@ fn replays_dedupe_and_a_foreign_record_at_the_reference_is_a_collision() {
         ChatBatchOutcome::Recorded(batch) => batch,
         ChatBatchOutcome::NoMessages => panic!("the fixture has messages"),
     };
-    let first_refs: Vec<_> = first.messages().iter().map(|r| r.reference().clone()).collect();
-    let second_refs: Vec<_> = second.messages().iter().map(|r| r.reference().clone()).collect();
+    let first_refs: Vec<_> = first
+        .messages()
+        .iter()
+        .map(|r| r.reference().clone())
+        .collect();
+    let second_refs: Vec<_> = second
+        .messages()
+        .iter()
+        .map(|r| r.reference().clone())
+        .collect();
     assert_eq!(first_refs, second_refs);
     assert_eq!(
-        vault.audit_log().iter().filter(|entry| entry.action == AuditAction::Store).count(),
+        vault
+            .audit_log()
+            .iter()
+            .filter(|entry| entry.action == AuditAction::Store)
+            .count(),
         stores,
         "a replay stores nothing new"
     );
@@ -389,7 +431,13 @@ fn empty_oversized_and_malformed_inputs_are_typed_never_panics() {
     // Invalid messages fail at construction with the field named.
     for (message, field) in [
         (
-            ChatMessage::new(ChatPlatform::Whatsapp, "", SenderIdentity::display("Ana").unwrap(), Some(1), "hola"),
+            ChatMessage::new(
+                ChatPlatform::Whatsapp,
+                "",
+                SenderIdentity::display("Ana").unwrap(),
+                Some(1),
+                "hola",
+            ),
             "chat_id",
         ),
         (
@@ -413,7 +461,13 @@ fn empty_oversized_and_malformed_inputs_are_typed_never_panics() {
             "text",
         ),
         (
-            ChatMessage::new(ChatPlatform::Whatsapp, "family", SenderIdentity::display("Ana").unwrap(), Some(1), ""),
+            ChatMessage::new(
+                ChatPlatform::Whatsapp,
+                "family",
+                SenderIdentity::display("Ana").unwrap(),
+                Some(1),
+                "",
+            ),
             "text",
         ),
     ] {
@@ -430,7 +484,10 @@ fn empty_oversized_and_malformed_inputs_are_typed_never_panics() {
     ));
     assert!(matches!(
         parse_whatsapp_export("family", "", SALT),
-        Err(ParseError::NoMessages { malformed: 0, system: 0 })
+        Err(ParseError::NoMessages {
+            malformed: 0,
+            system: 0
+        })
     ));
     assert!(matches!(
         parse_instagram_export("not json", SALT),

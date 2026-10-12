@@ -1,7 +1,10 @@
 //! Minimal MQTT 3.1.1 client over plaintext TCP for private-LAN brokers only.
 //!
 //! Scope: CONNECT (optional username/password), PUBLISH at QoS 0, SUBSCRIBE to
-//! one configured topic and await one matching PUBLISH, DISCONNECT. There is no
+//! one configured topic and await one matching PUBLISH, DISCONNECT. `apply`
+//! subscribes to the state topic before it publishes the command and waits,
+//! bounded, for the device's live report, so the engine's observation that
+//! follows is not racing the device. There is no
 //! TLS: credentials and payloads cross the LAN in cleartext, so this adapter is
 //! only acceptable on a trusted private segment, exactly like the other native
 //! LAN adapters. TLS transport (mqtts, port 8883) is future work and requires a
@@ -34,6 +37,8 @@ const IO_TIMEOUT: Duration = Duration::from_secs(5);
 /// Awaiting a state publication is capped independently of Core's deadline so
 /// standalone calls always terminate. Core's per-intent budget may cut earlier.
 const OBSERVE_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long `apply` waits for the device's live state report after commanding.
+const REPORT_WAIT: Duration = Duration::from_secs(3);
 
 const PKT_CONNECT: u8 = 1;
 const PKT_CONNACK: u8 = 2;
@@ -381,9 +386,12 @@ fn render(binding: &MqttBinding, command: &Command) -> Result<Vec<u8>, AdapterEr
         (MqttKind::Light, Command::LightSetBrightness { percent }) => binding
             .brightness_template
             .replace("{percent}", &percent.to_string()),
-        (MqttKind::Climate, Command::ClimateSetTemperature { milli_celsius }) => binding
-            .temperature_template
-            .replace("{celsius}", &format!("{:.1}", *milli_celsius as f64 / 1000.0)),
+        (MqttKind::Climate, Command::ClimateSetTemperature { milli_celsius }) => {
+            binding.temperature_template.replace(
+                "{celsius}",
+                &format!("{:.1}", *milli_celsius as f64 / 1000.0),
+            )
+        }
         _ => return Err(AdapterError::Unsupported),
     };
     payload(&text)?;
@@ -485,7 +493,41 @@ impl EdgeAdapter for Mqtt {
         let payload = render(&binding, command)?;
         let mut stream = self.connect().await?;
         let result = async {
-            write_packet(&mut stream, &encode_publish(&binding.command_topic, &payload)?).await?;
+            // Subscribe to the state topic before commanding, so the device's
+            // own report of what it did cannot slip past between the PUBLISH
+            // and the engine's observation. The SUBACK (and any retained,
+            // pre-command state) is consumed first.
+            write_packet(&mut stream, &encode_subscribe(1, &binding.state_topic)?).await?;
+            let (header, body) = read_packet(&mut stream).await?;
+            if header >> 4 != PKT_SUBACK
+                || body.len() != 3
+                || u16::from_be_bytes([body[0], body[1]]) != 1
+            {
+                return Err(AdapterError::Protocol);
+            }
+            if body[2] != 0 {
+                return Err(AdapterError::Unavailable);
+            }
+            write_packet(
+                &mut stream,
+                &encode_publish(&binding.command_topic, &payload)?,
+            )
+            .await?;
+            // Wait, bounded, for a live (not retained) report on the state
+            // topic. It only synchronizes: whatever it says, the engine's own
+            // observation afterwards is the evidence. No report in time is
+            // not an error here; the observation then shows what is true.
+            let _ = timeout(REPORT_WAIT, async {
+                loop {
+                    let (header, body) = read_packet(&mut stream).await?;
+                    let retained = header & 0x01 != 0;
+                    let (topic, _) = parse_publish(header, &body)?;
+                    if !retained && topic == binding.state_topic {
+                        return Ok::<_, AdapterError>(());
+                    }
+                }
+            })
+            .await;
             Ok::<_, AdapterError>(())
         }
         .await;

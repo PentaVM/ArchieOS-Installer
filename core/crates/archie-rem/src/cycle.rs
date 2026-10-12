@@ -66,7 +66,9 @@ pub trait World {
 pub enum TrainerEnd {
     /// There was nothing to learn from, or no trainer is configured.
     Skipped(String),
-    Finished { exit_code: i32 },
+    Finished {
+        exit_code: i32,
+    },
     /// A person came back (or the power went) and the trainer left by itself.
     Interrupted,
     /// It had not left after the grace period.
@@ -111,7 +113,9 @@ impl<'a, W: World> Cycle<'a, W> {
             .and_then(|made| self.world.now().duration_since(made).ok())
             .is_some_and(|age| age.as_secs() > self.plan.retention_seconds);
         if outlived {
-            let mut report = empty_report(TrainerEnd::Skipped("the day's windows outlived their retention".into()));
+            let mut report = empty_report(TrainerEnd::Skipped(
+                "the day's windows outlived their retention".into(),
+            ));
             self.delete(&mut report);
             return Some(report);
         }
@@ -147,7 +151,9 @@ impl<'a, W: World> Cycle<'a, W> {
         for job in &jobs {
             match self.world.run(&job.checkpoint) {
                 Ok(0) => report.paused.push(job.id.clone()),
-                Ok(code) => report.not_paused.push((job.id.clone(), format!("its checkpoint exited with {code}"))),
+                Ok(code) => report
+                    .not_paused
+                    .push((job.id.clone(), format!("its checkpoint exited with {code}"))),
                 Err(error) => report.not_paused.push((job.id.clone(), error)),
             }
         }
@@ -208,7 +214,10 @@ impl<'a, W: World> Cycle<'a, W> {
     }
 
     fn report_activity(&mut self, idle_seconds: u64) {
-        let _ = self.world.activity(idle_seconds).write(&self.plan.activity_file);
+        let _ = self
+            .world
+            .activity(idle_seconds)
+            .write(&self.plan.activity_file);
     }
 
     /// Opens the day's buffer into the work directory as the trainer reads it, and says how
@@ -228,7 +237,9 @@ impl<'a, W: World> Cycle<'a, W> {
                 receipts.extend_from_slice(&plain);
                 continue;
             }
-            let path = name.split('+').fold(work.clone(), |path, part| path.join(part));
+            let path = name
+                .split('+')
+                .fold(work.clone(), |path, part| path.join(part));
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| failed(parent, e))?;
             }
@@ -275,7 +286,9 @@ impl<'a, W: World> Cycle<'a, W> {
             match self.world.run(&job.resume) {
                 Ok(0) => waiting.push((job, before)),
                 Ok(code) => {
-                    report.errors.push(format!("{}: its resume exited with {code}", job.id));
+                    report
+                        .errors
+                        .push(format!("{}: its resume exited with {code}", job.id));
                     report.stuck.push(job.id);
                 }
                 Err(error) => {
@@ -286,8 +299,12 @@ impl<'a, W: World> Cycle<'a, W> {
         }
         let mut waited = 0;
         loop {
-            let (moving, still): (Vec<_>, Vec<_>) = waiting.into_iter().partition(|(job, before)| job.moved_from(*before));
-            report.resumed.extend(moving.into_iter().map(|(job, _)| job.id));
+            let (moving, still): (Vec<_>, Vec<_>) = waiting
+                .into_iter()
+                .partition(|(job, before)| job.moved_from(*before));
+            report
+                .resumed
+                .extend(moving.into_iter().map(|(job, _)| job.id));
             waiting = still;
             if waiting.is_empty() || waited >= self.plan.resume_wait_seconds {
                 break;
@@ -295,10 +312,16 @@ impl<'a, W: World> Cycle<'a, W> {
             self.world.wait(5);
             waited += 5;
         }
-        report.stuck.extend(waiting.iter().map(|(job, _)| job.id.clone()));
+        report
+            .stuck
+            .extend(waiting.iter().map(|(job, _)| job.id.clone()));
         // A stuck job stays listed, so the next start tries it again.
         let left: Vec<Job> = waiting.into_iter().map(|(job, _)| job).collect();
-        let kept = if left.is_empty() { list.clear() } else { list.write(&left) };
+        let kept = if left.is_empty() {
+            list.clear()
+        } else {
+            list.write(&left)
+        };
         report.errors.extend(kept.err().map(|e| e.to_string()));
     }
 }
@@ -320,7 +343,8 @@ fn write_marker(path: &Path) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
     }
-    std::fs::write(path, b"a REM cycle is under way\n").map_err(|e| format!("{}: {e}", path.display()))
+    std::fs::write(path, b"a REM cycle is under way\n")
+        .map_err(|e| format!("{}: {e}", path.display()))
 }
 
 fn remove_dir(dir: &Path) -> Result<(), String> {
@@ -359,7 +383,9 @@ mod tests {
     impl Running for Trainer {
         fn finished(&mut self) -> Option<i32> {
             self.polls += 1;
-            self.ends_after.filter(|after| self.polls > *after).map(|_| 0)
+            self.ends_after
+                .filter(|after| self.polls > *after)
+                .map(|_| 0)
         }
         fn kill(&mut self) {
             self.log.borrow_mut().push("kill trainer".into());
@@ -373,13 +399,24 @@ mod tests {
             now
         }
         fn activity(&mut self, idle_seconds: u64) -> Activity {
-            Activity { updated_unix: 1, cpu_percent: 5, ram_bytes: 1, vram_bytes: 1, gpu_percent: 5, idle_seconds, inference_pending: false }
+            Activity {
+                updated_unix: 1,
+                cpu_percent: 5,
+                ram_bytes: 1,
+                vram_bytes: 1,
+                gpu_percent: 5,
+                idle_seconds,
+                inference_pending: false,
+            }
         }
         fn run(&mut self, command: &[String]) -> Result<i32, String> {
             let line = command.join(" ");
             // What must already be true when the first job is paused.
             if line.starts_with("pause") {
-                assert!(self.root.join("state/resume.json").exists(), "the resume list is written first");
+                assert!(
+                    self.root.join("state/resume.json").exists(),
+                    "the resume list is written first"
+                );
                 assert!(self.root.join("state/cycle").exists());
             }
             if let Some(id) = line.strip_prefix("resume ") {
@@ -392,13 +429,29 @@ mod tests {
         }
         fn start(&mut self, command: &[String]) -> Result<Box<dyn Running>, String> {
             let work = self.root.join("work");
-            let opened = std::fs::read_dir(work.join("windows/photopea/run-7")).unwrap().count();
+            let opened = std::fs::read_dir(work.join("windows/photopea/run-7"))
+                .unwrap()
+                .count();
             assert!(work.join("records/photopea/run-7/000001.json").exists());
             let receipts = std::fs::read_to_string(work.join("receipts.jsonl")).unwrap();
-            assert_eq!(receipts.lines().count(), 2, "every run's receipts, in one file");
-            self.log.borrow_mut().push(format!("train {} with {opened} window(s)", command.join(" ")));
-            assert!(self.root.join("run/activity.json").exists(), "the trainer needs a fresh activity file");
-            Ok(Box::new(Trainer { polls: 0, ends_after: self.trainer_ends_after, log: self.log.clone() }))
+            assert_eq!(
+                receipts.lines().count(),
+                2,
+                "every run's receipts, in one file"
+            );
+            self.log.borrow_mut().push(format!(
+                "train {} with {opened} window(s)",
+                command.join(" ")
+            ));
+            assert!(
+                self.root.join("run/activity.json").exists(),
+                "the trainer needs a fresh activity file"
+            );
+            Ok(Box::new(Trainer {
+                polls: 0,
+                ends_after: self.trainer_ends_after,
+                log: self.log.clone(),
+            }))
         }
         fn now(&mut self) -> SystemTime {
             // Earlier than any file the test writes, whatever the filesystem's clock grain.
@@ -407,11 +460,24 @@ mod tests {
         fn wait(&mut self, _seconds: u64) {}
     }
 
-    const AWAY: Conditions = Conditions { local_minute: 180, on_mains: true, idle_seconds: 4000 };
-    const BACK: Conditions = Conditions { local_minute: 181, on_mains: true, idle_seconds: 3 };
+    const AWAY: Conditions = Conditions {
+        local_minute: 180,
+        on_mains: true,
+        idle_seconds: 4000,
+    };
+    const BACK: Conditions = Conditions {
+        local_minute: 181,
+        on_mains: true,
+        idle_seconds: 3,
+    };
 
-    fn night(name: &str, looks: Vec<Conditions>, trainer_ends_after: Option<usize>) -> (Plan, Night, Rc<RefCell<Vec<String>>>) {
-        let root = std::env::temp_dir().join(format!("archie-rem-cycle-{name}-{}", std::process::id()));
+    fn night(
+        name: &str,
+        looks: Vec<Conditions>,
+        trainer_ends_after: Option<usize>,
+    ) -> (Plan, Night, Rc<RefCell<Vec<String>>>) {
+        let root =
+            std::env::temp_dir().join(format!("archie-rem-cycle-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("jobs")).unwrap();
         for id in ["render", "trainer"] {
@@ -427,13 +493,27 @@ mod tests {
         }
         let buffer = DayBuffer::open(root.join("day")).unwrap();
         for sample in ["000000", "000001"] {
-            buffer.seal(&format!("windows+photopea+run-7+{sample}.npz"), b"a window").unwrap();
-            buffer.seal(&format!("records+photopea+run-7+{sample}.json"), b"{}").unwrap();
+            buffer
+                .seal(&format!("windows+photopea+run-7+{sample}.npz"), b"a window")
+                .unwrap();
+            buffer
+                .seal(&format!("records+photopea+run-7+{sample}.json"), b"{}")
+                .unwrap();
         }
-        buffer.seal("receipts+photopea+run-7.jsonl", b"{\"receipt_id\":\"a\"}\n").unwrap();
-        buffer.seal("receipts+photopea+run-8.jsonl", b"{\"receipt_id\":\"b\"}\n").unwrap();
+        buffer
+            .seal("receipts+photopea+run-7.jsonl", b"{\"receipt_id\":\"a\"}\n")
+            .unwrap();
+        buffer
+            .seal("receipts+photopea+run-8.jsonl", b"{\"receipt_id\":\"b\"}\n")
+            .unwrap();
         let plan = Plan {
-            gate: Gate { window: NightWindow { start_minute: 120, end_minute: 360 }, idle_seconds: 1800 },
+            gate: Gate {
+                window: NightWindow {
+                    start_minute: 120,
+                    end_minute: 360,
+                },
+                idle_seconds: 1800,
+            },
             jobs_dir: root.join("jobs"),
             resume_list: root.join("state/resume.json"),
             marker: root.join("state/cycle"),
@@ -446,7 +526,14 @@ mod tests {
             retention_seconds: 26 * 3600,
         };
         let log = Rc::new(RefCell::new(Vec::new()));
-        let world = Night { root, looks, looked: 0, trainer_ends_after, log: log.clone(), heartbeats_move: true };
+        let world = Night {
+            root,
+            looks,
+            looked: 0,
+            trainer_ends_after,
+            log: log.clone(),
+            heartbeats_move: true,
+        };
         (plan, world, log)
     }
 
@@ -459,15 +546,26 @@ mod tests {
         assert_eq!(report.trainer, TrainerEnd::Finished { exit_code: 0 });
         assert!(report.windows_deleted);
         assert_eq!(report.resumed, vec!["render", "trainer"]);
-        assert!(report.stuck.is_empty() && report.errors.is_empty(), "{report:?}");
+        assert!(
+            report.stuck.is_empty() && report.errors.is_empty(),
+            "{report:?}"
+        );
 
         let log = log.borrow();
         assert_eq!(log[0], "pause render");
         assert_eq!(log[1], "pause trainer");
-        assert!(log[2].starts_with("train trainer --windows-root") && log[2].ends_with("with 2 window(s)"), "{}", log[2]);
+        assert!(
+            log[2].starts_with("train trainer --windows-root")
+                && log[2].ends_with("with 2 window(s)"),
+            "{}",
+            log[2]
+        );
         assert_eq!(&log[3..], ["resume render", "resume trainer"]);
 
-        assert!(!plan.buffer_dir.exists(), "the day's key and windows are gone");
+        assert!(
+            !plan.buffer_dir.exists(),
+            "the day's key and windows are gone"
+        );
         assert!(!plan.work_dir.exists(), "and so are the opened copies");
         assert!(!plan.marker.exists() && !plan.resume_list.exists());
     }
@@ -493,9 +591,16 @@ mod tests {
 
     #[test]
     fn by_day_nothing_is_paused_and_nothing_is_deleted() {
-        let noon = Conditions { local_minute: 720, on_mains: true, idle_seconds: 9000 };
+        let noon = Conditions {
+            local_minute: 720,
+            on_mains: true,
+            idle_seconds: 9000,
+        };
         let (plan, mut world, log) = night("day", vec![noon], Some(1));
-        assert_eq!(Cycle::new(&plan, &mut world).run(), Err(Wait::OutsideNightWindow));
+        assert_eq!(
+            Cycle::new(&plan, &mut world).run(),
+            Err(Wait::OutsideNightWindow)
+        );
         assert!(log.borrow().is_empty());
         assert!(DayBuffer::exists(&plan.buffer_dir));
     }
@@ -507,14 +612,23 @@ mod tests {
         ResumeList::at(&plan.resume_list).write(&jobs).unwrap();
         write_marker(&plan.marker).unwrap();
         std::fs::create_dir_all(&plan.work_dir).unwrap();
-        std::fs::write(plan.work_dir.join("photopea.run1.s0.npz"), b"an opened window").unwrap();
+        std::fs::write(
+            plan.work_dir.join("photopea.run1.s0.npz"),
+            b"an opened window",
+        )
+        .unwrap();
 
-        let report = Cycle::new(&plan, &mut world).recover().expect("a cut-short cycle is finished");
+        let report = Cycle::new(&plan, &mut world)
+            .recover()
+            .expect("a cut-short cycle is finished");
         assert!(report.windows_deleted);
         assert!(!plan.buffer_dir.exists() && !plan.work_dir.exists());
         assert_eq!(report.resumed, vec!["render", "trainer"]);
         assert_eq!(*log.borrow(), ["resume render", "resume trainer"]);
-        assert!(Cycle::new(&plan, &mut world).recover().is_none(), "nothing is left to recover");
+        assert!(
+            Cycle::new(&plan, &mut world).recover().is_none(),
+            "nothing is left to recover"
+        );
     }
 
     #[test]
@@ -526,26 +640,46 @@ mod tests {
         assert_eq!(report.stuck, vec!["render", "trainer"]);
         assert_eq!(ResumeList::at(&plan.resume_list).read().unwrap().len(), 2);
         assert!(plan.marker.exists(), "the next start tries again");
-        assert!(report.windows_deleted, "a stuck job does not keep the day's windows");
+        assert!(
+            report.windows_deleted,
+            "a stuck job does not keep the day's windows"
+        );
     }
 
     #[test]
     fn windows_that_outlived_their_day_are_deleted_without_a_cycle() {
         let (mut plan, mut world, log) = night("old", vec![AWAY], Some(1));
-        assert!(Cycle::new(&plan, &mut world).recover().is_none(), "today's windows are kept for tonight");
+        assert!(
+            Cycle::new(&plan, &mut world).recover().is_none(),
+            "today's windows are kept for tonight"
+        );
         plan.retention_seconds = 0;
         std::thread::sleep(Duration::from_millis(20));
         struct Later<'a>(&'a mut Night);
         impl World for Later<'_> {
-            fn conditions(&mut self) -> Conditions { self.0.conditions() }
-            fn activity(&mut self, idle: u64) -> Activity { self.0.activity(idle) }
-            fn run(&mut self, command: &[String]) -> Result<i32, String> { self.0.run(command) }
-            fn start(&mut self, command: &[String]) -> Result<Box<dyn Running>, String> { self.0.start(command) }
-            fn now(&mut self) -> SystemTime { SystemTime::now() + Duration::from_secs(3600) }
-            fn wait(&mut self, seconds: u64) { self.0.wait(seconds) }
+            fn conditions(&mut self) -> Conditions {
+                self.0.conditions()
+            }
+            fn activity(&mut self, idle: u64) -> Activity {
+                self.0.activity(idle)
+            }
+            fn run(&mut self, command: &[String]) -> Result<i32, String> {
+                self.0.run(command)
+            }
+            fn start(&mut self, command: &[String]) -> Result<Box<dyn Running>, String> {
+                self.0.start(command)
+            }
+            fn now(&mut self) -> SystemTime {
+                SystemTime::now() + Duration::from_secs(3600)
+            }
+            fn wait(&mut self, seconds: u64) {
+                self.0.wait(seconds)
+            }
         }
         let mut later = Later(&mut world);
-        let report = Cycle::new(&plan, &mut later).recover().expect("old windows are deleted");
+        let report = Cycle::new(&plan, &mut later)
+            .recover()
+            .expect("old windows are deleted");
         assert!(report.windows_deleted && !plan.buffer_dir.exists());
         assert!(log.borrow().is_empty(), "no job was touched");
     }

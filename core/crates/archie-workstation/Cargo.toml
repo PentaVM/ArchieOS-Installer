@@ -14,6 +14,7 @@ name = "archie-workstation-check"
 path = "src/bin/check.rs"
 
 [dependencies]
+archie-notices.workspace = true
 archie-cerebra.workspace = true
 archie-model-runtime.workspace = true
 archie-policy.workspace = true

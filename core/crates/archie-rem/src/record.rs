@@ -58,7 +58,9 @@ fn named(value: &str) -> Result<&str, RecordError> {
     let valid = !value.is_empty()
         && value.len() <= 64
         && !value.starts_with('.')
-        && value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.');
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.');
     if valid {
         Ok(value)
     } else {
@@ -89,14 +91,23 @@ pub fn receipts(app: &str, run: &str, how: Verified, samples: &[Sample]) -> Stri
 }
 
 fn run_dirs(spool: &Path, app: &str, run: &str) -> [PathBuf; 2] {
-    [spool.join("windows").join(app).join(run), spool.join("records").join(app).join(run)]
+    [
+        spool.join("windows").join(app).join(run),
+        spool.join("records").join(app).join(run),
+    ]
 }
 
 fn files_of(dir: &Path) -> Result<Vec<PathBuf>, RecordError> {
-    let io = |source| RecordError::Io { path: dir.display().to_string(), source };
+    let io = |source| RecordError::Io {
+        path: dir.display().to_string(),
+        source,
+    };
     match std::fs::read_dir(dir) {
         Ok(entries) => {
-            let mut files: Vec<PathBuf> = entries.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.is_file()).collect();
+            let mut files: Vec<PathBuf> = entries
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.is_file())
+                .collect();
             files.sort();
             Ok(files)
         }
@@ -122,16 +133,28 @@ pub fn keep_run(
     let [windows, records] = run_dirs(spool, app, run);
     let window_files = files_of(&windows)?;
     if window_files.len() != samples.len() {
-        return Err(RecordError::Mismatch { recorded: samples.len(), found: window_files.len() });
+        return Err(RecordError::Mismatch {
+            recorded: samples.len(),
+            found: window_files.len(),
+        });
     }
     for (kind, files) in [("windows", window_files), ("records", files_of(&records)?)] {
         for file in files {
-            let name = file.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-            let plain = std::fs::read(&file).map_err(|source| RecordError::Io { path: file.display().to_string(), source })?;
+            let name = file
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default();
+            let plain = std::fs::read(&file).map_err(|source| RecordError::Io {
+                path: file.display().to_string(),
+                source,
+            })?;
             buffer.seal(&format!("{kind}+{app}+{run}+{name}"), &plain)?;
         }
     }
-    buffer.seal(&format!("receipts+{app}+{run}.jsonl"), receipts(app, run, how, samples).as_bytes())?;
+    buffer.seal(
+        &format!("receipts+{app}+{run}.jsonl"),
+        receipts(app, run, how, samples).as_bytes(),
+    )?;
     discard_run(spool, app, run)?;
     Ok(samples.len())
 }
@@ -143,7 +166,12 @@ pub fn discard_run(spool: &Path, app: &str, run: &str) -> Result<(), RecordError
         match std::fs::remove_dir_all(&dir) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(source) => return Err(RecordError::Io { path: dir.display().to_string(), source }),
+            Err(source) => {
+                return Err(RecordError::Io {
+                    path: dir.display().to_string(),
+                    source,
+                })
+            }
         }
     }
     Ok(())
@@ -154,7 +182,8 @@ mod tests {
     use super::*;
 
     fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("archie-rem-record-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("archie-rem-record-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir
     }
@@ -177,8 +206,16 @@ mod tests {
             std::fs::create_dir_all(spool.join(kind).join("photopea/run-7")).unwrap();
         }
         for id in samples {
-            std::fs::write(spool.join(format!("windows/photopea/run-7/{id}.npz")), format!("window {id}")).unwrap();
-            std::fs::write(spool.join(format!("records/photopea/run-7/{id}.json")), "{}").unwrap();
+            std::fs::write(
+                spool.join(format!("windows/photopea/run-7/{id}.npz")),
+                format!("window {id}"),
+            )
+            .unwrap();
+            std::fs::write(
+                spool.join(format!("records/photopea/run-7/{id}.json")),
+                "{}",
+            )
+            .unwrap();
         }
         spool
     }
@@ -186,16 +223,40 @@ mod tests {
     /// The trainer rejects a receipt with a field missing or one too many.
     #[test]
     fn a_receipt_has_exactly_the_fields_the_trainer_checks() {
-        let lines = receipts("photopea", "run-7", Verified::TaskOutcome, &[sample("000000"), sample("000001")]);
-        let lines: Vec<serde_json::Value> = lines.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        let lines = receipts(
+            "photopea",
+            "run-7",
+            Verified::TaskOutcome,
+            &[sample("000000"), sample("000001")],
+        );
+        let lines: Vec<serde_json::Value> = lines
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
         assert_eq!(lines.len(), 2);
-        let mut names: Vec<&str> = lines[0].as_object().unwrap().keys().map(String::as_str).collect();
+        let mut names: Vec<&str> = lines[0]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
         names.sort_unstable();
         assert_eq!(
             names,
             [
-                "app", "base_sha256", "format", "future_sha256", "kind", "machine_analysis_allowed", "receipt_id",
-                "run_id", "sample_id", "sensitivity", "target_sha256", "training_allowed", "window_sha256"
+                "app",
+                "base_sha256",
+                "format",
+                "future_sha256",
+                "kind",
+                "machine_analysis_allowed",
+                "receipt_id",
+                "run_id",
+                "sample_id",
+                "sensitivity",
+                "target_sha256",
+                "training_allowed",
+                "window_sha256"
             ]
         );
         assert_eq!(lines[0]["kind"], "task_outcome");
@@ -208,7 +269,15 @@ mod tests {
         let root = scratch("keep");
         let spool = spooled(&root, &["000000", "000001"]);
         let buffer = DayBuffer::open(root.join("day")).unwrap();
-        let kept = keep_run(&buffer, &spool, "photopea", "run-7", Verified::TaskOutcome, &[sample("000000"), sample("000001")]).unwrap();
+        let kept = keep_run(
+            &buffer,
+            &spool,
+            "photopea",
+            "run-7",
+            Verified::TaskOutcome,
+            &[sample("000000"), sample("000001")],
+        )
+        .unwrap();
         assert_eq!(kept, 2);
         assert_eq!(
             buffer.names().unwrap(),
@@ -220,8 +289,14 @@ mod tests {
                 "windows+photopea+run-7+000001.npz",
             ]
         );
-        assert_eq!(buffer.unseal("windows+photopea+run-7+000001.npz").unwrap(), b"window 000001");
-        assert!(!spool.join("windows/photopea/run-7").exists(), "nothing of the run stays in the clear");
+        assert_eq!(
+            buffer.unseal("windows+photopea+run-7+000001.npz").unwrap(),
+            b"window 000001"
+        );
+        assert!(
+            !spool.join("windows/photopea/run-7").exists(),
+            "nothing of the run stays in the clear"
+        );
     }
 
     #[test]
@@ -229,7 +304,10 @@ mod tests {
         let root = scratch("discard");
         let spool = spooled(&root, &["000000"]);
         discard_run(&spool, "photopea", "run-7").unwrap();
-        assert!(!spool.join("windows/photopea/run-7").exists() && !spool.join("records/photopea/run-7").exists());
+        assert!(
+            !spool.join("windows/photopea/run-7").exists()
+                && !spool.join("records/photopea/run-7").exists()
+        );
         discard_run(&spool, "photopea", "run-7").unwrap();
         assert!(!DayBuffer::exists(&root.join("day")));
     }
@@ -239,9 +317,25 @@ mod tests {
         let root = scratch("mismatch");
         let spool = spooled(&root, &["000000", "000001"]);
         let buffer = DayBuffer::open(root.join("day")).unwrap();
-        let kept = keep_run(&buffer, &spool, "photopea", "run-7", Verified::TaskOutcome, &[sample("000000")]);
-        assert!(matches!(kept, Err(RecordError::Mismatch { recorded: 1, found: 2 })));
+        let kept = keep_run(
+            &buffer,
+            &spool,
+            "photopea",
+            "run-7",
+            Verified::TaskOutcome,
+            &[sample("000000")],
+        );
+        assert!(matches!(
+            kept,
+            Err(RecordError::Mismatch {
+                recorded: 1,
+                found: 2
+            })
+        ));
         assert!(buffer.names().unwrap().is_empty());
-        assert!(matches!(discard_run(&spool, "../etc", "run-7"), Err(RecordError::Name(_))));
+        assert!(matches!(
+            discard_run(&spool, "../etc", "run-7"),
+            Err(RecordError::Name(_))
+        ));
     }
 }

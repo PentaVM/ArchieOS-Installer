@@ -193,7 +193,11 @@ impl Corpus {
                 return Err(ReflexError::Corpus);
             };
             samples.push(Sample {
-                tile: Tile::from_pixels(pixels.to_vec(), labels.source_width, labels.source_height)?,
+                tile: Tile::from_pixels(
+                    pixels.to_vec(),
+                    labels.source_width,
+                    labels.source_height,
+                )?,
                 controls: labels.controls,
             });
         }

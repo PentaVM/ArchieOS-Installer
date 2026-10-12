@@ -16,11 +16,11 @@
 //! - **Was it only an acknowledgement?** "ya", "ok", "mhm" answer nothing and ask nothing.
 //!   While Archie speaks they must not stop it; after it speaks they must not start it again.
 
+use crate::addressee::AddresseeCues;
 use archie_speech::{
     ConversationalFloorState, InterruptionDirection, OverlapState, Probability, SilenceScope,
     Speaker,
 };
-use crate::addressee::AddresseeCues;
 use std::time::Duration;
 
 /// How long after Archie finished speaking a reply needs no name to be addressed to it.
@@ -42,7 +42,9 @@ fn edit_distance(a: &str, b: &str) -> usize {
         row[0] = i + 1;
         for (j, cb) in b.iter().enumerate() {
             let above = row[j + 1];
-            row[j + 1] = (above + 1).min(row[j] + 1).min(diagonal + usize::from(ca != *cb));
+            row[j + 1] = (above + 1)
+                .min(row[j] + 1)
+                .min(diagonal + usize::from(ca != *cb));
             diagonal = above;
         }
     }
@@ -58,7 +60,9 @@ fn sounds_like_archie(word: &str) -> bool {
     if NOT_NAMES.contains(&word) || !(4..=8).contains(&word.chars().count()) {
         return false;
     }
-    let starts_like = ["ar", "har", "ahr", "ars"].iter().any(|start| word.starts_with(start));
+    let starts_like = ["ar", "har", "ahr", "ars"]
+        .iter()
+        .any(|start| word.starts_with(start));
     starts_like && (edit_distance(word, "archi") <= 1 || edit_distance(word, "archie") <= 1)
 }
 
@@ -112,9 +116,9 @@ pub fn names_archie(text: &str) -> bool {
     let plain = plain(text);
     let words: Vec<&str> = plain.split(' ').collect();
     words.iter().any(|word| sounds_like_archie(word))
-        || words
-            .windows(2)
-            .any(|pair| pair[0].len() <= 3 && sounds_like_archie(&format!("{}{}", pair[0], pair[1])))
+        || words.windows(2).any(|pair| {
+            pair[0].len() <= 3 && sounds_like_archie(&format!("{}{}", pair[0], pair[1]))
+        })
 }
 
 /// Whether the utterance is only an acknowledgement.
@@ -150,7 +154,12 @@ pub fn after_utterance_within(
     since_archie_spoke: Option<Duration>,
     follow_up: Duration,
 ) -> ConversationalFloorState {
-    after_utterance_with(heard, since_archie_spoke, follow_up, &AddresseeCues::default())
+    after_utterance_with(
+        heard,
+        since_archie_spoke,
+        follow_up,
+        &AddresseeCues::default(),
+    )
 }
 
 /// As [`after_utterance_within`], with what is known around the words: who else is there,
@@ -260,10 +269,21 @@ mod tests {
         assert_eq!(plain("¿Qué hora es, Archie?"), "que hora es archie");
         assert!(names_archie("Oye Archi, abre Firefox."));
         assert!(!names_archie("la arquitectura del edificio"));
-        for misheard in ["Archier, qué ves?", "Oye Arshi.", "Harchi, mira esto", "oye ar chi qué es esto"] {
+        for misheard in [
+            "Archier, qué ves?",
+            "Oye Arshi.",
+            "Harchi, mira esto",
+            "oye ar chi qué es esto",
+        ] {
             assert!(names_archie(misheard), "{misheard}");
         }
-        for other in ["Busca el archivo.", "el arco del puente", "voy a marchar", "es muy ancho", "the arch"] {
+        for other in [
+            "Busca el archivo.",
+            "el arco del puente",
+            "voy a marchar",
+            "es muy ancho",
+            "the arch",
+        ] {
             assert!(!names_archie(other), "{other}");
         }
         assert!(is_acknowledgement("Sí."));

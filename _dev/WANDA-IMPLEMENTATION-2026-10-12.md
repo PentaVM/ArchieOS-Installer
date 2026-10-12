@@ -62,6 +62,21 @@ Later checkpoint:
   PRs are not proof of release rebuild or hardware validation. Integration with latest
   main follows this checkpoint; independent review and hardware proof remain pending.
 
+Main integration checkpoint:
+- Integrated origin/main 8e0cf22 into this branch. Kept main's bridge tests, Category
+  ordering/hash support, feeder, document producer, notices and other existing work.
+  Normalized source comparisons confirmed watcher differences are the intended scoped
+  references/domain APIs; kept the transactional Vault implementation.
+- Changed the new document producer's `Option<Vault>` to `Option<VaultGuard>` after
+  compilation identified the incompatible transaction type. No new producer or rules.
+- Fresh suites on this combined tree: Cerebra, Wanda, model runtime and voice passed;
+  C++ rebuilt and CTest 18/18 passed. The C++ integration test is explicitly marked
+  ignored for ordinary Rust CI because it requires a separately compiled authority;
+  it is run explicitly with the configured binary, not counted as hardware proof.
+- Remaining: CLI consumer compile check, independent review (worker quota), Android
+  SDK/device, real WhatsApp/model/audio, all-monitor producer, offers, sender resolution,
+  relevant graph retrieval, explicit combined schedule authority and WSL packaging.
+
 Ruling: typed references and inferred standing are necessary validation, but do not
 prove the truth of generated prose. Real-model accuracy and subtle social interpretations
 require evals and user review; current DOM tests establish fixture behavior only.

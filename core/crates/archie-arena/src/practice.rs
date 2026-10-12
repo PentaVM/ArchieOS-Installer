@@ -137,6 +137,7 @@ fn write_record(file: &mut std::fs::File, record: Value) -> Result<(), String> {
     writeln!(file, "{record}").map_err(|e| e.to_string())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn capture_step(
     seat: &mut Seat,
     out: &Path,

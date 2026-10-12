@@ -57,7 +57,10 @@ pub enum Disclosure {
     /// As it is, of models on the operator's own machines.
     Kept { models: Vec<ModelId> },
     /// Veiled, of models that disclose to a third party.
-    Veiled { models: Vec<ModelId>, veiled: Veiled },
+    Veiled {
+        models: Vec<ModelId>,
+        veiled: Veiled,
+    },
 }
 
 /// The answer to a private question, with what may be written down about how it was got.
@@ -101,11 +104,14 @@ pub struct Routed {
 
 impl Routed {
     pub fn new(registry: ModelRegistry) -> Self {
-        Self { registry, router: Router::new(Weights::default()), min_quality_tier: 0 }
+        Self {
+            registry,
+            router: Router::new(Weights::default()),
+            min_quality_tier: 0,
+        }
     }
 
-    /// Uses the existing router's capability floor. Quality is configured by
-    /// the operator; it is not a claim about model size or measured accuracy.
+    /// Operator-configured quality floor, using the existing router's admission.
     pub fn requiring_quality(mut self, tier: u8) -> Self {
         self.min_quality_tier = tier.min(100);
         self
@@ -134,7 +140,11 @@ impl Routed {
             request = request.requiring(ModelRole::VisionModel.capability());
         }
         let outcome = self.router.route(&self.registry, &request);
-        let mut eligible: Vec<_> = outcome.considered().iter().filter(|c| c.is_eligible()).collect();
+        let mut eligible: Vec<_> = outcome
+            .considered()
+            .iter()
+            .filter(|c| c.is_eligible())
+            .collect();
         eligible.sort_by(|a, b| b.score.total_cmp(&a.score));
         let callable: Vec<ModelId> = eligible
             .into_iter()
@@ -163,7 +173,11 @@ impl Routed {
     /// answer is the text veiled for a cloud model, and then only if it is graded no
     /// higher than `sensitive`, carries no picture (pixels cannot be veiled), and nothing
     /// with a sensitive shape is left in it afterwards.
-    pub fn disclosure(&self, question: &Question<'_>, veil: &Veil) -> Result<Disclosure, RoutedError> {
+    pub fn disclosure(
+        &self,
+        question: &Question<'_>,
+        veil: &Veil,
+    ) -> Result<Disclosure, RoutedError> {
         if question.privacy == PrivacyGrade::Secret {
             return Err(RoutedError::Withheld("secret data reaches no model".into()));
         }
@@ -171,7 +185,11 @@ impl Routed {
             .candidates(question)
             .unwrap_or_default()
             .into_iter()
-            .filter(|model| self.registry.get(model).is_some_and(|m| m.locality != Locality::Cloud))
+            .filter(|model| {
+                self.registry
+                    .get(model)
+                    .is_some_and(|m| m.locality != Locality::Cloud)
+            })
             .collect();
         if !own.is_empty() {
             return Ok(Disclosure::Kept { models: own });
@@ -182,12 +200,18 @@ impl Routed {
             ));
         }
         if question.image.is_some() {
-            return Err(RoutedError::Withheld("a picture cannot be veiled, and no model on this machine can see".into()));
+            return Err(RoutedError::Withheld(
+                "a picture cannot be veiled, and no model on this machine can see".into(),
+            ));
         }
         let veiled = veil.cover(&[question.system, question.user]);
         let residue = veiled.residue();
         if !residue.is_empty() {
-            return Err(RoutedError::Withheld(format!("the veil left {} sensitive value(s) uncovered: {}", residue.len(), kinds(&residue))));
+            return Err(RoutedError::Withheld(format!(
+                "the veil left {} sensitive value(s) uncovered: {}",
+                residue.len(),
+                kinds(&residue)
+            )));
         }
         let outgoing = Question {
             role: question.role,
@@ -204,7 +228,11 @@ impl Routed {
 
     /// Asks a question that may hold what a third party must not see. See the module's
     /// documentation for what leaves and what does not.
-    pub async fn ask_private(&self, question: &Question<'_>, veil: &Veil) -> Result<PrivateAnswer, RoutedError> {
+    pub async fn ask_private(
+        &self,
+        question: &Question<'_>,
+        veil: &Veil,
+    ) -> Result<PrivateAnswer, RoutedError> {
         match self.disclosure(question, veil)? {
             Disclosure::Kept { models } => Ok(PrivateAnswer {
                 answered: self.ask_among(models, question).await?,
@@ -224,12 +252,20 @@ impl Routed {
                 };
                 let mut answered = self.ask_among(models, &outgoing).await?;
                 answered.text = veiled.unveil.restore(&answered.text);
-                Ok(PrivateAnswer { answered, left_the_machine: true, covered: veiled.unveil.covered() })
+                Ok(PrivateAnswer {
+                    answered,
+                    left_the_machine: true,
+                    covered: veiled.unveil.covered(),
+                })
             }
         }
     }
 
-    async fn ask_among(&self, models: Vec<ModelId>, question: &Question<'_>) -> Result<Answered, RoutedError> {
+    async fn ask_among(
+        &self,
+        models: Vec<ModelId>,
+        question: &Question<'_>,
+    ) -> Result<Answered, RoutedError> {
         let started = Instant::now();
         let mut failures = Vec::new();
         for model in models {
@@ -246,9 +282,18 @@ impl Routed {
         Err(RoutedError::AllFailed(failures))
     }
 
-    async fn ask_one(&self, model: &ModelId, question: &Question<'_>, timeout: Duration) -> Result<Answered, RuntimeError> {
-        let descriptor = self.registry.get(model).ok_or(RuntimeError::ProviderMismatch)?;
-        let endpoint = ProviderEndpoint::for_model(descriptor)?.with_limits(timeout, 8 * 1024 * 1024)?;
+    async fn ask_one(
+        &self,
+        model: &ModelId,
+        question: &Question<'_>,
+        timeout: Duration,
+    ) -> Result<Answered, RuntimeError> {
+        let descriptor = self
+            .registry
+            .get(model)
+            .ok_or(RuntimeError::ProviderMismatch)?;
+        let endpoint =
+            ProviderEndpoint::for_model(descriptor)?.with_limits(timeout, 8 * 1024 * 1024)?;
         let client = InferenceClient::new(endpoint)?;
         let asked = Instant::now();
         let response = match &question.image {
@@ -257,17 +302,30 @@ impl Routed {
                     instruction: question.system,
                     context: question.user,
                     // The same borrowed picture: a keyframe is deliberately not cloneable.
-                    image: VisionImage { mime: image.mime, bytes: image.bytes, width: image.width, height: image.height },
+                    image: VisionImage {
+                        mime: image.mime,
+                        bytes: image.bytes,
+                        width: image.width,
+                        height: image.height,
+                    },
                     max_tokens: question.max_tokens,
                 };
-                client.vision_chat(descriptor, question.privacy, &request).await?
+                client
+                    .vision_chat(descriptor, question.privacy, &request)
+                    .await?
             }
             None => {
                 let request = ChatRequest {
                     model: provider_model_id(descriptor)?.to_string(),
                     messages: vec![
-                        ChatMessage { role: MessageRole::System, content: question.system.to_string() },
-                        ChatMessage { role: MessageRole::User, content: question.user.to_string() },
+                        ChatMessage {
+                            role: MessageRole::System,
+                            content: question.system.to_string(),
+                        },
+                        ChatMessage {
+                            role: MessageRole::User,
+                            content: question.user.to_string(),
+                        },
                     ],
                     max_tokens: Some(question.max_tokens),
                     temperature: Some(0.2),
@@ -276,7 +334,12 @@ impl Routed {
                 client.chat(descriptor, question.privacy, &request).await?
             }
         };
-        let text = response.choices.into_iter().next().map(|choice| choice.message.content).unwrap_or_default();
+        let text = response
+            .choices
+            .into_iter()
+            .next()
+            .map(|choice| choice.message.content)
+            .unwrap_or_default();
         if text.trim().is_empty() {
             return Err(RuntimeError::EmptyCompletion);
         }

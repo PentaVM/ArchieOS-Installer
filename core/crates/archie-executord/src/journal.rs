@@ -193,7 +193,7 @@ impl Journal {
             // Temporaries are a write that was interrupted. The rename never happened, so
             // the previous record — if any — is still the current one, and this file is
             // not evidence of anything.
-            if path.extension().map_or(true, |ext| ext != "json") {
+            if path.extension().is_none_or(|ext| ext != "json") {
                 continue;
             }
 

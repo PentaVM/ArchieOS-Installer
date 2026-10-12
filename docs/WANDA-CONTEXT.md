@@ -134,7 +134,8 @@ de inferencia usan un servidor sintético para verificar el recorrido, no pesos 
   servicio/voz en WSL con Claude/Xavi. La imagen ya subida a Sheriff no incluye esta rama.
 
 Reproducir suites Rust configurando `WANDA_TEST_GRAPH_BINARY` al CLI compilado y
-ejecutando `cargo test --manifest-path core/Cargo.toml -p archie-wanda`.
+ejecutando `cargo test --manifest-path core/Cargo.toml -p archie-wanda`, y la integración
+C++ explícita con `cargo test --manifest-path core/Cargo.toml -p archie-wanda --test graph -- --ignored`.
 Para navegador: `NODE_PATH` con Playwright, Edge instalado y
 `node --test display/wanda/tests/browser.cjs`. `WANDA_QA_DIR` elige el directorio de
 capturas; los datos son fixtures y no se usa una sesión privada del usuario.

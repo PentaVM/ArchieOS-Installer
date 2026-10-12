@@ -486,21 +486,49 @@ fn ipp_job_response(request_id: u32, status: u16, job_id: i32, state: i32) -> Ve
 #[test]
 fn ipp_job_codec_reads_a_job_and_refuses_what_is_not_one() {
     use archie_sentry::adapters::ipp::print::*;
-    let request = encode_print_job("ipp://192.168.1.232/ipp/print", 7, "Archie", "image/jpeg").unwrap();
+    let request =
+        encode_print_job("ipp://192.168.1.232/ipp/print", 7, "Archie", "image/jpeg").unwrap();
     assert_eq!(&request[..8], &[1, 1, 0, 2, 0, 0, 0, 7]);
     assert_eq!(request.last(), Some(&3));
-    assert!(encode_print_job("ipp://192.168.1.232/ipp/print", 7, "bad\nname", "image/jpeg").is_err());
-    assert_eq!(&encode_get_job_attributes("ipp://192.168.1.232/ipp/print", 8, 31).unwrap()[..4], &[1, 1, 0, 9]);
+    assert!(encode_print_job(
+        "ipp://192.168.1.232/ipp/print",
+        7,
+        "bad\nname",
+        "image/jpeg"
+    )
+    .is_err());
+    assert_eq!(
+        &encode_get_job_attributes("ipp://192.168.1.232/ipp/print", 8, 31).unwrap()[..4],
+        &[1, 1, 0, 9]
+    );
 
     let bytes = ipp_job_response(7, 0, 31, 5);
     let job = parse_job(&bytes, 7).unwrap();
-    assert_eq!((job.job_id, job.state, job.state.ended()), (31, JobState::Processing, false));
-    assert!(parse_job(&ipp_job_response(7, 0, 31, 9), 7).unwrap().state.ended());
+    assert_eq!(
+        (job.job_id, job.state, job.state.ended()),
+        (31, JobState::Processing, false)
+    );
+    assert!(parse_job(&ipp_job_response(7, 0, 31, 9), 7)
+        .unwrap()
+        .state
+        .ended());
     assert!(parse_job(&bytes, 8).is_err(), "another request's answer");
-    assert_eq!(parse_job(&ipp_job_response(7, 0x040a, 31, 5), 7), Err(AdapterError::Unsupported));
-    assert_eq!(parse_job(&ipp_job_response(7, 0x0506, 31, 5), 7), Err(AdapterError::Unavailable));
-    assert!(parse_job(&ipp_job_response(7, 0, 0, 5), 7).is_err(), "a job has a positive identifier");
-    assert!(parse_job(&ipp_job_response(7, 0, 31, 12), 7).is_err(), "no such state");
+    assert_eq!(
+        parse_job(&ipp_job_response(7, 0x040a, 31, 5), 7),
+        Err(AdapterError::Unsupported)
+    );
+    assert_eq!(
+        parse_job(&ipp_job_response(7, 0x0506, 31, 5), 7),
+        Err(AdapterError::Unavailable)
+    );
+    assert!(
+        parse_job(&ipp_job_response(7, 0, 0, 5), 7).is_err(),
+        "a job has a positive identifier"
+    );
+    assert!(
+        parse_job(&ipp_job_response(7, 0, 31, 12), 7).is_err(),
+        "no such state"
+    );
     for length in 0..bytes.len() {
         assert!(parse_job(&bytes[..length], 7).is_err());
     }
@@ -512,19 +540,40 @@ fn ipp_job_codec_reads_a_job_and_refuses_what_is_not_one() {
 async fn ipp_client_sends_the_document_once_and_follows_the_job() {
     use archie_sentry::adapters::ipp::print::JobState;
     let (url, task) = server(vec![
-        ("200 OK\r\nContent-Type: application/ipp", ipp_job_response(2, 0, 31, 3)),
-        ("200 OK\r\nContent-Type: application/ipp", ipp_job_response(3, 0, 31, 9)),
+        (
+            "200 OK\r\nContent-Type: application/ipp",
+            ipp_job_response(2, 0, 31, 3),
+        ),
+        (
+            "200 OK\r\nContent-Type: application/ipp",
+            ipp_job_response(3, 0, 31, 9),
+        ),
     ])
     .await;
     let client = IppClient::new(&format!("{url}/ipp/print")).unwrap();
-    let document = archie_sentry::page::pages("Hola, soy Archie.").unwrap().remove(0);
-    let accepted = client.print_job(2, "Archie", "image/jpeg", &document).await.unwrap();
+    let document = archie_sentry::page::pages("Hola, soy Archie.")
+        .unwrap()
+        .remove(0);
+    let accepted = client
+        .print_job(2, "Archie", "image/jpeg", &document)
+        .await
+        .unwrap();
     assert_eq!((accepted.job_id, accepted.state), (31, JobState::Pending));
     assert_eq!(client.job(3, 31).await.unwrap().state, JobState::Completed);
     let requests = task.await.unwrap();
     assert_eq!(requests.len(), 2);
-    let end = requests[0].windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+    let end = requests[0]
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .unwrap()
+        + 4;
     assert_eq!(&requests[0][end..end + 8], &[1, 1, 0, 2, 0, 0, 0, 2]);
-    assert!(requests[0].ends_with(&document), "the document follows the request, whole");
-    assert!(client.print_job(4, "Archie", "image/jpeg", &[]).await.is_err());
+    assert!(
+        requests[0].ends_with(&document),
+        "the document follows the request, whole"
+    );
+    assert!(client
+        .print_job(4, "Archie", "image/jpeg", &[])
+        .await
+        .is_err());
 }

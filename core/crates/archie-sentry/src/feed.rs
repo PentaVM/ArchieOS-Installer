@@ -441,7 +441,11 @@ impl Snapshot {
             push_fact(&mut facts, "name".to_owned(), &device.name);
             push_fact(&mut facts, "manufacturer".to_owned(), &device.manufacturer);
             push_fact(&mut facts, "model".to_owned(), &device.model);
-            push_fact(&mut facts, "services".to_owned(), &device.services.join(","));
+            push_fact(
+                &mut facts,
+                "services".to_owned(),
+                &device.services.join(","),
+            );
             push_fact(&mut facts, "seen_by".to_owned(), &device.seen_by.join(","));
             for (key, value) in &device.state {
                 push_fact(&mut facts, format!("state.{key}"), value);
@@ -754,7 +758,11 @@ pub fn from_passive_network(json: &str) -> Result<Vec<ContextEvent>, FeedError> 
                 ipv4_address,
                 current_candidates,
                 ..
-            } => (EventKind::DeviceStateChanged, ipv4_address, current_candidates),
+            } => (
+                EventKind::DeviceStateChanged,
+                ipv4_address,
+                current_candidates,
+            ),
         };
         passive_address(address)?;
         events.push(ContextEvent::new(
@@ -832,9 +840,10 @@ fn recognized_service(name: &str) -> Option<&'static str> {
         .copied()
 }
 
-fn parse_watchdog_line(
-    text: &str,
-) -> Result<(Ipv4Addr, Vec<&'static str>, u32, Option<i64>), ()> {
+/// A parsed watchdog line: address, reasons, count and the time it was seen.
+type ParsedWatchdog = (Ipv4Addr, Vec<&'static str>, u32, Option<i64>);
+
+fn parse_watchdog_line(text: &str) -> Result<ParsedWatchdog, ()> {
     let line: WatchdogLine = serde_json::from_str(text).map_err(|_| ())?;
     if line.udp_srcport != 5353 || line.dns_ptr_names.len() > WATCHDOG_MAX_NAMES_PER_LINE {
         return Err(());
@@ -858,9 +867,7 @@ fn parse_watchdog_line(
     }
     let frame_ms = match line.frame_time_epoch {
         None => None,
-        Some(epoch)
-            if epoch.is_finite() && epoch >= 0.0 && epoch * 1000.0 <= i64::MAX as f64 =>
-        {
+        Some(epoch) if epoch.is_finite() && epoch >= 0.0 && epoch * 1000.0 <= i64::MAX as f64 => {
             Some((epoch * 1000.0).round() as i64)
         }
         Some(_) => return Err(()),

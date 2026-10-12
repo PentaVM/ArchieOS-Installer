@@ -56,7 +56,14 @@ pub struct Conv {
 }
 
 impl Conv {
-    fn new(in_channels: usize, out_channels: usize, kernel: usize, stride: usize, pad: usize, random: &mut Random) -> Self {
+    fn new(
+        in_channels: usize,
+        out_channels: usize,
+        kernel: usize,
+        stride: usize,
+        pad: usize,
+        random: &mut Random,
+    ) -> Self {
         // Small random weights, scaled by how many numbers each output sums, so the first
         // pass through the network neither vanishes nor explodes.
         let fan_in = (in_channels * kernel * kernel) as f32;
@@ -102,8 +109,10 @@ impl Conv {
                                     continue;
                                 }
                                 let ix = ix - self.pad;
-                                let weight = self.weights
-                                    [((oc * self.in_channels + ic) * self.kernel + ky) * self.kernel + kx];
+                                let weight =
+                                    self.weights[((oc * self.in_channels + ic) * self.kernel + ky)
+                                        * self.kernel
+                                        + kx];
                                 sum += weight * input.data[input.at(ic, iy, ix)];
                             }
                         }
@@ -280,7 +289,9 @@ impl Detector {
             let mut out = layer.forward(activations.last().expect("an input"));
             // Rectified in between, plain at the head, where the numbers mean things.
             if index + 1 < self.layers.len() {
-                out.data.iter_mut().for_each(|value| *value = rectify(*value));
+                out.data
+                    .iter_mut()
+                    .for_each(|value| *value = rectify(*value));
             }
             activations.push(out);
         }
@@ -357,7 +368,9 @@ fn softmax_gap(values: &[f32], best: usize, runner: usize) -> u16 {
 fn suppress_overlaps(found: Vec<Prediction>) -> Vec<Prediction> {
     let mut kept: Vec<Prediction> = Vec::new();
     for candidate in found {
-        let overlaps = kept.iter().any(|other| overlap(&candidate.control, &other.control) > 0.4);
+        let overlaps = kept
+            .iter()
+            .any(|other| overlap(&candidate.control, &other.control) > 0.4);
         if !overlaps {
             kept.push(candidate);
         }
@@ -491,7 +504,11 @@ fn targets_of(controls: &[Box2]) -> Vec<Target> {
 }
 
 /// The loss of one tile, and the gradient at the head that goes with it.
-fn head_gradient(head: &Tensor, targets: &[Target], training: &Training) -> (f32, Tensor, u32, u32) {
+fn head_gradient(
+    head: &Tensor,
+    targets: &[Target],
+    training: &Training,
+) -> (f32, Tensor, u32, u32) {
     let mut grad = Tensor::zeros(head.channels, head.height, head.width);
     let mut loss = 0.0;
     let (mut found, mut missed) = (0_u32, 0_u32);
@@ -504,11 +521,17 @@ fn head_gradient(head: &Tensor, targets: &[Target], training: &Training) -> (f32
             let present = target.is_some();
             let logit = head.data[head.at(0, cy, cx)];
             let said = sigmoid(logit);
-            let weight = if present { training.presence_weight } else { 1.0 };
+            let weight = if present {
+                training.presence_weight
+            } else {
+                1.0
+            };
             // Cross entropy on whether something is there, weighted towards the few cells
             // where something is.
             let wanted = if present { 1.0 } else { 0.0 };
-            loss += weight * -(wanted * said.max(1e-7).ln() + (1.0 - wanted) * (1.0 - said).max(1e-7).ln()) / cells;
+            loss += weight
+                * -(wanted * said.max(1e-7).ln() + (1.0 - wanted) * (1.0 - said).max(1e-7).ln())
+                / cells;
             let at = grad.at(0, cy, cx);
             grad.data[at] = weight * (said - wanted) / cells;
             if present && said >= 0.5 {
@@ -599,7 +622,9 @@ impl Detector {
                     // Back through the rectifier, which passes as little backwards as it
                     // passed forwards.
                     if index > 0 {
-                        for (value, activation) in grad.data.iter_mut().zip(activations[index].data.iter()) {
+                        for (value, activation) in
+                            grad.data.iter_mut().zip(activations[index].data.iter())
+                        {
                             if *activation < 0.0 {
                                 *value *= LEAK;
                             }
@@ -654,11 +679,8 @@ impl Detector {
                     }
                     seen += hidden.channels;
                 }
-                let (sample_loss, _, _, _) = head_gradient(
-                    head,
-                    &targets_of(&sample.controls),
-                    &training,
-                );
+                let (sample_loss, _, _, _) =
+                    head_gradient(head, &targets_of(&sample.controls), &training);
                 held_back_loss += sample_loss;
             }
             let mean = said.iter().sum::<f32>() / said.len().max(1) as f32;
@@ -692,7 +714,8 @@ mod tests {
         let mut pixels = vec![235_u8; TILE_WIDTH * TILE_HEIGHT];
         for row in y..(y + height).min(TILE_HEIGHT) {
             for column in x..(x + width).min(TILE_WIDTH) {
-                let edge = row == y || column == x || row + 1 == y + height || column + 1 == x + width;
+                let edge =
+                    row == y || column == x || row + 1 == y + height || column + 1 == x + width;
                 pixels[row * TILE_WIDTH + column] = if edge { 40 } else { 150 };
             }
         }

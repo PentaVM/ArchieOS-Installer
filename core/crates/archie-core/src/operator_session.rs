@@ -6,7 +6,7 @@ use crate::{
 };
 use archie_policy::{Action, CapabilityRequest, Constraints, Principal, Resource, Scope};
 use archie_sentry::{
-    adapters::{ipp::IppAdapter, roku::Roku},
+    adapters::{ipp::IppAdapter, process::ProcessRunner, roku::Roku, router::RouterAdapter},
     contracts::{Command, CommandKind, Intent},
     engine::{CoreAuthority, EdgeAdapter, EngineError, ExecutionGuard},
     journal::Journal,
@@ -71,7 +71,7 @@ impl OperatorSession {
         }))
     }
     /// Registers every configured actuable resource with its owning adapter
-    /// route. Telemetry resources (HA telemetry, ONVIF cameras, Chromecasts)
+    /// route. Telemetry resources (HA telemetry, ONVIF cameras)
     /// never appear here, so no intent can name them.
     fn service(&self) -> Result<crate::sentry::SentryService, EngineError> {
         let sentry = &self.core.config.sentry;
@@ -97,11 +97,20 @@ impl OperatorSession {
                 resource_id: roku.resource_id.clone(),
                 edge_id: "local-core".into(),
                 adapter_id: "roku".into(),
-                paired: self.paired_device(
-                    &roku.resource_id,
-                    archie_state::DeviceClass::Television,
-                )?,
+                paired: self
+                    .paired_device(&roku.resource_id, archie_state::DeviceClass::Television)?,
                 capabilities: crate::sentry_config::RokuBinding::capabilities(),
+            })?;
+        }
+        for cast in &sentry.chromecasts {
+            registry.register(ResourceDescriptor {
+                resource_id: cast.resource_id.clone(),
+                edge_id: "local-core".into(),
+                adapter_id: "cast".into(),
+                paired: self
+                    .paired_device(&cast.resource_id, archie_state::DeviceClass::Television)?,
+                capabilities: archie_sentry::adapters::chromecast::Chromecast::CAPABILITIES
+                    .to_vec(),
             })?;
         }
         for printer in &sentry.printers {
@@ -123,11 +132,49 @@ impl OperatorSession {
                     resource_id: resource_id.clone(),
                     edge_id: "local-core".into(),
                     adapter_id: "mqtt".into(),
-                    paired: self.paired_device(
-                        resource_id,
-                        archie_state::DeviceClass::HomeAssistant,
-                    )?,
+                    paired: self
+                        .paired_device(resource_id, archie_state::DeviceClass::HomeAssistant)?,
                     capabilities: crate::sentry_config::mqtt_capabilities(binding),
+                })?;
+            }
+        }
+        if let Some(wol) = &sentry.wol {
+            for node in &wol.nodes {
+                registry.register(ResourceDescriptor {
+                    resource_id: node.resource_id.clone(),
+                    edge_id: "local-core".into(),
+                    adapter_id: "wol".into(),
+                    paired: self
+                        .paired_device(&node.resource_id, archie_state::DeviceClass::Host)?,
+                    capabilities: vec![CommandKind::WakeHost],
+                })?;
+            }
+        }
+        if let Some(android) = &sentry.android {
+            for node in &android.nodes {
+                registry.register(ResourceDescriptor {
+                    resource_id: node.resource_id.clone(),
+                    edge_id: "local-core".into(),
+                    adapter_id: "adb".into(),
+                    paired: self
+                        .paired_device(&node.resource_id, archie_state::DeviceClass::Mobile)?,
+                    capabilities: vec![
+                        CommandKind::AppLaunch,
+                        CommandKind::SessionLock,
+                        CommandKind::VolumeSet,
+                    ],
+                })?;
+            }
+        }
+        if let Some(router) = &sentry.router {
+            if let Some((_, capabilities)) = sentry.actuable_route(&router.resource_id) {
+                registry.register(ResourceDescriptor {
+                    resource_id: router.resource_id.clone(),
+                    edge_id: "local-core".into(),
+                    adapter_id: "router".into(),
+                    paired: self
+                        .paired_device(&router.resource_id, archie_state::DeviceClass::Router)?,
+                    capabilities,
                 })?;
             }
         }
@@ -161,6 +208,7 @@ impl OperatorSession {
                 )
                 .map_err(|_| EngineError::Authority)?,
             ),
+            "cast" => Box::new(sentry.cast_adapter().map_err(|_| EngineError::Authority)?),
             "ipp" => {
                 let printer = sentry
                     .printers
@@ -187,6 +235,39 @@ impl OperatorSession {
                     .adapter()
                     .map_err(|_| EngineError::Authority)?,
             ),
+            "wol" => Box::new(
+                sentry
+                    .wol
+                    .as_ref()
+                    .ok_or(EngineError::Authority)?
+                    .adapter()
+                    .map_err(|_| EngineError::Authority)?,
+            ),
+            "adb" => Box::new(
+                sentry
+                    .android
+                    .as_ref()
+                    .ok_or(EngineError::Authority)?
+                    .adapter()
+                    .map_err(|_| EngineError::Authority)?,
+            ),
+            "router" => {
+                let binding = sentry.router.as_ref().ok_or(EngineError::Authority)?;
+                let (config, capabilities) = binding
+                    .to_router_config()
+                    .map_err(|_| EngineError::Authority)?;
+                Box::new(
+                    RouterAdapter::new(
+                        "local-core",
+                        "router",
+                        &binding.resource_id,
+                        config,
+                        capabilities,
+                        Arc::new(ProcessRunner::default()),
+                    )
+                    .map_err(|_| EngineError::Authority)?,
+                )
+            }
             _ => return Err(EngineError::Authority),
         };
         Ok(adapter)

@@ -19,8 +19,8 @@
 
 use crate::action::{
     Key, KeyChord, Modifier, PointerButton, Region, StageAction, StageText, StrokePoint,
-    MAX_COORDINATE, MAX_SCROLL_STEPS, MAX_STROKE_PATHS, MAX_STROKE_POINTS,
-    MAX_FRAME_WIDTH, MAX_STROKE_POINTS_IN_ALL, MAX_TEXT_CHARS, MIN_FRAME_WIDTH,
+    MAX_COORDINATE, MAX_FRAME_WIDTH, MAX_SCROLL_STEPS, MAX_STROKE_PATHS, MAX_STROKE_POINTS,
+    MAX_STROKE_POINTS_IN_ALL, MAX_TEXT_CHARS, MIN_FRAME_WIDTH,
 };
 use crate::gate::AuthorizedStageCommand;
 use archie_types::Timestamp;
@@ -199,7 +199,9 @@ impl From<&StageAction> for WireAction {
             StageAction::Snapshot { region } => Self::Snapshot {
                 region: region.filter(|region| !region.is_empty()),
             },
-            StageAction::Frame { max_width } => Self::Frame { max_width: *max_width },
+            StageAction::Frame { max_width } => Self::Frame {
+                max_width: *max_width,
+            },
             StageAction::KeyDown { key } => Self::KeyDown { key: *key },
             StageAction::KeyUp { key } => Self::KeyUp { key: *key },
             StageAction::ButtonDown { button } => Self::ButtonDown { button: *button },
@@ -254,7 +256,10 @@ impl WireAction {
             }
             Self::Focus => true,
             // One key; a key alone is never one of the system's chords.
-            Self::KeyDown { .. } | Self::KeyUp { .. } | Self::ButtonDown { .. } | Self::ButtonUp { .. } => true,
+            Self::KeyDown { .. }
+            | Self::KeyUp { .. }
+            | Self::ButtonDown { .. }
+            | Self::ButtonUp { .. } => true,
             // A part of a window is two corners of it, and it has to be a real rectangle
             // before it is sealed: the compositor checks it again against the live window.
             Self::Snapshot { region: None } => true,

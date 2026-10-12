@@ -124,6 +124,8 @@ install -Dm755 "${cargo_target}/release/archie-lan" "${stage}/airootfs/usr/bin/a
 install -Dm755 "${cargo_target}/release/archie-netwatch" "${stage}/airootfs/usr/bin/archie-netwatch"
 install -Dm755 "${cargo_target}/release/archie-print" "${stage}/airootfs/usr/bin/archie-print"
 install -Dm644 "${repo_root}/distro/sentry/archie-netwatch.service" "${stage}/airootfs/etc/systemd/system/archie-netwatch.service"
+install -Dm644 "${repo_root}/distro/sentry/archie-netwatch.sysusers" "${stage}/airootfs/usr/lib/sysusers.d/archie-netwatch.conf"
+install -Dm644 "${repo_root}/distro/sentry/archie-sentry-follow.service" "${stage}/airootfs/etc/systemd/system/archie-sentry-follow.service"
 # REM's supervisor. The unit is installed and not enabled: with no jobs registered and
 # no trainer it would have nothing to pause, and recording is the owner's to turn on.
 install -Dm755 "${cargo_target}/release/archie-rem" "${stage}/airootfs/usr/bin/archie-rem"

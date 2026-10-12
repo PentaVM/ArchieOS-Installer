@@ -462,7 +462,7 @@ mod tests {
         let mut bridge = TaskBridge::new(link);
 
         assert_eq!(bridge.start(spec(id)), Outcome::AlreadyRunning(id));
-        assert!(bridge.start(spec(id)).holds_a_slot() || true);
+        let _ = bridge.start(spec(id));
     }
 
     #[test]

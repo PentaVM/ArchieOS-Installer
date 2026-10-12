@@ -24,6 +24,7 @@
 #include "sentry/store/wanda_projection.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <fstream>
 #include <cstdlib>
