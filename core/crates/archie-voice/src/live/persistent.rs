@@ -1138,4 +1138,29 @@ mod tests {
             "the original journal still references this crop"
         );
     }
+
+    #[test]
+    fn a_person_named_aloud_is_remembered_as_what_the_speaker_said() {
+        let dir = TestDir::new();
+        let mut memory = PersistentMemory::open(dir.0.clone()).expect("open memory");
+        let said_at = now_ms() - 40 * DAY_MS;
+        memory
+            .record_utterance("Pedro es mi hermano", said_at)
+            .expect("record speech");
+        memory
+            .classify_utterance("Pedro es mi hermano", Tier::T1, said_at + 1)
+            .expect("classify speech");
+        memory.compact_now().expect("compact");
+        drop(memory);
+
+        // Forty days later, after a restart, the sentence is still there and still reads as
+        // the speaker's report: nothing in this journal turns it into a verified tie.
+        let reopened = PersistentMemory::open(dir.0.clone()).expect("reopen memory");
+        let context = reopened.context(now_ms(), "¿Quién es Pedro?");
+        assert!(context.contains("Pedro es mi hermano"), "{context}");
+        assert!(context.contains("no verificado"), "{context}");
+        assert_eq!(reopened.events.len(), 1);
+        assert_eq!(reopened.events[0].subject, "speaker");
+        assert_eq!(reopened.events[0].relation, "said");
+    }
 }

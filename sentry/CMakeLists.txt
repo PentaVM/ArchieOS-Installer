@@ -189,6 +189,15 @@ if(SENTRY_BUILD_TESTS)
 
     add_test(NAME sentry.wanda COMMAND sentry-wanda)
 
+    add_executable(sentry-wanda-memory tests/test_wanda_memory.cpp)
+    target_link_libraries(sentry-wanda-memory PRIVATE sentry::store)
+    target_include_directories(sentry-wanda-memory PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    target_compile_options(sentry-wanda-memory PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Werror>
+    )
+
+    add_test(NAME sentry.wanda_memory COMMAND sentry-wanda-memory)
+
     # Draws what Wanda decided, by calling Wanda. Built with the tests because it is a
     # diagnostic, and must never enter the ISO.
     add_executable(sentry-wanda-snapshot tools/wanda_snapshot.cpp)
