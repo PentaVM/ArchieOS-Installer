@@ -19,12 +19,12 @@ deja commiteada y empujada en `claude/sentry-ola3-cast-focos-servidores` (PR #36
 
 ## Cola
 
-- [ ] **CI verde.** `cargo fmt` del workspace (sólo estilo), `#include <array>` en
+- [~] **CI verde.** `cargo fmt` del workspace (sólo estilo), `#include <array>` en
   `sentry/src/cli/main.cpp`, clippy `-D warnings` con toolchain 1.88, `cargo test
   --workspace`, `ctest` de cortex/sentry/visual/osm.
-- [ ] **Sentry 11 — primera respuesta reversible.** Aviso por voz/Observatory de una
+- [x] **Sentry 11 — primera respuesta reversible.** Aviso por voz/Observatory de una
   alerta, sin bloquear nada. Bloqueo o cuarentena sólo como `Intent` aprobado.
-- [ ] **Sentry 14 — IPv6.** `address-moved` con Neighbor Discovery (NA/NS) además de ARP.
+- [x] **Sentry 14 — IPv6.** `address-moved` con Neighbor Discovery (NA/NS) además de ARP.
 - [ ] **Sentry 7 — baselines por dispositivo.** Mecanismo (volumen y destinos habituales,
   alerta por desviación) con prueba; la tasa de falsos positivos queda sin medir.
 - [ ] **Sentry 13 — unidad systemd.** `systemd-analyze verify` y endurecimiento de
@@ -33,3 +33,10 @@ deja commiteada y empujada en `claude/sentry-ola3-cast-focos-servidores` (PR #36
   `archie-sentry` y `archie-cerebra`, timeouts y límites de tamaño en E/S de red.
 
 ## Hecho
+
+- CI: fmt + clippy `-D warnings` del workspace con 1.88, `#include <array>`, la cgroup raíz
+  (`0::/`) como `Unsupported` y el `Content-Length` de la prueba 429
+  (`223081f`..`26b10f1`). Pendiente: confirmar en verde en GitHub.
+- IPv6 en `address-moved` por Neighbor Advertisement (`e41b83d`).
+- Avisos al dueño: `archie-notices`, follower, `sentry-notices`, `/api/notices`, lock
+  entre escritores, `[sentry.response]`; `docs/SENTRY-RESPUESTA.md`.

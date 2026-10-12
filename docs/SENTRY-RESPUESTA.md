@@ -1,0 +1,81 @@
+# Sentry — la primera respuesta: avisar al dueño
+
+Hasta ahora todo lo que Sentry veía terminaba en el Vault y en las trazas de Cerebra.
+Nadie se enteraba. La primera respuesta es **avisar**, y es la única que se toma sin
+preguntar: un aviso no cambia nada en la red. Lo peor que hace un aviso equivocado es
+interrumpir, y acusarlo lo termina. Bloquear o poner en cuarentena un equipo es otro
+tipo de acto y va siempre como `Intent` aprobado (`archie-sentry`), nunca por aquí.
+
+## Cómo fluye
+
+```
+archie-netwatch ──► alerts.jsonl ──► archie sentry-follow ──┬─► Vault + pase de Cerebra (como antes)
+                                                            └─► <state>/cerebra/notices.json
+                                                                   │
+                         archie sentry-notices (listar / --ack) ◄──┤
+                         archie-displayd GET /api/notices ◄────────┤  (Observatory)
+                         voz: lee `spoken`, marca `spoken_ms` ◄────┘  (contrato, ver abajo)
+```
+
+- El follower publica **antes** de que Cerebra razone, y aunque no pueda: un nodo sin
+  modelo local también avisa.
+- El tablón se guarda antes que el journal del follower. Si hay un corte, se releen las
+  alertas, y como el id de cada aviso sale de su contenido (SHA-256), nada se publica
+  dos veces.
+- Se guardan como máximo 256 avisos. Primero salen los acusados más viejos; los
+  pendientes sólo salen cuando ya no queda otra cosa.
+- El archivo tiene modo 0600 y se escribe de forma atómica. Toda lectura-modificación-escritura
+  pasa por `Board::update`, con lock exclusivo sobre `notices.lock`: el follower,
+  `--ack` y la voz no se pisan (probado con 8 hilos y 80 avisos).
+- Un tablón dañado se aparta como `notices.bad` y se empieza uno vacío. El informe lo
+  dice (`notices_reset`). Displayd no lo muestra como vacío: responde `unavailable` con
+  el error.
+
+## Qué avisa
+
+`[sentry.response] min_severity` = `notice` | `warning` (por defecto) | `high`. Por
+debajo del umbral la alerta queda registrada en Cerebra, pero no interrumpe. Con el
+valor por defecto, un dispositivo nuevo o un cambio normal de DHCP no avisan; un
+port-scan, un túnel DNS o alguien reclamando la dirección del router, sí.
+
+## Dos textos por aviso
+
+- `detail`: lo que vio la auditoría, para una pantalla que el dueño está mirando.
+- `spoken`: una frase fija por regla. No nombra ningún dispositivo, dirección ni nombre
+  DNS, así que puede decirse en voz alta en una sala compartida. Ejemplo: *«Sentry: otro
+  equipo está reclamando la dirección del router; el tráfico podría estar pasando por
+  él.»*
+
+## Contrato para la voz (pendiente de quien lleva `archie-voice`)
+
+El modo `live` de `archie-voice` necesita el SDK de NeMo y no compila en el entorno
+donde se hizo esto, así que no se tocó. Lo que la voz tiene que hacer:
+
+1. `Board::load(<state>/cerebra/notices.json)` y `board.unspoken()`: los pendientes no
+   dichos, primero los más graves.
+2. Decir `notice.spoken`, **y nada más**, respetando el turno de palabra y el silencio.
+3. `Board::update(path, |b| b.mark_spoken(&id, now_ms))`.
+
+Un aviso acusado nunca se dice. El dueño acusa con `archie sentry-notices --ack <id>`
+o `--ack-all`.
+
+## Comandos
+
+```
+archie sentry-follow --once                 # publica avisos nuevos (además de lo de siempre)
+archie sentry-notices                       # pendientes
+archie sentry-notices --all                 # también los acusados
+archie sentry-notices --ack 657cc778        # prefijo único de 6+ caracteres
+archie sentry-notices --ack-all
+curl 127.0.0.1:7666/api/notices             # lo que lee el Observatory
+```
+
+## Qué no está verificado
+
+- No hay panel QML que dibuje `/api/notices`: la GUI es de Claude/Xavi.
+- La voz no los dice todavía (ver el contrato).
+- Displayd corre sin privilegios. Si el tablón pertenece a otro usuario con modo 0600,
+  `/api/notices` responde `unavailable` con el error de permisos; en el despliegue hay
+  que darle lectura (grupo) o correr ambos con el mismo usuario.
+- Las pruebas son con alertas sintéticas y archivos temporales. Nada se probó contra
+  tráfico real.

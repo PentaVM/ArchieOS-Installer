@@ -125,8 +125,15 @@ fixture se reporta como fixture, no como dispositivo real. Un PR por avance, con
   flujo normal de intents. `archie-print` queda como herramienta de operador.
 - [ ] **10. Imprimir en una impresora real.** La Brother DCP-T720DW no respondía. *Hecho
   cuando:* sale una página y el recibo dice `completed`, con el formato que aceptó.
-- [ ] **11. Respuesta.** Hoy todo es observación. Primera respuesta reversible: aviso
+- [~] **11. Respuesta.** Hoy todo es observación. Primera respuesta reversible: aviso
   por voz y por el Observatory. Bloqueo o cuarentena solo como `Intent` aprobado.
+  **Parcial (Claude, 2026-10-12):** tablón de avisos del dueño (`archie-notices`), que
+  `sentry-follow` alimenta aunque no haya modelo local. Lo leen `archie sentry-notices`
+  (listar y acusar) y `GET /api/notices` de displayd. Cada aviso trae una frase hablable
+  que no nombra nada de la red. Umbral en `[sentry.response] min_severity`. Faltan el
+  panel QML (GUI de Claude/Xavi) y que la voz los diga: el contrato está en
+  [`SENTRY-RESPUESTA.md`](SENTRY-RESPUESTA.md). El bloqueo como `Intent` sigue sin
+  existir.
 - [~] **12. Control más allá de Home Assistant.** **Parcial (Kimi, 2026-10-11):** Roku
   ECP actúa (teclas con postcondición medible y lanzamiento de apps, verificado contra el
   propio dispositivo); MQTT actúa switches/luces/clima con estado medido; ONVIF observa
