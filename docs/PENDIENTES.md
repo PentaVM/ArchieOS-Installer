@@ -60,12 +60,16 @@ No sustituye el trabajo de Kimi ni prueba cobertura universal de IoT.
   que se hayan enumerado sus dispositivos hijos.
 - [ ] Captura pasiva en la LAN física del host y tráfico de otros nodos mediante
   gateway/espejo. **2026-10-13:** TShark 4.6.9 local en Windows y prueba con TShark
-  real/PCAP sintético pasadas; falta Npcap y validación de captura física. TShark 4.7.4,
+  real/PCAP sintético pasadas. **Npcap 1.89 instalado y captura LAN del host verificada:**
+  Sentry seleccionó la interfaz por su alcance actual y procesó 565 tramas en 20 s,
+  con 4 registros MAC y 4 avisos `new-device`; salida 0. No son 4 IoT identificados.
+  Falta captura desde gateway/espejo para tráfico entre otros nodos. TShark 4.7.4,
   Nmap y tcpdump disponibles en ArchieOS-Builder; captura Sentry real en `eth0`
   verificada, con alcance virtual WSL. No demuestra cobertura de toda la casa.
   Seguimiento: `archie-netwatch live --seconds 1..86400` guarda estado al acabar
   aun sin paquetes; prueba real extcap de inactividad pasada. Mantener timeout
-  de proceso en Core. Npcap/PktMon necesitan elevación en este host; comparación
+  de proceso en Core. Npcap ya permite captura desde la sesión del host; PktMon
+  dio acceso denegado en la sesión no elevada. Comparación
   de WinDivert, PcapPlusPlus y NDISAPI en el informe del router.
 - [ ] Canal administrativo del router real: no hay credencial/clave en Vault.
   SSH abierto (Dropbear 2019.78), acceso autenticado/firmware exacto sin verificar.
