@@ -16,9 +16,11 @@ Un solo PR de diseño abierto a la vez; las siguientes tandas de diseño se suma
 - Se retiró el botón «Antes» (`toggleCompare`, aspecto V2) del orbe nativo.
 
 ## No verificado (honesto)
-- Sin Qt/CMake en la máquina de Xavi: los cambios de `display/native` (C++/QML, incluida la carga
-  de presets JSON y el CMake) no se compilaron ni se vieron en pantalla. Los valores de los tres presets son una aproximación de diseño a
-  revisar en el hardware real.
+- Compilado y arrancado en Windows (MSVC 2022, Qt 6.8.3, CMake/Ninja): `archie-display` compila sin
+  errores, abre la ventana y responde `ok` a `preset sphere` por el canal 7668; el orbe se dibuja.
+  Sin el observador del sistema (puerto 7666) no hay nodos, así que **no se han visto** los nodos
+  de cada preset en pantalla; los valores de `sphere`, `orb` y `neural` siguen siendo una
+  aproximación de diseño a revisar con datos reales. Solo se probó en Windows (Qt/D3D), no en Linux/WSLg.
 - No se portaron aún los nodos con halo/formas, los estilos de enlace ni el cerebro vivo
   (emisiones dentro de los enlaces) de Archie2: requieren shaders nuevos en `display/native/shaders`.
 
