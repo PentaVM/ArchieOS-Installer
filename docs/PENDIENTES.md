@@ -303,6 +303,16 @@ adicionales fuera de main**, último del 2026-10-12 a las 07:12 de Santiago. No 
 un PR nuevo abierto para ese rediseño. La rama diverge: 4 commits delante y 89
 detrás de main; requiere integrar contra la base actual.
 
+**PR40 sí existe para el Orbe nativo**, en otra rama: `design/orb-presets-cli`,
+head `c65543d`, Draft de Xavi creado el 2026-10-13. Añade CLI `archie visual` y
+herramienta de voz `orb_preset`, con presets field/sphere/orb/neural; 9 archivos,
++221/-90 líneas en esta primera tanda. CI Rust/native-contracts verde, pero el job
+no compila `display/native`; Xavi declara que C++/QML no se compiló ni renderizó.
+Los shaders para halos/formas/enlaces/cerebro vivo siguen pendientes. Este PR no
+contiene los cuatro commits de la GUI Archie Mac. Revisar antes de fusionar la
+retirada de cinematic/overlay y crown/atlas/dense, por compatibilidad con funciones
+existentes. Enlace: [PR40](https://github.com/PentaVM/ArchieOS-Nvidia/pull/40).
+
 **Diseño nuevo sí existe:** Archie Mac, grafito oscuro, dock/barra, 81 iconos,
 Inter y Space Grotesk empaquetadas, superficies opacas/cristal y cuatro perfiles
 de movimiento con transiciones QML. Además: Alt-Tab, notificaciones/autorización,

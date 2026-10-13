@@ -93,3 +93,31 @@ transport from actual input provenance. Visual integration is not universal E2E.
 Updated pending design status so the new branch is not described as nonexistent.
 No GUI implementation or branch merge performed. Functional Sentry head f7b7954 CI
 rust/native-contracts passed before this documentation-only follow-up.
+
+## New user steering: PR40, native Orb
+
+Owner pointed out PR40 during the audit. Queried GitHub directly and attached it:
+design(orb): presets y escenas controlados por CLI, sin overlays, Draft/open,
+XaviCottier, design/orb-presets-cli, c65543d78458a0106495861f23ca176bd1856aaa,
+created2026-10-13T09:01:54Z. Separate from the large GUI branch above.9 files,
++221/-90, one commit at the observed head. No merge or edits of this branch.
+
+Read CLI visual.rs, live voice tool changes, DisplayControl C++/header, Main.qml,
+LumenField profileOverrides and the author's ledger. Adds archie visual scene/preset/
+list and orb_preset through existing loopback channel, validated names. field has
+no overrides and original defaults are unchanged by the diff. sphere/orb/neural
+adjust existing renderer parameters (radial/category/hierarchy pull, scale,
+membrane opacity, particles, node size, link budget/opacity, bloom/rotation).
+No new shader code, halos/node shapes, styled links or live-brain emissions yet.
+
+Compatibility change: removes voice orb_cinematic/orb_overlay, native protocol
+cinematic/overlay and crown/atlas/dense presets. This is intentionally tested as
+rejected, not backwards-compatible aliases. Existing capability preservation needs
+review before merge; field-only preservation is not all-function preservation.
+
+Rust and native-contracts CI green at c65543d. Inspected ci.yml: native job builds
+cortex, sentry, display/visual and display/osm, not display/native (Qt). Therefore
+green CI does not prove the modified C++/QML display compiles or renders. Author
+reports CLI30 tests/check-voice; we did not rerun or render this PR. No actual new
+Orb screenshot is present in the9-file delivery; GUI screenshots above are the
+separate sample shell, not a render of these Orb presets.
