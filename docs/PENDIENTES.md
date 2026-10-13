@@ -59,7 +59,14 @@ No sustituye el trabajo de Kimi ni prueba cobertura universal de IoT.
   incluidas redes aisladas y equipos dormidos; los servicios de un hub no prueban
   que se hayan enumerado sus dispositivos hijos.
 - [ ] Captura pasiva en la LAN física del host y tráfico de otros nodos mediante
-  gateway/espejo. TShark no está disponible para Sentry en el Windows probado.
+  gateway/espejo. **2026-10-13:** TShark 4.6.9 local en Windows y prueba con TShark
+  real/PCAP sintético pasadas; falta Npcap y validación de captura física. TShark 4.7.4,
+  Nmap y tcpdump disponibles en ArchieOS-Builder; captura Sentry real en `eth0`
+  verificada, con alcance virtual WSL. No demuestra cobertura de toda la casa.
+- [ ] Canal administrativo del router real: no hay credencial/clave en Vault.
+  SSH abierto (Dropbear 2019.78), acceso autenticado/firmware exacto sin verificar.
+  Reutilizar el adaptador router existente; faltan sonda CLI, sonda real en Core y descubrimiento de
+  control URL IGD. Opciones, herramientas y límites: [`SENTRY-ROUTER-AUDIT.md`](SENTRY-ROUTER-AUDIT.md).
 - [ ] Identificar la impresora desde evidencia de Sentry y completar la impresión
   autorizada con recibo de trabajo; la búsqueda actual no obtuvo una impresora.
 
