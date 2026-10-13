@@ -434,6 +434,17 @@ impl Snapshot {
                 .parse::<IpAddr>()
                 .map_err(|_| FeedError::Malformed("invalid device address"))?;
             validate_subject(&device.address)?;
+            // Reading a system cache now does not mean the peer was seen now.
+            // Candidates remain available to Core's inventory/world view, but do
+            // not become live DeviceSeen events in the context feeder.
+            if !device.seen_by.is_empty()
+                && device
+                    .seen_by
+                    .iter()
+                    .all(|source| source == "neighbor-cache")
+            {
+                continue;
+            }
             let mut facts = BTreeMap::new();
             if let Some(class) = &device.class {
                 push_fact(&mut facts, "class".to_owned(), class);

@@ -69,7 +69,7 @@ pub fn classify(evidence: &Evidence) -> Option<DeviceAdapterClass> {
     {
         return Some(Television);
     }
-    if evidence.offers(&["_companion-link._tcp", "_apple-mobdev2._tcp"]) {
+    if evidence.offers(&["_apple-mobdev2._tcp"]) {
         return Some(Mobile);
     }
     if evidence.says("mediaserver")
@@ -134,7 +134,7 @@ mod tests {
             Some(DeviceAdapterClass::Host)
         );
         assert_eq!(
-            classify(&mdns(&["_companion-link._tcp"])),
+            classify(&mdns(&["_apple-mobdev2._tcp"])),
             Some(DeviceAdapterClass::Mobile)
         );
     }
@@ -147,5 +147,10 @@ mod tests {
         );
         assert_eq!(classify(&mdns(&["_http._tcp", "_raop._tcp"])), None);
         assert_eq!(classify(&Evidence::default()), None);
+    }
+
+    #[test]
+    fn companion_link_alone_does_not_identify_a_mobile_device() {
+        assert_eq!(classify(&mdns(&["_companion-link._tcp"])), None);
     }
 }

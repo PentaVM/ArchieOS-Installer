@@ -15,13 +15,14 @@
 //!   An answer from a public address is dropped, and a description is fetched only from
 //!   the host that announced it. Scanning the internet tells you a device is exposed,
 //!   which is a finding about somebody else's network (RFC-008).
-//! * **Probe.** No port scan, no address sweep, no default passwords, no vendor cloud. A
-//!   device that does not announce itself is not found, and that is the intended limit.
+//! * **Unbounded probes.** TCP presence is opt-in, private, at most 256 addresses,
+//!   sixteen workers, and sends no application payload. No passwords or vendor cloud.
+//!   The neighbor cache is observed by Sentry itself with its cached provenance.
 //! * **Act.** Everything here observes. Changing a device's state is
 //!   `DeviceAdapterOperation::ApplyDesiredState`, which needs an operator's grant and is
 //!   not in this crate.
-//! * **Name people.** A phone on the network is a device of class `mobile`. Whose it is, is
-//!   not asked.
+//! * **Name people.** Published device types are claims. Neither Spotify playback nor
+//!   a hardware address proves who owns a device.
 
 #![forbid(unsafe_code)]
 
@@ -31,9 +32,13 @@ pub mod classify;
 pub mod http;
 pub mod inventory;
 pub mod mdns;
+pub mod neighbors;
+pub mod presence;
 pub mod roku;
+pub mod spotify;
 pub mod ssdp;
 pub mod upnp;
+pub mod wsdiscovery;
 
 pub use inventory::{Device, Inventory};
 

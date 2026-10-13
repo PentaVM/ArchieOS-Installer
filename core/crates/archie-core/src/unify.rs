@@ -443,9 +443,15 @@ pub fn unify(
                 .address
                 .parse()
                 .map_err(|_| UnifyError::Malformed("inventory device address"))?;
+            let cache_only = !device.seen_by.is_empty()
+                && device
+                    .seen_by
+                    .iter()
+                    .all(|source| source == "neighbor-cache");
+            let observed_at = (!cache_only).then_some(inventory.scanned_unix);
             let mut fact = SourceFact {
-                first_seen_unix: Some(inventory.scanned_unix),
-                last_seen_unix: Some(inventory.scanned_unix),
+                first_seen_unix: observed_at,
+                last_seen_unix: observed_at,
                 ..SourceFact::default()
             };
             if !device.name.is_empty() {

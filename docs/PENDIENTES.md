@@ -37,6 +37,20 @@ tiene y dónde está el detalle. Se marca aquí cuando se cierra.
 
 ## 3. Sentry — Kimi K3 trabaja aquí
 
+**Descubrimiento ampliado (2026-10-12, Codex):** rama `codex/sentry-discovery`;
+[`SENTRY-LAN.md`](SENTRY-LAN.md) y [`bitácora`](../_dev/SENTRY-DISCOVERY-2026-10-12.md).
+Incluye mDNS multicast/consultas explícitas, WS-Discovery, TCP acotado y candidatos
+ARP observados por Sentry. Mantiene el inventario y las autoridades existentes.
+No sustituye el trabajo de Kimi ni prueba cobertura universal de IoT.
+
+- [ ] Validar bombillas, hubs y dispositivos Matter/Thread/Zigbee/Bluetooth reales,
+  incluidas redes aisladas y equipos dormidos; los servicios de un hub no prueban
+  que se hayan enumerado sus dispositivos hijos.
+- [ ] Captura pasiva en la LAN física del host y tráfico de otros nodos mediante
+  gateway/espejo. TShark no está disponible para Sentry en el Windows probado.
+- [ ] Identificar la impresora desde evidencia de Sentry y completar la impresión
+  autorizada con recibo de trabajo; la búsqueda actual no obtuvo una impresora.
+
 **Lo último (2026-10-12):** [`HANDOFF-2026-10-12-SENTRY-OLA3.md`](HANDOFF-2026-10-12-SENTRY-OLA3.md),
 con la lista de validación en hardware, en orden, y las decisiones pendientes de Nelson.
 
