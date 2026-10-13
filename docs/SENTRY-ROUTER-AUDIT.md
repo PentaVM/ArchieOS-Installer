@@ -106,15 +106,18 @@ el exploit. No hay evidencia de un takeover sin credenciales para este equipo.
 2. Sobre la interfaz cuyo alcance se quiere verificar:
 
    ```sh
-   archie-netwatch live --interface eth0 --state-dir PRIVATE_DIR/netwatch --learn 0
+   archie-netwatch live --interface eth0 --state-dir PRIVATE_DIR/netwatch --learn 0 --seconds 60
    nmap -sT -sV --version-light -Pn -n -p 22,80,443 --max-rate 5 \
      --max-retries 1 --host-timeout 45s -oX PRIVATE_DIR/router-services.xml "$SENTRY_ROUTER"
    ```
 
-   `SENTRY_ROUTER` se obtiene del inventario, no de una constante. Esta sesión usó
-   timeout externo de 60 s para Nmap, esperó 10 s adicionales y detuvo el hijo TShark
-   con SIGINT para que Sentry persistiera el estado. El CLI de captura todavía no
-   ofrece un parámetro propio de duración acotada. No es un servicio instalado.
+   `SENTRY_ROUTER` se obtiene del inventario, no de una constante. La primera sesión
+   usó timeout externo de 60 s para Nmap, esperó 10 s adicionales y detuvo el hijo
+   TShark con SIGINT. El seguimiento añade `--seconds 1..86400`, que utiliza el
+   autostop de TShark desde el inicio de captura y guarda el estado al terminar,
+   incluso sin paquetes. No sustituye el timeout de inicio/proceso de Core ni
+   instala un servicio. Sin ese flag conserva el modo continuo. Los límites
+   inválidos/incompletos y opciones live desconocidas se rechazan antes de iniciar.
 3. Ejecutar `archie-netwatch report --state-dir PRIVATE_DIR/netwatch`. Registrar
    interfaces, códigos de salida, tramas procesadas/asignadas, avisos y herramientas.
    Distinguir captura virtual, física y del gateway. No publicar direcciones/MACs.
@@ -122,6 +125,29 @@ el exploit. No hay evidencia de un takeover sin credenciales para este equipo.
    Medir cobertura contra dispositivos despiertos/dormidos conocidos por el dueño,
    CPU/RAM, pérdida de paquetes y propagación al feeder bajo Core. Evaluar segmentación
    con nodos controlados y ejercicios PCAP reproducibles antes de ensayos en vivo.
+
+## Comparación de motores Windows — seguimiento
+
+| Proyecto | Uso adecuado | Decisión para ArchieOS |
+| --- | --- | --- |
+| [Npcap](https://github.com/nmap/npcap) | Captura libpcap usada por TShark; interfaces locales Ethernet/Wi-Fi según hardware | Mantener para el backend existente. Instalador firmado listo; driver todavía ausente. |
+| [WinDivert](https://github.com/basil00/WinDivert/wiki/WinDivert-Documentation) | Interceptar tráfico IP/flows/sockets del host o en tránsito; filtrar/modificar/reinyectar | Candidato distinto para control del tráfico del host. También exige administrador; su API de capa IP no sustituye la evidencia Ethernet/ARP del monitor actual. No instalado ni integrado. |
+| [PcapPlusPlus](https://github.com/seladb/PcapPlusPlus) | API C++ multiplataforma de captura/parseo sobre varios motores | Útil si se mide la necesidad de un colector nativo C++. Envuelve Npcap/libpcap/WinDivert y otros; no elimina los requisitos del motor ni justifica sustituir TShark sin benchmark. |
+| [Windows Packet Filter / NDISAPI](https://github.com/wiresock/ndisapi) | Captura/filtrado a nivel Ethernet con otro driver y API propia | Requiere otro backend y despliegue de driver. No hay benchmark ni integración que pruebe una ventaja para Sentry aquí. |
+| [PktMon](https://learn.microsoft.com/en-us/windows-server/networking/technologies/pktmon/pktmon) + [etl2pcapng](https://github.com/microsoft/etl2pcapng) | Diagnóstico de red del host, trazas ETL y conversión a PCAPNG | Alternativa de diagnóstico ya incluida en Windows, sin instalar Npcap. En esta sesión `pktmon status` da acceso denegado; no resuelve la falta de elevación. No integrado como productor continuo. |
+
+Verificación adicional: el lanzamiento directo del instalador Npcap devuelve
+Win32 **740 (requiere elevación)** y Appinfo está activo. Se envió la solicitud
+normal `runas` mediante `Shell.Application`; no se observó instalación completada.
+No se deshabilitó UAC ni se alteraron controles de Windows. Prueba del nuevo límite
+con interfaz extcap `udpdump` y TShark real: duración de captura 2 s, proceso 4,65 s
+incluyendo arranque/cierre, cero paquetes, salida 0, `state.json` y `told.json`
+persistidos. Es prueba de terminación en inactividad, no captura de la LAN física.
+
+Decisión: Npcap + TShark para la integración presente; evaluar PktMon como fallback
+de diagnóstico y PcapPlusPlus para un colector nativo después de medir CPU, memoria,
+latencia, pérdida y cobertura de campos. WinDivert sería otra capacidad de actuación,
+bajo las autoridades existentes, no un reemplazo automático del observador.
 
 ## Fuentes primarias y siguientes integraciones
 

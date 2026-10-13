@@ -6,11 +6,17 @@ what each device does on it. From that record it raises alerts.
 ```bash
 archie-netwatch interfaces
 archie-netwatch live --interface eth0 --state-dir /var/lib/archie/netwatch
+archie-netwatch live --interface eth0 --state-dir ./audit --learn 0 --seconds 30
 archie-netwatch read capture.pcapng --state-dir ./audit
 archie-netwatch report --state-dir /var/lib/archie/netwatch --alerts 50
 ```
 
-`live` runs until it is stopped. `read` audits a capture file by the same rules, on the
+`live` runs until it is stopped, or until `--seconds 1..86400` ends the capture.
+The optional limit uses TShark's autostop and saves state at EOF even if no packets
+arrive. It measures capture time, not subprocess startup: Core must retain its
+process timeout, especially for a remote extcap connection. Invalid/missing limits
+and unknown live options are rejected before creating state or starting TShark.
+`read` audits a capture file by the same rules, on the
 frames' own clock. `report` prints the devices and the most recent alerts as JSON.
 
 ## What it reads
@@ -36,8 +42,10 @@ Both `told.json` and `state.json` load through bounded parsers: a file beyond th
 caps (4096 devices, 512 names, 64 peers, 16 addresses per device, 256 MiB) is refused
 with an error that names the cap, never loaded partly.
 
-All three are written for their owner only (mode 0600). Which names a device asks for
-says a great deal about the people who use it.
+On Unix the files are created with mode 0640 (subject to umask), so their owner's
+group can also read them; the service uses group `archie`. Which names a device asks
+for says a great deal about the people who use it. Windows deployments need account
+ACLs; Unix mode bits are not a Windows privacy guarantee.
 
 ## Alerts
 
@@ -83,8 +91,10 @@ under these settings with `NoNewPrivileges=yes`.
 ## What it can see
 
 A machine on a switch sees its own traffic, broadcasts and multicast: ARP, DHCP, mDNS,
-and whatever is addressed to it. That is enough for `new-device` and `address-moved` for
-the whole network, and for the other rules only for this machine. To audit every
+and whatever is addressed to it. That can reveal `new-device` and `address-moved`
+for nodes whose announcements actually reach it, not every node in the whole network.
+Sleeping devices, client isolation and VLANs can leave gaps. WSL's virtual interface
+may expose only its virtual neighbors and transit traffic. To audit other
 device's traffic the node has to be where that traffic passes: the router or gateway
 itself, a mirror port on the switch, or a tap.
 

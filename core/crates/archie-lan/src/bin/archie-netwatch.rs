@@ -2,12 +2,13 @@
 //!
 //! ```text
 //! archie-netwatch interfaces
-//! archie-netwatch live --interface eth0 --state-dir DIR [--learn 600] [--gateway 192.168.1.1] [--filter BPF]
+//! archie-netwatch live --interface eth0 --state-dir DIR [--learn 600] [--gateway 192.168.1.1] [--filter BPF] [--seconds 30]
 //! archie-netwatch read FILE.pcapng --state-dir DIR [--gateway 192.168.1.1]
 //! archie-netwatch report --state-dir DIR [--alerts 50]
 //! ```
 //!
-//! `live` runs until stopped: TShark captures, each frame is audited, alerts are appended
+//! `live` runs until stopped, or until its optional capture duration expires: TShark
+//! captures, each frame is audited, alerts are appended
 //! to `DIR/alerts.jsonl` as they are raised, what is known of each device is kept in
 //! `DIR/state.json`, and which alerts were already raised in `DIR/told.json`, so a
 //! restart does not repeat them. `read` audits a capture file the same way. `report`
@@ -27,10 +28,41 @@ const SAVE_EVERY: Duration = Duration::from_secs(30);
 
 fn take(arguments: &mut Vec<String>, flag: &str) -> Option<String> {
     let at = arguments.iter().position(|a| a == flag)?;
-    (at + 1 < arguments.len()).then(|| {
-        arguments.remove(at);
-        arguments.remove(at)
-    })
+    arguments
+        .get(at + 1)
+        .is_some_and(|value| !value.starts_with("--"))
+        .then(|| {
+            arguments.remove(at);
+            arguments.remove(at)
+        })
+}
+
+/// Let TShark stop the capture even when stdout receives no packets. Its normal
+/// EOF path then saves the audit; Core still owns process/startup timeouts.
+fn live_source(arguments: &mut Vec<String>) -> Result<Vec<String>, String> {
+    let interface = take(arguments, "--interface").ok_or_else(|| {
+        "live needs --interface NAME; `archie-netwatch interfaces` lists them".to_string()
+    })?;
+    let mut source = vec!["-i".to_string(), interface, "-s".into(), SNAPLEN.into()];
+    if let Some(filter) = take(arguments, "--filter") {
+        source.extend(["-f".to_string(), filter]);
+    }
+    if let Some(seconds) = take(arguments, "--seconds") {
+        let seconds = seconds
+            .parse::<u64>()
+            .ok()
+            .filter(|value| (1..=86_400).contains(value))
+            .ok_or_else(|| "--seconds must be an integer from 1 to 86400".to_string())?;
+        source.extend(["-a".to_string(), format!("duration:{seconds}")]);
+    }
+    // Never silently turn a misspelled/missing limit into a continuous capture.
+    if arguments.len() != 1 {
+        return Err(format!(
+            "unknown or incomplete live options: {}",
+            arguments[1..].join(" ")
+        ));
+    }
+    Ok(source)
 }
 
 /// Opens a file for the audit's own account and its group, never for others. Under the
@@ -214,14 +246,13 @@ fn main() -> ExitCode {
             .map(|_| ())
             .map_err(|e| format!("tshark could not be started: {e}")),
         (Some("live"), Some(directory)) => {
-            let Some(interface) = take(&mut arguments, "--interface") else {
-                eprintln!("archie-netwatch: live needs --interface NAME; `archie-netwatch interfaces` lists them");
-                return ExitCode::from(2);
+            let source = match live_source(&mut arguments) {
+                Ok(source) => source,
+                Err(error) => {
+                    eprintln!("archie-netwatch: {error}");
+                    return ExitCode::from(2);
+                }
             };
-            let mut source = vec!["-i".to_string(), interface, "-s".into(), SNAPLEN.into()];
-            if let Some(filter) = take(&mut arguments, "--filter") {
-                source.extend(["-f".to_string(), filter]);
-            }
             let settings = Settings {
                 learn_ms: learn.unwrap_or(600) * 1000,
                 gateway: gateway.or_else(default_gateway),
@@ -249,7 +280,7 @@ fn main() -> ExitCode {
         ),
         _ => {
             eprintln!(
-                "usage: archie-netwatch interfaces\n       archie-netwatch live --interface NAME --state-dir DIR [--learn SECONDS] [--gateway IP] [--filter BPF]\n       archie-netwatch read FILE --state-dir DIR [--gateway IP]\n       archie-netwatch report --state-dir DIR [--alerts N]"
+                "usage: archie-netwatch interfaces\n       archie-netwatch live --interface NAME --state-dir DIR [--learn SECONDS] [--gateway IP] [--filter BPF] [--seconds 1..86400]\n       archie-netwatch read FILE --state-dir DIR [--gateway IP]\n       archie-netwatch report --state-dir DIR [--alerts N]"
             );
             return ExitCode::from(2);
         }
