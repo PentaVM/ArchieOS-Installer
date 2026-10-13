@@ -60,7 +60,7 @@ botella, no nombres exactos: no inventes qué es exactamente algo. Si te pregunt
 no está en lo que ya averiguaste, usa la herramienta identify; para datos de internet, \
 web_search. Lo que ya averiguaste no lo digas si nadie lo pregunta ni responde lo que te \
 preguntaron. Nunca digas quién es una persona por su cara ni la busques: eso necesita su \
-permiso. Puedes cambiar la vista del Observatory con observatory_scene, la cinemática del orbe con orb_cinematic y sus capas visuales con orb_overlay cuando la persona lo pida. No inventes datos que no tienes. Si lo que oíste es un fragmento sin sentido o solo tu nombre, no lo repitas: pregunta en pocas palabras qué necesita, o quédate callado.";
+permiso. Puedes cambiar la vista del Observatory con observatory_scene, el aspecto del orbe con orb_preset cuando la persona lo pida. No inventes datos que no tienes. Si lo que oíste es un fragmento sin sentido o solo tu nombre, no lo repitas: pregunta en pocas palabras qué necesita, o quédate callado.";
 
 /// The tools a live session adds: looking closer, and reading the web.
 pub fn tools() -> Vec<ToolDefinition> {
@@ -111,49 +111,27 @@ pub fn tools() -> Vec<ToolDefinition> {
             }),
         },
         ToolDefinition {
-            name: "orb_cinematic".into(),
-            description: "Cambia la cinemática del orbe y abre Orb. field es la vista original; crown, atlas y dense son variaciones.".into(),
+            name: "orb_preset".into(),
+            description: "Cambia el aspecto del orbe con un preset y abre Orb. field es la vista original (Regiones vivas); sphere, orb y neural son las esferas neuronales.".into(),
             parameters: json!({
                 "type": "object",
-                "properties": {"profile": {"type": "string", "enum": ["field", "crown", "atlas", "dense"]}},
-                "required": ["profile"]
-            }),
-        },
-        ToolDefinition {
-            name: "orb_overlay".into(),
-            description: "Enciende o apaga una capa visual del orbe. hud controla los textos; shell la membrana; ambient las partículas; guides las guías; links las conexiones; pulses las señales; bloom el brillo.".into(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "overlay": {"type": "string", "enum": ["hud", "shell", "ambient", "guides", "links", "pulses", "bloom"]},
-                    "state": {"type": "string", "enum": ["on", "off"]}
-                },
-                "required": ["overlay", "state"]
+                "properties": {"preset": {"type": "string", "enum": ["field", "sphere", "orb", "neural"]}},
+                "required": ["preset"]
             }),
         },
     ]
 }
 
-async fn visual_command(action: &str, value: &str, enabled: Option<bool>) -> String {
+async fn visual_command(action: &str, value: &str) -> String {
     let valid = match action {
         "scene" => matches!(value, "orb" | "forge" | "world"),
-        "cinematic" => matches!(value, "field" | "crown" | "atlas" | "dense"),
-        "overlay" => {
-            enabled.is_some()
-                && matches!(
-                    value,
-                    "hud" | "shell" | "ambient" | "guides" | "links" | "pulses" | "bloom"
-                )
-        }
+        "preset" => matches!(value, "field" | "sphere" | "orb" | "neural"),
         _ => false,
     };
     if !valid {
         return "No cambié el Observatory: la opción visual no es válida.".into();
     }
-    let mut command = json!({"action": action, "value": value});
-    if let Some(enabled) = enabled {
-        command["enabled"] = json!(enabled);
-    }
+    let command = json!({"action": action, "value": value});
     let request = format!("{command}\n");
     let sent = tokio::time::timeout(Duration::from_millis(750), async {
         let mut stream = TcpStream::connect("127.0.0.1:7668")
@@ -345,28 +323,11 @@ impl Senses {
                 arguments["tier"].as_str().unwrap_or("t4"),
             )),
             "observatory_scene" => {
-                Some(visual_command("scene", arguments["scene"].as_str().unwrap_or(""), None).await)
+                Some(visual_command("scene", arguments["scene"].as_str().unwrap_or("")).await)
             }
-            "orb_cinematic" => Some(
-                visual_command(
-                    "cinematic",
-                    arguments["profile"].as_str().unwrap_or(""),
-                    None,
-                )
-                .await,
-            ),
-            "orb_overlay" => Some(
-                visual_command(
-                    "overlay",
-                    arguments["overlay"].as_str().unwrap_or(""),
-                    match arguments["state"].as_str() {
-                        Some("on") => Some(true),
-                        Some("off") => Some(false),
-                        _ => None,
-                    },
-                )
-                .await,
-            ),
+            "orb_preset" => {
+                Some(visual_command("preset", arguments["preset"].as_str().unwrap_or("")).await)
+            }
             _ => None,
         }
     }

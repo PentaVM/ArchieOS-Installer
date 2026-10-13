@@ -101,25 +101,30 @@ QVariantMap defaults()
     return s;
 }
 
+/// Look presets. Every visual parameter lives here, selected from the CLI
+/// (`archie visual preset <name>`); there are no per-layer overlay switches.
+/// `field` is the design's original "Regiones vivas" and has no overrides, so it renders
+/// exactly as before. The three neural spheres only change parameters this renderer has.
 QVariantMap profileOverrides(const QString &name)
 {
-    if (name == QLatin1String("crown"))
-        return {{QStringLiteral("categoryPull"), 0.58}, {QStringLiteral("hierarchyPull"), 0.42},
-                {QStringLiteral("radialLayers"), 0.77}, {QStringLiteral("scale"), 1.12},
-                {QStringLiteral("shellOpacity"), 0.055}, {QStringLiteral("ambientCount"), 780},
-                {QStringLiteral("nodeSize"), 1.45}, {QStringLiteral("rotationSpeed"), 0.55},
-                {QStringLiteral("bloomStrength"), 0.47}};
-    if (name == QLatin1String("atlas"))
-        return {{QStringLiteral("categoryPull"), 0.29}, {QStringLiteral("hierarchyPull"), 0.78},
-                {QStringLiteral("radialLayers"), 0.53}, {QStringLiteral("scale"), 1.06},
-                {QStringLiteral("ambientCount"), 180}, {QStringLiteral("shellOpacity"), 0.02},
-                {QStringLiteral("links"), true}, {QStringLiteral("linkBudget"), 320},
-                {QStringLiteral("nodeSize"), 2.0}, {QStringLiteral("bloomStrength"), 0.18}};
-    if (name == QLatin1String("dense"))
-        return {{QStringLiteral("categoryPull"), 0.52}, {QStringLiteral("hierarchyPull"), 0.67},
-                {QStringLiteral("radialLayers"), 0.42}, {QStringLiteral("scale"), 0.82},
-                {QStringLiteral("ambientCount"), 950}, {QStringLiteral("shellOpacity"), 0.05},
-                {QStringLiteral("nodeSize"), 1.55}, {QStringLiteral("bloomStrength"), 0.46}};
+    if (name == QLatin1String("sphere"))
+        return {{QStringLiteral("categoryPull"), 0.44}, {QStringLiteral("hierarchyPull"), 0.62},
+                {QStringLiteral("radialLayers"), 0.82}, {QStringLiteral("scale"), 1.0},
+                {QStringLiteral("shellOpacity"), 0.1}, {QStringLiteral("ambientCount"), 300},
+                {QStringLiteral("nodeSize"), 1.9}, {QStringLiteral("linkBudget"), 320},
+                {QStringLiteral("linkOpacity"), 0.07}, {QStringLiteral("bloomStrength"), 0.3}};
+    if (name == QLatin1String("orb"))
+        return {{QStringLiteral("categoryPull"), 0.6}, {QStringLiteral("hierarchyPull"), 0.35},
+                {QStringLiteral("radialLayers"), 0.3}, {QStringLiteral("scale"), 0.9},
+                {QStringLiteral("shellOpacity"), 0.05}, {QStringLiteral("ambientCount"), 420},
+                {QStringLiteral("nodeSize"), 1.5}, {QStringLiteral("linkBudget"), 700},
+                {QStringLiteral("linkOpacity"), 0.08}, {QStringLiteral("bloomStrength"), 0.3}};
+    if (name == QLatin1String("neural"))
+        return {{QStringLiteral("categoryPull"), 0.29}, {QStringLiteral("hierarchyPull"), 0.8},
+                {QStringLiteral("radialLayers"), 0.77}, {QStringLiteral("scale"), 1.06},
+                {QStringLiteral("shellOpacity"), 0.03}, {QStringLiteral("ambientCount"), 120},
+                {QStringLiteral("nodeSize"), 1.6}, {QStringLiteral("linkBudget"), 260},
+                {QStringLiteral("rotationSpeed"), 0.3}, {QStringLiteral("bloomStrength"), 0.2}};
     return {};
 }
 

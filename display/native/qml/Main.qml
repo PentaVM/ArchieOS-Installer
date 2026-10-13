@@ -37,14 +37,11 @@ ApplicationWindow {
 
     Connections {
         target: displayControl
-        function onCommandReceived(action, value, enabled) {
+        function onCommandReceived(action, value) {
             if (action === "scene") root.changeScene(value)
-            else if (action === "cinematic") {
+            else if (action === "preset") {
                 root.changeScene("orb")
                 lumen.applyProfile(value)
-            } else if (action === "overlay") {
-                if (value === "hud") root.orbHudVisible = enabled
-                else lumen.setSetting(value, enabled)
             }
         }
     }

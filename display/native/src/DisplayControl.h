@@ -14,7 +14,7 @@ public:
     bool start();
 
 signals:
-    void commandReceived(const QString &action, const QString &value, bool enabled);
+    void commandReceived(const QString &action, const QString &value);
 
 private:
     QTcpServer m_server;

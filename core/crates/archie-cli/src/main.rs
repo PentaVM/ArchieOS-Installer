@@ -17,6 +17,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Stdio};
 
+mod visual;
+
 #[derive(Debug, Parser)]
 #[command(
     name = "archie",
@@ -306,6 +308,11 @@ enum Command {
     Speech {
         #[command(subcommand)]
         command: SpeechCommand,
+    },
+    /// Control the Observatory: scenes and look presets (no overlays).
+    Visual {
+        #[command(subcommand)]
+        command: visual::VisualCommand,
     },
     /// Test the local audio bridge.
     Voice {
@@ -659,7 +666,8 @@ impl Command {
             | Self::SentryNotices { .. }
             | Self::WandaIngest { .. }
             | Self::WandaWatch { .. }
-            | Self::VaultDocs { .. } => return None,
+            | Self::VaultDocs { .. }
+            | Self::Visual { .. } => return None,
         })
     }
 }
@@ -1110,6 +1118,10 @@ fn enrol(paths: &StatePaths, owner_key: Option<&str>, json: bool) -> std::proces
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
+
+    if let Command::Visual { command } = &cli.command {
+        return visual::run(command).await;
+    }
 
     let paths = match &cli.root {
         Some(root) => StatePaths::rooted(root),
