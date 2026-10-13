@@ -136,4 +136,17 @@ mod tests {
         })
         .is_err());
     }
+    #[test]
+    fn every_preset_has_a_file_in_the_display() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../display/native/presets");
+        for name in PRESETS {
+            let text = std::fs::read_to_string(dir.join(format!("{name}.json")))
+                .unwrap_or_else(|error| panic!("preset file for {name}: {error}"));
+            let value: Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(value["name"], *name);
+            assert!(value["settings"].is_object(), "{name}");
+        }
+        let files = std::fs::read_dir(&dir).unwrap().count();
+        assert_eq!(files, PRESETS.len(), "a preset file the CLI does not accept");
+    }
 }

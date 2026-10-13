@@ -64,6 +64,10 @@ qt_add_resources(archie-display "archie-native-assets"
         shaders/lumen_line.frag
         shaders/lumen_ring.vert
         shaders/lumen_ring.frag
+        presets/field.json
+        presets/sphere.json
+        presets/orb.json
+        presets/neural.json
         apps/archie-stage.desktop
         apps/archie-voice.desktop
         apps/archie-editor.desktop

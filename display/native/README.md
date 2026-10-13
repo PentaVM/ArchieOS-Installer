@@ -10,7 +10,7 @@ controls are on the CLI: `archie visual scene <orb|forge|world>`, `archie visual
 
 - Scene: `orb`, `forge`, `world`.
 - Preset: `field` (Regiones vivas, the original look), `sphere`, `orb`, `neural`. Applying a preset
-  opens Orb. Every visual parameter belongs to a preset; there are no overlay toggles.
+  opens Orb. Every visual parameter belongs to a preset, stored as `presets/<name>.json`; there are no overlay toggles.
 
 The listener changes only the local view. It cannot run commands, access Stage,
 or write to displayd. If the Observatory is closed, Archie reports that the local

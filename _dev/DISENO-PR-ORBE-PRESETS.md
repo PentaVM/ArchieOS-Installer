@@ -10,10 +10,14 @@ Un solo PR de diseño abierto a la vez; las siguientes tandas de diseño se suma
   los parámetros visuales ya no se conmutan por capas, viven en presets.
 - `field` = «Regiones vivas», sin sobrescrituras: se dibuja exactamente igual que antes.
 - `sphere`, `orb`, `neural` solo cambian parámetros que este renderizador ya tiene.
+- Los presets son archivos: `display/native/presets/<nombre>.json` (embebidos en `:/archie/presets`).
+  Solo pueden fijar claves que existan en `defaults()`; una prueba de `archie-cli` exige que haya
+  un archivo por cada preset que acepta la CLI y ninguno de más.
+- Se retiró el botón «Antes» (`toggleCompare`, aspecto V2) del orbe nativo.
 
 ## No verificado (honesto)
-- Sin Qt/CMake en la máquina de Xavi: los cambios de `display/native` (C++/QML) no se compilaron
-  ni se vieron en pantalla. Los valores de los tres presets son una aproximación de diseño a
+- Sin Qt/CMake en la máquina de Xavi: los cambios de `display/native` (C++/QML, incluida la carga
+  de presets JSON y el CMake) no se compilaron ni se vieron en pantalla. Los valores de los tres presets son una aproximación de diseño a
   revisar en el hardware real.
 - No se portaron aún los nodos con halo/formas, los estilos de enlace ni el cerebro vivo
   (emisiones dentro de los enlaces) de Archie2: requieren shaders nuevos en `display/native/shaders`.

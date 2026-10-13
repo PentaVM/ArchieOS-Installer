@@ -3,6 +3,7 @@
 #include "LumenGeometry.h"
 
 #include <QColor>
+#include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -101,53 +102,22 @@ QVariantMap defaults()
     return s;
 }
 
-/// Look presets. Every visual parameter lives here, selected from the CLI
-/// (`archie visual preset <name>`); there are no per-layer overlay switches.
-/// `field` is the design's original "Regiones vivas" and has no overrides, so it renders
-/// exactly as before. The three neural spheres only change parameters this renderer has.
+/// Look presets live in presets/<name>.json (embedded as :/archie/presets), selected from the
+/// CLI (`archie visual preset <name>`); there are no per-layer overlay switches. `field` is the
+/// design's original "Regiones vivas" and has no overrides, so it renders exactly as before.
+/// A preset can only set keys that exist in defaults(); anything else in the file is ignored.
+const QStringList presetNames{QStringLiteral("field"), QStringLiteral("sphere"), QStringLiteral("orb"),
+                              QStringLiteral("neural")};
+
 QVariantMap profileOverrides(const QString &name)
 {
-    if (name == QLatin1String("sphere"))
-        return {{QStringLiteral("categoryPull"), 0.44}, {QStringLiteral("hierarchyPull"), 0.62},
-                {QStringLiteral("radialLayers"), 0.82}, {QStringLiteral("scale"), 1.0},
-                {QStringLiteral("shellOpacity"), 0.1}, {QStringLiteral("ambientCount"), 300},
-                {QStringLiteral("nodeSize"), 1.9}, {QStringLiteral("linkBudget"), 320},
-                {QStringLiteral("linkOpacity"), 0.07}, {QStringLiteral("bloomStrength"), 0.3}};
-    if (name == QLatin1String("orb"))
-        return {{QStringLiteral("categoryPull"), 0.6}, {QStringLiteral("hierarchyPull"), 0.35},
-                {QStringLiteral("radialLayers"), 0.3}, {QStringLiteral("scale"), 0.9},
-                {QStringLiteral("shellOpacity"), 0.05}, {QStringLiteral("ambientCount"), 420},
-                {QStringLiteral("nodeSize"), 1.5}, {QStringLiteral("linkBudget"), 700},
-                {QStringLiteral("linkOpacity"), 0.08}, {QStringLiteral("bloomStrength"), 0.3}};
-    if (name == QLatin1String("neural"))
-        return {{QStringLiteral("categoryPull"), 0.29}, {QStringLiteral("hierarchyPull"), 0.8},
-                {QStringLiteral("radialLayers"), 0.77}, {QStringLiteral("scale"), 1.06},
-                {QStringLiteral("shellOpacity"), 0.03}, {QStringLiteral("ambientCount"), 120},
-                {QStringLiteral("nodeSize"), 1.6}, {QStringLiteral("linkBudget"), 260},
-                {QStringLiteral("rotationSpeed"), 0.3}, {QStringLiteral("bloomStrength"), 0.2}};
-    return {};
-}
-
-/// The earlier V2 look, which the design's "Antes" button shows for comparison.
-QVariantMap legacy()
-{
-    QVariantMap s = defaults();
-    const QVariantMap o{
-        {QStringLiteral("layoutMode"), QStringLiteral("legacy")}, {QStringLiteral("categoryPull"), 0.72},
-        {QStringLiteral("hierarchyPull"), 0.35}, {QStringLiteral("radialLayers"), 0.64},
-        {QStringLiteral("nodeSize"), 1.4}, {QStringLiteral("shellOpacity"), 0.075},
-        {QStringLiteral("ambientCount"), 1400}, {QStringLiteral("ambientSize"), 0.9},
-        {QStringLiteral("ghostOpacity"), 0.42}, {QStringLiteral("metalness"), 0.58},
-        {QStringLiteral("roughness"), 0.31}, {QStringLiteral("emissive"), 0.8},
-        {QStringLiteral("linkOpacity"), 0.09}, {QStringLiteral("linkBudget"), 1200},
-        {QStringLiteral("bloomStrength"), 0.64}, {QStringLiteral("bloomThreshold"), 0.68},
-        {QStringLiteral("ambientLight"), 1.5}, {QStringLiteral("warmLight"), 26000},
-        {QStringLiteral("coolLight"), 21000}, {QStringLiteral("background"), QStringLiteral("#070d13")},
-        {QStringLiteral("guides"), true},
-    };
-    for (auto it = o.begin(); it != o.end(); ++it)
-        s.insert(it.key(), it.value());
-    return s;
+    if (!presetNames.contains(name))
+        return {};
+    QFile file(QStringLiteral(":/archie/presets/") + name + QStringLiteral(".json"));
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    const QJsonObject root = QJsonDocument::fromJson(file.readAll()).object();
+    return root.value(QStringLiteral("settings")).toObject().toVariantMap();
 }
 
 struct Range {
@@ -368,12 +338,20 @@ void LumenField::setSetting(const QString &key, const QVariant &value)
 
 void LumenField::applyProfile(const QString &name)
 {
-    m_saved.clear();
-    m_profile = profileOverrides(name).isEmpty() && name != QLatin1String("field") ? QStringLiteral("field") : name;
+    m_profile = presetNames.contains(name) ? name : QStringLiteral("field");
     m_settings = defaults();
     const QVariantMap overrides = profileOverrides(m_profile);
-    for (auto it = overrides.begin(); it != overrides.end(); ++it)
-        m_settings.insert(it.key(), it.value());
+    for (auto it = overrides.begin(); it != overrides.end(); ++it) {
+        const QVariant current = m_settings.value(it.key());
+        if (!current.isValid())
+            continue;
+        if (current.typeId() == QMetaType::Int)
+            m_settings.insert(it.key(), it.value().toInt());
+        else if (current.typeId() == QMetaType::Double)
+            m_settings.insert(it.key(), it.value().toDouble());
+        else if (current.typeId() == it.value().typeId())
+            m_settings.insert(it.key(), it.value());
+    }
     updateLook();
     updateCategoryRows();
     rebuildMembrane();
@@ -387,26 +365,6 @@ void LumenField::applyProfile(const QString &name)
 void LumenField::resetProfile()
 {
     applyProfile(m_profile);
-}
-
-void LumenField::toggleCompare()
-{
-    if (m_saved.isEmpty()) {
-        m_saved = m_settings;
-        m_settings = legacy();
-    } else {
-        m_settings = m_saved;
-        m_saved.clear();
-    }
-    updateLook();
-    updateCategoryRows();
-    rebuildMembrane();
-    rebuildGhosts();
-    m_structureDirty = true;
-    m_positionsDirty = true;
-    scheduleRequest(0);
-    emit settingsChanged();
-    emit fitRequested();
 }
 
 void LumenField::setLens(const QString &lens)
