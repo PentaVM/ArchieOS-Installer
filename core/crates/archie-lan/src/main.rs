@@ -1,15 +1,12 @@
 //! Sentry's bounded LAN inventory. Discovery never grants device control.
 use archie_lan::{
-    inventory::{scan_with, ScanOptions},
+    dns_sd::Backend,
+    inventory::{scan_with, ScanOptions, ScanReport},
     presence::Subnet,
 };
+mod watch;
 use clap::{Args, Parser, Subcommand};
-use std::{
-    net::Ipv4Addr,
-    path::{Path, PathBuf},
-    process::ExitCode,
-    time::Duration,
-};
+use std::{net::Ipv4Addr, path::PathBuf, process::ExitCode, time::Duration};
 
 #[derive(Parser)]
 #[command(about = "Discover local devices using Sentry; no device control or credentials")]
@@ -26,8 +23,20 @@ enum Command {
     Watch {
         #[arg(long)]
         out: PathBuf,
-        #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u64).range(30..))]
-        every: u64,
+        #[arg(long, value_parser = clap::value_parser!(u64).range(30..=3600))]
+        every: Option<u64>,
+        /// Recover observation history and schedule light/deep discovery independently.
+        #[arg(long)]
+        autonomous: bool,
+        /// Perform one bounded iteration and exit, useful for validation.
+        #[arg(long)]
+        once: bool,
+        #[arg(long, requires = "autonomous")]
+        history: Option<PathBuf>,
+        #[arg(long, requires = "autonomous")]
+        health: Option<PathBuf>,
+        #[arg(long, default_value_t = 600, value_parser = clap::value_parser!(u64).range(30..=86400))]
+        deep_every: u64,
         #[command(flatten)]
         options: Options,
     },
@@ -35,8 +44,11 @@ enum Command {
     Interfaces,
 }
 
-#[derive(Args)]
+#[derive(Args, Clone)]
 struct Options {
+    /// Keep native discovery, use upstream DNS-SD, or combine both.
+    #[arg(long, value_enum)]
+    mdns_backend: Option<Backend>,
     #[arg(long, default_value_t = 4, value_parser = clap::value_parser!(u64).range(1..=30))]
     seconds: u64,
     /// Select a private local IPv4 interface instead of the default route.
@@ -49,8 +61,8 @@ struct Options {
     #[arg(long)]
     subnet: Option<Subnet>,
     /// TCP discovery deadline; partial coverage is explicitly reported.
-    #[arg(long, default_value_t = 15, value_parser = clap::value_parser!(u64).range(1..=120))]
-    probe_seconds: u64,
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..=120))]
+    probe_seconds: Option<u64>,
     /// Private JSON sidecar: source errors, multicast availability and probe coverage.
     #[arg(long)]
     diagnostics: Option<PathBuf>,
@@ -63,25 +75,14 @@ fn local_address(raw: &str) -> Result<Ipv4Addr, String> {
         .ok_or_else(|| "interface must be private or link-local".into())
 }
 
-fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
-        std::fs::create_dir_all(parent)?;
-    }
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    options.open(path)?.write_all(bytes)
-}
-
-fn run(options: &Options) -> std::io::Result<Vec<u8>> {
+fn run_report(options: &Options) -> std::io::Result<ScanReport> {
     let report = scan_with(
         ScanOptions {
             bind: options.bind,
             probe_local: options.probe_local,
             subnet: options.subnet,
-            probe_seconds: options.probe_seconds,
+            probe_seconds: options.probe_seconds.unwrap_or(15),
+            mdns_backend: options.mdns_backend.unwrap_or_default(),
         },
         Duration::from_secs(options.seconds),
     )?;
@@ -99,7 +100,7 @@ fn run(options: &Options) -> std::io::Result<Vec<u8>> {
         }
     }
     if let Some(path) = &options.diagnostics {
-        write_private(path, &serde_json::to_vec_pretty(&report.diagnostics)?)?;
+        watch::write_atomic(path, &serde_json::to_vec_pretty(&report.diagnostics)?)?;
     }
     if report
         .diagnostics
@@ -111,7 +112,11 @@ fn run(options: &Options) -> std::io::Result<Vec<u8>> {
             "no discovery source could start; see diagnostics",
         ));
     }
-    Ok(serde_json::to_vec_pretty(&report.inventory)?)
+    Ok(report)
+}
+
+fn run(options: &Options) -> std::io::Result<Vec<u8>> {
+    Ok(serde_json::to_vec_pretty(&run_report(options)?.inventory)?)
 }
 
 fn main() -> ExitCode {
@@ -123,21 +128,24 @@ fn main() -> ExitCode {
         Command::Watch {
             out,
             every,
+            autonomous,
+            once,
+            history,
+            health,
+            deep_every,
             options,
-        } => loop {
-            match run(&options) {
-                Ok(bytes) => {
-                    let partial = out.with_extension("partial");
-                    if let Err(error) = write_private(&partial, &bytes)
-                        .and_then(|()| std::fs::rename(&partial, &out))
-                    {
-                        eprintln!("archie-lan: {}: {error}", out.display());
-                    }
-                }
-                Err(error) => eprintln!("archie-lan: {error}"),
-            }
-            std::thread::sleep(Duration::from_secs(every));
-        },
+        } => watch::run(
+            watch::Settings {
+                out,
+                every,
+                autonomous,
+                once,
+                history,
+                health,
+                deep_every,
+            },
+            options,
+        ),
         Command::Interfaces => if_addrs::get_if_addrs().map(|interfaces| {
             for interface in interfaces {
                 if let if_addrs::IfAddr::V4(address) = interface.addr {

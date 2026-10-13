@@ -447,7 +447,7 @@ pub fn unify(
                 && device
                     .seen_by
                     .iter()
-                    .all(|source| source == "neighbor-cache");
+                    .all(|source| matches!(source.as_str(), "neighbor-cache" | "history-cache"));
             let observed_at = (!cache_only).then_some(inventory.scanned_unix);
             let mut fact = SourceFact {
                 first_seen_unix: observed_at,

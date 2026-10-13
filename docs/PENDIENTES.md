@@ -1,6 +1,7 @@
 # Pendientes — ArchieOS
 
-Estado al 2026-10-11. `main` es la única rama; todo lo hecho hasta hoy está fusionado.
+Base de esta lista: 2026-10-11; sección Sentry actualizada al 2026-10-13. Los avances
+del Draft PR39 se indican por separado de `main`; no están en el release ya descargado.
 Esta lista es lo que falta para llamar terminado a cada parte. Cada punto dice quién lo
 tiene y dónde está el detalle. Se marca aquí cuando se cierra.
 
@@ -36,6 +37,17 @@ tiene y dónde está el detalle. Se marca aquí cuando se cierra.
 - [x] `PentaVM/archie-iris#27` fusionado (float32 en GPU sin bf16 nativo, `einops`).
 
 ## 3. Sentry — Kimi K3 trabaja aquí
+
+**Monitor autónomo (2026-10-13, Codex, PR39):** backend suplementario `mdns-sd`
+0.21.5, historial privado con procedencia, cadencias light/deep independientes,
+reinicio, backoff, health y protección de escritores concurrentes. Core conserva
+permisos/procesos/actuación; el feeder no revive filas históricas. Diseño, repos
+investigados y validaciones reproducibles: [`SENTRY-AUTONOMY.md`](SENTRY-AUTONOMY.md).
+Prueba real: 3795 sondeos TCP completos, resolución de anuncios IPv4/IPv6 y segundo
+arranque sin repetir el pase profundo. Son registros de direcciones, no prueba de
+propiedad ni de siete dispositivos únicos. Pendiente desplegar el binario actualizado
+bajo Core y validar radios/hubs/IPv6 multicast en hardware; no incluido en el WSL
+que Sheriff ya está probando.
 
 **Descubrimiento ampliado (2026-10-12, Codex):** rama `codex/sentry-discovery`;
 [`SENTRY-LAN.md`](SENTRY-LAN.md) y [`bitácora`](../_dev/SENTRY-DISCOVERY-2026-10-12.md).

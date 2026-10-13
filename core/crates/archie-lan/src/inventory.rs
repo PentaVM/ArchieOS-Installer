@@ -2,8 +2,8 @@
 
 use crate::classify::{classify, Evidence};
 use crate::http::{get, LanUrl};
-use crate::{mdns, neighbors, presence, roku, spotify, ssdp, upnp, wsdiscovery};
-use serde::Serialize;
+use crate::{dns_sd, mdns, neighbors, presence, roku, spotify, ssdp, upnp, wsdiscovery};
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -12,7 +12,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 const ASKING: Duration = Duration::from_secs(45);
 
 /// One device, as it described itself.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Device {
     pub address: String,
     /// The device family, when what it said supports one.
@@ -157,6 +158,7 @@ pub struct ScanOptions {
     pub probe_local: bool,
     pub subnet: Option<presence::Subnet>,
     pub probe_seconds: u64,
+    pub mdns_backend: dns_sd::Backend,
 }
 
 impl Default for ScanOptions {
@@ -166,6 +168,7 @@ impl Default for ScanOptions {
             probe_local: false,
             subnet: None,
             probe_seconds: 15,
+            mdns_backend: dns_sd::Backend::Native,
         }
     }
 }
@@ -229,7 +232,10 @@ pub fn scan_with(options: ScanOptions, listen: Duration) -> std::io::Result<Scan
             "probe subnet must contain the selected local interface",
         ));
     }
-    let browsing = std::thread::spawn(move || mdns::browse_report(local, listen));
+    let browsing = (!matches!(options.mdns_backend, dns_sd::Backend::MdnsSd))
+        .then(|| std::thread::spawn(move || mdns::browse_report(local, listen)));
+    let library = (!matches!(options.mdns_backend, dns_sd::Backend::Native))
+        .then(|| std::thread::spawn(move || dns_sd::browse(local, listen)));
     let searching = std::thread::spawn(move || ssdp::search(local, listen));
     let wsd = std::thread::spawn(move || wsdiscovery::search(local, listen));
     let probing = subnet.map(|s| {
@@ -242,7 +248,17 @@ pub fn scan_with(options: ScanOptions, listen: Duration) -> std::io::Result<Scan
         })
     });
     let (answers, ssdp_error) = source(searching.join());
-    let (browse, mdns_error) = source(browsing.join());
+    let (browse, mdns_error) = browsing
+        .map(|worker| source(worker.join()))
+        .unwrap_or_else(|| {
+            (
+                mdns::BrowseReport::default(),
+                Some("native mDNS disabled by selected backend".into()),
+            )
+        });
+    let (supplemental, library_error) = library
+        .map(|worker| source(worker.join()))
+        .unwrap_or_default();
     let (discovered, wsd_error) = source(wsd.join());
     let probe = probing.and_then(|worker| worker.join().ok());
     let mut sources = BTreeMap::new();
@@ -293,6 +309,14 @@ pub fn scan_with(options: ScanOptions, listen: Duration) -> std::io::Result<Scan
         );
     }
     let hosts = browse.hosts;
+    if !matches!(options.mdns_backend, dns_sd::Backend::Native) {
+        let mut status = supplemental.status();
+        if let Some(error) = library_error {
+            status.error = Some(error);
+            status.available = false;
+        }
+        sources.insert("mdns-sd".into(), status);
+    }
 
     let mut descriptions = BTreeMap::new();
     let mut states = BTreeMap::new();
@@ -323,6 +347,7 @@ pub fn scan_with(options: ScanOptions, listen: Duration) -> std::io::Result<Scan
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
     let mut inventory = assemble(&answers, &descriptions, &hosts, &states, now);
+    dns_sd::merge(&mut inventory.devices, &supplemental.devices);
     for device in &mut inventory.devices {
         if Instant::now() >= until {
             break;
@@ -410,7 +435,7 @@ pub fn scan_with(options: ScanOptions, listen: Duration) -> std::io::Result<Scan
     }
     Ok(ScanReport { inventory, diagnostics: Diagnostics {
         format: "archie-lan-diagnostics-v1", local_address: local, sources, presence: probe,
-        limitations: vec!["IPv4 discovery; IPv6-only endpoints require another source",
+        limitations: vec![if matches!(options.mdns_backend, dns_sd::Backend::Native) { "native discovery uses IPv4; IPv6-only endpoints require another source" } else { "DNS-SD observes private scoped IPv6; HTTP and TCP discovery still use IPv4" },
             "one selected network; isolated VLANs are not visible", "Zigbee/Thread devices may require hub or border-router observations",
             "silent devices without advertised services or sampled open TCP ports may remain unseen",
             "advertisements are unauthenticated device claims; ownership is unknown"] } })

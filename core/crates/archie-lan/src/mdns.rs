@@ -55,7 +55,11 @@ fn question_type(name: &str, kind: u16) -> Vec<u8> {
 }
 
 pub fn initial_questions() -> Vec<Vec<u8>> {
-    [
+    service_types().iter().map(|kind| question(kind)).collect()
+}
+
+pub fn service_types() -> &'static [&'static str] {
+    &[
         META,
         "_ipp._tcp.local",
         "_ipps._tcp.local",
@@ -87,9 +91,6 @@ pub fn initial_questions() -> Vec<Vec<u8>> {
         "_smb._tcp.local",
         "_workstation._tcp.local",
     ]
-    .into_iter()
-    .map(question)
-    .collect()
 }
 
 /// A name at `at`, following compression pointers. Returns it and where reading goes on.

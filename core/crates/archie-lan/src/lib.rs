@@ -27,8 +27,10 @@
 #![forbid(unsafe_code)]
 
 pub mod audit;
+pub mod autonomy;
 pub mod capture;
 pub mod classify;
+pub mod dns_sd;
 pub mod http;
 pub mod inventory;
 pub mod mdns;

@@ -23,3 +23,8 @@ if-addrs = "0.13"
 roxmltree = "0.20"
 uuid.workspace = true
 clap.workspace = true
+fs2.workspace = true
+mdns-sd = { version = "=0.21.5", default-features = false }
+
+[dev-dependencies]
+mdns-sd = { version = "=0.21.5", default-features = false, features = ["serde"] }

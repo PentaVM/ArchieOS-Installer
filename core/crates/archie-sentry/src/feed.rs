@@ -441,7 +441,7 @@ impl Snapshot {
                 && device
                     .seen_by
                     .iter()
-                    .all(|source| source == "neighbor-cache")
+                    .all(|source| matches!(source.as_str(), "neighbor-cache" | "history-cache"))
             {
                 continue;
             }
