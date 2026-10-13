@@ -148,3 +148,49 @@ functional test failure established because those tests are not reached. Native
 contracts passes. Source inspection only, no edits/merge of Xavi's implementation.
 Attached PR41 to this task. Earlier no-new-PR statements describe the earlier query;
 this new result supersedes them. No polling automation created.
+
+## Owner steering: test the branches before merging, including non-Rust code
+
+Exported exact PR40 e460341 native/visual/OSM sources and PR41 9f98235 shell into
+isolated temporary snapshots. Did not edit Xavi/Claude's worktrees or merge.
+Recovered 1960 MiB by deleting only regenerable PDB symbols from this audit
+worktree's core/target/debug and deps; no source, executable, WSL image or shared
+build removed. Used existing toolchains, no downloads or WSL configuration changes.
+
+Native Linux build completed (GCC16.2.1, Qt6.11.2, CMake/Ninja). Visual19/19 and
+OSM2/2 passed. Added external audit harness linked to those exact objects/resources:
+82 preset checks passed, covering actual embedded JSON application/reset/defaults.
+Native WSLg Wayland run produced a real PNG and exited0; seven accepted control
+commands and five rejection cases passed. Renderer log explicitly says llvmpipe,
+with Zink/EGL fallback warnings: no NVIDIA validation or performance claim. Observer
+7666 absent, so this render did not validate live nodes. Port7668 was free before
+starting, and the isolated process exited; existing producers were not replaced.
+
+GUI stock Qt6.11.2 tests reported21+79 passes on Windows/Linux; Windows processes
+exited0. Temporary WSL command connection failures/timeouts prevent treating its
+exit statuses as clean proof. Windows normal-state real Qt offscreen window
+cycled14 overlays and saved a desktop PNG with no QML warnings in that traversal.
+Surfaces suite reproduced undefined QColor warnings at WindowSwitcher.qml35 in
+both platforms: unknown-app key is empty in degraded; invisible Rectangle still
+evaluates Theme.dk[info.key]. Assertions do not count engine warnings. Not fixed
+in the owner's branch by this audit. Need strict warning checks before integration.
+
+PR40 Rustfmt failure independently reproduced on a file copy. Retirement of voice
+cinematic/overlay/Antes remains a compatibility blocker; capability registry/index
+still reference removed tools and symbols. Main-to-PR40 is0 behind/3 ahead;
+GUI is89 behind/5 ahead. Both merge-tree computations are conflict-free, not proof
+of deployment. Read-only GUI bridge sources match current main. Preserving main
+is mandatory when integrating this older GUI branch.
+
+Reproducible harnesses, pinned SHAs, command recipes and remaining checks are in
+_dev/verification/xavi/. No GUI implementation, release or WSL image modified.
+
+Follow-up: the sample shell also rendered in WSLg/Wayland, cycled14 normal-state
+overlays, saved PNG and exited0; no QML warnings, same llvmpipe renderer/fallback
+warnings. This still does not test Quickshell. During the preservation check LAN
+watch was alive, but passive netwatch had ended at09:40 local, before this audit
+began. Its private log reported a completed capture (709438 frames), without a
+failure reason. Restarted the existing pinned collector in the same continuous
+mode/state directory/interface under the standing capture authorization; no data
+reset, service installation or inference/authority change. Fresh private state
+writes confirmed after restart. Durable Core-managed supervision remains pending.

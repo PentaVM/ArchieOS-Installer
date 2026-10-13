@@ -305,6 +305,10 @@ octubre para avisos QML al abrir la ventana real. 161 archivos, +14 144/-644 lí
 CI verde. Xavi reporta ventana Windows real y guards/defaults corregidos en Alt-Tab,
 Sentry, Actividad, medidores y Panel, con 21+79 comprobaciones QML pasadas.
 Los nuevos datos/operaciones siguen siendo muestras. Integrar contra main actual.
+Auditoría independiente posterior: Qt 6.11.2 Windows/Linux reporta 21+79 checks;
+Windows termina con salida 0 y renderiza escritorio/14 overlays offscreen. Persisten
+avisos de color indefinido en `WindowSwitcher.qml:35` con app desconocida/degraded;
+las assertions no los cuentan. No considerar la GUI limpia sólo por CI verde.
 
 **PR40 sí existe para el Orbe nativo**, en otra rama: `design/orb-presets-cli`,
 head `e460341`, Draft de Xavi creado el 2026-10-13. Añade CLI `archie visual` y
@@ -312,7 +316,10 @@ herramienta de voz `orb_preset`, con presets field/sphere/orb/neural. Tres commi
 15 archivos, +281/-141 líneas: ahora los presets están en JSON embebido y también
 se elimina el botón «Antes». **Xavi reporta compilación y arranque Windows** con
 MSVC/Qt 6.8.3: el Orbe se dibuja y el canal acepta `preset sphere`, pero sin el
-observador de 7666 no hay nodos; presets con datos reales y Linux/WSLg sin verificar.
+observador de 7666 no hay nodos. Ahora se reprodujo el build C++/QML en Linux/Qt
+6.11.2, 19+2 tests visual/OSM y 82 comprobaciones sobre presets/recursos reales.
+Arranque, captura PNG y canal 7668 pasan en WSLg/Wayland, pero el renderer fue
+**llvmpipe software**: NVIDIA y presets con nodos reales siguen sin verificar.
 CI native-contracts verde; Rust falla en `cargo fmt` de `visual.rs`, antes de tests.
 Los shaders para halos/formas/enlaces/cerebro vivo siguen pendientes. Este PR no
 contiene los cuatro commits de la GUI Archie Mac. Revisar antes de fusionar la
@@ -334,10 +341,14 @@ todo el HTML/los assets como código nuevo del sistema operativo.
 **Qué funciona y qué es muestra:** el bridge de lectura existente entrega
 display/kernel, inventario LAN y estado de jobs. Vault sigue usando `Synthetic`;
 las ocho superficies nuevas son `Demo` con datos de ejemplo. Quickshell sigue
-marcado sin verificar. Xavi informa 21 comprobaciones BridgeModel y 79 SurfacesTest
-pasadas offscreen; esta auditoría leyó código/capturas, no repitió esos tests.
+marcado sin verificar. Se reprodujeron las 21 comprobaciones BridgeModel y 79
+SurfacesTest en Qt stock; ver resultados y límites en
+[`_dev/verification/xavi/README.md`](../_dev/verification/xavi/README.md).
 
 - [ ] Revisar e integrar PR41 conservando main; el PR ya está abierto.
+- [ ] Corregir el binding de color de Alt-Tab en degraded y exigir logs QML limpios.
+- [ ] Resolver retirada de funciones del PR40 e inventario de capacidades obsoleto;
+  corregir formato Rust y ejecutar checks antes de fusionar.
 - [ ] Probar Quickshell, Linux/Wayland/NVIDIA, blur real, accesibilidad y rendimiento.
 - [ ] Conectar el control principalmente por voz a la shell nueva; los cuatro
   commits no demuestran ese cableado. Conservar el sistema de voz existente.
