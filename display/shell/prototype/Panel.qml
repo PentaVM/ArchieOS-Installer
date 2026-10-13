@@ -7,7 +7,7 @@ import QtQuick
 Item {
     id: p
     property string kind: "panel"       // window | panel | dock
-    default property alias data: holder.data
+    default property alias kids: holder.data
     property alias contentItem: holder
     // Reveal (MOVIMIENTO.md): opacity plus a short slide (panels) or scale (windows); only
     // transform and opacity. Quiet keeps opacity alone; reduced motion shows or hides at once.

@@ -9,7 +9,10 @@ Panel {
     property var bridge
     width: 460
     height: content.implicitHeight + 40
-    readonly property var jobs: bridge.jobs
+    // Merged over full defaults; see SentryPanel.qml's `lan` for why.
+    readonly property var jobs: Object.assign(
+        { state: "not_configured", jobs: [], unreadable: [], skipped: 0 },
+        (bridge && bridge.jobs) || {})
     readonly property var spec: ({
         starting:  { t: "iniciando", i: "waiting",  k: "info" },
         running:   { t: "en curso",  i: "activity", k: "info" },

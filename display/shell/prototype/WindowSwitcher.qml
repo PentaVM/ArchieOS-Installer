@@ -34,7 +34,7 @@ Panel {
             Item { width: 44; height: 44
                 Rectangle { anchors.fill: parent; radius: 11; visible: info.key !== ""; color: Theme.dk[info.key]
                     Rectangle { anchors.fill: parent; radius: 11; gradient: Gradient { GradientStop { position: 0; color: Qt.rgba(1, 1, 1, 0.10) } GradientStop { position: 1; color: Qt.rgba(0, 0, 0, 0.14) } } }
-                    Icon { anchors.centerIn: parent; name: sw.dkIcon[info.key] ? sw.dkIcon[info.key] : "devunk"; size: 20; color: "#ffffff" } }
+                    Icon { anchors.centerIn: parent; name: (sw.dkIcon && sw.dkIcon[info.key]) ? sw.dkIcon[info.key] : "devunk"; size: 20; color: "#ffffff" } }
                 DashedRect { anchors.fill: parent; visible: info.key === ""; radius: 11; color: Qt.rgba(141 / 255, 140 / 255, 156 / 255, 0.6)
                     Icon { anchors.centerIn: parent; name: "devunk"; size: 20; color: Theme.t3 } } }
             Column { width: parent.width

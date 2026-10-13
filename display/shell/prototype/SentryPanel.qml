@@ -10,7 +10,13 @@ Panel {
     property var bridge
     width: 780
     height: content.implicitHeight + 46
-    readonly property var lan: bridge.lan
+    // Merged over full defaults: the bridge's own fallback (state only, before `bridge` is even
+    // assigned, or for frames older than this field) omits devices/path/etc., and every binding
+    // below reads them unconditionally (QML property bindings do not share another property's
+    // `visible` guard), so a bare { state: ... } would throw on first paint.
+    readonly property var lan: Object.assign(
+        { state: "not_configured", devices: [], total: 0, age_seconds: 0, path: "", reason: "", stale: false },
+        (bridge && bridge.lan) || {})
     function ageText(s) { return s < 90 ? s + " s" : (s < 5400 ? Math.round(s / 60) + " min" : Math.round(s / 3600) + " h") }
     function deviceIcon(c) { return ({ television: "tv", printer: "printer", speaker: "speaker", camera: "camera" })[c] || "devunk" }
 
