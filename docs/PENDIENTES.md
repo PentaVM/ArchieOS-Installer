@@ -49,6 +49,14 @@ propiedad ni de siete dispositivos únicos. Pendiente desplegar el binario actua
 bajo Core y validar radios/hubs/IPv6 multicast en hardware; no incluido en el WSL
 que Sheriff ya está probando.
 
+**Sesión continua del host (2026-10-13):** `archie-netwatch live` activo sin límite
+de duración, más `archie-lan watch --autonomous` con inventario ligero cada 30 s y
+TCP profundo cada 600 s. Binarios copiados a una ruta estable del usuario; estado,
+historial y health privados. Se verificaron escrituras frescas y cero fallos del
+watcher. **No equivale a despliegue bajo Core ni a arranque automático de Windows**:
+faltan esa gestión y el transporte host/guest hacia el feeder. Detalle y auditoría
+de GUI: [`bitácora`](../_dev/SENTRY-CONTINUOUS-XAVI-GUI-2026-10-13.md).
+
 **Descubrimiento ampliado (2026-10-12, Codex):** rama `codex/sentry-discovery`;
 [`SENTRY-LAN.md`](SENTRY-LAN.md) y [`bitácora`](../_dev/SENTRY-DISCOVERY-2026-10-12.md).
 Incluye mDNS multicast/consultas explícitas, WS-Discovery, TCP acotado y candidatos
@@ -288,51 +296,49 @@ Detalle: [`HANDOFF-2026-10-11-SPEECH-FLOOR.md`](HANDOFF-2026-10-11-SPEECH-FLOOR.
 
 ## 6. Diseño — Xavi termina aquí
 
-**Lo que hay** (commit `4b282cd`, ya en `main`): `display/shell/prototype/`, doce
-componentes QML con `Theme.qml` (tokens de las tres direcciones y la síntesis) y
-`Synthetic.qml` (todos los datos, inventados y rotulados). Documentos en
-[`gui/`](gui/README.md): `DESIGN_SYSTEM.md`, `SCREEN_SPECS.md`, `MOTION_CINEMATICS.md`,
-`ARCHITECTURE_GUI.md`, `GUI_FUNCTION_BACKLOG.md`. Capturas en `gui/screenshots/`.
+**Estado verificado al 2026-10-13:** PR31 (prototipo inicial) y PR34 (bridge de
+lectura, inventario LAN y jobs) fusionados. La rama de Xavi
+`feat/professional-gui-quickshell-vault` avanzó a `a1a240e` con **cuatro commits
+adicionales fuera de main**, último del 2026-10-12 a las 07:12 de Santiago. No hay
+un PR nuevo abierto para ese rediseño. La rama diverge: 4 commits delante y 89
+detrás de main; requiere integrar contra la base actual.
 
-**Lo que no hay:** nada del diseño nuevo de **Lumenfield para el Orbe**. El Orbe de
-`display/native` (`LumenScene.qml`, `LumenField.cpp`, shaders `lumen_orb.*`) es el de
-septiembre, y desde `4b282cd` no entró ningún commit de diseño. Si existe fuera del
-repositorio, hay que subirlo.
+**Diseño nuevo sí existe:** Archie Mac, grafito oscuro, dock/barra, 81 iconos,
+Inter y Space Grotesk empaquetadas, superficies opacas/cristal y cuatro perfiles
+de movimiento con transiciones QML. Además: Alt-Tab, notificaciones/autorización,
+Forge, inspector IRIS/Cortex, Ajustes, bloqueo/arranque/instalador, selector de
+espacio/placeholder del Orbe y búsqueda; seis estados de ejemplo por superficie.
+El Orbe/Lumenfield real no se modificó ni se integró en ese fondo.
 
-**Decisiones que son de Xavi** (bloquean lo demás):
+**Tamaño de los cuatro commits:** 161 archivos, +14 132/-641 líneas. QML: 45
+archivos, +2 192/-560; HTML de referencia: 45 archivos, +9 900; resto documentos,
+tokens, imágenes y fuentes. No hay cambios nuevos de backend Rust. No presentar
+todo el HTML/los assets como código nuevo del sistema operativo.
 
-- [ ] **D1. La dirección visual.** Frost, Workspace, Signature o la síntesis propuesta
-  (superficies de Frost, acento `#6fc8f5`, radio 12, densidad 0,94). Dejarla como la única
-  en `Theme.qml`.
-- [ ] **D2. Tipografía.** El prototipo usa la del sistema; las capturas salieron con
-  Segoe UI porque se renderizaron en Windows.
-- [ ] **D3. Los ADR** de `gui/ARCHITECTURE_GUI.md`: aceptar o rechazar cada uno.
-- [ ] **D4. Lumenfield nuevo para el Orbe.** Subir el diseño y decir qué reemplaza de
-  `display/native`. El acento de la síntesis se eligió para convivir con el cian del
-  Orbe actual (`#6fe3f5`); si el Orbe cambia, revisar ese par.
+**Qué funciona y qué es muestra:** el bridge de lectura existente entrega
+display/kernel, inventario LAN y estado de jobs. Vault sigue usando `Synthetic`;
+las ocho superficies nuevas son `Demo` con datos de ejemplo. Quickshell sigue
+marcado sin verificar. Xavi informa 21 comprobaciones BridgeModel y 79 SurfacesTest
+pasadas offscreen; esta auditoría leyó código/capturas, no repitió esos tests.
 
-**Diseño por terminar:**
+- [ ] Abrir el PR del rediseño y actualizar/integrar la rama conservando main.
+- [ ] Probar Quickshell, Linux/Wayland/NVIDIA, blur real, accesibilidad y rendimiento.
+- [ ] Conectar el control principalmente por voz a la shell nueva; los cuatro
+  commits no demuestran ese cableado. Conservar el sistema de voz existente.
+- [ ] Sustituir muestras por contratos reales, incluidos dominios personal/trabajo,
+  Vault como gestor de archivos, autorizaciones, Stage y estados de Forge. Auditar
+  primero lo existente; las capacidades del backend no se deducen del mockup.
+- [ ] Resolver decisiones de producción: escala, fondo/Orbe, modo opaco automático
+  y ADR de arquitectura. La rama registra cuatro cambios de interacción aprobados;
+  esto es evidencia documental de Xavi, no una instrucción para ejecutar su trabajo.
+- [ ] Actualizar el texto de Sentry: hoy el panel afirma «no escanea», aunque el
+  colector actual incluye WSD/TCP/historial. Distinguir «bridge real» de un inventario
+  de ejemplo en las capturas y conservar procedencia/frescura/caché.
 
-- [ ] **10 de 15 superficies sin dibujar** (lista en `gui/SCREEN_SPECS.md`). Dibujadas:
-  barra superior, dock, Vault (lista y cuadrícula), centro de control, centro de
-  actividad, paleta de comandos.
-- [ ] **Movimiento**: `MOTION_CINEMATICS.md` es especificación; nada está animado.
-- [ ] **Estados** de cada superficie: vacío, cargando, error, sin permiso, sin conexión.
-- [ ] **Vista de Sentry**: dispositivos de la red y alertas (depende del punto 1 de
-  Sentry). Hoy no tiene superficie.
-- [ ] **Vista del Stage**: quién tiene la autoridad y cómo se toma el control.
-
-**Integración** (Claude, cuando D1–D3 estén decididas):
-
-- [ ] **Conectar a datos reales** por el bridge de solo lectura (`display/native/src/ArchieBridge.h`),
-  reemplazando `Synthetic.qml` superficie por superficie. Primero: dominio
-  (personal o trabajo), autoridad del Stage, presión de CPU.
-- [ ] **Chips de contexto de Vault** desde `ContextDomain` (`core/crates/archie-vault/src/domain.rs`).
-- [ ] **Pausa de emergencia de autoridad**: `archied` no expone ese control; el
-  prototipo ya lo muestra como no disponible.
-- [ ] **Vault**: las 24 acciones `GUI-VAULT-*` de `gui/GUI_FUNCTION_BACKLOG.md`.
-- [ ] **Sin verificar**: Quickshell, blur del compositor, NVIDIA, Wayland, lectores de
-  pantalla, presupuesto de frame. El prototipo solo se renderizó por software.
+Detalle del rediseño en la
+[rama auditada](https://github.com/PentaVM/ArchieOS-Nvidia/blob/a1a240efcc21ab3c0f38b183d1cdf44996f5dcc6/docs/gui/DESIGN_ARCHIE_MAC.md).
+La GUI y su implementación siguen siendo trabajo de Claude/Xavi; no se modificaron
+en esta auditoría.
 
 ## 7. Plataforma
 
