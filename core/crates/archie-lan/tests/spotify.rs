@@ -11,7 +11,7 @@ fn spotify_device_type_is_a_device_claim_and_never_an_owner() {
     assert_eq!(snapshot.class.as_deref(), Some("mobile"));
     assert_eq!(snapshot.state["spotify.device_type"], "Smartphone");
     assert_eq!(snapshot.state.len(), 4);
-    assert!(!format!("{:?}", snapshot).contains("private-person"));
+    assert!(!format!("{snapshot:?}").contains("private-person"));
     let computer = parse(br#"{"status":101,"spotifyError":0,"deviceType":"Computer"}"#).unwrap();
     assert_eq!(computer.class.as_deref(), Some("host"));
     let speaker = parse(br#"{"status":101,"spotifyError":0,"deviceType":"Speaker"}"#).unwrap();
