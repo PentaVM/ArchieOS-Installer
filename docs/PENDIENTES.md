@@ -298,16 +298,22 @@ Detalle: [`HANDOFF-2026-10-11-SPEECH-FLOOR.md`](HANDOFF-2026-10-11-SPEECH-FLOOR.
 
 **Estado verificado al 2026-10-13:** PR31 (prototipo inicial) y PR34 (bridge de
 lectura, inventario LAN y jobs) fusionados. La rama de Xavi
-`feat/professional-gui-quickshell-vault` avanzó a `a1a240e` con **cuatro commits
-adicionales fuera de main**, último del 2026-10-12 a las 07:12 de Santiago. No hay
-un PR nuevo abierto para ese rediseño. La rama diverge: 4 commits delante y 89
-detrás de main; requiere integrar contra la base actual.
+`feat/professional-gui-quickshell-vault` tiene ahora el
+[Draft PR41](https://github.com/PentaVM/ArchieOS-Nvidia/pull/41), head `9f98235`:
+los cuatro commits de rediseño del 12 de octubre más una corrección del 13 de
+octubre para avisos QML al abrir la ventana real. 161 archivos, +14 144/-644 líneas;
+CI verde. Xavi reporta ventana Windows real y guards/defaults corregidos en Alt-Tab,
+Sentry, Actividad, medidores y Panel, con 21+79 comprobaciones QML pasadas.
+Los nuevos datos/operaciones siguen siendo muestras. Integrar contra main actual.
 
 **PR40 sí existe para el Orbe nativo**, en otra rama: `design/orb-presets-cli`,
-head `c65543d`, Draft de Xavi creado el 2026-10-13. Añade CLI `archie visual` y
-herramienta de voz `orb_preset`, con presets field/sphere/orb/neural; 9 archivos,
-+221/-90 líneas en esta primera tanda. CI Rust/native-contracts verde, pero el job
-no compila `display/native`; Xavi declara que C++/QML no se compiló ni renderizó.
+head `e460341`, Draft de Xavi creado el 2026-10-13. Añade CLI `archie visual` y
+herramienta de voz `orb_preset`, con presets field/sphere/orb/neural. Tres commits,
+15 archivos, +281/-141 líneas: ahora los presets están en JSON embebido y también
+se elimina el botón «Antes». **Xavi reporta compilación y arranque Windows** con
+MSVC/Qt 6.8.3: el Orbe se dibuja y el canal acepta `preset sphere`, pero sin el
+observador de 7666 no hay nodos; presets con datos reales y Linux/WSLg sin verificar.
+CI native-contracts verde; Rust falla en `cargo fmt` de `visual.rs`, antes de tests.
 Los shaders para halos/formas/enlaces/cerebro vivo siguen pendientes. Este PR no
 contiene los cuatro commits de la GUI Archie Mac. Revisar antes de fusionar la
 retirada de cinematic/overlay y crown/atlas/dense, por compatibilidad con funciones
@@ -331,7 +337,7 @@ las ocho superficies nuevas son `Demo` con datos de ejemplo. Quickshell sigue
 marcado sin verificar. Xavi informa 21 comprobaciones BridgeModel y 79 SurfacesTest
 pasadas offscreen; esta auditoría leyó código/capturas, no repitió esos tests.
 
-- [ ] Abrir el PR del rediseño y actualizar/integrar la rama conservando main.
+- [ ] Revisar e integrar PR41 conservando main; el PR ya está abierto.
 - [ ] Probar Quickshell, Linux/Wayland/NVIDIA, blur real, accesibilidad y rendimiento.
 - [ ] Conectar el control principalmente por voz a la shell nueva; los cuatro
   commits no demuestran ese cableado. Conservar el sistema de voz existente.

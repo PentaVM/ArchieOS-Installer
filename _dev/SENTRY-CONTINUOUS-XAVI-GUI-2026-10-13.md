@@ -121,3 +121,30 @@ green CI does not prove the modified C++/QML display compiles or renders. Author
 reports CLI30 tests/check-voice; we did not rerun or render this PR. No actual new
 Orb screenshot is present in the9-file delivery; GUI screenshots above are the
 separate sample shell, not a render of these Orb presets.
+
+## Latest published follow-up: PR41 and new PR40 commits
+
+Fresh GitHub check after the owner's next status request found PR41 created at
+2026-10-13T11:35:23Z (08:35 Santiago). GUI branch head9f98235 now has5 commits,
+161 changed files,+14144/-644. Fifth commit fixes QML construction-time accesses,
+negative repeater counts, Item.data alias shadowing and screenshot map; author
+reports real-window testing of14 overlays,21 BridgeModel+79 Surfaces checks.
+Its CI rust/native-contracts passes. PR description still contains warnings that
+the latest commit explicitly addresses; use the commit/code as current evidence.
+
+PR40 gained fb7ec85 (12:11:49Z/09:11 Santiago) and e460341 (12:37:53Z/09:37).
+Head e46034161b9667a1ca2b696d61600b024b3610c4:3 commits,15 files,+281/-141.
+New JSON presets embedded with Qt resources; overrides only recognised defaults.
+Removes legacy comparison/toggleCompare/Antes as well as earlier retired controls.
+Latest ledger reports successful native Windows compile/start (MSVC2022,Qt6.8.3,
+CMake/Ninja), display answers preset sphere and Orb draws, but no nodes because
+system observer7666 is absent. No node/preset visual validation with actual data,
+no Linux/WSLg verification, no new halo/link/live-brain shaders. PR body still says
+not compiled; it is stale relative to the new committed ledger. We did not reproduce
+the native build or render. Native CI does not cover display/native.
+
+Read failing CI log: Rust job stops in cargo fmt --check at visual.rs138/147; no
+functional test failure established because those tests are not reached. Native
+contracts passes. Source inspection only, no edits/merge of Xavi's implementation.
+Attached PR41 to this task. Earlier no-new-PR statements describe the earlier query;
+this new result supersedes them. No polling automation created.
