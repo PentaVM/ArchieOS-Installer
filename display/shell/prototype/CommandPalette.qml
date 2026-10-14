@@ -9,6 +9,10 @@ Panel {
     width: 720
     height: sf.height + body.implicitHeight + pf.height + 18
     property int current: 0
+    signal activated(string act)
+    readonly property var rows: Synthetic.search(inp.text)
+    function run(i) { var r = rows[i]; if (r && !r.why) activated(r.act) }
+    onShownChanged: if (shown) { inp.text = ""; current = 0; inp.forceActiveFocus() }
 
     component Kbd: Rectangle {
         property string label
@@ -22,16 +26,21 @@ Panel {
         Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.hair }
         Row { x: 16; anchors.verticalCenter: parent.verticalCenter; spacing: 10
             Icon { name: "search"; size: 18; color: Theme.t2; anchors.verticalCenter: parent.verticalCenter }
-            Row { anchors.verticalCenter: parent.verticalCenter
-                Text { text: Synthetic.query; color: Theme.t1; font.family: Theme.font; font.pixelSize: 17 }
-                Rectangle { width: 1.5; height: 19; color: Theme.acc } }
-            Text { visible: Synthetic.query === ""; text: "Buscar apps, archivos y acciones"; color: Theme.tdis; font.family: Theme.font; font.pixelSize: 13; anchors.verticalCenter: parent.verticalCenter } }
+            Item { width: 540; height: 26; anchors.verticalCenter: parent.verticalCenter
+                TextInput { id: inp; anchors.fill: parent; verticalAlignment: TextInput.AlignVCenter; clip: true
+                    color: Theme.t1; font.family: Theme.font; font.pixelSize: 17; selectionColor: Theme.acc; cursorDelegate: Rectangle { width: 1.5; color: Theme.acc }
+                    onTextChanged: pal.current = 0
+                    Keys.onPressed: function (e) {
+                        if (e.key === Qt.Key_Down) { pal.current = Math.min(pal.rows.length - 1, pal.current + 1); e.accepted = true }
+                        else if (e.key === Qt.Key_Up) { pal.current = Math.max(0, pal.current - 1); e.accepted = true }
+                        else if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) { pal.run(pal.current); e.accepted = true } } }
+                Text { visible: inp.text === ""; text: "Buscar apps, archivos y acciones"; color: Theme.tdis; font.family: Theme.font; font.pixelSize: 13; anchors.verticalCenter: parent.verticalCenter } } }
         Kbd { anchors.right: parent.right; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter; label: "esc" } }
 
     Column { id: body; y: sf.height + 4; width: parent.width
-        Repeater { model: Synthetic.results
+        Repeater { model: pal.rows
             delegate: Column { width: pal.width
-                Text { visible: index === 0 || Synthetic.results[index - 1].group !== modelData.group
+                Text { visible: index === 0 || pal.rows[index - 1].group !== modelData.group
                     text: modelData.group.toUpperCase(); leftPadding: 20; topPadding: 12; bottomPadding: 4
                     color: Theme.t3; font.family: Theme.disp; font.pixelSize: 11; font.weight: Font.DemiBold; font.letterSpacing: 1.26 }
                 Rectangle { x: 8; width: pal.width - 16; height: 52; radius: Theme.rRow
@@ -48,7 +57,9 @@ Panel {
                         Text { visible: !!modelData.why; text: modelData.why ? modelData.why : ""; color: Theme.warn; font.family: Theme.font; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
                         Chip { small: true; text: modelData.kind; anchors.verticalCenter: parent.verticalCenter }
                         Kbd { visible: parent.parent.sel && !parent.parent.dis; label: "↵"; anchors.verticalCenter: parent.verticalCenter } }
-                    MouseArea { anchors.fill: parent; hoverEnabled: true; onEntered: pal.current = index } } } } }
+                    MouseArea { anchors.fill: parent; hoverEnabled: true; onEntered: pal.current = index; onClicked: pal.run(index) } } } }
+        Item { visible: pal.rows.length === 0; width: pal.width; height: 64
+            Text { anchors.centerIn: parent; text: "Sin resultados para «" + inp.text + "»"; color: Theme.t3; font.family: Theme.font; font.pixelSize: 13 } } }
 
     Item { id: pf; x: 0; y: sf.height + 4 + body.implicitHeight + 10; width: parent.width; height: 40
         Rectangle { width: parent.width; height: 1; color: Theme.hair }
@@ -57,5 +68,5 @@ Panel {
             Row { spacing: 4; Kbd { label: "↵" } Text { text: "abrir"; color: Theme.t3; font.family: Theme.font; font.pixelSize: 12; leftPadding: 4; anchors.verticalCenter: parent.verticalCenter } }
             Row { spacing: 4; Kbd { label: "esc" } Text { text: "cerrar"; color: Theme.t3; font.family: Theme.font; font.pixelSize: 12; leftPadding: 4; anchors.verticalCenter: parent.verticalCenter } } }
         Text { anchors.right: parent.right; anchors.rightMargin: 20; anchors.verticalCenter: parent.verticalCenter
-            text: Synthetic.results.length + " resultados"; color: Theme.t3; font.family: Theme.font; font.pixelSize: 12 } }
+            text: pal.rows.length + " resultados"; color: Theme.t3; font.family: Theme.font; font.pixelSize: 12 } }
 }

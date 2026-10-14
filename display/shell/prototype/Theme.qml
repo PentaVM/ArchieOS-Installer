@@ -13,6 +13,8 @@ QtObject {
     // content breaks legibility: text shows through). Bar and dock stay glass over the desktop.
     property bool blur: false
     property bool reducedMotion: false
+    // Vivid colours (default): near-black surfaces, more saturated accents. Settings > Apariencia.
+    property bool vivid: true
 
     // Fonts shipped with the shell (display/shell/fonts, SIL OFL 1.1).
     property FontLoader interFont: FontLoader { source: Qt.resolvedUrl("../fonts/inter/Inter-Variable.ttf") }
@@ -20,41 +22,45 @@ QtObject {
     readonly property string font: interFont.status === FontLoader.Ready ? interFont.font.family : "sans-serif"
     readonly property string disp: groteskFont.status === FontLoader.Ready ? groteskFont.font.family : font
 
-    readonly property color desktop: "#07080c"
+    readonly property color desktop: vivid ? "#000000" : "#07080c"
 
     // Surfaces: glass / opaque.
-    readonly property color bar: opaque ? "#101117" : Qt.rgba(16 / 255, 17 / 255, 23 / 255, 0.62)
-    readonly property color dock: opaque ? "#14151c" : Qt.rgba(20 / 255, 21 / 255, 28 / 255, 0.55)
-    readonly property color win: (opaque || !blur) ? "#12131a" : Qt.rgba(18 / 255, 19 / 255, 26 / 255, 0.78)
-    readonly property color side: (opaque || !blur) ? "#1a1b24" : Qt.rgba(26 / 255, 27 / 255, 36 / 255, 0.66)
-    readonly property color panel: (opaque || !blur) ? "#16171f" : Qt.rgba(22 / 255, 23 / 255, 31 / 255, 0.86)
-    readonly property color raised: opaque ? "#22232a" : Qt.rgba(1, 1, 1, 0.05)
-    readonly property color hover: opaque ? "#2a2b32" : Qt.rgba(1, 1, 1, 0.08)
-    readonly property color pressed: opaque ? "#31323a" : Qt.rgba(1, 1, 1, 0.11)
-    readonly property color hair: opaque ? "#2c2d36" : Qt.rgba(1, 1, 1, 0.09)
-    readonly property color inner: opaque ? "#25262e" : Qt.rgba(1, 1, 1, 0.06)
-    readonly property color sel: opaque ? "#1f3a4a" : Qt.rgba(111 / 255, 200 / 255, 245 / 255, 0.16)
+    readonly property color bar: opaque ? (vivid ? "#030304" : "#101117") : (vivid ? Qt.rgba(2 / 255, 2 / 255, 4 / 255, 0.7) : Qt.rgba(16 / 255, 17 / 255, 23 / 255, 0.62))
+    readonly property color dock: opaque ? (vivid ? "#050506" : "#14151c") : (vivid ? Qt.rgba(4 / 255, 4 / 255, 6 / 255, 0.62) : Qt.rgba(20 / 255, 21 / 255, 28 / 255, 0.55))
+    readonly property color win: (opaque || !blur) ? (vivid ? "#050507" : "#12131a") : (vivid ? Qt.rgba(3 / 255, 3 / 255, 5 / 255, 0.82) : Qt.rgba(18 / 255, 19 / 255, 26 / 255, 0.78))
+    readonly property color side: (opaque || !blur) ? (vivid ? "#09090c" : "#1a1b24") : (vivid ? Qt.rgba(8 / 255, 8 / 255, 11 / 255, 0.7) : Qt.rgba(26 / 255, 27 / 255, 36 / 255, 0.66))
+    readonly property color panel: (opaque || !blur) ? (vivid ? "#070709" : "#16171f") : (vivid ? Qt.rgba(5 / 255, 5 / 255, 8 / 255, 0.9) : Qt.rgba(22 / 255, 23 / 255, 31 / 255, 0.86))
+    readonly property color raised: opaque ? (vivid ? "#101013" : "#22232a") : Qt.rgba(1, 1, 1, 0.05)
+    readonly property color hover: opaque ? (vivid ? "#17171c" : "#2a2b32") : Qt.rgba(1, 1, 1, 0.08)
+    readonly property color pressed: opaque ? (vivid ? "#1e1e24" : "#31323a") : Qt.rgba(1, 1, 1, 0.11)
+    readonly property color hair: opaque ? (vivid ? "#202026" : "#2c2d36") : Qt.rgba(1, 1, 1, 0.09)
+    readonly property color inner: opaque ? (vivid ? "#141418" : "#25262e") : Qt.rgba(1, 1, 1, 0.06)
+    readonly property color sel: opaque ? (vivid ? "#0a3a52" : "#1f3a4a") : (vivid ? Qt.rgba(0, 190 / 255, 1, 0.22) : Qt.rgba(111 / 255, 200 / 255, 245 / 255, 0.16))
 
     // Text.
-    readonly property color t1: "#f2f1ee"
-    readonly property color t2: "#b9b8c4"
-    readonly property color t3: "#8d8c9c"
+    readonly property color t1: vivid ? "#ffffff" : "#f2f1ee"
+    readonly property color t2: vivid ? "#cfcfdc" : "#b9b8c4"
+    readonly property color t3: vivid ? "#a2a1b4" : "#8d8c9c"
     readonly property color tdis: "#5e5d6b"
 
     // Accents and states. A state is never colour alone: icon + word always.
-    readonly property color acc: "#6fc8f5"
-    readonly property color arch: "#f0bb78"
-    readonly property color ok: "#47d18b"
-    readonly property color warn: "#f0b429"
-    readonly property color bad: "#f2626b"
-    readonly property color info: "#6fe3f5"
+    readonly property color acc: vivid ? "#1ec0ff" : "#6fc8f5"
+    readonly property color arch: vivid ? "#ffb02e" : "#f0bb78"
+    readonly property color ok: vivid ? "#17e387" : "#47d18b"
+    readonly property color warn: vivid ? "#ffc21a" : "#f0b429"
+    readonly property color bad: vivid ? "#ff4757" : "#f2626b"
+    readonly property color info: vivid ? "#22e6ff" : "#6fe3f5"
     readonly property color unk: "#8d8c9c"
 
     // File categories (colour-blind safe, same as the sphere's nodes).
-    readonly property var cat: ({ documents: "#e69f00", media: "#009e73", data: "#f0e442",
+    readonly property var cat: (vivid ? { documents: "#ffa000", media: "#00c98d", data: "#fff000",
+                                  archive: "#e85cb4", executable: "#ff5a00", other: "#d8d8d8" }
+                                : { documents: "#e69f00", media: "#009e73", data: "#f0e442",
                                   archive: "#cc79a7", executable: "#d55e00", other: "#bbbbbb" })
     // Dock icons: solid colour under a 165° white→black wash.
-    readonly property var dk: ({ orb: "#1b8fa6", vault: "#3b7fd6", forge: "#b87a0b",
+    readonly property var dk: (vivid ? { orb: "#00b4d8", vault: "#2f7bff", forge: "#ff9500",
+                                 sentry: "#00c46a", stage: "#9b5cff", set: "#7b8798" }
+                               : { orb: "#1b8fa6", vault: "#3b7fd6", forge: "#b87a0b",
                                  sentry: "#1f9a62", stage: "#8a5fd6", set: "#6b7686" })
     // Window controls.
     readonly property color tlClose: "#d9605a"

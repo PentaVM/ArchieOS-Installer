@@ -10,10 +10,19 @@ Rectangle {
     property string app: "Vault"
     property var bridge
     signal toggle(string name)
+    property string menu: ""                 // name of the open drop-down, "" if none
+    signal menuClicked(string name, real x)
 
     Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.inner }
 
-    component MenuItem: Text { leftPadding: 9; rightPadding: 9; color: Theme.t2; font.family: Theme.font; font.pixelSize: 13 }
+    component MenuItem: Rectangle {
+        id: mi
+        property string label
+        height: 24; radius: 6; width: mt.implicitWidth + 18
+        color: bar.menu === label ? Theme.pressed : (mma.containsMouse ? Theme.hover : "transparent")
+        Text { id: mt; anchors.centerIn: parent; text: mi.label; color: (bar.menu === mi.label || mma.containsMouse) ? Theme.t1 : Theme.t2; font.family: Theme.font; font.pixelSize: 13 }
+        MouseArea { id: mma; anchors.fill: parent; hoverEnabled: true; onClicked: bar.menuClicked(mi.label, mi.mapToItem(bar, 0, 0).x) }
+    }
     component IconButton: Rectangle {
         id: ib
         property string icon
@@ -35,7 +44,7 @@ Rectangle {
             Icon { name: "archie"; size: 18; color: Theme.t1; anchors.verticalCenter: parent.verticalCenter }
             Text { text: "Archie"; color: Theme.t1; font.family: Theme.font; font.pixelSize: 14; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter } }
         Text { text: bar.app; rightPadding: 12; color: Theme.t1; font.family: Theme.font; font.pixelSize: 13; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
-        MenuItem { text: "Archivo" } MenuItem { text: "Editar" } MenuItem { text: "Vista" } MenuItem { text: "Ir" } MenuItem { text: "Ventana" }
+        MenuItem { label: "Archivo"; anchors.verticalCenter: parent.verticalCenter } MenuItem { label: "Editar"; anchors.verticalCenter: parent.verticalCenter } MenuItem { label: "Vista"; anchors.verticalCenter: parent.verticalCenter } MenuItem { label: "Ir"; anchors.verticalCenter: parent.verticalCenter } MenuItem { label: "Ventana"; anchors.verticalCenter: parent.verticalCenter }
     }
     Row {
         anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter; spacing: 6

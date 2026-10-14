@@ -9,6 +9,7 @@ Panel {
     width: row.implicitWidth + 24
     height: Theme.dockIcon + 26
     property string current: "vault"
+    property bool vaultOpen: true
     signal launched(string id)
 
     Row {
@@ -41,7 +42,7 @@ Panel {
                         Behavior on opacity { NumberAnimation { duration: Theme.durDock } } }
                     Icon { anchors.centerIn: parent; name: modelData.icon; size: 28; color: "#ffffff" }
                 }
-                Rectangle { visible: modelData.running; width: 4; height: 4; radius: 2; color: Theme.t1
+                Rectangle { visible: modelData.id === "vault" ? dock.vaultOpen : (modelData.running || dock.current === modelData.id); width: 4; height: 4; radius: 2; color: Theme.t1
                     anchors.horizontalCenter: parent.horizontalCenter; anchors.top: parent.bottom; anchors.topMargin: 8 }
                 Rectangle { visible: ma.containsMouse; y: -30; anchors.horizontalCenter: parent.horizontalCenter
                     width: tip.implicitWidth + 16; height: 22; radius: 7; color: Theme.panel; border.width: 1; border.color: Theme.hair

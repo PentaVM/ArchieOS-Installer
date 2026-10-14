@@ -20,6 +20,11 @@ Superficies de ejemplo de la segunda entrega (todas "Diseño · datos de ejemplo
 (normal, vacío, error, offline, degradado, desactualizado) de esas superficies, `.` activa el anillo
 de foco, `H` deja el escritorio vacío, `P` cambia el perfil de movimiento (Full / Balanced / Quiet).
 
+Visor gráfico (fondo del escritorio): la esfera de Archie Lumenfield 0449 sobre el grafo guardado del
+contenido del sistema, servida por `../../visor` (ver su README). `Ctrl+Espacio` libera la cámara para
+navegar en 3D y `Esc` la vuelve a fijar. Ajustes > Visor gráfico (perfil, brillo, actividad, giro) y
+Ajustes > Apariencia (colores vívidos u originales). Sin el visor en marcha se ve el fondo de siempre.
+
 Aspecto: diseño Archie Mac de Claude Design; ver `docs/gui/DESIGN_ARCHIE_MAC.md` (qué se aplicó, desviaciones
 y correcciones a la verdad). Fuentes: `../fonts` (OFL). Referencia: `../design/archie-mac-handoff`.
 Las capturas de `docs/gui/screenshots/` se generaron con Qt 6.12 (PySide6, API gráfica de software,

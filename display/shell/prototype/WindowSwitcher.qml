@@ -9,6 +9,7 @@ Panel {
     width: 640
     height: foot.y + foot.height
     property string st: Demo.state
+    signal chosen(string key)
 
     readonly property var work: [
         { title: "Catálogo de puentes", app: "Forge",  key: "forge" },
@@ -45,6 +46,7 @@ Panel {
                 Text { text: tile.domain === "work" ? "Trabajo" : "Personal"; color: Theme.t2; font.family: Theme.font; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter } }
             // Offline: the authority per window cannot be read, and says so.
             Chip { visible: sw.st === "offline"; small: true; tone: "unk"; icon: "unknown"; text: "Autoridad"; sub: "sin lectura" } }
+        MouseArea { anchors.fill: parent; enabled: info.key !== ""; hoverEnabled: true; onClicked: sw.chosen(info.key) }
     }
     component Group: Column {
         id: g
