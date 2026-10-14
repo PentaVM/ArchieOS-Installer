@@ -73,6 +73,17 @@ Item {
         var nc = make("NotificationCenter")
         check("notifications empty: no phantom job", texts(nc).indexOf("freecad") < 0)
         nc.destroy()
+        // the centre really dismisses: one entry, then all of them, then the examples come back
+        Demo.state = "normal"
+        var nd = make("NotificationCenter")
+        check("notifications: five examples at first", nd.live === 5 && texts(nd).indexOf("Dispositivo nuevo en la red") >= 0)
+        Demo.dismiss("n4")
+        check("notifications: one dismissed", nd.live === 4 && texts(nd).indexOf("Dispositivo nuevo en la red") < 0)
+        Demo.dismissAll(nd.keys)
+        check("notifications: all dismissed shows 'Todo al día'", nd.allGone && texts(nd).indexOf("Todo al día") >= 0 && texts(nd).indexOf("freecad") < 0)
+        Demo.restoreNotifs()
+        check("notifications: examples restored", nd.live === 5 && texts(nd).indexOf("Todo al día") < 0)
+        nd.destroy()
         // 5. unreadable is not alive: offline never says "en vivo"
         Demo.state = "offline"
         var fo = make("ForgeWindow")

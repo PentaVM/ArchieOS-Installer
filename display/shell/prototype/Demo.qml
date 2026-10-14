@@ -24,6 +24,12 @@ QtObject {
     // Silent mode: the shell's own notifications (toasts) stay hidden. It is local to this shell;
     // no system-wide Do Not Disturb exists behind it.
     property bool silent: false
+    // Notifications the person has dismissed in the centre (by entry key). Local to this shell and not
+    // persisted: the entries are design samples, so "restore" brings the examples back.
+    property var notifGone: []
+    function dismiss(k) { if (notifGone.indexOf(k) < 0) notifGone = notifGone.concat([k]) }
+    function dismissAll(ks) { var g = notifGone.slice(); for (var i = 0; i < ks.length; i++) if (g.indexOf(ks[i]) < 0) g.push(ks[i]); notifGone = g }
+    function restoreNotifs() { notifGone = [] }
 
     // The real time, to the minute, for the top bar and the lock screen.
     property date now: new Date()
