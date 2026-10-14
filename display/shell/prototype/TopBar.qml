@@ -62,7 +62,7 @@ Rectangle {
         IconButton { icon: "activity"; count: bar.bridge.jobs.state === "ok" ? String(bar.bridge.runningJobs) : "—"
             active: bar.overlay === "activity"; onClicked: bar.toggle("activity"); anchors.verticalCenter: parent.verticalCenter }
         IconButton { icon: "control"; active: bar.overlay === "control"; onClicked: bar.toggle("control"); anchors.verticalCenter: parent.verticalCenter }
-        Text { leftPadding: 8; text: Synthetic.clock; color: Theme.t1; font.family: Theme.font; font.pixelSize: 13; font.weight: Font.Medium
+        Text { leftPadding: 8; text: Demo.barClock; color: Theme.t1; font.family: Theme.font; font.pixelSize: 13; font.weight: Font.Medium
             font.features: { "tnum": 1 }; anchors.verticalCenter: parent.verticalCenter }
     }
 }

@@ -6,7 +6,6 @@ import QtQuick
 // and per-section chips). The bridge-fed parts (link, control center, activity jobs, Sentry)
 // do not read from here.
 QtObject {
-    readonly property string clock: "lun 12 oct  14:32"
     readonly property var dock: [
         { id: "orb",    name: "Orb",     icon: "dkOrb",    running: true  },
         { id: "vault",  name: "Vault",   icon: "dkVault",  running: true  },

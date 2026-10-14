@@ -46,13 +46,18 @@ Item {
             }
         }
         // 2. design samples say they are samples
-        var must = ["WindowSwitcher", "NotificationCenter", "ForgeWindow", "InspectorPanel", "SettingsWindow", "AuthDialog"]
+        var must = ["NotificationCenter", "ForgeWindow", "InspectorPanel", "SettingsWindow", "AuthDialog"]
         for (var m = 0; m < must.length; m++) {
             Demo.state = "normal"
             var d = make(must[m])
             check(must[m] + " is labelled Diseño", texts(d).indexOf("Diseño") >= 0)
             d.destroy()
         }
+        // The switcher lists the real windows but says what is inside them is a sample.
+        Demo.state = "normal"
+        var sw0 = make("WindowSwitcher")
+        check("WindowSwitcher says its content is a sample", texts(sw0).indexOf("contenido de ejemplo") >= 0)
+        sw0.destroy()
         // 3. the authorization dialog grants nothing and says why
         var ad = make("AuthDialog")
         var at = texts(ad)

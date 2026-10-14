@@ -9,10 +9,8 @@ Panel {
     kind: "window"
     property bool gridView: false
     property int selected: 1
-    property real dx: 0                      // drag offset, applied by the host
-    property real dy: 0
+    readonly property string wid: "vault"   // its entry in the window manager (Wm)
     signal closeRequested()
-    signal zoomRequested()
     readonly property color noteColor: Theme.t3
 
     // ---- state: tabs, navigation, sort, copy queue ------------------------------------------
@@ -99,16 +97,8 @@ Panel {
     // ---- title bar -------------------------------------------------------------------------
     Item { id: tbar; width: parent.width; height: 52
         Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.hair }
-        DragHandler { id: dh; target: null; property real sx: 0; property real sy: 0
-            onActiveChanged: if (active) { sx = win.dx; sy = win.dy }
-            onTranslationChanged: if (active) { win.dx = sx + (centroid.scenePosition.x - centroid.scenePressPosition.x); win.dy = sy + (centroid.scenePosition.y - centroid.scenePressPosition.y) } }
-        Row { x: 16; anchors.verticalCenter: parent.verticalCenter; spacing: 8
-            Rectangle { width: 12; height: 12; radius: 6; color: Theme.tlClose; border.width: 1; border.color: Qt.rgba(0, 0, 0, 0.22)
-                MouseArea { anchors.fill: parent; anchors.margins: -2; onClicked: win.closeRequested() } }
-            Rectangle { width: 12; height: 12; radius: 6; color: Theme.tlMin; border.width: 1; border.color: Qt.rgba(0, 0, 0, 0.22)
-                MouseArea { anchors.fill: parent; anchors.margins: -2; onClicked: win.closeRequested() } }
-            Rectangle { width: 12; height: 12; radius: 6; color: Theme.tlZoom; border.width: 1; border.color: Qt.rgba(0, 0, 0, 0.22)
-                MouseArea { anchors.fill: parent; anchors.margins: -2; onClicked: win.zoomRequested() } } }
+        TitleDrag { wid: win.wid; reserveRight: 100 }
+        Lights { x: 16; anchors.verticalCenter: parent.verticalCenter; wid: win.wid }
         Row { anchors.centerIn: parent
             Text { text: "Vault"; color: Theme.t1; font.family: Theme.disp; font.pixelSize: 17; font.weight: Font.DemiBold; font.letterSpacing: -0.17 }
             Text { text: " — " + Synthetic.places[win.cur.place].name; color: Theme.t2; font.family: Theme.disp; font.pixelSize: 17; font.weight: Font.Medium; font.letterSpacing: -0.17 } }

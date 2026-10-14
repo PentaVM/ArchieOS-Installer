@@ -13,10 +13,29 @@ QtObject {
     property bool bare: true
     // Graph viewer (the desktop sphere): Settings > Visor gráfico.
     property bool orbShow: true
-    property int orbProfile: 1          // 0 Sphere, 1 Orb, 2 Field
+    property int orbProfile: 0          // 0 Sphere (the main one), 1 Orb, 2 Field
     property int orbBrightI: 1
     property int orbActI: 2
     property bool orbSpin: true
+    property int orbNodesI: 3           // visible nodes: 0 60 · 1 220 · 2 800 · 3 2 500 · 4 5 000
+    property bool orbDust: false        // "dust of light": decorative particles that grey the picture
+    property int orbGradeI: 1           // colour grade of the sphere: 0 original · 1 cold hologram · 2 vivid
     property bool orbNav: false         // "navigate the sphere in 3D" (free camera); otherwise the camera is fixed
+    // Silent mode: the shell's own notifications (toasts) stay hidden. It is local to this shell;
+    // no system-wide Do Not Disturb exists behind it.
+    property bool silent: false
+
+    // The real time, to the minute, for the top bar and the lock screen.
+    property date now: new Date()
+    readonly property var dayShort: ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"]
+    readonly property var dayLong: ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"]
+    readonly property var monthShort: ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
+    readonly property var monthLong: ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+    function two(n) { return (n < 10 ? "0" : "") + n }
+    readonly property string time: two(now.getHours()) + ":" + two(now.getMinutes())
+    readonly property string barClock: dayShort[now.getDay()] + " " + now.getDate() + " " + monthShort[now.getMonth()] + "  " + time
+    readonly property string longDate: dayLong[now.getDay()] + " " + now.getDate() + " de " + monthLong[now.getMonth()]
+    property Timer tick: Timer { interval: 5000; running: true; repeat: true; onTriggered: Demo.now = new Date() }
+
     function next() { state = states[(states.indexOf(state) + 1) % states.length] }
 }

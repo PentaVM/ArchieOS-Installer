@@ -65,14 +65,22 @@ AppWindow {
     Column { visible: sw.section === 4; width: parent.width; spacing: 2
         OrbOpt { label: "Mostrar en el escritorio"; options: ["Sí", "No"]; index: Demo.orbShow ? 0 : 1; onPicked: function (i) { Demo.orbShow = (i === 0) } }
         OrbOpt { label: "Perfil de representación"; options: ["Esfera", "Orbe", "Campo"]; index: Demo.orbProfile; onPicked: function (i) { Demo.orbProfile = i } }
+        OrbOpt { label: "Nodos visibles"; options: ["60", "220", "800", "2.500", "5.000"]; index: Demo.orbNodesI; onPicked: function (i) { Demo.orbNodesI = i } }
+        OrbOpt { label: "Color de la esfera"; options: ["Original", "Holograma frío", "Vivo"]; index: Demo.orbGradeI; onPicked: function (i) { Demo.orbGradeI = i } }
+        OrbOpt { label: "Polvo de luz"; options: ["No", "Sí"]; index: Demo.orbDust ? 1 : 0; onPicked: function (i) { Demo.orbDust = (i === 1) } }
         OrbOpt { label: "Brillo"; options: ["Bajo", "Normal", "Alto"]; index: Demo.orbBrightI; onPicked: function (i) { Demo.orbBrightI = i } }
         OrbOpt { label: "Actividad"; options: ["Apagada", "Baja", "Media", "Alta"]; index: Demo.orbActI; onPicked: function (i) { Demo.orbActI = i } }
         OrbOpt { label: "Giro automático"; options: ["Sí", "No"]; index: Demo.orbSpin ? 0 : 1; onPicked: function (i) { Demo.orbSpin = (i === 0) } } }
 
     Column { visible: sw.section === 5; width: parent.width; spacing: 2
-        OrbOpt { label: "Colores del sistema"; options: ["Vívidos", "Originales"]; index: Theme.vivid ? 0 : 1; onPicked: function (i) { Theme.vivid = (i === 0) } } }
-    NoteBox { visible: sw.section === 5; text: "Vívidos: fondos casi negros y colores más saturados en todo el sistema. Originales: el grafito del diseño de Claude Design." }
-    NoteBox { visible: sw.section === 4; text: "La esfera es el motor de Archie Lumenfield 0449 sobre el grafo guardado del contenido del sistema; los archivos nuevos se agregan solos. En el escritorio la cámara queda fija: pasa el ratón o haz clic en un nodo para ver qué es. Ctrl+Espacio libera la cámara para navegar en 3D; Esc la vuelve a fijar." }
+        OrbOpt { label: "Colores del sistema"; options: ["Vívidos", "Originales"]; index: Theme.vivid ? 0 : 1; onPicked: function (i) { Theme.vivid = (i === 0) } }
+        OrbOpt { label: "Perfil de movimiento"; options: ["Completo", "Equilibrado", "Tranquilo"]; index: Theme.motion === "full" ? 0 : (Theme.motion === "balanced" ? 1 : 2)
+            onPicked: function (i) { Theme.motion = ["full", "balanced", "quiet"][i] } }
+        OrbOpt { label: "Movimiento reducido"; options: ["No", "Sí"]; index: Theme.reducedMotion ? 1 : 0; onPicked: function (i) { Theme.reducedMotion = (i === 1) } }
+        OrbOpt { label: "Superficies opacas"; options: ["No", "Sí"]; index: Theme.opaque ? 1 : 0; onPicked: function (i) { Theme.opaque = (i === 1) } }
+        OrbOpt { label: "Cristal con desenfoque"; options: ["No", "Sí"]; index: Theme.blur ? 1 : 0; onPicked: function (i) { Theme.blur = (i === 1) } } }
+    NoteBox { visible: sw.section === 5; text: "Vívidos: fondos casi negros y colores más saturados en todo el sistema. Originales: el grafito del diseño de Claude Design. El movimiento sigue la tabla de MOVIMIENTO.md; con «reducido» todo es instantáneo. El desenfoque real lo hace el compositor: en este prototipo solo cambia el material." }
+    NoteBox { visible: sw.section === 4; text: "La esfera es el motor de Archie Lumenfield sobre el contenido del sistema. «Nodos visibles» es cuántos importantes dibuja; el resto aparece al tocar su carpeta. «Color de la esfera» lo aplica la shell sobre la imagen (el motor no se toca): Original es como lo dibuja él. En el escritorio la cámara queda fija: pasa el ratón o haz clic en un nodo para ver qué es. Ctrl+Espacio libera la cámara para navegar en 3D; Esc la vuelve a fijar." }
     NoteBox { visible: sw.st === "stale"; icon: "recents"; text: "Última lectura hace 18 min." }
     NoteBox { visible: sw.section === 0 && sw.st !== "error"; text: "Los valores de las claves nunca se muestran ni se teclean aquí: solo el nombre de la variable." }
     NoteBox { visible: sw.section === 1 && sw.plain; text: "Localidad y grado de privacidad son los declarados por cada modelo registrado." }

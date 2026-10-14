@@ -6,10 +6,13 @@ import QtQuick
 // unreadable, invalid, empty ("ran and found nothing"), stale, truncated.
 Panel {
     id: sp
-    kind: "panel"
+    kind: "window"
+    readonly property string wid: "sentry"
     property var bridge
     width: 780
-    height: content.implicitHeight + 46
+    height: tbar.height + content.implicitHeight + 46
+    enterScale: 0.96
+    durIn: Theme.durOpen; durOut: Theme.durClose
     // Merged over full defaults: the bridge's own fallback (state only, before `bridge` is even
     // assigned, or for frames older than this field) omits devices/path/etc., and every binding
     // below reads them unconditionally (QML property bindings do not share another property's
@@ -41,7 +44,13 @@ Panel {
             Column { id: extraCol; width: parent.width; spacing: 8 } }
     }
 
-    Column { id: content; x: 22; y: 22; width: parent.width - 46; spacing: 0
+    Item { id: tbar; width: parent.width; height: 52
+        Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.hair }
+        TitleDrag { wid: sp.wid }
+        Lights { x: 16; anchors.verticalCenter: parent.verticalCenter; wid: sp.wid }
+        Text { anchors.centerIn: parent; text: "Sentry"; color: Theme.t1; font.family: Theme.disp; font.pixelSize: 17; font.weight: Font.DemiBold; font.letterSpacing: -0.17 } }
+
+    Column { id: content; x: 22; y: tbar.height + 20; width: parent.width - 46; spacing: 0
         Text { text: "Sentry · red local"; color: Theme.t1; font.family: Theme.disp; font.pixelSize: 22; font.weight: Font.DemiBold; font.letterSpacing: -0.33 }
         Flow { width: parent.width; topPadding: 12; spacing: 8
             Chip { src: true; icon: "ok"; text: "Real · bridge" }

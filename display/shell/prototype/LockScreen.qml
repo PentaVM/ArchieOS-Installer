@@ -9,11 +9,18 @@ Item {
     anchors.fill: parent
     property string st: Demo.state
     property bool installer: false
+    signal leave()
     // vacio / error / degraded show the boot list; the rest show the lock.
     readonly property bool boot: st === "vacio" || st === "error" || st === "degraded"
 
     Background { anchors.fill: parent; nodes: false }
     DesignBanner { x: 14; y: 12 }
+    // There is no authentication service, so nothing here unlocks anything: this only leaves the
+    // demonstration screen and goes back to the desktop.
+    Column { anchors.horizontalCenter: parent.horizontalCenter; y: parent.height - 120; spacing: 8
+        Btn { anchors.horizontalCenter: parent.horizontalCenter; text: "Volver al escritorio"; onClicked: ls.leave() }
+        Row { anchors.horizontalCenter: parent.horizontalCenter; spacing: 6; Kbd { label: "Esc" }
+            Text { text: "salir de esta pantalla (demostración, no autentica)"; color: Theme.t3; font.family: Theme.font; font.pixelSize: 12 } } }
 
     component Check: Item {
         id: ck
@@ -33,8 +40,8 @@ Item {
     Panel { visible: !ls.installer && !ls.boot; kind: "panel"; x: (ls.width - width) / 2; y: 250; width: 440; height: lc.implicitHeight + 64
         Column { id: lc; x: 36; y: 34; width: parent.width - 72; spacing: 10
             Icon { anchors.horizontalCenter: parent.horizontalCenter; name: "archie"; size: 28; color: Theme.t1 }
-            Text { anchors.horizontalCenter: parent.horizontalCenter; text: "14:32"; color: Theme.t1; font.family: Theme.disp; font.pixelSize: 68; font.weight: Font.Medium; font.letterSpacing: -2 }
-            Text { anchors.horizontalCenter: parent.horizontalCenter; text: "lunes 12 de octubre"; color: Theme.t2; font.family: Theme.font; font.pixelSize: 14 }
+            Text { anchors.horizontalCenter: parent.horizontalCenter; text: Demo.time; color: Theme.t1; font.family: Theme.disp; font.pixelSize: 68; font.weight: Font.Medium; font.letterSpacing: -2 }
+            Text { anchors.horizontalCenter: parent.horizontalCenter; text: Demo.longDate; color: Theme.t2; font.family: Theme.font; font.pixelSize: 14 }
             Row { anchors.horizontalCenter: parent.horizontalCenter; spacing: 8
                 Chip { design: true; icon: "sample"; text: "Diseño · sin servicio" }
                 StateChip { visible: ls.st === "offline" || ls.st === "stale"; st: ls.st; noun: "estados"

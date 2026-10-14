@@ -4,7 +4,7 @@ Qt Quick puro, **sin Quickshell**, datos sintéticos rotulados ("DATOS DE DISEÑ
 `archied`, `archie-displayd` ni el sistema de archivos. Sustituye nada de `display/native`
 (Orbe, Observatorio) ni de `display/stage`.
 
-Ejecutar (Qt 6.6+, Linux o Windows):
+Ejecutar (Qt 6.6+, Linux o Windows; en Windows sin `qml` basta PySide6, ver `display/visor/README.md` para la esfera):
 
 ```sh
 qml display/shell/prototype/Main.qml
@@ -12,6 +12,23 @@ qml display/shell/prototype/Main.qml
 
 Teclas: `Ctrl+K` paleta · `C` centro de control · `A` actividad · `S` Sentry · `G` lista/cuadrícula ·
 `M` movimiento reducido · `O` superficies opacas · `B` desenfoque del compositor (cristal) · `Esc` cerrar.
+
+### Ventanas y sistema básico (14 oct)
+
+Las cinco apps del dock (Vault, Forge, Sentry, Stage, Ajustes) son ventanas de verdad, gobernadas por `Wm.qml`
+(estado real; el contenido de cada ventana sigue siendo de ejemplo):
+
+- **Mover:** arrastrar la barra de título (queda siempre alcanzable). **Subir al frente:** cualquier clic en ella.
+- **Luces:** roja cierra, amarilla minimiza al dock, verde amplía (otra vez, restaura). Grises si la ventana no está al frente.
+- **Dock:** un punto bajo lo abierto (atenuado si está minimizado). Clic: abre, restaura, sube o, si ya está al frente, minimiza.
+  Clic derecho: menú de la app (traer al frente, minimizar, zoom, cerrar); en el Orb, mostrar el escritorio, minimizar o cerrar todas.
+- **Teclas:** `Ctrl+W` cierra la ventana del frente, `Ctrl+Mayús+W` las cierra todas, `Ctrl+M` minimiza, `Ctrl+Mayús+M` las minimiza todas,
+  `D` muestra el escritorio, `F` `S` `,` abren Forge, Sentry y Ajustes (otra vez, con la ventana al frente, la cierran).
+  `W` abre el selector de ventanas (lista las reales): `Tab` / `Mayús+Tab` eligen, `↵` abre.
+- **Menú Ventana:** minimizar, zoom, cerrar, minimizar/mostrar/cerrar todas, mostrar el escritorio y las cinco apps.
+- **Reloj real** en la barra y en el bloqueo. **Silencio** (Centro de control) es real pero solo de esta shell: oculta los avisos.
+  El bloqueo no autentica: solo tiene «Volver al escritorio». Ajustes > Apariencia reúne colores, movimiento, opacidad y cristal.
+- **Esfera de fondo** (Ajustes > Visor gráfico): nodos visibles, color (Original, Holograma frío, Vivo), polvo de luz, brillo, actividad, giro.
 
 Superficies de ejemplo de la segunda entrega (todas "Diseño · datos de ejemplo", sin datos reales):
 `W` Alt-Tab · `N` centro de notificaciones · `T` avisos + diálogo de autorización · `F` Forge ·
@@ -32,7 +49,7 @@ plataforma `offscreen`), a 1920×1080 y 2560×1440.
 El script de captura no se versiona (ArchieOS no incluye Python). Los mismos resultados con
 `qml` en Linux no están verificados.
 
-Pruebas: `BridgeModelTest.qml` (modelo de datos) y `SurfacesTest.qml` (superficies de ejemplo y perfiles de movimiento); ambas sin QtTest, con resultados en `passes` / `failures` / `log`.
+Pruebas: `BridgeModelTest.qml` (modelo de datos), `SurfacesTest.qml` (superficies de ejemplo y perfiles de movimiento) y `WmTest.qml` (gestor de ventanas, luces y dock); sin QtTest, con resultados en `passes` / `failures` / `log`.
 
 **No probado:** Quickshell (`PanelWindow`, capas), blur del compositor, NVIDIA, Wayland,
 lectores de pantalla, `qmllint`.

@@ -107,3 +107,31 @@ Ninguna cambia lo entregado hasta que se elija. Lo que hizo el prototipo mientra
 ### No verificado en la segunda entrega
 
 Quickshell, desenfoque real, lectores de pantalla, rendimiento y que el movimiento se vea como el diseño (no hay referencia renderizada). Las animaciones se comprobaron sólo por ausencia de errores de QML; no se midió su duración real.
+
+## 9. Ventanas, sistema básico y color de la esfera (14 oct, pedido del dueño)
+
+El dueño pidió, tras probar el prototipo en Windows: quitar el velo gris y el polvo de la esfera, que se genere bien con muchos
+archivos y se parezca a la idea base, mover/cerrar/minimizar ventanas y activar lo que estaba sin usar. Esto **no es sólo visual**:
+cambia comportamiento y va aquí para que se vea qué se pidió y qué se hizo.
+
+| Qué | Cómo | Límite honesto |
+|---|---|---|
+| Gestor de ventanas | `Wm.qml` (estado), `WinHost.qml` (coloca, apila, sube al frente), `Lights.qml` (luces), `TitleDrag.qml` (arrastre), `StageWindow.qml` | El contenido de cada ventana sigue siendo de ejemplo. No hay compositor: es el de esta shell |
+| Forge, Ajustes y Sentry pasan de «panel que se cierra al hacer clic fuera» a ventana persistente | Sentry gana una barra de título con luces (antes no tenía) | Cambia su aspecto: 52 px más de alto |
+| Luces del semáforo | Roja cierra, amarilla minimiza (antes cerraba), verde amplía | Estaban dibujadas pero sin función, salvo en Vault |
+| Dock | Punto por ventana abierta, atenuado si está minimizada; clic abre/restaura/sube/minimiza; clic derecho abre `DockMenu.qml` | |
+| Selector de ventanas (`W`) | Lista las ventanas reales y se maneja con `Tab`/`Mayús+Tab`/`↵` | Su contenido y el reparto Trabajo/Personal siguen siendo de ejemplo; el chip lo dice |
+| Reloj | Hora y fecha reales en la barra y en el bloqueo (`Demo.qml`) | Antes eran el texto fijo del diseño («lun 12 oct 14:32») |
+| Silencio | Único interruptor del Centro de control que funciona: oculta los avisos de esta shell | Wi-Fi, Bluetooth y Privacidad siguen deshabilitados («sin servicio conectado»): no hay servicio detrás |
+| Bloqueo | Botón «Volver al escritorio» | **No autentica.** Lo dice la propia pantalla |
+| Ajustes > Apariencia | Perfil de movimiento, movimiento reducido, opacidad, cristal | Antes sólo existían como teclas |
+| Esfera: velo y polvo | `ambient` («polvo de luz») apagado, exposición 1,0 (de fábrica 1,5) y fondo negro | Se ajusta a través de los controles del propio motor; el motor no se toca. El efecto del polvo se vio al quitarlo; el de la exposición no se midió por separado |
+| Esfera: más nodos | 2 500 visibles (de fábrica 220) y 30 archivos por carpeta | Medido: 60 FPS con 2 500 nodos en la GPU de este equipo. Con 5 000 no se midió |
+| Esfera: color | «Holograma frío» (filtro CSS de la shell: giro de tono hacia cian, más saturación y contraste); «Vivo» (mismos tonos); «Original» | Con el contenido de este repo el motor dibuja naranja y crema (en su código, las carpetas de primer nivel se tiñen con el acento cálido). Ningún ajuste del motor que se probó lo cambió (acento cálido, paleta por tipo, esquema de color). El filtro gira **toda** la imagen, así que las guías y el cono salen rosados |
+| Foco del teclado | Con la página de la esfera cargada, el teclado se lo quedaba ella y las teclas de la shell no respondían; ahora el foco vuelve a la shell | |
+
+Verificado: `WmTest.qml` (44) y recorrido con eventos reales de ratón y teclado (arrastrar, minimizar, restaurar desde el dock, zoom, cerrar,
+menú del dock). No verificado: rendimiento con muchas ventanas, 5 000 nodos, otro equipo/GPU, Linux.
+
+Capturas: `29` escritorio con la esfera en «Holograma frío» (Qt 6.12 + QtWebEngine, GPU real; una captura por arranque), `30` cinco ventanas apiladas con la del frente
+en color, `31` menú del dock, `32` Ajustes > Visor gráfico.

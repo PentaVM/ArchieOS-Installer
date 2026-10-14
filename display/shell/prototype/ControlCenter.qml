@@ -50,16 +50,24 @@ Panel {
         Item { width: 1; height: 18 }
         Chip { design: true; icon: "sample"; text: "Diseño · sin servicio" }
         Item { width: 1; height: 12 }
-        // quick tiles: no service is connected, so each is dashed and says so.
+        // quick tiles: no service is connected, so each is dashed and says so. The exception is Silencio:
+        // it only governs this shell's own notifications, so it works, and says it is local.
         Grid { columns: 2; spacing: 10; width: parent.width
             Repeater { model: Synthetic.quick
-                delegate: Item { width: (content.width - 10) / 2; height: 62
-                    DashedRect { anchors.fill: parent; radius: Theme.rCard; color: Theme.hair }
+                delegate: Item { id: tile
+                    readonly property bool live: modelData.name === "Silencio"
+                    readonly property bool on: live && Demo.silent
+                    width: (content.width - 10) / 2; height: 62
+                    Rectangle { visible: tile.live; anchors.fill: parent; radius: Theme.rCard; color: tile.on ? Theme.sel : (tma.containsMouse ? Theme.hover : Theme.raised)
+                        border.width: 1; border.color: tile.on ? Theme.tint(Theme.acc, 0.45) : Theme.hair }
+                    DashedRect { visible: !tile.live; anchors.fill: parent; radius: Theme.rCard; color: Theme.hair }
                     Column { x: 12; y: 12; spacing: 6
-                        Row { spacing: 8; Icon { name: modelData.icon; size: 20; color: Theme.t3; anchors.verticalCenter: parent.verticalCenter }
-                            Text { text: modelData.name; color: Theme.t2; font.family: Theme.font; font.pixelSize: 13; font.weight: Font.Medium; anchors.verticalCenter: parent.verticalCenter } }
-                        Row { spacing: 5; Icon { name: "lock"; size: 12; color: Theme.t3; anchors.verticalCenter: parent.verticalCenter }
-                            Text { text: "sin servicio conectado"; color: Theme.t3; font.family: Theme.font; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter } } } } } }
+                        Row { spacing: 8; Icon { name: modelData.icon; size: 20; color: tile.on ? Theme.acc : (tile.live ? Theme.t1 : Theme.t3); anchors.verticalCenter: parent.verticalCenter }
+                            Text { text: modelData.name; color: tile.live ? Theme.t1 : Theme.t2; font.family: Theme.font; font.pixelSize: 13; font.weight: Font.Medium; anchors.verticalCenter: parent.verticalCenter } }
+                        Row { spacing: 5; Icon { name: tile.live ? (tile.on ? "done" : "unknown") : "lock"; size: 12; color: tile.on ? Theme.acc : Theme.t3; anchors.verticalCenter: parent.verticalCenter }
+                            Text { text: tile.live ? (tile.on ? "activado · solo local" : "desactivado · solo local") : "sin servicio conectado"
+                                color: Theme.t3; font.family: Theme.font; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter } } }
+                    MouseArea { id: tma; anchors.fill: parent; hoverEnabled: true; enabled: tile.live; onClicked: Demo.silent = !Demo.silent } } } }
 
         // Emergency pause: disabled on purpose, no IPC exists yet (GUI-POLICY-002).
         Item { width: 1; height: 12 }

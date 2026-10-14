@@ -1,16 +1,19 @@
 import QtQuick
 
 // Dock: Orb, Vault, Forge, Sentry, Stage, Ajustes, in that order. 56 px icons, white line glyph
-// on a solid colour under a 165° wash. A 4 px dot under apps that are really running; the
-// active app has a 1.5 px accent outline 3 px away.
+// on a solid colour under a 165° wash. A 4 px dot under apps whose window is open (dim while it is
+// minimised); the app in front has a 1.5 px accent outline 3 px away. Clicking opens, restores,
+// raises or minimises its window (Wm.dockClick).
 Panel {
     id: dock
     kind: "dock"
     width: row.implicitWidth + 24
     height: Theme.dockIcon + 26
-    property string current: "vault"
-    property bool vaultOpen: true
+    // The app in front: the window manager's front window, or the Orb when the desktop is showing.
+    readonly property string current: Wm.front() === "" ? "orb" : Wm.front()
     signal launched(string id)
+    // Right click: ask the host for the icon's context menu, centred on the icon (x in the dock's coordinates).
+    signal menuRequested(string id, real centerX)
 
     Row {
         id: row; x: 12; y: 10; spacing: 14
@@ -42,12 +45,15 @@ Panel {
                         Behavior on opacity { NumberAnimation { duration: Theme.durDock } } }
                     Icon { anchors.centerIn: parent; name: modelData.icon; size: 28; color: "#ffffff" }
                 }
-                Rectangle { visible: modelData.id === "vault" ? dock.vaultOpen : (modelData.running || dock.current === modelData.id); width: 4; height: 4; radius: 2; color: Theme.t1
+                // A dot under what is open (the Orb always runs); dimmer while its window is minimised.
+                Rectangle { visible: modelData.id === "orb" || Wm.isOpen(modelData.id); width: 4; height: 4; radius: 2; color: Theme.t1
+                    opacity: Wm.isMin(modelData.id) ? 0.4 : 1
                     anchors.horizontalCenter: parent.horizontalCenter; anchors.top: parent.bottom; anchors.topMargin: 8 }
                 Rectangle { visible: ma.containsMouse; y: -30; anchors.horizontalCenter: parent.horizontalCenter
                     width: tip.implicitWidth + 16; height: 22; radius: 7; color: Theme.panel; border.width: 1; border.color: Theme.hair
                     Text { id: tip; anchors.centerIn: parent; text: modelData.name; color: Theme.t1; font.family: Theme.font; font.pixelSize: 12; font.weight: Font.Medium } }
-                MouseArea { id: ma; anchors.fill: parent; hoverEnabled: true; onClicked: dock.launched(modelData.id) }
+                MouseArea { id: ma; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    onClicked: function (m) { if (m.button === Qt.RightButton) dock.menuRequested(modelData.id, cell.mapToItem(dock, cell.width / 2, 0).x); else dock.launched(modelData.id) } }
             }
         }
     }
