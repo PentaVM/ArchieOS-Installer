@@ -296,6 +296,19 @@ Detalle: [`HANDOFF-2026-10-11-SPEECH-FLOOR.md`](HANDOFF-2026-10-11-SPEECH-FLOOR.
 
 ## 6. Diseño — Xavi termina aquí
 
+**Actualización 2026-10-14:** PR41 ahora tiene head `eeeb68c`, seis commits y
+172 archivos (+15008/-651). Commit nuevo: 24 archivos (+970/-113), Orbe web de
+fondo mediante QtWebEngine/Python/Lumenfield externo, menús y navegación local,
+colores vivos. Vault sigue con datos de ejemplo. Repetidos 21+79 checks, pero el
+escritorio Windows falla por falta de QtWebEngine; WSL arranca el fallback con el
+módulo instalado, sin validar el visor externo/GPU. El aviso QColor persiste.
+PR40 sigue en `e460341`. Detalle:
+[`UPDATE-2026-10-14.md`](../_dev/verification/xavi/UPDATE-2026-10-14.md).
+
+- [ ] Empaquetar/validar dependencias del visor externo y decidir su runtime Python.
+- [ ] Mantener arranque/fallback por plataforma y probar Main/LiveOrb, no sólo panels.
+- [ ] Validar visor real: arranque en frío, refresh, navegación/Esc, perfiles y GPU.
+
 **Estado verificado al 2026-10-13:** PR31 (prototipo inicial) y PR34 (bridge de
 lectura, inventario LAN y jobs) fusionados. La rama de Xavi
 `feat/professional-gui-quickshell-vault` tiene ahora el
