@@ -8,7 +8,10 @@
 //! that the day someone adds one, it cannot become reachable from a web page by
 //! accident — it will trip an assertion in the bridge instead.
 
-use crate::snapshot::{DisplaySnapshot, SnapshotSource};
+use crate::snapshot::{
+    DisplaySnapshot, InspectorSnapshot, ProjectionSource, ProjectionState, SnapshotSource,
+    MAX_PROVIDERS, MAX_TRAJECTORIES,
+};
 use archie_core::control::{request_over, ControlRequest, ControlResponse};
 use archie_core::endpoint;
 use archie_state::StatePaths;
@@ -24,6 +27,10 @@ const SNAPSHOT_REQUESTS: &[fn() -> ControlRequest] = &[
     || ControlRequest::Modules,
     || ControlRequest::Models,
     || ControlRequest::Metrics,
+    || ControlRequest::Providers,
+    || ControlRequest::CortexTrajectories {
+        limit: MAX_TRAJECTORIES as u32,
+    },
 ];
 
 /// Talks to `archied` on behalf of the renderer.
@@ -77,11 +84,57 @@ impl Bridge {
             load_order: Vec::new(),
             models: Vec::new(),
             metrics: None,
+            inspector: Some(InspectorSnapshot {
+                source: ProjectionSource::Live,
+                state: ProjectionState::Ready,
+                reason: None,
+                generated_at_ms: Timestamp::now().as_millis(),
+                providers: Vec::new(),
+                cortex_trajectories: Vec::new(),
+            }),
         };
 
         for build in SNAPSHOT_REQUESTS {
             let request = build();
             let name = request.name();
+            if matches!(
+                request,
+                ControlRequest::Providers | ControlRequest::CortexTrajectories { .. }
+            ) {
+                // These optional projections share the timer-owned cache. An old Core
+                // or a slow inspector must not erase a healthy system snapshot.
+                let answer = tokio::time::timeout(
+                    std::time::Duration::from_secs(1),
+                    request_over(&mut stream, &request),
+                )
+                .await;
+                match answer {
+                    Ok(Ok(ControlResponse::Providers { providers, .. })) if name == "providers" => {
+                        snapshot.inspector.as_mut().unwrap().providers = providers
+                            .into_iter()
+                            .take(MAX_PROVIDERS)
+                            .map(Into::into)
+                            .collect();
+                    }
+                    Ok(Ok(ControlResponse::CortexTrajectories { trajectories }))
+                        if name == "cortex-trajectories" =>
+                    {
+                        snapshot.inspector.as_mut().unwrap().cortex_trajectories =
+                            trajectories.into_iter().take(MAX_TRAJECTORIES).collect();
+                    }
+                    other => {
+                        let inspector = snapshot.inspector.as_mut().unwrap();
+                        inspector.state = ProjectionState::Unavailable;
+                        inspector.reason = Some(format!("{name} projection unavailable"));
+                        // I/O failure/timeout makes the stream unusable; do not read a
+                        // response from another request or block the base projection.
+                        if !matches!(other, Ok(Ok(_))) {
+                            break;
+                        }
+                    }
+                }
+                continue;
+            }
             match request_over(&mut stream, &request).await {
                 Ok(response) => self.absorb(&mut snapshot, response, name),
                 Err(e) => {
@@ -150,7 +203,16 @@ mod tests {
     #[test]
     fn the_snapshot_covers_every_view_the_observatory_renders() {
         let names: Vec<&str> = SNAPSHOT_REQUESTS.iter().map(|b| b().name()).collect();
-        for expected in ["status", "boot", "topology", "modules", "models", "metrics"] {
+        for expected in [
+            "status",
+            "boot",
+            "topology",
+            "modules",
+            "models",
+            "metrics",
+            "providers",
+            "cortex-trajectories",
+        ] {
             assert!(names.contains(&expected), "snapshot is missing {expected}");
         }
     }

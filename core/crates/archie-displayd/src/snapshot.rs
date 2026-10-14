@@ -4,11 +4,123 @@
 //! mixes a fresh module list with a stale topology.
 
 use archie_core::boot::BootReport;
-use archie_core::control::{ModelView, ModuleView, PeerView, StatusView, TotalsView};
+use archie_core::control::{
+    CortexTrajectoryView, ModelView, ModuleView, PeerView, ProviderView, StatusView, TotalsView,
+};
 use archie_observability::MetricSnapshot;
 use archie_types::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+
+pub const MAX_PROVIDERS: usize = 128;
+pub const MAX_TRAJECTORIES: usize = 32;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectionSource {
+    Live,
+    Fixture,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectionState {
+    Ready,
+    Unavailable,
+    Stale,
+}
+
+/// Manifest metadata only. Diagnostics and credentials never enter this DTO.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderSummary {
+    pub id: String,
+    pub title: String,
+    pub capability: String,
+    pub status: String,
+    pub records: Vec<String>,
+    pub known_gaps: Vec<String>,
+}
+
+impl From<ProviderView> for ProviderSummary {
+    fn from(view: ProviderView) -> Self {
+        Self {
+            id: view.id,
+            title: view.title,
+            capability: view.capability,
+            status: view.status,
+            records: view.records,
+            known_gaps: view.known_gaps,
+        }
+    }
+}
+
+/// Cached, bounded replay metadata; no context, references, endpoints or leases.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InspectorSnapshot {
+    pub source: ProjectionSource,
+    pub state: ProjectionState,
+    pub reason: Option<String>,
+    pub generated_at_ms: i64,
+    pub providers: Vec<ProviderSummary>,
+    pub cortex_trajectories: Vec<CortexTrajectoryView>,
+}
+
+impl InspectorSnapshot {
+    pub fn unavailable(reason: impl Into<String>) -> Self {
+        Self {
+            source: ProjectionSource::Unavailable,
+            state: ProjectionState::Unavailable,
+            reason: Some(reason.into()),
+            generated_at_ms: 0,
+            providers: Vec::new(),
+            cortex_trajectories: Vec::new(),
+        }
+    }
+
+    pub fn is_bounded(&self) -> bool {
+        self.providers.len() <= MAX_PROVIDERS && self.cortex_trajectories.len() <= MAX_TRAJECTORIES
+    }
+}
+
+/// The observation lanes of the existing Orb, without its geometry or private content.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkflowSnapshot {
+    pub source: ProjectionSource,
+    pub state: ProjectionState,
+    pub reason: Option<String>,
+    pub generated_at_ms: i64,
+    pub workflows: Vec<archie_orb::WorkflowView>,
+}
+
+impl WorkflowSnapshot {
+    pub fn unavailable(reason: impl Into<String>) -> Self {
+        Self {
+            source: ProjectionSource::Unavailable,
+            state: ProjectionState::Unavailable,
+            reason: Some(reason.into()),
+            generated_at_ms: 0,
+            workflows: Vec::new(),
+        }
+    }
+}
+
+/// The catalogue already owned by Core, with its own reachability and freshness.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CatalogSnapshot {
+    pub source: SnapshotSource,
+    pub generated_at: Timestamp,
+    pub daemon_reachable: bool,
+    pub staleness_ms: i64,
+    pub error: Option<String>,
+    pub modules: Vec<ModuleView>,
+    pub models: Vec<ModelView>,
+    pub nodes: Vec<PeerView>,
+    pub capabilities: BTreeMap<String, Vec<String>>,
+}
 
 /// Where the data in a snapshot came from.
 ///
@@ -61,6 +173,9 @@ pub struct DisplaySnapshot {
     pub load_order: Vec<String>,
     pub models: Vec<ModelView>,
     pub metrics: Option<MetricSnapshot>,
+    /// Added to schema 1. A recording or older server can omit this projection.
+    #[serde(default)]
+    pub inspector: Option<InspectorSnapshot>,
 }
 
 impl DisplaySnapshot {
@@ -84,6 +199,7 @@ impl DisplaySnapshot {
             load_order: Vec::new(),
             models: Vec::new(),
             metrics: None,
+            inspector: None,
         }
     }
 
@@ -94,13 +210,56 @@ impl DisplaySnapshot {
     /// state — but it must never claim that data is current.
     pub fn as_stale(&self, error: impl Into<String>) -> Self {
         let now = Timestamp::now();
-        Self {
+        let mut stale = Self {
             daemon_reachable: false,
-            staleness_ms: self.generated_at.elapsed_to(now).max(0),
+            staleness_ms: self
+                .staleness_ms
+                .saturating_add(self.generated_at.elapsed_to(now).max(0)),
             error: Some(error.into()),
             generated_at: now,
             ..self.clone()
+        };
+        if stale.inspector.is_some() {
+            stale.inspector = Some(stale.inspector_view());
         }
+        stale
+    }
+
+    pub fn catalog(&self) -> CatalogSnapshot {
+        CatalogSnapshot {
+            source: self.source,
+            generated_at: self.generated_at,
+            daemon_reachable: self.daemon_reachable,
+            staleness_ms: self.staleness_ms,
+            error: self.error.clone(),
+            modules: self.modules.clone(),
+            models: self.models.clone(),
+            nodes: self.nodes.clone(),
+            capabilities: self.capabilities.clone(),
+        }
+    }
+
+    pub fn inspector_view(&self) -> InspectorSnapshot {
+        let Some(mut view) = self.inspector.clone() else {
+            let mut missing = InspectorSnapshot::unavailable(if self.daemon_reachable {
+                "inspector projection not provided by this server"
+            } else {
+                "archied unreachable; no inspector projection available"
+            });
+            if self.source == SnapshotSource::Fixture {
+                missing.source = ProjectionSource::Fixture;
+            }
+            return missing;
+        };
+        view.source = match self.source {
+            SnapshotSource::Live => ProjectionSource::Live,
+            SnapshotSource::Fixture => ProjectionSource::Fixture,
+        };
+        if !self.daemon_reachable {
+            view.state = ProjectionState::Stale;
+            view.reason = Some("archied unreachable; showing the last inspector projection".into());
+        }
+        view
     }
 
     /// Modules that resolved and will run.
@@ -175,6 +334,7 @@ mod tests {
             load_order: vec!["core.archie".into()],
             models: Vec::new(),
             metrics: None,
+            inspector: None,
         }
     }
 
@@ -206,6 +366,24 @@ mod tests {
         let s = snapshot();
         let json = serde_json::to_string(&s).unwrap();
         assert_eq!(serde_json::from_str::<DisplaySnapshot>(&json).unwrap(), s);
+    }
+
+    #[test]
+    fn older_snapshots_omit_inspector_without_claiming_it_is_empty_and_ready() {
+        let mut old = serde_json::to_value(snapshot()).unwrap();
+        old.as_object_mut().unwrap().remove("inspector");
+        let decoded: DisplaySnapshot = serde_json::from_value(old).unwrap();
+        assert!(decoded.inspector.is_none());
+        assert_eq!(decoded.inspector_view().state, ProjectionState::Unavailable);
+    }
+
+    #[test]
+    fn repeated_failures_keep_the_original_age() {
+        let mut original = snapshot();
+        original.generated_at = Timestamp::now().plus_millis(-5_000);
+        let mut first = original.as_stale("down");
+        first.generated_at = Timestamp::now().plus_millis(-3_000);
+        assert!(first.as_stale("still down").staleness_ms >= 8_000);
     }
 
     #[test]

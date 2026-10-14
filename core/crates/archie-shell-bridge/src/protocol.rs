@@ -7,7 +7,10 @@
 use crate::client::{Client, ClientError};
 use crate::jobs::{self, Jobs};
 use crate::lan::{self, Lan};
-use archie_displayd::{DisplaySnapshot, KernelSnapshot, SnapshotSource};
+use archie_displayd::{
+    CatalogSnapshot, DisplaySnapshot, InspectorSnapshot, KernelSnapshot, ProjectionSource,
+    SnapshotSource, WorkflowSnapshot,
+};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -64,6 +67,9 @@ pub struct Frame {
     pub lan: Lan,
     /// Long bridge jobs, read from the given workspaces' `.archie/jobs`. Read-only.
     pub jobs: Jobs,
+    pub catalog: Option<CatalogSnapshot>,
+    pub inspector: InspectorSnapshot,
+    pub workflows: WorkflowSnapshot,
 }
 
 fn now_ms() -> i64 {
@@ -143,6 +149,9 @@ pub fn poll_with(client: &Client, sources: &Sources) -> Frame {
         kernel: None,
         lan: lan.clone(),
         jobs: jobs.clone(),
+        catalog: None,
+        inspector: InspectorSnapshot::unavailable("displayd offline"),
+        workflows: WorkflowSnapshot::unavailable("displayd offline"),
     };
 
     let body = match client.get("/api/snapshot") {
@@ -159,6 +168,9 @@ pub fn poll_with(client: &Client, sources: &Sources) -> Frame {
                 kernel: None,
                 lan: lan.clone(),
                 jobs: jobs.clone(),
+                catalog: None,
+                inspector: InspectorSnapshot::unavailable("displayd response invalid"),
+                workflows: WorkflowSnapshot::unavailable("displayd response invalid"),
             }
         }
     };
@@ -175,6 +187,9 @@ pub fn poll_with(client: &Client, sources: &Sources) -> Frame {
                 kernel: None,
                 lan: lan.clone(),
                 jobs: jobs.clone(),
+                catalog: None,
+                inspector: InspectorSnapshot::unavailable("displayd snapshot invalid"),
+                workflows: WorkflowSnapshot::unavailable("displayd snapshot invalid"),
             }
         }
     };
@@ -186,6 +201,24 @@ pub fn poll_with(client: &Client, sources: &Sources) -> Frame {
         .ok()
         .and_then(|body| serde_json::from_slice::<KernelSnapshot>(&body).ok());
 
+    // A lightweight read of the existing Orb lanes, independently of archied.
+    // Older displayd versions have no route: absence is explicit, never fabricated.
+    let mut workflows = client
+        .get("/api/workflows")
+        .ok()
+        .and_then(|body| serde_json::from_slice::<WorkflowSnapshot>(&body).ok())
+        .filter(|view| view.workflows.len() <= 4)
+        .unwrap_or_else(|| WorkflowSnapshot::unavailable("workflow projection unavailable"));
+    if snapshot.source == SnapshotSource::Fixture {
+        workflows.source = ProjectionSource::Fixture;
+    }
+    let inspector = snapshot.inspector_view();
+    let inspector = if inspector.is_bounded() {
+        inspector
+    } else {
+        InspectorSnapshot::unavailable("inspector projection exceeds its bounds")
+    };
+
     Frame {
         schema: SCHEMA,
         at_ms,
@@ -194,5 +227,8 @@ pub fn poll_with(client: &Client, sources: &Sources) -> Frame {
         kernel,
         lan,
         jobs,
+        catalog: Some(snapshot.catalog()),
+        inspector,
+        workflows,
     }
 }

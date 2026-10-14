@@ -41,7 +41,7 @@ impl RuntimeInventory {
     pub fn read(&mut self) -> Vec<OrbEntity> {
         #[cfg(not(target_os = "linux"))]
         {
-            return Vec::new();
+            Vec::new()
         }
         #[cfg(target_os = "linux")]
         {
@@ -170,10 +170,11 @@ impl RuntimeInventory {
         // Keep running units ahead of installed but inactive ones when the
         // inventory cap is reached on a larger machine.
         let active_names = service_members.keys().cloned().collect::<BTreeSet<_>>();
-        let prioritized_units = active_names
-            .iter()
-            .cloned()
-            .chain(service_units.into_iter().filter(|name| !active_names.contains(name)));
+        let prioritized_units = active_names.iter().cloned().chain(
+            service_units
+                .into_iter()
+                .filter(|name| !active_names.contains(name)),
+        );
         for service in prioritized_units.take(MAX_SERVICES) {
             let members = service_members.remove(&service).unwrap_or_default();
             let active = !members.is_empty();
@@ -248,7 +249,9 @@ impl RuntimeInventory {
                 });
             }
         }
-        for directory in ["/proc", "/sys", "/dev", "/run", "/etc", "/usr", "/var", "/tmp"] {
+        for directory in [
+            "/proc", "/sys", "/dev", "/run", "/etc", "/usr", "/var", "/tmp",
+        ] {
             if !Path::new(directory).is_dir() {
                 continue;
             }
