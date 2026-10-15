@@ -1,3 +1,9 @@
+> Experimento histórico, fuera del arranque operativo. La shell actual reutiliza
+> el renderer nativo; ver [integración](../../docs/gui/NATIVE_INTEGRATION.md).
+> `escritorio.sh` ahora redirige al lanzador nativo. Los otros scripts conservan
+> el experimento externo y sus rutas de laboratorio; no ejecutarlos sobre el
+> árbol real del sistema. Las afirmaciones de GPU/FPS siguientes son históricas.
+
 # Visor gráfico del escritorio
 
 La esfera neuronal de **Archie Lumenfield 0449** como fondo del escritorio de ArchieOS. Muestra el

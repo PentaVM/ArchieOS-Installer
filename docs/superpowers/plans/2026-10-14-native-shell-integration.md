@@ -25,10 +25,10 @@ Files: `archie-displayd/src/{bridge,snapshot,lib}.rs` (o DTO dedicado),
 Transportar providers, Cortex DTO y workflows del Orb con estado y source explícitos;
 mantener Frame schema 1, compatibilidad de campos ausentes y límites.
 
-- [ ] Escribir y ejecutar tests que fallen por proyecciones ausentes.
-- [ ] Implementar lecturas de contratos existentes, sin requests mutantes.
-- [ ] Probar live/fixture/offline/partial y redacción de contexto privado.
-- [ ] Ejecutar cargo test de displayd/shell-bridge y fmt/clippy correspondientes.
+- [x] Escribir y ejecutar tests que fallen por proyecciones ausentes.
+- [x] Implementar lecturas de contratos existentes, sin requests mutantes.
+- [x] Probar live/fixture/offline/partial y redacción de contexto privado.
+- [x] Ejecutar cargo test de displayd/shell-bridge y fmt/clippy correspondientes.
 
 ## 2. Host y viewport nativos
 
@@ -37,11 +37,11 @@ LumenField/ArchieBridge cuando sea necesario, tests nativos.
 `--shell` hospeda ventana Qt Quick sobre recursos locales. Un bridge watch tipado
 provee Frame por QProcess acotado; no duplica Core. Viewport reutiliza LumenScene.
 
-- [ ] Tests RED de lifecycle/framing y carga sin QtWebEngine.
-- [ ] Implementar viewport/host compartidos y paro/reconexión de proceso de lectura.
-- [ ] Aplicar budget/presentación/reduced motion y descartar resultados obsoletos.
-- [ ] Preservar control cinematic/overlay/Antes y probar protocolo nativo.
-- [ ] Build CMake, CTest, recursos instalados y render-check.
+- [x] Tests RED de lifecycle/framing y carga sin QtWebEngine.
+- [x] Implementar viewport/host compartidos y paro/reconexión de proceso de lectura.
+- [x] Aplicar budget/presentación/reduced motion y descartar resultados obsoletos.
+- [x] Preservar control cinematic/overlay/Antes y probar protocolo nativo.
+- [x] Build CMake, CTest, recursos embebidos y render-check (instalación Linux pendiente).
 
 ## 3. UI conectada y acciones veraces
 
@@ -49,32 +49,39 @@ Files: `BridgeModel`, `Main`, `LiveOrb`, `InspectorPanel`, `SettingsWindow`,
 `ForgeWindow`, `NotificationCenter`, `ActivityCenter`, `VaultWindow`, `SearchPanel`,
 `WindowSwitcher`, `WorkspaceMenu`, `Panel` y tests QML.
 
-- [ ] Tests RED de frescura/tipos/acciones ocultas/autoridad/deshacer inexistente.
-- [ ] Consumir campos del bridge real en panels; read-only o disabled donde falte canal.
-- [ ] Quitar simulación operativa, selección de dominio ficticia y claims de autoridad.
-- [ ] Preservar UX visual/menu/teclado; arreglar Escape y QColor.
-- [ ] Render normal/degraded/offline; suites QML y contrato real de bridge.
+- [x] Tests RED de frescura/tipos/acciones ocultas/autoridad/deshacer inexistente.
+- [x] Consumir campos del bridge real en panels; read-only o disabled donde falte canal.
+- [x] Quitar simulación operativa, selección de dominio ficticia y claims de autoridad.
+- [x] Preservar UX visual/menu/teclado; arreglar Escape y QColor.
+- [x] Render fixture/desconectado; estados en suites QML y contrato real de bridge.
 
 ## 4. Presets/voz y despliegue
 
 Files: presets/control/CLI/voice si precisan extensión, servicio/session/build/docs.
 
-- [ ] Presets nuevos aditivos, voces cinematic/overlay conservadas; tests RED/GREEN.
-- [ ] Session launch del componente nativo sin privilegios nuevos.
-- [ ] Limpiar documentación y separar visor externo experimental del arranque real.
-- [ ] Registrar matriz de capacidades conectadas/no expuestas y comandos reproducibles.
+- [x] Presets nuevos aditivos, voces cinematic/overlay conservadas; tests RED/GREEN.
+- [x] Session launch del componente nativo sin privilegios nuevos.
+- [x] Limpiar documentación y separar visor externo experimental del arranque real.
+- [x] Registrar matriz de capacidades conectadas/no expuestas y comandos reproducibles.
 
 ## 5. Modo claro beta (último)
 
 Files: `Theme.qml`, Apariencia y bindings semánticos de paneles/viewport, tests QML.
 
-- [ ] Test RED de selector y tokens de contraste/navegación compartida.
-- [ ] Añadir paleta clara centralizada y selector beta, preservar oscuro por defecto.
-- [ ] Render/verificar textos, selección, diálogos y foco claro/oscuro.
+- [x] Test RED de selector y tokens de contraste/navegación compartida.
+- [x] Añadir paleta clara centralizada y selector beta, preservar oscuro por defecto.
+- [x] Render claro/oscuro; contraste, selector y navegación compartida verificados.
 
 ## 6. Cierre sin merge
 
-- [ ] Pruebas pertinentes, revisión independiente de todo el diff y fixes comprobados.
+- [x] Pruebas pertinentes, revisión independiente por dominios y fixes comprobados.
 - [ ] Commits por etapas, push fast-forward al PR41 y bitácora/pendientes actualizados.
-- [ ] PR sigue Draft/open, main y release intactos. Nunca afirmar GPU/operaciones
+- [x] PR sigue Draft/open, main y release intactos. Nunca afirmar GPU/operaciones
   físicas verificadas por fixtures.
+
+## Evidencia y límites del cierre
+
+Ver docs/gui/BITACORA_NATIVE_2026-10-15.md para resultados y pendientes reales.
+El código de estas etapas está implementado; instalación Linux/NVIDIA, productores vivos,
+audio NeMo y canales gráficos de autoridad pendientes no se acreditan por fixtures.
+Los commits nuevos de Xavi 1177407/17a8bee se conservaron al reconciliar la rama.

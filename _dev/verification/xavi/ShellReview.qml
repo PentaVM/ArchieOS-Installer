@@ -5,12 +5,14 @@ import QtQuick
 Item {
     Loader { id: bridge; source: "../../../display/shell/prototype/BridgeModelTest.qml" }
     Loader { id: surfaces; source: "../../../display/shell/prototype/SurfacesTest.qml" }
+    Loader { id: windows; source: "../../../display/shell/prototype/WmTest.qml" }
     Timer {
         interval: 500
         running: true
         onTriggered: {
             for (const entry of [{name: "BridgeModelTest", loader: bridge},
-                                 {name: "SurfacesTest", loader: surfaces}]) {
+                                 {name: "SurfacesTest", loader: surfaces},
+                                 {name: "WmTest", loader: windows}]) {
                 const test = entry.loader.item
                 console.log("REVIEW_RESULT " + JSON.stringify(test
                     ? {name: entry.name, passes: test.passes, failures: test.failures, log: test.log}

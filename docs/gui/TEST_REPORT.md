@@ -1,3 +1,10 @@
+# Estado actual de integración
+
+Resultados y pendientes actuales: [bitácora del host nativo](BITACORA_NATIVE_2026-10-15.md).
+El informe que sigue conserva la evidencia histórica por fases; no describe por sí solo el estado final del PR.
+
+---
+
 # Informe de pruebas
 
 Estado: **línea base de la Fase A.** Este PR no contiene aún código de GUI, así que no hay pruebas de GUI que informar. Se registra qué se pudo y qué no se pudo ejecutar para que nadie confunda "no corrió" con "pasó".

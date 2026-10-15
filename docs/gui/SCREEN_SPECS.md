@@ -2,7 +2,7 @@
 
 Estado: **Fase B.** Cobertura visual real: 5 de las 15 superficies del handoff (marcadas ▣). Las demás sólo tienen especificación textual. Capturas reproducibles en `docs/gui/screenshots/` (1080p y 1440p, Qt 6.12 software, datos sintéticos rotulados). Todas las pantallas deben soportar: estado vacío, error, `offline` (daemon caído), `degraded` y `stale` con edad del dato; teclado completo; foco visible; salida segura (`Esc`); Reduced Motion.
 
-Mapa de capturas: `01-escritorio`, `02-vault-cuadricula`, `03-centro-sin-respuesta`, `04-centro-en-vivo`, `05-actividad`, `06-sentry-dispositivos`, `07-sentry-sin-escaner`, `08-paleta`, `09-opaca`, `10-cristal-con-blur`, y `*-1440p`; `11` a `20` son las superficies de ejemplo de la segunda entrega, `21` a `28` sus estados (ver `docs/gui/DESIGN_ARCHIE_MAC.md` §8).
+Mapa de capturas: `11` a `32` son referencias históricas de diseño; `33-native-orb-fixture.png` y `34-native-light-beta.png` verifican el host nativo nuevo con fuente fixture. Ver `NATIVE_INTEGRATION.md` y la bitácora del 15 de octubre para capacidades y límites actuales.
 
 | # | Superficie | Cobertura | Backlog | Notas de diseño |
 |---|---|---|---|---|
