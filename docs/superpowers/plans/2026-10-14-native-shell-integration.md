@@ -75,7 +75,7 @@ Files: `Theme.qml`, Apariencia y bindings semánticos de paneles/viewport, tests
 ## 6. Cierre sin merge
 
 - [x] Pruebas pertinentes, revisión independiente por dominios y fixes comprobados.
-- [ ] Commits por etapas, push fast-forward al PR41 y bitácora/pendientes actualizados.
+- [x] Commits por etapas, push fast-forward al PR41 y bitácora/pendientes actualizados.
 - [x] PR sigue Draft/open, main y release intactos. Nunca afirmar GPU/operaciones
   físicas verificadas por fixtures.
 
@@ -85,3 +85,4 @@ Ver docs/gui/BITACORA_NATIVE_2026-10-15.md para resultados y pendientes reales.
 El código de estas etapas está implementado; instalación Linux/NVIDIA, productores vivos,
 audio NeMo y canales gráficos de autoridad pendientes no se acreditan por fixtures.
 Los commits nuevos de Xavi 1177407/17a8bee se conservaron al reconciliar la rama.
+Publicados por fast-forward hasta 7254666; el PR permanece abierto como Draft.
