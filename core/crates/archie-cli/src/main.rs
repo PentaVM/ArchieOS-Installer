@@ -6,6 +6,8 @@
 //!
 //! Every command accepts `--json` for machine consumption.
 
+mod visual;
+
 use archie_core::control::{
     request_over, ControlRequest, ControlResponse, CortexTrajectoryView, DeviceOperationView,
     DeviceView, ModelView, ModuleView, PeerView, ProviderView, StatusView, TotalsView,
@@ -130,6 +132,11 @@ enum Command {
         #[command(subcommand)]
         command: VoiceCommand,
     },
+    /// Control the native display through its local allowlisted channel.
+    Visual {
+        #[command(subcommand)]
+        command: visual::VisualCommand,
+    },
     /// Inspect professional tool adapters.
     Tools {
         #[command(subcommand)]
@@ -221,6 +228,7 @@ impl Command {
             | Self::Vault { .. }
             | Self::Speech { .. }
             | Self::Voice { .. }
+            | Self::Visual { .. }
             | Self::Tools { .. }
             | Self::Workspace { .. }
             | Self::Iris { .. } => return None,
@@ -281,6 +289,7 @@ fn read_bounded(path: &Path, maximum: u64) -> Result<Vec<u8>, String> {
 async fn local_command(command: &Command, root: &Path, json: bool) -> std::process::ExitCode {
     use archie_workstation::harness::{HarnessKind, HarnessSpec};
     match command {
+        Command::Visual { command } => visual::run(command).await,
         Command::Doctor => {
             let checks = archie_workstation::doctor();
             if json {

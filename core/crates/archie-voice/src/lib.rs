@@ -28,10 +28,10 @@ pub mod addressee;
 pub mod audio;
 #[cfg(feature = "nemo")]
 pub mod conversation;
-#[cfg(feature = "live")]
-pub mod live;
 pub mod hands;
 pub mod listen;
+#[cfg(feature = "live")]
+pub mod live;
 #[cfg(feature = "nemo")]
 pub mod native;
 pub mod nemotron;
@@ -40,6 +40,8 @@ pub mod piper;
 pub mod rvc;
 pub mod segment;
 pub mod tools;
+#[cfg(any(feature = "live", test))]
+mod visual;
 pub mod voice;
 pub mod wav;
 
