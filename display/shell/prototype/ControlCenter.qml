@@ -13,7 +13,7 @@ Panel {
     Column { id: content; x: 20; y: 20; width: parent.width - 40; spacing: 0
         Text { text: "Centro de control"; color: Theme.t1; font.family: Theme.disp; font.pixelSize: 22; font.weight: Font.DemiBold; font.letterSpacing: -0.33 }
         Flow { width: parent.width; topPadding: 12; spacing: 8
-            Chip { src: true; icon: "ok"; text: "Real · bridge" }
+            SourceChip { bridge:cc.bridge; projection:cc.sys }
             LinkChip { bridge: cc.bridge } }
 
         // Failure box: the real reason, and why the summary is hidden.

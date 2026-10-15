@@ -10,12 +10,14 @@ class DisplayControl final : public QObject
     Q_OBJECT
 
 public:
-    explicit DisplayControl(QObject *parent = nullptr);
-    bool start();
+    explicit DisplayControl(QObject *parent = nullptr, bool shellMode = false);
+    bool start(quint16 port = 7668);
+    quint16 port() const { return m_server.serverPort(); }
 
 signals:
     void commandReceived(const QString &action, const QString &value, bool enabled);
 
 private:
     QTcpServer m_server;
+    bool m_shellMode = false;
 };

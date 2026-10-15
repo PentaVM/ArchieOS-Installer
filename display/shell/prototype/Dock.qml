@@ -51,7 +51,7 @@ Panel {
                     anchors.horizontalCenter: parent.horizontalCenter; anchors.top: parent.bottom; anchors.topMargin: 8 }
                 Rectangle { visible: ma.containsMouse; y: -30; anchors.horizontalCenter: parent.horizontalCenter
                     width: tip.implicitWidth + 16; height: 22; radius: 7; color: Theme.panel; border.width: 1; border.color: Theme.hair
-                    Text { id: tip; anchors.centerIn: parent; text: modelData.name; color: Theme.t1; font.family: Theme.font; font.pixelSize: 12; font.weight: Font.Medium } }
+                    Text { id: tip; anchors.centerIn: parent; text: modelData.id === "stage" ? Wm.title("stage") : modelData.name; color: Theme.t1; font.family: Theme.font; font.pixelSize: 12; font.weight: Font.Medium } }
                 MouseArea { id: ma; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.LeftButton | Qt.RightButton
                     onClicked: function (m) { if (m.button === Qt.RightButton) dock.menuRequested(modelData.id, cell.mapToItem(dock, cell.width / 2, 0).x); else dock.launched(modelData.id) } }
             }

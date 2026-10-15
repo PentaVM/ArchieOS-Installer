@@ -1,88 +1,72 @@
 import QtQuick
 
-// Settings, 940 px window. DESIGN SAMPLE. The first four sections are read-only: provider NAMES
-// (only the name of the environment variable, never its value), models with their declared
-// locality and privacy grade, the apps Archie may operate (policy, read-only: editing does not
-// exist), and a short diagnosis. The last two hold the only live controls, both local to the
-// shell and never persisted: the desktop graph viewer and the colour set (vivid / original).
 AppWindow {
-    id: sw
-    title: "Ajustes"
-    property string st: Demo.state
-    property int section: 0
-    readonly property var titles: ["Proveedores", "Modelos", "Apps que Archie puede operar", "Diagnóstico", "Visor gráfico", "Apariencia"]
-    readonly property var nouns: ["elementos", "modelos", "apps", "comprobaciones", "ajustes", "ajustes"]
-    readonly property bool plain: st === "normal" || st === "stale" || st === "degraded" || st === "offline"
-    readonly property bool dim: st === "stale"
-    readonly property bool unread: st === "offline"
-
-    trailing: [ Chip { design: true; icon: "sample"; text: "Diseño · datos de ejemplo" } ]
-    sidebar: [
-        Eyebrow { text: "Ajustes"; leftPadding: 10; bottomPadding: 6 },
-        SideRow { icon: "key"; text: "Proveedores"; on: sw.section === 0; ring: Demo.focusRing; onClicked: sw.section = 0 },
-        SideRow { icon: "cpu"; text: "Modelos"; on: sw.section === 1; onClicked: sw.section = 1 },
-        SideRow { icon: "lock"; text: "Apps de Archie"; on: sw.section === 2; onClicked: sw.section = 2 },
-        SideRow { icon: "activity"; text: "Diagnóstico"; on: sw.section === 3; onClicked: sw.section = 3 },
-        SideRow { icon: "dkOrb"; text: "Visor gráfico"; on: sw.section === 4; onClicked: sw.section = 4 },
-        SideRow { icon: "dkOrb"; text: "Apariencia"; on: sw.section === 5; onClicked: sw.section = 5 } ]
-
-    Item { width: parent.width; height: 24
-        Eyebrow { text: sw.titles[sw.section]; anchors.verticalCenter: parent.verticalCenter }
-        StateChip { st: sw.st; noun: sw.nouns[sw.section]; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter } }
-
-    ErrBox { visible: sw.st === "error" && sw.section < 4; text: sw.section > 3 ? "" : sw.section === 0 ? "No se pudo leer la lista de proveedores: respuesta no válida."
-        : sw.section === 1 ? "No se pudo leer el registro de modelos: respuesta no válida."
-        : sw.section === 2 ? "No se pudo leer la política de apps: respuesta no válida." : "No se pudo leer el diagnóstico: respuesta no válida." }
-    VoidBox { visible: sw.st === "vacio" && sw.section < 4
-        icon: ["key", "cpu", "lock", "activity", "", ""][sw.section]
-        title: ["Ningún proveedor configurado", "Ningún modelo registrado", "Ninguna app en la política", "Sin comprobaciones", "", ""][sw.section]
-        text: ["Cuando haya uno, aquí se verá solo el nombre de su variable de entorno.", "Cuando se registre uno, aquí se verá su localidad y su grado de privacidad.",
-               "Cuando haya una política, aquí se verá en solo lectura.", "Cuando haya lecturas, aquí aparecerá cada servicio con su estado.", "", ""][sw.section] }
-
-    Column { visible: sw.plain && sw.section === 0; width: parent.width; opacity: sw.dim ? 0.62 : 1
-        ListRow { glyph: "key"; title: "Proveedor A"; ring: Demo.focusRing; sub: "variable de entorno PROVEEDOR_A_API_KEY"
-            Chip { small: true; tone: sw.unread ? "unk" : "ok"; icon: sw.unread ? "unknown" : "done"; text: sw.unread ? "sin lectura" : "definida" } }
-        ListRow { glyph: "key"; title: "Proveedor B"; sub: sw.st === "degraded" ? "bridge sin datos" : "variable de entorno PROVEEDOR_B_API_KEY"
-            Chip { small: true; tone: (sw.unread || sw.st === "degraded") ? "unk" : "neutral"; icon: (sw.unread || sw.st === "degraded") ? "unknown" : "stale"
-                text: sw.unread ? "sin lectura" : (sw.st === "degraded" ? "no medido" : "sin definir") } } }
-    Column { visible: sw.plain && sw.section === 1; width: parent.width; opacity: sw.dim ? 0.62 : 1
-        ListRow { glyph: "cpu"; title: "Modelo local 1"; sub: "modelo registrado"
-            Chip { small: true; tone: sw.unread ? "unk" : "ok"; icon: sw.unread ? "unknown" : "dkOrb"; text: sw.unread ? "sin lectura" : "local" }
-            Chip { small: true; tone: sw.unread ? "unk" : "ok"; icon: sw.unread ? "unknown" : "lock"; text: sw.unread ? "sin lectura" : "privacidad alta" } }
-        ListRow { glyph: "cpu"; title: "Modelo en la nube 1"; sub: "modelo registrado"
-            Chip { small: true; tone: sw.unread ? "unk" : "neutral"; icon: sw.unread ? "unknown" : "cloud"; text: sw.unread ? "sin lectura" : "nube" }
-            Chip { small: true; tone: sw.unread ? "unk" : "warn"; icon: sw.unread ? "unknown" : "warn"; text: sw.unread ? "sin lectura" : "privacidad media" } } }
-    Column { visible: sw.plain && sw.section === 2; width: parent.width; opacity: sw.dim ? 0.62 : 1
-        Repeater { model: [["dkVault", "Vault", "lectura"], ["dkForge", "Forge", "operar"], ["dkStage", "Stage", "operar"], ["dkSentry", "Sentry", "lectura"]]
-            delegate: ListRow { glyph: modelData[0]; title: modelData[1]
-                Chip { small: true; tone: sw.unread ? "unk" : "neutral"; icon: sw.unread ? "unknown" : "lock"; text: sw.unread ? "sin lectura" : modelData[2] } } } }
-    Column { visible: sw.plain && sw.section === 3; width: parent.width; opacity: sw.dim ? 0.62 : 1
-        ListRow { title: "archied"; Chip { small: true; tone: sw.unread ? "bad" : "ok"; icon: sw.unread ? "bad" : "ok"; text: sw.unread ? "no responde" : "en vivo" } }
-        ListRow { title: "Policy"; Chip { small: true; tone: sw.unread ? "unk" : "ok"; icon: sw.unread ? "unknown" : "ok"; text: sw.unread ? "sin lectura" : "en vivo" } }
-        ListRow { title: "Cortex"; Chip { small: true; tone: "unk"; icon: "unknown"; text: "no medido" } }
-        ListRow { title: "Presupuesto"; Chip { small: true; tone: "unk"; icon: "unknown"; text: "sin lectura" } } }
-
-    Column { visible: sw.section === 4; width: parent.width; spacing: 2
-        OrbOpt { label: "Mostrar en el escritorio"; options: ["Sí", "No"]; index: Demo.orbShow ? 0 : 1; onPicked: function (i) { Demo.orbShow = (i === 0) } }
-        OrbOpt { label: "Perfil de representación"; options: ["Esfera", "Orbe", "Campo"]; index: Demo.orbProfile; onPicked: function (i) { Demo.orbProfile = i } }
-        OrbOpt { label: "Nodos visibles"; options: ["60", "220", "800", "2.500", "5.000"]; index: Demo.orbNodesI; onPicked: function (i) { Demo.orbNodesI = i } }
-        OrbOpt { label: "Color de la esfera"; options: ["Original", "Holograma frío", "Vivo"]; index: Demo.orbGradeI; onPicked: function (i) { Demo.orbGradeI = i } }
-        OrbOpt { label: "Polvo de luz"; options: ["No", "Sí"]; index: Demo.orbDust ? 1 : 0; onPicked: function (i) { Demo.orbDust = (i === 1) } }
-        OrbOpt { label: "Brillo"; options: ["Bajo", "Normal", "Alto"]; index: Demo.orbBrightI; onPicked: function (i) { Demo.orbBrightI = i } }
-        OrbOpt { label: "Actividad"; options: ["Apagada", "Baja", "Media", "Alta"]; index: Demo.orbActI; onPicked: function (i) { Demo.orbActI = i } }
-        OrbOpt { label: "Giro automático"; options: ["Sí", "No"]; index: Demo.orbSpin ? 0 : 1; onPicked: function (i) { Demo.orbSpin = (i === 0) } } }
-
-    Column { visible: sw.section === 5; width: parent.width; spacing: 2
-        OrbOpt { label: "Colores del sistema"; options: ["Vívidos", "Originales"]; index: Theme.vivid ? 0 : 1; onPicked: function (i) { Theme.vivid = (i === 0) } }
-        OrbOpt { label: "Perfil de movimiento"; options: ["Completo", "Equilibrado", "Tranquilo"]; index: Theme.motion === "full" ? 0 : (Theme.motion === "balanced" ? 1 : 2)
-            onPicked: function (i) { Theme.motion = ["full", "balanced", "quiet"][i] } }
-        OrbOpt { label: "Movimiento reducido"; options: ["No", "Sí"]; index: Theme.reducedMotion ? 1 : 0; onPicked: function (i) { Theme.reducedMotion = (i === 1) } }
-        OrbOpt { label: "Superficies opacas"; options: ["No", "Sí"]; index: Theme.opaque ? 1 : 0; onPicked: function (i) { Theme.opaque = (i === 1) } }
-        OrbOpt { label: "Cristal con desenfoque"; options: ["No", "Sí"]; index: Theme.blur ? 1 : 0; onPicked: function (i) { Theme.blur = (i === 1) } } }
-    NoteBox { visible: sw.section === 5; text: "Vívidos: fondos casi negros y colores más saturados en todo el sistema. Originales: el grafito del diseño de Claude Design. El movimiento sigue la tabla de MOVIMIENTO.md; con «reducido» todo es instantáneo. El desenfoque real lo hace el compositor: en este prototipo solo cambia el material." }
-    NoteBox { visible: sw.section === 4; text: "La esfera es el motor de Archie Lumenfield sobre el contenido del sistema. «Nodos visibles» es cuántos importantes dibuja; el resto aparece al tocar su carpeta. «Color de la esfera» lo aplica la shell sobre la imagen (el motor no se toca): Original es como lo dibuja él. En el escritorio la cámara queda fija: pasa el ratón o haz clic en un nodo para ver qué es. Ctrl+Espacio libera la cámara para navegar en 3D; Esc la vuelve a fijar." }
-    NoteBox { visible: sw.st === "stale"; icon: "recents"; text: "Última lectura hace 18 min." }
-    NoteBox { visible: sw.section === 0 && sw.st !== "error"; text: "Los valores de las claves nunca se muestran ni se teclean aquí: solo el nombre de la variable." }
-    NoteBox { visible: sw.section === 1 && sw.plain; text: "Localidad y grado de privacidad son los declarados por cada modelo registrado." }
-    NoteBox { visible: sw.section === 2 && sw.plain; text: "Solo lectura: editar la política no existe todavía." }
+    id:sw; title:"Ajustes"
+    property var bridge:null
+    property string st:Demo.state
+    property int section:0
+    readonly property var catalog:bridge && bridge.catalog ? bridge.catalog : null
+    readonly property var inspection:bridge && bridge.inspector ? bridge.inspector : null
+    readonly property var providers:inspection && inspection.providers ? inspection.providers : []
+    readonly property var models:catalog && catalog.models ? catalog.models : []
+    readonly property var modules:catalog && catalog.modules ? catalog.modules : []
+    trailing:[SourceChip { bridge:sw.bridge; projection:sw.section===0 ? sw.inspection : sw.catalog }]
+    sidebar:[
+        SideRow { icon:"key"; text:"Proveedores"; on:sw.section===0; onClicked:sw.section=0 },
+        SideRow { icon:"cpu"; text:"Modelos"; on:sw.section===1; onClicked:sw.section=1 },
+        SideRow { icon:"lock"; text:"Autoridad"; on:sw.section===2; onClicked:sw.section=2 },
+        SideRow { icon:"activity"; text:"Diagnóstico"; on:sw.section===3; onClicked:sw.section=3 },
+        SideRow { icon:"dkOrb"; text:"Orbe nativo"; on:sw.section===4; onClicked:sw.section=4 },
+        SideRow { icon:"control"; text:"Apariencia"; on:sw.section===5; onClicked:sw.section=5 }
+    ]
+    Column { visible:sw.section===0; width:parent.width; spacing:8
+        Eyebrow { text:"Proveedores declarados por Core" }
+        VoidBox { visible:sw.providers.length===0; icon:"key"; title:"Sin proveedores en la proyección"
+            text:sw.inspection && sw.inspection.reason ? sw.inspection.reason : "El visor no solicita ni muestra valores de claves." }
+        Repeater { model:sw.providers
+            delegate:ListRow { glyph:"key"; title:modelData.title || modelData.id; sub:modelData.id + " · " + modelData.capability
+                Chip { small:true; text:modelData.status; tone:modelData.status==="available" ? "neutral" : "unk" }
+            }
+        }
+    }
+    Column { visible:sw.section===1; width:parent.width; spacing:8
+        Eyebrow { text:"Modelos registrados" }
+        VoidBox { visible:sw.models.length===0; icon:"cpu"; title:"Sin modelos en la proyección"; text:"No se deduce si hay un modelo cargado a partir de un catálogo vacío." }
+        Repeater { model:sw.models
+            delegate:ListRow { glyph:"cpu"; title:modelData.id
+                sub:(modelData.locality || "localidad no declarada") + " · privacidad " + (modelData.max_privacy_grade || "no declarada")
+                Chip { small:true; text:modelData.availability || "sin lectura"; tone:"neutral" }
+            }
+        }
+    }
+    NoteBox { visible:sw.section===2; icon:"lock"
+        text:"Core y Policy conservan la autoridad. Esta proyección no expone leases ni ofrece aprobar operaciones: el canal gráfico de revisión todavía no está conectado." }
+    Column { visible:sw.section===3; width:parent.width; spacing:8
+        Eyebrow { text:"Módulos y diagnóstico real" }
+        Repeater { model:sw.modules
+            delegate:ListRow { glyph:"activity"; title:modelData.id; sub:modelData.explanation
+                Chip { small:true; text:modelData.state; tone:"neutral" }
+            }
+        }
+        ResourceGauges { bridge:sw.bridge; width:parent.width }
+    }
+    Column { visible:sw.section===4; width:parent.width; spacing:8
+        OrbOpt { label:"Mostrar en escritorio"; options:["Sí","No"]; index:Demo.orbShow ? 0 : 1; onPicked:function(i) { Demo.orbShow=(i===0) } }
+        OrbOpt { label:"Representación"; options:["Esfera","Orbe","Campo","Neural","Crown","Atlas","Dense"]; index:typeof lumen!=="undefined" ? ["sphere","orb","field","neural","crown","atlas","dense"].indexOf(lumen.profile) : Demo.orbProfile; onPicked:function(i) { Demo.orbProfile=i } }
+        OrbOpt { label:"Nodos visibles (máximo nativo)"; options:["60","120","220","360","420"]; index:Demo.orbNodesI; onPicked:function(i) { Demo.orbNodesI=i } }
+        OrbOpt { label:"Color de la esfera"; options:["Original","Holograma frío","Vivo"]; index:Demo.orbGradeI; onPicked:function(i) { Demo.orbGradeI=i } }
+        OrbOpt { label:"Polvo de luz"; options:["No","Sí"]; index:Demo.orbDust ? 1 : 0; onPicked:function(i) { Demo.orbDust=i===1 } }
+        OrbOpt { label:"Brillo"; options:["Bajo","Normal","Alto"]; index:Demo.orbBrightI; onPicked:function(i) { Demo.orbBrightI=i } }
+        OrbOpt { label:"Actividad visual"; options:["Apagada","Baja","Media","Alta"]; index:Demo.orbActI; onPicked:function(i) { Demo.orbActI=i } }
+        OrbOpt { label:"Giro automático"; options:["Sí","No"]; index:Demo.orbSpin ? 0 : 1; onPicked:function(i) { Demo.orbSpin=(i===0) } }
+        NoteBox { text:"Renderer nativo Lumenfield, geometría y cinemáticas existentes. El presupuesto del OS y movimiento reducido limitan efectos; una opción visual no cambia modelos, inferencia ni autoridad." }
+    }
+    Column { visible:sw.section===5; width:parent.width; spacing:8
+        OrbOpt { objectName:"themeMode"; label:"Tema"; options:["Oscuro","Claro · beta"]; index:Theme.light ? 1 : 0; onPicked:function(i) { Theme.colorMode=i===1 ? "light" : "dark" } }
+        OrbOpt { label:"Colores"; options:["Vívidos","Originales"]; index:Theme.vivid ? 0 : 1; onPicked:function(i) { Theme.vivid=(i===0) } }
+        OrbOpt { label:"Perfil de movimiento"; options:["Completo","Equilibrado","Tranquilo"]; index:["full","balanced","quiet"].indexOf(Theme.motion); onPicked:function(i) { Theme.motion=["full","balanced","quiet"][i] } }
+        OrbOpt { label:"Superficies opacas"; options:["No","Sí"]; index:Theme.opaque ? 1 : 0; onPicked:function(i) { Theme.opaque=i===1 } }
+        OrbOpt { label:"Movimiento reducido"; options:["Sí","No"]; index:Theme.reducedMotion ? 0 : 1; onPicked:function(i) { Theme.reducedMotion=(i===0) } }
+        NoteBox { text:"Preferencias locales de presentación. No modifican la configuración de Core." }
+    }
 }

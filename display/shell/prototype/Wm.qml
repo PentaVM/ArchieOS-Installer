@@ -2,9 +2,8 @@ pragma Singleton
 import QtQuick
 
 // Window manager of the shell prototype: which windows exist, which are minimised or zoomed, which
-// one is in front. It is real state (the windows really open, move, hide and close), but the
-// windows' contents are still the design samples described in each file. The compositor that
-// would do this for Stage's own programs is not part of this prototype.
+// one is in front. This manages local Qt surfaces only, never external applications, OS
+// workspaces, personal/work domains or Core authority.
 //
 //   open    = the window exists (closing it forgets its position and zoom)
 //   min     = hidden in the dock, still open
@@ -16,11 +15,11 @@ QtObject {
     id: wm
     readonly property var ids: ["vault", "forge", "sentry", "stage", "set"]
     readonly property var meta: ({
-        vault:  { title: "Vault",   icon: "dkVault",  domain: "work" },
-        forge:  { title: "Forge",   icon: "dkForge",  domain: "work" },
-        sentry: { title: "Sentry",  icon: "dkSentry", domain: "personal" },
-        stage:  { title: "Stage",   icon: "dkStage",  domain: "work" },
-        set:    { title: "Ajustes", icon: "dkSet",    domain: "personal" } })
+        vault:  { title: "Vault",   icon: "dkVault",  domain: "" },
+        forge:  { title: "Forge",   icon: "dkForge",  domain: "" },
+        sentry: { title: "Sentry",  icon: "dkSentry", domain: "" },
+        stage:  { title: "Stage · vista local", icon: "dkStage", domain: "" },
+        set:    { title: "Ajustes", icon: "dkSet",    domain: "" } })
 
     property int top: 3
     property var st: ({
@@ -107,6 +106,7 @@ QtObject {
         _set(id, { max: !st[id].max, z: top, min: false })
     }
     function moveTo(id, x, y) {
+        if (!st[id] || !isFinite(x) || !isFinite(y)) return
         var h = hosts[id]
         var p = h ? h.clampOffset(x, y) : { x: x, y: y }
         var o = {}

@@ -3,6 +3,7 @@
 #include "LumenGeometry.h"
 
 #include <QColor>
+#include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -16,6 +17,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <memory>
 
 namespace lumen = archie::visual::lumen;
 using archie::visual::Vec3;
@@ -103,6 +105,23 @@ QVariantMap defaults()
 
 QVariantMap profileOverrides(const QString &name)
 {
+    if (name == QLatin1String("sphere") || name == QLatin1String("orb") || name == QLatin1String("neural")) {
+        QFile file(QStringLiteral(":/archie/presets/") + name + QStringLiteral(".json"));
+        if (!file.open(QIODevice::ReadOnly)) return {};
+        const auto parsed = QJsonDocument::fromJson(file.readAll());
+        if (!parsed.isObject()) return {};
+        const auto values = parsed.object().value(QStringLiteral("settings")).toObject().toVariantMap();
+        const auto original = defaults();
+        QVariantMap valid;
+        for (auto it=values.begin(); it!=values.end(); ++it) {
+            const auto existing=original.value(it.key());
+            if (!existing.isValid()) continue;
+            if (existing.typeId()==QMetaType::Int) valid.insert(it.key(),it.value().toInt());
+            else if (existing.typeId()==QMetaType::Double) valid.insert(it.key(),it.value().toDouble());
+            else if (existing.typeId()==it.value().typeId()) valid.insert(it.key(),it.value());
+        }
+        return valid;
+    }
     if (name == QLatin1String("crown"))
         return {{QStringLiteral("categoryPull"), 0.58}, {QStringLiteral("hierarchyPull"), 0.42},
                 {QStringLiteral("radialLayers"), 0.77}, {QStringLiteral("scale"), 1.12},
@@ -237,10 +256,12 @@ float statusCode(const QString &status)
 
 }  // namespace
 
-LumenField::LumenField(QObject *parent) : QObject(parent), m_settings(defaults())
+LumenField::LumenField(QObject *parent, QUrl endpoint)
+    : QObject(parent), m_endpoint(endpoint.isEmpty() ? QUrl(QString::fromLatin1(lumenUrl)) : std::move(endpoint)),
+      m_settings(defaults())
 {
     m_frameTimer.setTimerType(Qt::PreciseTimer);
-    m_frameTimer.setInterval(16);
+    m_frameTimer.setInterval(m_frameIntervalMs);
     connect(&m_frameTimer, &QTimer::timeout, this, &LumenField::tick);
     bool pollValid = false;
     const int pollOverride = qEnvironmentVariableIntValue("ARCHIE_ORB_POLL_MS", &pollValid);
@@ -249,6 +270,9 @@ LumenField::LumenField(QObject *parent) : QObject(parent), m_settings(defaults()
     connect(&m_pollTimer, &QTimer::timeout, this, &LumenField::request);
     m_requestDelay.setSingleShot(true);
     connect(&m_requestDelay, &QTimer::timeout, this, &LumenField::request);
+    connect(this, &LumenField::settingsChanged, this, &LumenField::updateTimers);
+    connect(this, &LumenField::sceneChanged, this, &LumenField::updateTimers);
+    connect(this, &LumenField::selectionChanged, this, &LumenField::updateTimers);
     updateLook();
     updateCategoryRows();
     setStatus(QStringLiteral("ESPERANDO EL CAMPO"));
@@ -263,14 +287,105 @@ void LumenField::setActive(bool active)
         m_clock.start();
         m_fpsClock.start();
         m_framesCounted = 0;
-        m_frameTimer.start();
-        m_pollTimer.start();
-        request();
     } else {
+        ++m_queryGeneration;
+        m_requestDelay.stop();
+        m_requestAgain = false;
+        if (m_reply) m_reply->abort();
+    }
+    updateTimers();
+    if (active) request();
+    emit activeChanged();
+}
+
+void LumenField::updateTimers()
+{
+    if (!m_active || m_frameIntervalMs == 0) {
         m_frameTimer.stop();
         m_pollTimer.stop();
+        return;
     }
-    emit activeChanged();
+    m_frameTimer.start(m_frameIntervalMs);
+    m_pollTimer.start();
+    m_clock.restart();
+}
+
+void LumenField::setFrameIntervalMs(int interval)
+{
+    interval = interval <= 0 ? 0 : std::clamp(interval, 16, 1000);
+    if (interval == m_frameIntervalMs) return;
+    const bool resuming = m_frameIntervalMs == 0;
+    m_frameIntervalMs = interval;
+    if (interval == 0) {
+        ++m_queryGeneration;
+        m_requestDelay.stop();
+        m_requestAgain = false;
+        if (m_reply) m_reply->abort();
+    }
+    updateTimers();
+    if (resuming && interval > 0) request();
+    emit budgetChanged();
+}
+
+bool LumenField::ambientAllowed() const
+{
+    return !m_reducedMotion && m_renderBudget.value(QStringLiteral("ambientMotion"), true).toBool();
+}
+
+int LumenField::particleBudget() const
+{
+    return std::clamp(m_renderBudget.value(QStringLiteral("maxParticles"), 2000).toInt(), 0, 6000);
+}
+
+void LumenField::setReducedMotion(bool reduced)
+{
+    if (m_reducedMotion == reduced) return;
+    m_reducedMotion = reduced;
+    updateLook();
+    rebuildGhosts();
+    m_positionsDirty = true;
+    emit settingsChanged();
+    emit budgetChanged();
+}
+
+void LumenField::setRenderBudget(const QVariantMap &budget)
+{
+    // Frame summaries also carry camera/history state. Only budget changes can
+    // rebuild decoration; advancing those unrelated fields is not a new budget.
+    const QVariantMap normalized{
+        {QStringLiteral("frameIntervalMs"), budget.value(QStringLiteral("frameIntervalMs"), 16)},
+        {QStringLiteral("maxVisibleNodes"), budget.value(QStringLiteral("maxVisibleNodes"), 420)},
+        {QStringLiteral("maxParticles"), budget.value(QStringLiteral("maxParticles"), 2000)},
+        {QStringLiteral("postProcessing"), budget.value(QStringLiteral("postProcessing"), false)},
+        {QStringLiteral("ambientMotion"), budget.value(QStringLiteral("ambientMotion"), true)},
+    };
+    if (m_renderBudget == normalized) return;
+    const int oldLimit = m_renderBudget.value(QStringLiteral("maxVisibleNodes"), 420).toInt();
+    m_renderBudget = normalized;
+    setFrameIntervalMs(budget.value(QStringLiteral("frameIntervalMs"), 16).toInt());
+    updateLook();
+    rebuildGhosts();
+    m_positionsDirty = true;
+    if (oldLimit != budget.value(QStringLiteral("maxVisibleNodes"), 420).toInt()) scheduleRequest();
+    emit settingsChanged();
+    emit budgetChanged();
+}
+
+bool LumenField::acquireView(QObject *owner)
+{
+    if (!owner || (m_viewOwner && m_viewOwner != owner)) return false;
+    if (m_viewOwner == owner) return true;
+    m_viewOwner = owner;
+    connect(owner, &QObject::destroyed, this, [this] { m_viewOwner.clear(); setActive(false); });
+    return true;
+}
+
+void LumenField::releaseView(QObject *owner)
+{
+    if (m_viewOwner != owner) return;
+    disconnect(owner, nullptr, this, nullptr);
+    m_viewOwner.clear();
+    setActive(false);
 }
 
 void LumenField::bindLayer(const QString &name, QObject *target)
@@ -574,14 +689,14 @@ QVector3D LumenField::positionOf(const QString &id) const
 
 void LumenField::scheduleRequest(int delayMs)
 {
-    if (!m_active)
-        return;
+    ++m_queryGeneration;
+    if (!m_active || m_frameIntervalMs == 0) return;
     m_requestDelay.start(std::max(0, delayMs));
 }
 
 void LumenField::request()
 {
-    if (!m_active)
+    if (!m_active || m_frameIntervalMs == 0)
         return;
     if (m_requestPending) {
         m_requestAgain = true;
@@ -592,7 +707,8 @@ void LumenField::request()
         expanded.push_back(QString::fromLatin1(QUrl::toPercentEncoding(id)));
     expanded.sort();
     QString query = QStringLiteral("lens=") + m_lens
-                    + QStringLiteral("&limit=") + QString::number(static_cast<int>(number("visibleLimit")))
+                    + QStringLiteral("&limit=") + QString::number(std::clamp(std::min(static_cast<int>(number("visibleLimit")),
+                        m_renderBudget.value(QStringLiteral("maxVisibleNodes"), 420).toInt()), 12, 420))
                     + QStringLiteral("&layout=") + m_settings.value(QStringLiteral("layoutMode")).toString()
                     + QStringLiteral("&category_pull=") + QString::number(number("categoryPull"))
                     + QStringLiteral("&hierarchy_pull=") + QString::number(number("hierarchyPull"))
@@ -603,23 +719,38 @@ void LumenField::request()
         query += QStringLiteral("&expand=") + expanded.join(QLatin1Char(','));
     if (!m_focus.isEmpty())
         query += QStringLiteral("&focus=") + QString::fromLatin1(QUrl::toPercentEncoding(m_focus));
-    QUrl url(QString::fromLatin1(lumenUrl));
+    QUrl url(m_endpoint);
     url.setQuery(query, QUrl::StrictMode);
     QNetworkRequest get(url);
     get.setTransferTimeout(3000);
     m_requestPending = true;
     QNetworkReply *reply = m_network.get(get);
-    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+    m_reply = reply;
+    const quint64 generation = m_queryGeneration;
+    auto body = std::make_shared<QByteArray>();
+    connect(reply, &QNetworkReply::readyRead, this, [reply, body] {
+        if (reply->isOpen()) body->append(reply->read(maximumSceneBytes + 1 - body->size()));
+        if (body->size() > maximumSceneBytes) reply->abort();
+    });
+    connect(reply, &QNetworkReply::finished, this, [this, reply, body, generation] {
         reply->deleteLater();
         m_requestPending = false;
+        m_reply.clear();
+        if (!m_active || m_frameIntervalMs == 0 || generation != m_queryGeneration) {
+            if (m_requestAgain || (m_active && generation != m_queryGeneration)) {
+                m_requestAgain = false;
+                request();
+            }
+            return;
+        }
+        if (reply->isOpen()) body->append(reply->read(maximumSceneBytes + 1 - body->size()));
+        if (body->size() > maximumSceneBytes) {
+            setStatus(QStringLiteral("SIN CAMPO"), QStringLiteral("la escena superó el límite de 8 MiB"));
+        } else
         if (reply->error() != QNetworkReply::NoError) {
             setStatus(QStringLiteral("SIN CAMPO"), QStringLiteral("archie-displayd no responde: ") + reply->errorString());
         } else {
-            const QByteArray body = reply->read(maximumSceneBytes + 1);
-            if (body.size() > maximumSceneBytes)
-                setStatus(QStringLiteral("SIN CAMPO"), QStringLiteral("la escena superó el límite de 8 MiB"));
-            else
-                accept(body);
+            accept(*body);
         }
         if (m_requestAgain) {
             m_requestAgain = false;
@@ -751,14 +882,14 @@ void LumenField::updateLook()
         {QStringLiteral("textureDepth"), number("textureDepth")},
         {QStringLiteral("shellOpacity"), flag("shell") ? number("shellOpacity") : 0.0F},
         {QStringLiteral("legacy"), m_settings.value(QStringLiteral("layoutMode")).toString() == QLatin1String("legacy") ? 1.0F : 0.0F},
-        {QStringLiteral("ghostOpacity"), flag("ambient") ? number("ghostOpacity") : 0.0F},
+        {QStringLiteral("ghostOpacity"), flag("ambient") && ambientAllowed() && particleBudget() > 0 ? number("ghostOpacity") : 0.0F},
         {QStringLiteral("ghostSize"), number("ambientSize")},
         {QStringLiteral("linkOpacity"), flag("links") ? number("linkOpacity") : 0.0F},
         {QStringLiteral("highlightOpacity"), flag("links") ? number("highlightOpacity") : 0.0F},
         {QStringLiteral("links"), flag("links")},
-        {QStringLiteral("pulses"), flag("pulses")},
+        {QStringLiteral("pulses"), flag("pulses") && ambientAllowed() && particleBudget() > 0},
         {QStringLiteral("guides"), flag("guides")},
-        {QStringLiteral("bloom"), flag("bloom")},
+        {QStringLiteral("bloom"), flag("bloom") && m_renderBudget.value(QStringLiteral("postProcessing"), false).toBool()},
         {QStringLiteral("bloomStrength"), number("bloomStrength")},
         {QStringLiteral("bloomRadius"), number("bloomRadius")},
         {QStringLiteral("bloomThreshold"), number("bloomThreshold")},
@@ -1069,7 +1200,8 @@ void LumenField::rebuildGhosts()
             members.push_back(static_cast<std::size_t>(node.memberCount));
         }
     }
-    const int count = flag("ambient") ? std::min(3500, static_cast<int>(number("ambientCount"))) : 0;
+    const int count = flag("ambient") && ambientAllowed()
+        ? std::min({3500, static_cast<int>(number("ambientCount")), particleBudget()}) : 0;
     m_ghostOffsets = lumen::ghosts(centres, members, count, m_fieldRadius);
     const auto table = m_tables.value(QStringLiteral("ghosts"));
     if (!table)
@@ -1243,7 +1375,7 @@ void LumenField::updatePulses()
         return;
     QByteArray data;
     int count = 0;
-    if (flag("pulses")) {
+    if (flag("pulses") && ambientAllowed() && particleBudget() > 0) {
         const auto warm = lumen::to_linear(lumen::parse_hex(m_settings.value(QStringLiteral("accentWarm")).toString().toStdString())
                                                .value_or(lumen::Rgb{0.9F, 0.7F, 0.5F}));
         const float speed = number("pulseSpeed");
@@ -1264,13 +1396,13 @@ void LumenField::tick()
 {
     const float dt = std::min(0.05F, static_cast<float>(m_clock.restart()) / 1000.0F);
     const bool inspecting = !m_selected.isEmpty() && flag("pauseOnInspect");
-    if (!m_paused) {
+    if (!m_paused && ambientAllowed()) {
         m_time += dt;
         m_pulseTime += dt;
         if (flag("rotate") && !inspecting)
             m_spin = std::fmod(m_spin + dt * number("rotationSpeed") * 0.1F * 57.29578F, 360.0F);
     }
-    if (flag("physics") && !m_paused) {
+    if (flag("physics") && !m_paused && ambientAllowed()) {
         lumen::Motion motion;
         motion.reaction = number("reaction");
         motion.reach = number("reach");
@@ -1288,7 +1420,7 @@ void LumenField::tick()
             pointer = m_bodies[static_cast<std::size_t>(h)].position;
         if (lumen::step(m_bodies, pointer, dt, motion))
             m_positionsDirty = true;
-    } else if (!flag("physics")) {
+    } else if (!flag("physics") || !ambientAllowed()) {
         for (lumen::Body &body : m_bodies) {
             if (!(body.position == body.anchor)) {
                 body.position = body.anchor;
@@ -1309,6 +1441,7 @@ void LumenField::tick()
         m_framesCounted = 0;
         emit fpsChanged();
     }
+    if (!ambientAllowed() || m_paused) m_frameTimer.stop();
 }
 
 void LumenField::updateSelectionInfo()

@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 
 // Sentry · red local, 780 px wide, two-column device grid. Passive: opening it starts no scan
 // and changes nothing on any device; there are no action buttons because no control contract
@@ -10,9 +11,7 @@ Panel {
     readonly property string wid: "sentry"
     property var bridge
     width: 780
-    height: tbar.height + content.implicitHeight + 46
-    enterScale: 0.96
-    durIn: Theme.durOpen; durOut: Theme.durClose
+    height: Math.min(900, parent ? Math.max(240,parent.height-y-24) : 900, content.implicitHeight + 46)
     // Merged over full defaults: the bridge's own fallback (state only, before `bridge` is even
     // assigned, or for frames older than this field) omits devices/path/etc., and every binding
     // below reads them unconditionally (QML property bindings do not share another property's
@@ -44,16 +43,21 @@ Panel {
             Column { id: extraCol; width: parent.width; spacing: 8 } }
     }
 
-    Item { id: tbar; width: parent.width; height: 52
-        Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.hair }
-        TitleDrag { wid: sp.wid }
-        Lights { x: 16; anchors.verticalCenter: parent.verticalCenter; wid: sp.wid }
-        Text { anchors.centerIn: parent; text: "Sentry"; color: Theme.t1; font.family: Theme.disp; font.pixelSize: 17; font.weight: Font.DemiBold; font.letterSpacing: -0.17 } }
-
-    Column { id: content; x: 22; y: tbar.height + 20; width: parent.width - 46; spacing: 0
+    Item { id:tbar; width:parent.width; height:52
+        Rectangle { anchors.bottom:parent.bottom; width:parent.width; height:1; color:Theme.hair }
+        TitleDrag { wid:sp.wid }
+        Lights { x:16; anchors.verticalCenter:parent.verticalCenter; wid:sp.wid }
+        Text { anchors.centerIn:parent; text:"Sentry"; color:Theme.t1; font.family:Theme.disp; font.pixelSize:17 }
+    }
+    Flickable {
+        objectName:"projectionScroll"; x:0; y:tbar.height; width:parent.width; height:parent.height-tbar.height
+        contentWidth:width; contentHeight:content.implicitHeight+46; clip:true
+        boundsBehavior:Flickable.StopAtBounds
+        ScrollBar.vertical:ScrollBar { }
+    Column { id: content; x: 22; y: 22; width: parent.width - 46; spacing: 0
         Text { text: "Sentry · red local"; color: Theme.t1; font.family: Theme.disp; font.pixelSize: 22; font.weight: Font.DemiBold; font.letterSpacing: -0.33 }
         Flow { width: parent.width; topPadding: 12; spacing: 8
-            Chip { src: true; icon: "ok"; text: "Real · bridge" }
+            SourceChip { bridge: sp.bridge; projection: ({ source: sp.bridge && sp.bridge.link === "fixture" ? "fixture" : sp.lan.state === "ok" ? "live" : "unavailable", state: sp.lan.state }) }
             // inventory state
             Chip { visible: lan.state === "ok"; icon: lan.stale ? "stale" : "done"; tone: lan.stale ? "warn" : "ok"
                 text: lan.stale ? "inventario desactualizado" : "inventario actualizado"; sub: "hace " + sp.ageText(lan.age_seconds) }
@@ -65,6 +69,7 @@ Panel {
             Chip { visible: lan.state === "ok"; text: lan.total + (lan.total === 1 ? " dispositivo" : " dispositivos") }
             Chip { visible: lan.state !== "ok"; icon: "unknown"; tone: "unk"; text: "dispositivos"; sub: "—" }
         }
+        NoteBox { visible: sp.lan.state === "bridge_silent"; width: parent.width; text: "El bridge está en silencio. El inventario retenido es histórico; no confirma presencia ni estado actual." }
         Item { width: 1; height: 16 }
         Text { visible: lan.state === "ok" && lan.total > lan.devices.length; width: parent.width
             text: "Se muestran " + lan.devices.length + " de " + lan.total + "."; color: Theme.warn; font.family: Theme.font; font.pixelSize: 12; bottomPadding: 8 }
@@ -76,7 +81,7 @@ Panel {
                     color: Theme.raised; border.width: 1; border.color: Theme.hair
                     Column { id: dv; x: 14; y: 14; width: parent.width - 28; spacing: 8
                         Item { width: parent.width; height: 36
-                            Rectangle { width: 36; height: 36; radius: 9; color: Qt.rgba(1, 1, 1, 0.05); border.width: 1; border.color: Theme.hair
+                            Rectangle { width: 36; height: 36; radius: 9; color: Theme.raised; border.width: 1; border.color: Theme.hair
                                 Icon { anchors.centerIn: parent; name: sp.deviceIcon(modelData.class); size: 20; color: Theme.t2 } }
                             Column { x: 46; width: parent.width - 46 - kindChip.width - 8; anchors.verticalCenter: parent.verticalCenter
                                 Text { width: parent.width; text: modelData.name !== "" ? modelData.name : modelData.address; elide: Text.ElideRight
@@ -124,6 +129,7 @@ Panel {
         Row { topPadding: 14; spacing: 8; width: parent.width
             Icon { name: "lock"; size: 14; color: Theme.t3; y: 15 }
             Text { width: parent.width - 24; wrapMode: Text.Wrap; color: Theme.t3; font.family: Theme.font; font.pixelSize: 12; lineHeight: 17; lineHeightMode: Text.FixedHeight
-                text: "Inventario pasivo: solo se listan los dispositivos que se anuncian por sí mismos (ssdp, mdns). Sentry no escanea ni modifica nada, y por eso aquí no hay botones de acción." } }
+                text: "Inventario producido por Sentry. Cada dispositivo indica sus fuentes de detección; esta vista no inicia escaneos ni ejecuta operaciones sobre dispositivos." } }
+    }
     }
 }

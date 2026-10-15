@@ -1,4 +1,5 @@
 import QtQuick
+import "ActionRules.js" as ActionRules
 
 // Drop-down of the top-bar menus (Archivo, Editar, Vista, Ir, Ventana). Each entry runs an
 // action by id in Main.run(); entries that cannot apply right now are disabled and dim.
@@ -6,6 +7,7 @@ Panel {
     id: md
     kind: "panel"
     property string name: "Archivo"
+    property var actionContext: ({})
     property var vault
     signal activated(string id)
     width: 270
@@ -61,7 +63,8 @@ Panel {
                 { l: "Vault", id: "app.vault", on: Wm.isShown("vault") },
                 { l: "Forge", id: "app.forge", k: "F", on: Wm.isShown("forge") },
                 { l: "Sentry", id: "app.sentry", k: "S", on: Wm.isShown("sentry") },
-                { l: "Stage", id: "app.stage", on: Wm.isShown("stage") },
+                { l: "Stage · vista local", id: "window.stage", on: Wm.isShown("stage") },
+                { l: "Iniciar aplicación Stage", id: "app.stage" },
                 { l: "Ajustes", id: "app.set", k: ",", on: Wm.isShown("set") },
                 { sep: true },
                 { l: "Cambiar de ventana", id: "overlay.switcher", k: "W" },
@@ -70,7 +73,10 @@ Panel {
                 { l: "Centro de control", id: "overlay.control", k: "C" },
                 { l: "Inspector", id: "overlay.inspector", k: "I" } ]
         }
-        return m[name] || []
+        return (m[name] || []).map(function(row) {
+            if (!row.sep && !ActionRules.allowed(row.id, md.actionContext)) row.dis = true
+            return row
+        })
     }
 
     Column { id: col; x: 6; y: 6; width: parent.width - 12

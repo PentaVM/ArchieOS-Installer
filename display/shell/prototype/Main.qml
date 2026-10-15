@@ -1,196 +1,198 @@
 import QtQuick
+import "ActionRules.js" as ActionRules
 
-// ArchieOS professional shell: Archie Mac design (phase B, restyled from the Claude Design
-// handoff). Plain Qt Quick so it renders without Quickshell:   qml Main.qml     (Qt 6.6+)
-// The Quickshell host layer (PanelWindow, layer-shell) is not part of this file and is untested.
-//
-//   Ctrl+K palette   C control center   A activity   S sentry   G grid/list
-//   W windows (Alt-Tab)   N notifications   T toasts + authorization   F forge   I inspector
-//   , settings   L lock   Shift+L installer   X workspace menu   / search
-//   V cycle the state shown by the design-sample surfaces   . visible-focus ring   H bare desktop
-//   M reduced motion   P motion profile (full / balanced / quiet)   O opaque   B glass   Esc close
-//
-// Positions follow the design's 1920x1080 board: Vault 88/100 (list) or 88/92 (grid), Stage
-// 110 px from the right edge, right panels 24 px from the right edge, Sentry and palette centred.
+// Native desktop surfaces managed locally by Wm. Core, Policy and the external
+// compositor keep their own authority; window state never grants a capability.
 Item {
     id: root
     width: 1920; height: 1080
     property string overlay: ""
+    property string menuName: ""
     focus: true
 
     property alias bridge: bridgeModel
-    // Plain values for tests that cannot reach the model object.
     readonly property string bridgeLink: bridgeModel.link
     readonly property int bridgeRejected: bridgeModel.rejected
     readonly property bool opaque: Theme.opaque
     readonly property var wmState: Wm.st
     readonly property string wmFront: Wm.front()
     readonly property var wmOffsets: Wm.off
+    readonly property bool vaultOpen: Wm.isOpen("vault")
 
     BridgeModel { id: bridgeModel }
+    property string actionNote: ""
+    signal actionDenied(string action, string reason)
+    readonly property bool nativeHost: typeof shellRuntime !== "undefined" && shellRuntime !== null
+    readonly property string hostError: nativeHost ? shellRuntime.error : ""
+    Connections {
+        target: root.nativeHost ? shellRuntime : null
+        function onFrameReady(line) { bridgeModel.ingest(line) }
+    }
+    Binding { target: Theme; property: "runtimeConserve"; value: root.bridge.kernel !== null && ["conserve","headless"].indexOf(root.bridge.kernel.display_budget) >= 0 }
+    Timer { interval: 1000; repeat: true; running: root.visible; onTriggered: bridgeModel.tick() }
+    onOverlayChanged: if (overlay !== "palette" && overlay !== "search") root.forceActiveFocus()
 
-    // Test/replay only: a context property `replayFile` (a file URL of JSON lines written by
-    // archie-shell-bridge) is fed through the same ingest() path. Needs QML_XHR_ALLOW_FILE_READ=1.
+    function handleEscape() { overlay = ""; Demo.orbNav = false; root.forceActiveFocus() }
+    function toggle(name) { overlay = overlay === name ? "" : name }
+    function ingestRecording(line) {
+        var frame
+        try { frame = JSON.parse(line) } catch (e) { return bridgeModel.ingest(line) }
+        if (!frame || typeof frame !== "object") return bridgeModel.ingest(line)
+        frame.link = { state: "fixture" }
+        if (frame.system) frame.system.source = "fixture"
+        for (var field of ["catalog","inspector","workflows"])
+            if (frame[field] && typeof frame[field] === "object") frame[field].source = "fixture"
+        return bridgeModel.ingest(JSON.stringify(frame))
+    }
+    function actionContext() {
+        return { nativeReady: live.ok,
+            stageLauncher: typeof appCatalog !== "undefined" && appCatalog.canLaunch,
+            compositorBlur: false }
+    }
+    // Explicit development replay: recordings cannot present themselves as live.
     property string replayDebug: ""
     Component.onCompleted: {
         replayDebug = typeof replayFile === "undefined" ? "no-context-property" : "file=" + replayFile
         if (typeof replayFile === "undefined" || replayFile === "") return
         var xhr = new XMLHttpRequest()
-        xhr.open("GET", replayFile, false)
-        xhr.send()
+        xhr.open("GET", replayFile, false); xhr.send()
         var lines = xhr.responseText.split(/\r?\n/)
         replayDebug += " status=" + xhr.status + " bytes=" + xhr.responseText.length + " lines=" + lines.length
-        for (var i = 0; i < lines.length; i++) if (lines[i].trim() !== "") bridgeModel.ingest(lines[i])
+        for (var i = 0; i < lines.length; i++) if (lines[i].trim() !== "") root.ingestRecording(lines[i])
     }
 
-    function toggle(name) { overlay = overlay === name ? "" : name }
-
-    property string menuName: ""
-    onOverlayChanged: if (overlay !== "palette" && overlay !== "search") root.forceActiveFocus()
-
-    // Everything the menus, palette, search, dock, switcher and keys can do. Vault data stays
-    // sample data; opening a file only says there is no backend.
     function run(id) {
-        if (id.indexOf("go:") === 0) { Wm.open("vault"); vault.goPlace(parseInt(id.slice(3))); return }
-        if (id.indexOf("file:") === 0) { Wm.open("vault"); vault.reveal(id.slice(5)); return }
-        if (id.indexOf("dock.") === 0) { overlay = ""; Wm.dockClick(id.slice(5)); return }
-        if (id.indexOf("overlay.") === 0) { var o = id.slice(8); overlay = ""; if (o === "lock") lock.installer = false; overlay = o; return }
+        if (typeof id !== "string" || !ActionRules.allowed(id, actionContext())) {
+            actionNote = typeof id === "string" ? ActionRules.reason(id, actionContext()) : "Acción no válida"
+            actionDenied(String(id), actionNote)
+            return false
+        }
+        actionNote = ""
+        if (id.indexOf("dock.") === 0) { overlay = ""; Wm.dockClick(id.slice(5)); return true }
+        if (id.indexOf("window.") === 0) { overlay = ""; Wm.open(id.slice(7)); return true }
+        if (id.indexOf("overlay.") === 0) {
+            var name = id.slice(8)
+            var windows = { forge: "forge", settings: "set", sentry: "sentry" }
+            if (windows[name]) { overlay = ""; Wm.open(windows[name]) }
+            else overlay = name
+            return true
+        }
         switch (id) {
-        case "app.orb": overlay = ""; Demo.bare = !Demo.bare; break
-        case "app.vault": case "app.forge": case "app.sentry": case "app.stage": case "app.set": overlay = ""; Wm.open(id.slice(4)); break
+        case "app.orb": overlay = ""; Demo.bare = true; break
+        case "app.vault": case "app.forge": case "app.sentry": case "app.set":
+            overlay = ""; Wm.open(id.slice(4)); break
+        case "app.stage": {
+            var stage = appCatalog.apps.filter(function(a) { return a.available && a.id.indexOf("archie-stage") >= 0 })
+            if (!stage.length) { actionNote = "Stage no está instalado en el catálogo"; actionDenied(id, actionNote); return false }
+            return appCatalog.launch(stage[0].id)
+        }
         case "win.close": Wm.closeFront(); break
         case "win.min": Wm.minimizeFront(); break
         case "win.zoom": Wm.zoomFront(); break
         case "win.closeAll": Wm.closeAll(); break
         case "win.minAll": Wm.minimizeAll(); break
         case "win.showAll": overlay = ""; Wm.showAll(); break
-        case "win.desktop": overlay = ""; Demo.bare = !Demo.bare; break
-        case "vault.newTab": Wm.open("vault"); vault.newTab(); break
+        case "win.desktop": case "desk.toggle": overlay = ""; Demo.bare = !Demo.bare; break
+        case "vault.newTab": overlay = ""; Wm.open("vault"); vault.newTab(); break
         case "vault.closeTab": vault.closeTab(vault.tabIndex); break
-        case "vault.open": vault.openSelected(); break
-        case "vault.up": vault.up(); break
-        case "vault.cancel": vault.cancelCopy(); break
-        case "vault.undo": vault.undoCopy(); break
-        case "vault.redo": vault.repeatCopy(); break
         case "vault.sort": vault.toggleSort(); break
         case "vault.list": vault.gridView = false; break
         case "vault.grid": vault.gridView = true; break
         case "theme.motion": Theme.reducedMotion = !Theme.reducedMotion; break
         case "theme.opaque": Theme.opaque = !Theme.opaque; break
         case "theme.blur": Theme.blur = !Theme.blur; break
-        case "desk.toggle": Demo.bare = !Demo.bare; break
         case "orb.nav": overlay = ""; Demo.bare = true; Demo.orbNav = !Demo.orbNav; break
         }
+        return true
     }
 
-    Keys.onPressed: function (e) {
-        if (e.key === Qt.Key_Escape) overlay = ""
-        else if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_K) overlay = overlay === "palette" ? "" : "palette"
-        else if (e.key === Qt.Key_C) overlay = overlay === "control" ? "" : "control"
-        else if (e.key === Qt.Key_S) Wm.toggle("sentry")
-        else if (e.key === Qt.Key_A) overlay = overlay === "activity" ? "" : "activity"
-        else if (e.key === Qt.Key_Escape && Demo.orbNav) Demo.orbNav = false
+    Keys.onPressed: function(e) {
+        if (e.key === Qt.Key_Escape) handleEscape()
+        else if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_K) toggle("palette")
         else if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_Space) run("orb.nav")
-        else if (e.key === Qt.Key_G && Wm.isOpen("vault")) vault.gridView = !vault.gridView
         else if (overlay === "switcher" && e.key === Qt.Key_Tab) switcher.step(1)
         else if (overlay === "switcher" && e.key === Qt.Key_Backtab) switcher.step(-1)
         else if (overlay === "switcher" && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter)) switcher.choose()
         else if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_T) run("vault.newTab")
         else if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_W) run((e.modifiers & Qt.ShiftModifier) ? "win.closeAll" : "win.close")
         else if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_M) run((e.modifiers & Qt.ShiftModifier) ? "win.minAll" : "win.min")
+        else if (e.key === Qt.Key_C) toggle("control")
+        else if (e.key === Qt.Key_S) Wm.toggle("sentry")
+        else if (e.key === Qt.Key_A) toggle("activity")
+        else if (e.key === Qt.Key_G && Wm.isOpen("vault")) vault.gridView = !vault.gridView
         else if (e.key === Qt.Key_D) run("win.desktop")
         else if (overlay === "" && Wm.front() === "vault" && e.key === Qt.Key_Down) vault.move(vault.gridView ? 4 : 1)
         else if (overlay === "" && Wm.front() === "vault" && e.key === Qt.Key_Up) vault.move(vault.gridView ? -4 : -1)
         else if (overlay === "" && Wm.front() === "vault" && e.key === Qt.Key_Right && vault.gridView) vault.move(1)
         else if (overlay === "" && Wm.front() === "vault" && e.key === Qt.Key_Left && vault.gridView) vault.move(-1)
-        else if (overlay === "" && Wm.front() === "vault" && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter)) vault.openSelected()
-        else if (overlay === "" && Wm.front() === "vault" && e.key === Qt.Key_Backspace) vault.up()
+        else if (overlay === "" && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter)) run("vault.open")
+        else if (overlay === "" && e.key === Qt.Key_Backspace) run("vault.up")
         else if (e.key === Qt.Key_W) toggle("switcher")
-        else if (e.key === Qt.Key_N) toggle("notif")
-        else if (e.key === Qt.Key_T) toggle("avisos")
+        else if (e.key === Qt.Key_N || e.key === Qt.Key_T) toggle("notif")
         else if (e.key === Qt.Key_F) Wm.toggle("forge")
         else if (e.key === Qt.Key_I) toggle("inspector")
         else if (e.key === Qt.Key_Comma) Wm.toggle("set")
-        else if (e.key === Qt.Key_L) { lock.installer = !!(e.modifiers & Qt.ShiftModifier); toggle("lock") }
+        else if (e.key === Qt.Key_L) run("overlay.lock")
         else if (e.key === Qt.Key_X) toggle("workspace")
         else if (e.key === Qt.Key_Slash) toggle("search")
         else if (e.key === Qt.Key_V) Demo.next()
         else if (e.key === Qt.Key_Period) Demo.focusRing = !Demo.focusRing
-        else if (e.key === Qt.Key_H) Demo.bare = !Demo.bare
-        else if (e.key === Qt.Key_P) Theme.motion = Theme.motion === "full" ? "balanced" : (Theme.motion === "balanced" ? "quiet" : "full")
+        else if (e.key === Qt.Key_H) run("win.desktop")
+        else if (e.key === Qt.Key_P) Theme.motion = Theme.motion === "full" ? "balanced" : Theme.motion === "balanced" ? "quiet" : "full"
         else if (e.key === Qt.Key_M) Theme.reducedMotion = !Theme.reducedMotion
         else if (e.key === Qt.Key_O) Theme.opaque = !Theme.opaque
-        else if (e.key === Qt.Key_B) Theme.blur = !Theme.blur
+        else if (e.key === Qt.Key_B) run("theme.blur")
     }
 
-    // The plain backdrop shows until the graph viewer is up (or when it is turned off in Settings).
     Background { anchors.fill: parent; nodes: !Demo.orbShow || !live.ok }
-
-    // Graph viewer: the Lumenfield 0449 sphere over the saved graph of the OS content
-    // (display/visor), part of the desktop, always behind the windows.
     LiveOrb { id: live; anchors.fill: parent; visible: Demo.orbShow || Demo.orbNav }
+    readonly property string orbDiagnostics:live.diagnostics
 
-    TopBar { id: bar; z: 600; width: parent.width; overlay: root.overlay; bridge: bridgeModel; menu: root.overlay === "menu" ? root.menuName : ""
-        onMenuClicked: function (n, x) { if (root.overlay === "menu" && root.menuName === n) root.overlay = ""; else { root.menuName = n; menuDrop.x = x; root.overlay = "menu" } }
+    // A separate layer keeps arbitrarily many local raises below menus and overlays.
+    Item { anchors.fill: parent; z: 100
+        WinHost { wid: "vault"; baseX: 88; baseY: vault.gridView ? 92 : 100
+            VaultWindow { id: vault; shown: Wm.isShown("vault"); enterDy: Wm.isMin("vault") ? 160 : 0; enterScale: Wm.isMin("vault") ? 0.8 : 0.96
+                width: Wm.isMax("vault") ? root.width - 80 : 1060; height: Wm.isMax("vault") ? root.height - 154 : gridView ? 840 : 720
+                onCloseRequested: Wm.close("vault") } }
+        WinHost { wid: "stage"; baseX: root.width - 710; baseY: 172
+            StageWindow { shown: Wm.isShown("stage"); enterDy: Wm.isMin("stage") ? 160 : 0; enterScale: Wm.isMin("stage") ? 0.8 : 0.96
+                width: Wm.isMax("stage") ? root.width - 80 : Math.min(600,root.width-32); height: Wm.isMax("stage") ? root.height - 154 : Math.min(400,Math.max(240,root.height-154)) } }
+        WinHost { wid: "forge"; baseX: 460; baseY: 130
+            ForgeWindow { wid: "forge"; bridge: bridgeModel; shown: Wm.isShown("forge"); enterDy: Wm.isMin("forge") ? 160 : 0; enterScale: Wm.isMin("forge") ? 0.8 : 0.96
+                width: Wm.isMax("forge") ? root.width - 80 : Math.min(1000,root.width-32); height: Wm.isMax("forge") ? root.height - 154 : Math.min(600,Math.max(240,root.height-154)) } }
+        WinHost { wid: "set"; baseX: 490; baseY: 140
+            SettingsWindow { wid: "set"; bridge: bridgeModel; shown: Wm.isShown("set"); enterDy: Wm.isMin("set") ? 160 : 0; enterScale: Wm.isMin("set") ? 0.8 : 0.96
+                width: Wm.isMax("set") ? root.width - 80 : Math.min(940,root.width-32); height: Wm.isMax("set") ? root.height - 154 : Math.min(650,Math.max(240,root.height-154)) } }
+        WinHost { wid: "sentry"; baseX: (root.width - 780) / 2; baseY: 110
+            SentryPanel { bridge: bridgeModel; height:Math.min(700,Math.max(240,root.height-154)); shown: Wm.isShown("sentry"); enterDy: Wm.isMin("sentry") ? 160 : 0; enterScale: Wm.isMin("sentry") ? 0.8 : 0.96 } }
+    }
+
+    TopBar { z: 600; width: parent.width; overlay: root.overlay; bridge: bridgeModel; menu: root.overlay === "menu" ? root.menuName : ""
         app: Wm.frontTitle()
-        onToggle: function (n) { root.overlay = root.overlay === n ? "" : n } }
-
-    DesignBanner { x: 14; y: 42; z: 550 }
-
-    // Managed windows (see Wm): each is wrapped in a WinHost that places it, stacks it and raises it on
-    // a press. `shown` comes from the window manager, so minimising or closing fades it out.
-    // Vault: list 1060x720 at (88,100); grid 1060x840 at (88,92); zoomed fills the desktop area.
-    WinHost { wid: "vault"; baseX: 88; baseY: vault.gridView ? 92 : 100
-        VaultWindow { id: vault; shown: Wm.isShown("vault"); enterDy: Wm.isMin("vault") ? 160 : 0; enterScale: Wm.isMin("vault") ? 0.8 : 0.96
-            width: Wm.isMax("vault") ? root.width - 80 : 1060; height: Wm.isMax("vault") ? root.height - 44 - 110 : (gridView ? 840 : 720)
-            onCloseRequested: Wm.close("vault") } }
-
-    // Stage: a window of its own program (see StageWindow).
-    WinHost { wid: "stage"; baseX: root.width - 600 - 110; baseY: 172
-        StageWindow { shown: Wm.isShown("stage"); enterDy: Wm.isMin("stage") ? 160 : 0; enterScale: Wm.isMin("stage") ? 0.8 : 0.96
-            width: Wm.isMax("stage") ? root.width - 80 : 600; height: Wm.isMax("stage") ? root.height - 44 - 110 : 400 } }
-
-    WinHost { wid: "forge"; baseX: 460; baseY: 130
-        ForgeWindow { wid: "forge"; shown: Wm.isShown("forge"); enterDy: Wm.isMin("forge") ? 160 : 0; enterScale: Wm.isMin("forge") ? 0.8 : 0.96
-            width: Wm.isMax("forge") ? root.width - 80 : 1000; height: Wm.isMax("forge") ? root.height - 44 - 110 : 560 } }
-
-    WinHost { wid: "set"; baseX: 490; baseY: 140
-        SettingsWindow { wid: "set"; shown: Wm.isShown("set"); enterDy: Wm.isMin("set") ? 160 : 0; enterScale: Wm.isMin("set") ? 0.8 : 0.96
-            width: Wm.isMax("set") ? root.width - 80 : 940; height: Wm.isMax("set") ? root.height - 44 - 110 : 520 } }
-
-    WinHost { wid: "sentry"; baseX: (root.width - 780) / 2; baseY: 110
-        SentryPanel { bridge: bridgeModel; shown: Wm.isShown("sentry"); enterDy: Wm.isMin("sentry") ? 160 : 0; enterScale: Wm.isMin("sentry") ? 0.8 : 0.96 } }
-
+        onMenuClicked: function(n,x) { if (root.overlay === "menu" && root.menuName === n) root.overlay = ""; else { root.menuName = n; menuDrop.x = x; root.overlay = "menu" } }
+        onToggle: function(n) { root.toggle(n) } }
+    Dock { id: dock; z: 500; anchors.horizontalCenter: parent.horizontalCenter; y: parent.height - height - 14
+        onLaunched: function(id) { root.run(id === "orb" ? "app.orb" : "dock." + id) }
+        onMenuRequested: function(id,cx) { dockMenu.target = id; dockMenu.x = Math.max(8, Math.min(root.width - dockMenu.width - 8, dock.x + cx - dockMenu.width / 2)); root.overlay = "dockmenu" } }
     Rectangle { visible: Demo.orbNav; z: 700; anchors.horizontalCenter: parent.horizontalCenter; y: 40; width: navTxt.implicitWidth + 28; height: 30; radius: 15
         MouseArea { anchors.fill: parent; onClicked: Demo.orbNav = false }
-        color: Qt.rgba(2 / 255, 2 / 255, 4 / 255, 0.9); border.width: 1; border.color: Theme.hair
-        Text { id: navTxt; anchors.centerIn: parent; text: "Navegando la esfera en 3D · Esc o clic aquí para fijar la cámara"
-            color: Theme.t2; font.family: Theme.font; font.pixelSize: 12 } }
+        color: Theme.panel; border.width: 1; border.color: Theme.hair
+        Text { id: navTxt; anchors.centerIn: parent; text: "Navegando la esfera en 3D · Esc o clic aquí para fijar la cámara"; color: Theme.t2; font.family: Theme.font; font.pixelSize: 12 } }
 
-    Dock { id: dock; z: 500; anchors.horizontalCenter: parent.horizontalCenter; y: parent.height - height - 14
-        onLaunched: function (id) { root.run(id === "orb" ? "app.orb" : "dock." + id) }
-        onMenuRequested: function (id, cx) { dockMenu.target = id; dockMenu.x = dock.x + cx - dockMenu.width / 2; root.overlay = "dockmenu" } }
-
-    // Overlays. Each panel reveals itself with `shown` (opacity plus a short slide or scale; see
-    // Theme motion tokens), so closing fades out instead of vanishing.
     Item { anchors.fill: parent; z: 1000
-        MouseArea { anchors.fill: parent; enabled: root.overlay !== "" && root.overlay !== "lock"; onClicked: root.overlay = "" }
+        MouseArea { anchors.fill: parent; enabled: root.overlay !== ""; onClicked: root.overlay = "" }
         ControlCenter { bridge: bridgeModel; shown: root.overlay === "control"; enterDy: -8; x: root.width - width - 24; y: 44 }
         ActivityCenter { bridge: bridgeModel; shown: root.overlay === "activity"; enterDy: -8; x: root.width - width - 24; y: 44 }
-        CommandPalette { onActivated: function (act) { root.overlay = ""; root.run(act) }; shown: root.overlay === "palette"; enterDy: -8; durIn: Theme.durPalette; durOut: Theme.durPaletteClose; x: (root.width - width) / 2; y: 140 }
-
-        // Surfaces added by the second handoff. All design samples (see Demo.qml).
-        WindowSwitcher { id: switcher; onChosen: function (k) { root.overlay = ""; if (k !== "") root.run("app." + k) }; shown: root.overlay === "switcher"; enterDy: -8; durIn: Theme.durPalette; durOut: Theme.durPaletteClose; x: (root.width - width) / 2; y: 250 }
-        NotificationCenter { shown: root.overlay === "notif"; enterDy: -8; x: root.width - width - 24; y: 44 }
-        Toasts { shown: root.overlay === "avisos" && !Demo.silent; x: root.width - width - 14; y: 44 }
-        AuthDialog { shown: root.overlay === "avisos"; x: 620; y: 340; onRejected: root.overlay = "" }
+        CommandPalette { actionContext: root.actionContext(); onActivated: function(act) { root.overlay = ""; root.run(act) }; shown: root.overlay === "palette"; enterDy: -8; durIn: Theme.durPalette; durOut: Theme.durPaletteClose; x: (root.width - width) / 2; y: 140 }
+        WindowSwitcher { id: switcher; onChosen: function(k) { root.overlay = ""; if (k !== "") root.run("window." + k) }; shown: root.overlay === "switcher"; enterDy: -8; durIn: Theme.durPalette; durOut: Theme.durPaletteClose; x: (root.width - width) / 2; y: 250 }
+        NotificationCenter { bridge: bridgeModel; shown: root.overlay === "notif"; enterDy: -8; x: root.width - width - 24; y: 44 }
         DockMenu { id: dockMenu; shown: root.overlay === "dockmenu"; y: dock.y - height - 8; onActivated: root.overlay = "" }
-        InspectorPanel { shown: root.overlay === "inspector"; enterDy: -8; x: root.width - width - 24; y: 44 }
-        OrbHole { visible: root.overlay === "workspace" && Demo.bare; x: 700; y: 250 }
-        WorkspaceMenu { onChosen: function (w) { root.overlay = ""; Demo.bare = (w === "orb") }; shown: root.overlay === "workspace"; x: 1338; y: 42 }
-        MenuDropdown { id: menuDrop; vault: vault; name: root.menuName; shown: root.overlay === "menu"; y: 34; enterDy: -6
-            onActivated: function (id) { root.overlay = ""; root.run(id) } }
-        SearchPanel { onActivated: function (act) { root.overlay = ""; root.run(act) }; shown: root.overlay === "search"; x: (root.width - width) / 2; y: 140 }
+        InspectorPanel { bridge: bridgeModel; shown: root.overlay === "inspector"; enterDy: -8; x: root.width - width - 24; y: 44 }
+        WorkspaceMenu { onChosen: function(w) { if (w === "orb") root.run("app.orb"); root.overlay = "" }; shown: root.overlay === "workspace"; x: Math.max(8, root.width - width - 24); y: 42 }
+        MenuDropdown { id: menuDrop; actionContext: root.actionContext(); vault: vault; name: root.menuName; shown: root.overlay === "menu"; y: 34; enterDy: -6
+            onActivated: function(id) { root.overlay = ""; root.run(id) } }
+        SearchPanel { objectName: "globalSearch"; bridge: bridgeModel; onActivated: function(act) { root.overlay = ""; root.run(act) }; shown: root.overlay === "search"; x: (root.width - width) / 2; y: 140 }
     }
-    LockScreen { id: lock; z: 2000; visible: root.overlay === "lock"; onLeave: root.overlay = "" }
+    NoteBox { z: 1200; visible: root.actionNote !== ""; text: root.actionNote; icon: "unknown"; x: 24; y: root.height - height - 100; width: Math.min(720,root.width - 48) }
+    NoteBox { z: 1200; visible: root.hostError !== ""; text: "Bridge local: " + root.hostError; icon: "bad"; x: 24; y: 60; width: Math.min(720,root.width - 48) }
 }

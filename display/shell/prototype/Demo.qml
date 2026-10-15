@@ -21,6 +21,7 @@ QtObject {
     property bool orbDust: false        // "dust of light": decorative particles that grey the picture
     property int orbGradeI: 1           // colour grade of the sphere: 0 original · 1 cold hologram · 2 vivid
     property bool orbNav: false         // "navigate the sphere in 3D" (free camera); otherwise the camera is fixed
+    property bool orbHud: true
     // Silent mode: the shell's own notifications (toasts) stay hidden. It is local to this shell;
     // no system-wide Do Not Disturb exists behind it.
     property bool silent: false

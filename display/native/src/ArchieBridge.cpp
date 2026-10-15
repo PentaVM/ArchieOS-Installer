@@ -371,7 +371,7 @@ QVariantMap makeEdge(const QVector3D &from, const QVector3D &to, const QColor &c
 }
 }
 
-ArchieBridge::ArchieBridge(QObject *parent)
+ArchieBridge::ArchieBridge(QObject *parent, bool shellMode)
     : QObject(parent), m_observatory(scenePolicy())
 {
     // Advancing is not the same as a payload arriving. Freshness decays, entries and
@@ -409,28 +409,41 @@ ArchieBridge::ArchieBridge(QObject *parent)
     m_clockTimer.setTimerType(Qt::CoarseTimer);
     connect(&m_clockTimer, &QTimer::timeout, this, &ArchieBridge::updateEarthAngle);
 
-    m_snapshotTimer.start();
-    m_worldTimer.start();
     m_kernelTimer.start();
-    m_orbTimer.start();
-    m_clockTimer.start();
+    if (!shellMode) {
+        m_snapshotTimer.start();
+        m_worldTimer.start();
+        m_orbTimer.start();
+        m_clockTimer.start();
+    }
     m_frameTimer.start();
     updateEarthAngle();
     // One frame before any payload arrives, so the interface starts from what the model
     // says about an empty observatory rather than from an empty QVariantList that means
     // the same thing by accident.
     tick();
-    refreshSnapshot();
-    refreshWorld();
     refreshKernel();
-    refreshOrb();
-    // No timer for this one. The plan `/api/geofabric` reports is a constant of the
-    // daemon's build — it cannot change while the process runs — so one fetch at
-    // startup is the whole of the polling this needs, and a repeating timer would only
-    // ever confirm the same bytes.
-    refreshGeoFabric();
-    // Same reasoning: a file on disk does not change while this process runs either.
-    loadBuildings();
+    if (!shellMode) {
+        refreshSnapshot();
+        refreshWorld();
+        refreshOrb();
+        // World is opt-in: a shell rendering Orb does not fetch its globe assets.
+        refreshGeoFabric();
+        loadBuildings();
+    }
+}
+
+void ArchieBridge::setPresented(bool presented)
+{
+    if (m_presented == presented) return;
+    m_presented = presented;
+    const auto object = QJsonObject::fromVariantMap(m_kernel);
+    const auto now = QDateTime::currentMSecsSinceEpoch();
+    const auto elapsed = m_kernelReceivedAt == 0 ? 0 : std::max<qint64>(0, now - m_kernelReceivedAt);
+    m_observatory.ingest_kernel_payload(archie::native::fromJson(object),
+        ageOf(object, QStringLiteral("staleness_ms")) + elapsed, m_presented, now);
+    tick();
+    emit presentedChanged();
 }
 
 void ArchieBridge::refreshSnapshot()
@@ -510,7 +523,7 @@ void ArchieBridge::request(Projection projection, const QUrl &url)
     emit busyChanged();
 
     connect(reply, &QNetworkReply::finished, this, [this, reply, projection] {
-        const auto body = reply->readAll();
+        const auto body = reply->isOpen() ? reply->readAll() : QByteArray{};
         const auto failure = reply->error();
         const auto message = reply->errorString();
         reply->deleteLater();
@@ -593,13 +606,14 @@ void ArchieBridge::accept(Projection projection, const QByteArray &body)
             QJsonDocument(condition).toJson(QJsonDocument::Compact), QCryptographicHash::Sha256);
 
         m_kernel = object.toVariantMap();
+        m_kernelReceivedAt = QDateTime::currentMSecsSinceEpoch();
         // `display_present` is what separates "nothing is being presented" from "the
         // machine is idle", and the two want opposite tiers. This process has a window,
         // so a display is present by construction — asserting it from somewhere else
         // would be inventing a fact we already have.
         m_observatory.ingest_kernel_payload(archie::native::fromJson(object),
                                             ageOf(object, QStringLiteral("staleness_ms")),
-                                            /*display_present=*/true,
+                                            m_presented,
                                             QDateTime::currentMSecsSinceEpoch());
         emit kernelChanged();
         if (kernelDigest != m_kernelDigest) {
@@ -674,6 +688,11 @@ void ArchieBridge::tick()
 {
     const auto now = QDateTime::currentMSecsSinceEpoch();
     const auto frame = m_observatory.tick(now);
+    // Hidden windows retain a slow freshness clock; the model's budget drives
+    // visible presentation. Zero is never passed to a repeating QTimer.
+    const int interval = m_presented && frame.profile.frame_interval_ms > 0
+        ? frame.profile.frame_interval_ms : 1000;
+    if (m_frameTimer.interval() != interval) m_frameTimer.setInterval(interval);
 
     // The record an observation came from, so the inspector can show magnitude and place
     // without a second list to keep in step. The model decides where the marker goes and

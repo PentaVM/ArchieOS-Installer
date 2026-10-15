@@ -13,6 +13,9 @@ import Archie.Observatory
 // settles back. Between events there is only a slow drift of the view.
 Node {
     id: scene
+    required property var controller
+    property bool reducedMotion: false
+    property bool presented: true
 
     property alias camera: lumenCamera
     property alias field: field
@@ -24,16 +27,21 @@ Node {
     property real distance: 900
     property vector3d target: Qt.vector3d(0, 0, 0)
     property real home: 900
-    readonly property var look: lumen.look
-    readonly property var sceneInfo: lumen.scene
+    readonly property var look: scene.controller.look
+    readonly property var sceneInfo: scene.controller.scene
 
     function homeDistance() {
-        const radius = Math.max(lumen.fieldRadius * 0.5, lumen.shellRadius || lumen.fieldRadius)
+        const radius = Math.max(scene.controller.fieldRadius * 0.5, scene.controller.shellRadius || scene.controller.fieldRadius)
         const half = 20 * Math.PI / 180
         return radius * Math.max(3.5, 1.3 / (Math.tan(half) * Math.max(1.0, scene.aspect)))
     }
     function glide(distance, target, duration) {
         travel.stop()
+        if (scene.reducedMotion || !scene.presented) {
+            scene.distance = distance
+            scene.target = target
+            return
+        }
         dolly.to = distance
         pan.to = target
         dolly.duration = duration
@@ -65,9 +73,15 @@ Node {
         NumberAnimation { id: dolly; target: scene; property: "distance"; easing.type: Easing.InOutCubic }
         Vector3dAnimation { id: pan; target: scene; property: "target"; easing.type: Easing.InOutCubic }
     }
+    onReducedMotionChanged: if (reducedMotion && travel.running) {
+        travel.stop()
+        scene.distance = dolly.to
+        scene.target = pan.to
+    }
+    onPresentedChanged: if (!presented) travel.stop()
 
     Connections {
-        target: lumen
+        target: scene.controller
         function onFitRequested() { scene.fit() }
         function onFocusRequested(position) {
             const world = field.mapPositionToScene(position)
@@ -83,7 +97,7 @@ Node {
         }
         // Attention: lean towards what the system is using, then settle back.
         function onAttentionMoved(position, engaged) {
-            if (!!lumen.selection.id)
+            if (!!scene.controller.selection.id)
                 return
             if (engaged) {
                 const world = field.mapPositionToScene(position)
@@ -97,8 +111,8 @@ Node {
     Node {
         position: scene.target
         // A slow drift of the view between events: a few degrees, over about a minute.
-        eulerRotation: Qt.vector3d(scene.pitch + Math.sin(lumen.time * 0.09) * 3.0,
-                                   scene.yaw + Math.sin(lumen.time * 0.05) * 4.0, 0)
+        eulerRotation: Qt.vector3d(scene.pitch + (scene.reducedMotion ? 0 : Math.sin(scene.controller.time * 0.09) * 3.0),
+                                   scene.yaw + (scene.reducedMotion ? 0 : Math.sin(scene.controller.time * 0.05) * 4.0), 0)
         PerspectiveCamera {
             id: lumenCamera
             position: Qt.vector3d(0, 0, scene.distance)
@@ -110,20 +124,20 @@ Node {
 
     Node {
         id: field
-        eulerRotation: Qt.vector3d(0, lumen.spin, 0)
+        eulerRotation: Qt.vector3d(0, scene.controller.spin, 0)
 
         // --- The membrane ---
         Model {
             visible: scene.look.shellOpacity > 0
             geometry: LumenGeometry { id: membraneMesh }
-            Component.onCompleted: lumen.bindLayer("membrane", membraneMesh)
+            Component.onCompleted: scene.controller.bindLayer("membrane", membraneMesh)
             materials: CustomMaterial {
                 shadingMode: CustomMaterial.Unshaded
                 sourceBlend: CustomMaterial.SrcAlpha
                 destinationBlend: CustomMaterial.OneMinusSrcAlpha
                 cullMode: Material.NoCulling
                 depthDrawMode: Material.NeverDepthDraw
-                property real time: lumen.time
+                property real time: scene.controller.time
                 property real alpha: scene.look.shellOpacity
                 property real legacy: scene.look.legacy
                 property vector3d warm: scene.look.warm
@@ -142,7 +156,7 @@ Node {
             visible: scene.look.ghostOpacity > 0
             geometry: LumenGeometry { id: ghostQuad }
             instancing: LumenInstancing { id: ghostTable }
-            Component.onCompleted: { lumen.bindLayer("quad", ghostQuad); lumen.bindLayer("ghosts", ghostTable) }
+            Component.onCompleted: { scene.controller.bindLayer("quad", ghostQuad); scene.controller.bindLayer("ghosts", ghostTable) }
             materials: SpriteMaterial {
                 grow: scene.look.ghostSize * 1.3
                 alpha: scene.look.ghostOpacity
@@ -162,7 +176,7 @@ Node {
         Model {
             geometry: LumenGeometry { id: satelliteMesh }
             instancing: LumenInstancing { id: satelliteTable }
-            Component.onCompleted: { lumen.bindLayer("satelliteMesh", satelliteMesh); lumen.bindLayer("satellites", satelliteTable) }
+            Component.onCompleted: { scene.controller.bindLayer("satelliteMesh", satelliteMesh); scene.controller.bindLayer("satellites", satelliteTable) }
             materials: OrbMaterial { facet: 0.2; shapeAmount: 0.12; detail: 0.0 }
         }
 
@@ -170,13 +184,13 @@ Node {
         Model {
             geometry: LumenGeometry { id: orbMesh }
             instancing: LumenInstancing { id: moduleTable }
-            Component.onCompleted: { lumen.bindLayer("orbMesh", orbMesh); lumen.bindLayer("modules", moduleTable) }
+            Component.onCompleted: { scene.controller.bindLayer("orbMesh", orbMesh); scene.controller.bindLayer("modules", moduleTable) }
             materials: OrbMaterial { facet: 0.3; shapeAmount: 0.16; detail: 1.0 }
         }
         Model {
             geometry: LumenGeometry { id: entityMesh }
             instancing: LumenInstancing { id: entityTable }
-            Component.onCompleted: { lumen.bindLayer("entityMesh", entityMesh); lumen.bindLayer("entities", entityTable) }
+            Component.onCompleted: { scene.controller.bindLayer("entityMesh", entityMesh); scene.controller.bindLayer("entities", entityTable) }
             materials: OrbMaterial { facet: 0.15; shapeAmount: 0.1; detail: 0.7 }
         }
 
@@ -184,13 +198,13 @@ Node {
         Model {
             geometry: LumenGeometry { id: moduleHaloQuad }
             instancing: moduleTable
-            Component.onCompleted: lumen.bindLayer("quad", moduleHaloQuad)
+            Component.onCompleted: scene.controller.bindLayer("quad", moduleHaloQuad)
             materials: SpriteMaterial { grow: 2.8; alpha: 0.3 + scene.look.bloomStrength * 0.16; sharpness: 1.8; haloGain: 0.9 }
         }
         Model {
             geometry: LumenGeometry { id: entityHaloQuad }
             instancing: entityTable
-            Component.onCompleted: lumen.bindLayer("quad", entityHaloQuad)
+            Component.onCompleted: scene.controller.bindLayer("quad", entityHaloQuad)
             materials: SpriteMaterial { grow: 3.3; alpha: 0.28 + scene.look.bloomStrength * 0.16; sharpness: 1.7; haloGain: 1.1 }
         }
 
@@ -199,17 +213,17 @@ Node {
             visible: scene.look.pulses
             geometry: LumenGeometry { id: pulseQuad }
             instancing: LumenInstancing { id: pulseTable }
-            Component.onCompleted: { lumen.bindLayer("quad", pulseQuad); lumen.bindLayer("pulses", pulseTable) }
+            Component.onCompleted: { scene.controller.bindLayer("quad", pulseQuad); scene.controller.bindLayer("pulses", pulseTable) }
             materials: SpriteMaterial { grow: 1.0; alpha: 0.83; sharpness: 1.4 }
         }
 
         // --- The selection ---
         Model {
-            visible: lumen.selectionVisible
-            position: lumen.selectionPosition
-            scale: Qt.vector3d(lumen.selectionScale, lumen.selectionScale, lumen.selectionScale)
+            visible: scene.controller.selectionVisible
+            position: scene.controller.selectionPosition
+            scale: Qt.vector3d(scene.controller.selectionScale, scene.controller.selectionScale, scene.controller.selectionScale)
             geometry: LumenGeometry { id: ringMesh }
-            Component.onCompleted: lumen.bindLayer("ring", ringMesh)
+            Component.onCompleted: scene.controller.bindLayer("ring", ringMesh)
             materials: CustomMaterial {
                 shadingMode: CustomMaterial.Unshaded
                 sourceBlend: CustomMaterial.SrcAlpha
@@ -230,7 +244,7 @@ Node {
         property real alpha: 0.2
         property real intensity: 1.0
         geometry: LumenGeometry { id: lines }
-        Component.onCompleted: lumen.bindLayer(name, lines)
+        Component.onCompleted: scene.controller.bindLayer(name, lines)
         materials: CustomMaterial {
             shadingMode: CustomMaterial.Unshaded
             sourceBlend: CustomMaterial.SrcAlpha
@@ -265,19 +279,19 @@ Node {
         property real facet: 0.5
         property real shapeAmount: 0.35
         property real detail: 1.0
-        property real time: lumen.time
-        property vector3d warm: lumen.look.warm
-        property vector3d cool: lumen.look.cool
-        property vector3d warmLight: lumen.look.warmLight
-        property vector3d coolLight: lumen.look.coolLight
-        property vector3d ambientLight: lumen.look.ambientLight
-        property vector3d warmPosition: lumen.look.warmPosition
-        property vector3d coolPosition: lumen.look.coolPosition
-        property real metalness: lumen.look.metalness
-        property real roughness: lumen.look.roughness
-        property real emissive: lumen.look.emissive
-        property real textureContrast: lumen.look.textureContrast
-        property real textureDepth: lumen.look.textureDepth
+        property real time: scene.controller.time
+        property vector3d warm: scene.controller.look.warm
+        property vector3d cool: scene.controller.look.cool
+        property vector3d warmLight: scene.controller.look.warmLight
+        property vector3d coolLight: scene.controller.look.coolLight
+        property vector3d ambientLight: scene.controller.look.ambientLight
+        property vector3d warmPosition: scene.controller.look.warmPosition
+        property vector3d coolPosition: scene.controller.look.coolPosition
+        property real metalness: scene.controller.look.metalness
+        property real roughness: scene.controller.look.roughness
+        property real emissive: scene.controller.look.emissive
+        property real textureContrast: scene.controller.look.textureContrast
+        property real textureDepth: scene.controller.look.textureDepth
         shadingMode: CustomMaterial.Unshaded
         cullMode: Material.BackFaceCulling
         vertexShader: "qrc:/archie/shaders/lumen_orb.vert"

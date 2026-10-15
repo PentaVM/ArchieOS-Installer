@@ -7,7 +7,7 @@ Column {
     id: g
     property var bridge
     spacing: 10
-    readonly property var kernel: bridge.kernel
+    readonly property var kernel: bridge && bridge.kernel ? bridge.kernel : null
     readonly property var pressure: kernel && kernel.pressure_availability.state === "available" ? kernel.pressure : null
     readonly property string pressureWhy: !kernel ? "sin lectura: el bridge no recibió telemetría"
         : (kernel.pressure_availability.state === "unavailable" ? kernel.pressure_availability.reason : "")
@@ -39,7 +39,7 @@ Column {
         Text { x: 26; width: 92; anchors.verticalCenter: parent.verticalCenter; text: m.label; elide: Text.ElideRight
             color: Theme.t2; font.family: Theme.font; font.pixelSize: 13 }
         Item { id: trk; x: 128; width: parent.width - 128 - 102; height: 6; anchors.verticalCenter: parent.verticalCenter
-            Rectangle { visible: m.v >= 0; anchors.fill: parent; radius: 3; color: Qt.rgba(1, 1, 1, 0.10)
+            Rectangle { visible: m.v >= 0; anchors.fill: parent; radius: 3; color: Theme.track
                 Rectangle { width: parent.width * Math.min(1, m.v); height: parent.height; radius: 3
                     color: m.tone === "warn" ? Theme.warn : m.tone === "bad" ? Theme.bad : m.tone === "ok" ? Theme.ok : Theme.acc } }
             Rectangle { visible: m.v >= 0 && m.limit; x: parent.width - 2; y: -3; width: 2; height: 12; radius: 1; color: Theme.t2 }
@@ -78,11 +78,11 @@ Column {
 
     Card { heading: "Presión · ventana de 10 s"
         MeterRow { icon: "cpu"; label: "CPU"; v: pressure ? pressure.cpu.some.avg10 / 100 : -1
-            valueText: pressure ? pct(pressure.cpu.some.avg10) : "no medido"; tone: pressure ? tone(pressure.cpu.some.avg10 / 100) === "ok" ? "acc" : tone(pressure.cpu.some.avg10 / 100) : "acc" }
+            valueText: pressure ? pct(pressure.cpu.some.avg10) : "no medido"; tone: pressure ? g.tone(pressure.cpu.some.avg10 / 100) === "ok" ? "acc" : g.tone(pressure.cpu.some.avg10 / 100) : "acc" }
         MeterRow { icon: "mem"; label: "Memoria"; v: pressure ? pressure.memory.some.avg10 / 100 : -1
-            valueText: pressure ? pct(pressure.memory.some.avg10) : "no medido"; tone: pressure ? tone(pressure.memory.some.avg10 / 100) === "ok" ? "acc" : tone(pressure.memory.some.avg10 / 100) : "acc" }
+            valueText: pressure ? pct(pressure.memory.some.avg10) : "no medido"; tone: pressure ? g.tone(pressure.memory.some.avg10 / 100) === "ok" ? "acc" : g.tone(pressure.memory.some.avg10 / 100) : "acc" }
         MeterRow { icon: "io"; label: "E/S"; v: pressure ? pressure.io.some.avg10 / 100 : -1
-            valueText: pressure ? pct(pressure.io.some.avg10) : "no medido"; tone: pressure ? tone(pressure.io.some.avg10 / 100) === "ok" ? "acc" : tone(pressure.io.some.avg10 / 100) : "acc" }
+            valueText: pressure ? pct(pressure.io.some.avg10) : "no medido"; tone: pressure ? g.tone(pressure.io.some.avg10 / 100) === "ok" ? "acc" : g.tone(pressure.io.some.avg10 / 100) : "acc" }
         // Real data the old panel never showed: the verdict and the longer windows.
         Why { visible: pressure !== null; text: verdictText() }
         Why { visible: pressure === null; text: pressureWhy }
@@ -91,7 +91,7 @@ Column {
         Repeater { model: thermal ? kernel.zones : []
             delegate: MeterRow { icon: "temp"; label: modelData.zone_type
                 v: modelData.headroom_fraction === null || modelData.headroom_fraction === undefined ? -1 : modelData.headroom_fraction
-                limit: v >= 0; tone: v >= 0 ? (tone(v) === "ok" ? "acc" : tone(v)) : "acc"
+                limit: v >= 0; tone: v >= 0 ? (g.tone(v) === "ok" ? "acc" : g.tone(v)) : "acc"
                 valueText: modelData.celsius.toFixed(0) + " °C" } }
         MeterRow { visible: !thermal; icon: "temp"; label: "Zonas"; v: -1; valueText: "sin zonas" }
         // per zone without a declared critical trip: no scale, so no bar, and it says so

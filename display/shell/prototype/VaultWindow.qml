@@ -2,25 +2,32 @@ import QtQuick
 
 // Vault window (file manager) in the Archie Mac look. List or grid; sidebar with the Sealed
 // store as a status row only; operation queue; footer with provenance. The window is
-// interactive (tabs, places, folders, sort, selection, copy queue) but its data is DESIGN data:
-// no file backend exists yet, so opening a file only says so. Nothing touches a filesystem.
+// Tabs and layout are local UI state. No filesystem contract is available; the operational
+// view contains no file rows. Explicit designSamples enables static reference data only.
 Panel {
     id: win
     kind: "window"
     property bool gridView: false
-    property int selected: 1
-    readonly property string wid: "vault"   // its entry in the window manager (Wm)
+    property int selected: -1
+    readonly property string wid: "vault"
+    property real dx: 0                      // drag offset, applied by the host
+    property real dy: 0
     signal closeRequested()
+    signal zoomRequested()
     readonly property color noteColor: Theme.t3
+    property bool designSamples: false
+    readonly property bool fileOperationsAvailable: false
+    readonly property string operationReason: "Vault aún no expone un contrato para leer o modificar archivos desde la shell."
 
     // ---- state: tabs, navigation, sort, copy queue ------------------------------------------
-    property var tabsModel: [ { place: 0, path: ["motor-bracket"] }, { place: 1, path: ["Workspaces"] } ]
+    property var tabsModel: [ { place: 0, path: [] } ]
     property int tabIndex: 0
     readonly property var cur: tabsModel[Math.min(tabIndex, tabsModel.length - 1)]
     readonly property int place: cur.place
     property int sortMode: 0                 // 0 as listed, 1 name A→Z, 2 name Z→A
     property string note: ""
     readonly property var rows: {
+        if (!designSamples) return []
         var depth = cur.path.length
         var base = depth > 1 ? (Synthetic.children[cur.path[depth - 1]] || []) : Synthetic.placeFiles(cur.place)
         var out = base.slice()
@@ -33,28 +40,24 @@ Panel {
         return out
     }
 
-    // copy queue (a sample job that advances so the buttons have something to act on)
-    property int qDone: 3
-    property string qState: "running"        // running | done | cancelled | undone
-    readonly property string qTitle: qState === "running" ? Synthetic.queue.title
-        : qState === "done" ? "Copiado a Entregas" : qState === "cancelled" ? "Copia cancelada" : "Copia deshecha"
-    readonly property string qPermission: qState === "undone" ? "Se quitaron los archivos copiados de Entregas"
-        : qState === "cancelled" ? "Cancelada · se conservan los archivos ya copiados" : Synthetic.queue.permission
-    readonly property bool canUndo: qState === "done" || (qState === "cancelled" && qDone > 0)
-    Timer { interval: 1100; repeat: true; running: win.visible && win.qState === "running"
-        onTriggered: { win.qDone += 1; if (win.qDone >= 9) { win.qDone = 9; win.qState = "done" } } }
-    function cancelCopy() { if (qState === "running") qState = "cancelled" }
-    function undoCopy() { if (canUndo) { qDone = 0; qState = "undone" } }
-    function repeatCopy() { qDone = 0; qState = "running" }
+    // Stable command API; no copy, permission or success is inferred from a UI event.
+    readonly property int qDone: designSamples ? 3 : 0
+    readonly property string qState: "unavailable"
+    readonly property string qTitle: designSamples ? "Diseño · cola de ejemplo" : "Operaciones de archivos no disponibles"
+    readonly property string qPermission: designSamples ? "Muestra visual · no representa una operación ni un permiso" : operationReason
+    readonly property bool canUndo: false
+    function cancelCopy() { flash(operationReason) }
+    function undoCopy() { flash(operationReason) }
+    function repeatCopy() { flash(operationReason) }
 
     Timer { id: noteTimer; interval: 3500; onTriggered: win.note = "" }
     function flash(text) { note = text; noteTimer.restart() }
 
     function setCur(p) { var t = tabsModel.slice(); t[tabIndex] = p; tabsModel = t }
     function select(i) { selected = (i >= 0 && i < rows.length) ? i : (rows.length ? 0 : -1) }
-    function goPlace(i) { setCur({ place: i, path: [Synthetic.places[i].name] }); sortMode = 0; select(0) }
+    function goPlace(i) { if (!designSamples || i < 0 || i >= Synthetic.places.length) { flash(operationReason); return }; setCur({ place: i, path: [Synthetic.places[i].name] }); sortMode = 0; select(0) }
     function setTab(i) { tabIndex = i; select(0) }
-    function newTab() { var t = tabsModel.concat([ { place: 0, path: ["Entregas"] } ]); tabsModel = t; tabIndex = t.length - 1; select(0) }
+    function newTab() { var t = tabsModel.concat([ { place: 0, path: designSamples ? ["Entregas"] : [] } ]); tabsModel = t; tabIndex = t.length - 1; select(0) }
     function closeTab(i) {
         if (tabsModel.length <= 1) { closeRequested(); return }
         var t = tabsModel.slice(); t.splice(i, 1)
@@ -62,10 +65,12 @@ Panel {
         tabsModel = t; tabIndex = Math.min(ni, t.length - 1); select(0)
     }
     function crumbTo(n) {                    // 0 Inicio, 1 Archie, then the path elements
+        if (!designSamples) { flash(operationReason); return }
         if (n <= 1) { goPlace(n === 0 ? 0 : cur.place); return }
         setCur({ place: cur.place, path: cur.path.slice(0, n - 1) }); select(0)
     }
     function openItem(i) {
+        if (!designSamples) { flash(operationReason); return }
         var f = rows[i]
         if (!f) return
         if (f.icon === "folder") { setCur({ place: cur.place, path: cur.path.concat([f.name]) }); sortMode = 0; select(0) }
@@ -73,12 +78,14 @@ Panel {
     }
     function openSelected() { openItem(selected) }
     function up() {
+        if (!designSamples) { flash(operationReason); return }
         if (cur.path.length > 1) { setCur({ place: cur.place, path: cur.path.slice(0, cur.path.length - 1) }); select(0) }
         else flash("Ya estás en la raíz de " + Synthetic.places[cur.place].name + ".")
     }
     function move(d) { if (rows.length) selected = Math.max(0, Math.min(rows.length - 1, (selected < 0 ? -1 : selected) + d)) }
     function toggleSort() { sortMode = (sortMode + 1) % 3 }
     function reveal(name) {                  // from the palette: show a file in its place
+        if (!designSamples) { flash(operationReason); return }
         goPlace(0)
         for (var i = 0; i < rows.length; i++) if (rows[i].name === name) { selected = i; return }
         for (var p = 2; p <= 3; p++) { goPlace(p); for (var j = 0; j < rows.length; j++) if (rows[j].name === name) { selected = j; return } }
@@ -101,7 +108,7 @@ Panel {
         Lights { x: 16; anchors.verticalCenter: parent.verticalCenter; wid: win.wid }
         Row { anchors.centerIn: parent
             Text { text: "Vault"; color: Theme.t1; font.family: Theme.disp; font.pixelSize: 17; font.weight: Font.DemiBold; font.letterSpacing: -0.17 }
-            Text { text: " — " + Synthetic.places[win.cur.place].name; color: Theme.t2; font.family: Theme.disp; font.pixelSize: 17; font.weight: Font.Medium; font.letterSpacing: -0.17 } }
+            Text { text: win.designSamples ? " — Diseño · " + Synthetic.places[win.cur.place].name : " — sin backend de archivos"; color: Theme.t2; font.family: Theme.disp; font.pixelSize: 17; font.weight: Font.Medium; font.letterSpacing: -0.17 } }
         Rectangle { id: seg; anchors.right: parent.right; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter
             width: 76; height: 28; radius: 9; color: Theme.raised; border.width: 1; border.color: Theme.hair
             Rectangle { x: win.gridView ? 38 : 2; y: 2; width: 34; height: 24; radius: 7; color: Theme.pressed
@@ -120,14 +127,14 @@ Panel {
                     color: index === win.tabIndex ? Theme.hover : (tma.containsMouse ? Qt.rgba(1, 1, 1, 0.04) : "transparent")
                     MouseArea { id: tma; anchors.fill: parent; hoverEnabled: true; onClicked: win.setTab(index) }
                     Row { x: 11; anchors.verticalCenter: parent.verticalCenter; spacing: 8
-                        Text { id: tl; text: Synthetic.places[modelData.place].name; color: index === win.tabIndex ? Theme.t1 : Theme.t2; font.family: Theme.font; font.pixelSize: 13; font.weight: Font.Medium; anchors.verticalCenter: parent.verticalCenter }
+                        Text { id: tl; text: win.designSamples ? Synthetic.places[modelData.place].name : "Archivos"; color: index === win.tabIndex ? Theme.t1 : Theme.t2; font.family: Theme.font; font.pixelSize: 13; font.weight: Font.Medium; anchors.verticalCenter: parent.verticalCenter }
                         Item { width: 12; height: 12; anchors.verticalCenter: parent.verticalCenter
                             Icon { anchors.centerIn: parent; name: "close"; size: 12; color: Theme.t3 }
                             MouseArea { anchors.fill: parent; anchors.margins: -4; onClicked: win.closeTab(index) } } } } }
             Item { width: 28; height: 26; anchors.verticalCenter: parent.verticalCenter; Icon { anchors.centerIn: parent; name: "plus"; size: 14; color: Theme.t2 }
                 MouseArea { anchors.fill: parent; onClicked: win.newTab() } } }
         Row { anchors.right: parent.right; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter; spacing: 4
-            Repeater { model: ["Inicio", "Archie"].concat(win.cur.path)
+            Repeater { model: win.designSamples ? ["Inicio", "Archie"].concat(win.cur.path) : []
                 delegate: Row { id: crumb; spacing: 4
                     readonly property bool last: index === win.cur.path.length + 1
                     Text { text: modelData; color: crumb.last ? Theme.t1 : (cma.containsMouse ? Theme.t2 : Theme.t3); font.family: Theme.font; font.pixelSize: 12
@@ -140,12 +147,12 @@ Panel {
         Rectangle { width: parent.width; height: 1; color: Theme.hair }
         Row { x: 16; anchors.verticalCenter: parent.verticalCenter; spacing: 14
             Row { spacing: 4
-                Text { text: String(win.rows.length); color: Theme.t2; font.family: Theme.font; font.pixelSize: 11; font.weight: Font.Medium; font.features: { "tnum": 1 } }
+                Text { text: win.designSamples ? String(win.rows.length) : "—"; color: Theme.t2; font.family: Theme.font; font.pixelSize: 11; font.weight: Font.Medium; font.features: { "tnum": 1 } }
                 Text { text: win.gridView && win.selected >= 0 ? "elementos · 1 seleccionado" : "elementos"; color: Theme.t3; font.family: Theme.font; font.pixelSize: 11 } }
-            Text { text: win.note !== "" ? win.note : "Diseño · datos de ejemplo"; color: win.note !== "" ? Theme.warn : Theme.t3; font.family: Theme.font; font.pixelSize: 11 } }
+            Text { text: win.note !== "" ? win.note : (win.designSamples ? "Diseño · datos de ejemplo" : "Sin lectura de archivos"); color: win.note !== "" ? Theme.warn : Theme.t3; font.family: Theme.font; font.pixelSize: 11 } }
         Row { anchors.right: parent.right; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter; spacing: 6
             Icon { name: "stale"; size: 12; color: Theme.t3; anchors.verticalCenter: parent.verticalCenter }
-            Text { text: Synthetic.queue.updated; color: Theme.t3; font.family: Theme.font; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter } } }
+            Text { text: win.designSamples ? "Muestra estática" : "Sin backend"; color: Theme.t3; font.family: Theme.font; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter } } }
 
     // ---- sidebar ---------------------------------------------------------------------------
     Rectangle { id: side; x: 0; y: tbar.height + tabs.height; width: 228; height: parent.height - y - foot.height
@@ -159,7 +166,7 @@ Panel {
                         Icon { name: modelData.icon; size: 16; color: win.place === index ? Theme.acc : Theme.t3; anchors.verticalCenter: parent.verticalCenter }
                         Text { text: modelData.name; color: win.place === index ? Theme.t1 : Theme.t2; font.family: Theme.font; font.pixelSize: 13; anchors.verticalCenter: parent.verticalCenter } }
                     DomainMark { visible: modelData.domain !== ""; domain: modelData.domain; anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter }
-                    MouseArea { id: sma; anchors.fill: parent; hoverEnabled: true; onClicked: win.goPlace(index) } } }
+                    MouseArea { id: sma; anchors.fill: parent; hoverEnabled: true; enabled: win.designSamples; onClicked: win.goPlace(index) } } }
             Item { width: 1; height: 14 }
             Text { text: "SISTEMA"; leftPadding: 10; bottomPadding: 6; color: Theme.t3; font.family: Theme.disp; font.pixelSize: 10; font.weight: Font.DemiBold; font.letterSpacing: 1.2 }
             // Sealed is a status row, never a folder you can open.
@@ -178,23 +185,23 @@ Panel {
                 Column { width: parent.width - qbtns.width - 24; spacing: 0
                     Row { spacing: 0
                         Text { text: win.qTitle; color: Theme.t1; font.family: Theme.font; font.pixelSize: 13; font.weight: Font.Medium }
-                        Text { text: " · " + win.qDone + " de 9 archivos"; color: Theme.t2; font.family: Theme.font; font.pixelSize: 13; font.features: { "tnum": 1 } } }
-                    Item { width: parent.width; height: 22
-                        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: 4; radius: 2; color: Qt.rgba(1, 1, 1, 0.10)
+                        Text { visible: win.designSamples; text: " · " + win.qDone + " de 9 archivos de ejemplo"; color: Theme.t2; font.family: Theme.font; font.pixelSize: 13; font.features: { "tnum": 1 } } }
+                    Item { visible: win.designSamples; width: parent.width; height: visible ? 22 : 8
+                        Rectangle { anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: 4; radius: 2; color: Theme.track
                             Rectangle { width: parent.width * win.qDone / 9; height: parent.height; radius: 2; color: win.qState === "undone" ? Theme.t3 : Theme.acc } } }
                     Row { spacing: 6
-                        Icon { name: "done"; size: 12; color: Theme.ok; anchors.verticalCenter: parent.verticalCenter }
-                        Text { text: win.qPermission; color: Theme.t3; font.family: Theme.font; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter } } }
+                        Icon { name: "lock"; size: 12; color: Theme.t3; anchors.verticalCenter: parent.verticalCenter }
+                        Text { width: parent.parent.width - 20; wrapMode: Text.Wrap; text: win.qPermission; color: Theme.t3; font.family: Theme.font; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter } } }
                 Column { id: qbtns; spacing: 6
                     Row { spacing: 8; layoutDirection: Qt.RightToLeft; anchors.right: parent.right
                         Btn { text: "Deshacer"; dis: !win.canUndo; onClicked: win.undoCopy() }
-                        Btn { text: win.qState === "running" ? "Cancelar" : "Repetir"; onClicked: { if (win.qState === "running") win.cancelCopy(); else win.repeatCopy() } } }
+                        Btn { text: "Cancelar"; dis: !win.fileOperationsAvailable; onClicked: win.cancelCopy() } }
                     Text { visible: win.qState === "running" || win.qState === "undone"; anchors.right: parent.right
                         text: win.qState === "running" ? Synthetic.queue.undoWhy : "Deshacer: ya no queda nada que deshacer"
                         color: Theme.warn; font.family: Theme.font; font.pixelSize: 11 } } } }
 
-        VoidBox { visible: win.rows.length === 0; x: 14; y: 14; width: parent.width - 28; icon: "folder"; title: "Carpeta vacía"
-            text: win.place === 5 ? "La papelera no tiene nada en este ejemplo." : "No hay elementos en esta ubicación de ejemplo." }
+        VoidBox { visible: win.rows.length === 0; x: 14; y: 14; width: parent.width - 28; icon: "folder"; title: win.designSamples ? "Carpeta vacía de ejemplo" : "Archivos sin lectura"
+            text: win.designSamples ? "No hay elementos en esta ubicación de ejemplo." : win.operationReason }
 
         // ---- list ----
         Item { visible: !win.gridView && win.rows.length > 0; x: 14; y: 8; width: parent.width - 28; height: queue.y - 8

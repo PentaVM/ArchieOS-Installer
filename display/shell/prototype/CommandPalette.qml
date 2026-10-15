@@ -1,4 +1,5 @@
 import QtQuick
+import "ActionRules.js" as ActionRules
 
 // Command palette / universal launcher, 720 px wide. Search field, grouped results with a type
 // chip, key hints at the foot. Never searches the web while typing; actions without a contract
@@ -10,8 +11,16 @@ Panel {
     height: sf.height + body.implicitHeight + pf.height + 18
     property int current: 0
     signal activated(string act)
-    readonly property var rows: Synthetic.search(inp.text)
-    function run(i) { var r = rows[i]; if (r && !r.why) activated(r.act) }
+    property var actionContext: ({})
+    readonly property var rows: Synthetic.search(inp.text).filter(function(r) {
+        return r.group !== "Archivos"
+    }).map(function(r) {
+        var row = Object.assign({}, r)
+        if (!row.act || !ActionRules.allowed(row.act, pal.actionContext))
+            row.why = ActionRules.reason(row.act || "", pal.actionContext)
+        return row
+    })
+    function run(i) { var r = rows[i]; if (shown && r && !r.why) activated(r.act) }
     onShownChanged: if (shown) { inp.text = ""; current = 0; inp.forceActiveFocus() }
 
     component Kbd: Rectangle {
@@ -28,7 +37,7 @@ Panel {
             Icon { name: "search"; size: 18; color: Theme.t2; anchors.verticalCenter: parent.verticalCenter }
             Item { width: 540; height: 26; anchors.verticalCenter: parent.verticalCenter
                 TextInput { id: inp; anchors.fill: parent; verticalAlignment: TextInput.AlignVCenter; clip: true
-                    color: Theme.t1; font.family: Theme.font; font.pixelSize: 17; selectionColor: Theme.acc; cursorDelegate: Rectangle { width: 1.5; color: Theme.acc }
+                    color: Theme.t1; font.family: Theme.font; font.pixelSize: 17; selectionColor: Theme.acc; selectedTextColor: Theme.onAccent; cursorDelegate: Rectangle { width: 1.5; color: Theme.acc }
                     onTextChanged: pal.current = 0
                     Keys.onPressed: function (e) {
                         if (e.key === Qt.Key_Down) { pal.current = Math.min(pal.rows.length - 1, pal.current + 1); e.accepted = true }
@@ -47,7 +56,7 @@ Panel {
                     readonly property bool sel: index === pal.current
                     readonly property bool dis: !!modelData.why
                     color: sel ? Theme.sel : "transparent"; border.width: 1; border.color: sel ? Theme.tint(Theme.acc, 0.35) : "transparent"
-                    Rectangle { x: 12; anchors.verticalCenter: parent.verticalCenter; width: 32; height: 32; radius: 8; color: Qt.rgba(1, 1, 1, 0.05); border.width: 1; border.color: Theme.hair
+                    Rectangle { x: 12; anchors.verticalCenter: parent.verticalCenter; width: 32; height: 32; radius: 8; color: Theme.raised; border.width: 1; border.color: Theme.hair
                         Icon { anchors.centerIn: parent; name: modelData.icon; size: 20; color: parent.parent.dis ? Theme.tdis : Theme.t2 } }
                     Column { x: 56; anchors.verticalCenter: parent.verticalCenter; width: parent.width - 56 - 150
                         Text { text: modelData.name; elide: Text.ElideRight; width: parent.width; color: parent.parent.dis ? Theme.tdis : Theme.t1

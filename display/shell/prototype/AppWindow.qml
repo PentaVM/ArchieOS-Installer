@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 
 // Window with title bar (traffic lights, centred title, trailing slot), a 200 px sidebar and a
 // main area. Used by Forge and Settings. With `wid` set, the lights close, minimise and zoom it
@@ -27,5 +28,13 @@ Panel {
     Rectangle { id: side; y: tbar.height; width: 200; height: parent.height - tbar.height - 1; color: Theme.side
         Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: Theme.hair }
         Column { id: sideCol; x: 10; y: 14; width: parent.width - 20; spacing: 2 } }
-    Column { id: mainCol; x: side.width + 20; y: tbar.height + 18; width: parent.width - side.width - 40; spacing: 12 }
+    Flickable {
+        id:scroll; objectName:"appContentScroll"
+        x:side.width+20; y:tbar.height+18
+        width:parent.width-side.width-40; height:Math.max(0,parent.height-y-18)
+        contentWidth:width; contentHeight:mainCol.implicitHeight; clip:true
+        boundsBehavior:Flickable.StopAtBounds
+        ScrollBar.vertical:ScrollBar { }
+        Column { id:mainCol; width:scroll.width; spacing:12 }
+    }
 }

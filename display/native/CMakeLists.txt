@@ -32,6 +32,8 @@ qt_add_executable(archie-display
     src/AppCatalog.h
     src/DisplayControl.cpp
     src/DisplayControl.h
+    src/ShellRuntime.cpp
+    src/ShellRuntime.h
 )
 
 qt_add_qml_module(archie-display
@@ -42,7 +44,20 @@ qt_add_qml_module(archie-display
         qml/LumenScene.qml
         qml/OrbHud.qml
         qml/ForgeView.qml
+        qml/OrbViewport.qml
 )
+
+# Keep relative prototype/font URLs intact; every operational shell asset is local.
+file(GLOB_RECURSE ARCHIE_SHELL_QML CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../shell/prototype/*.qml")
+file(GLOB_RECURSE ARCHIE_SHELL_JS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../shell/prototype/*.js")
+list(FILTER ARCHIE_SHELL_QML EXCLUDE REGEX "Test\\.qml$")
+list(FILTER ARCHIE_SHELL_QML EXCLUDE REGEX "/tst_[^/]+\\.qml$")
+file(GLOB_RECURSE ARCHIE_SHELL_FONTS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../shell/fonts/*.ttf")
+qt_add_resources(archie-display "archie-shell-assets"
+    PREFIX "/archie/shell"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/../shell"
+    FILES ${ARCHIE_SHELL_QML} ${ARCHIE_SHELL_JS} ${ARCHIE_SHELL_FONTS}
+          "${CMAKE_CURRENT_SOURCE_DIR}/../shell/prototype/qmldir")
 
 qt_add_resources(archie-display "archie-native-assets"
     PREFIX "/archie"
@@ -64,6 +79,10 @@ qt_add_resources(archie-display "archie-native-assets"
         shaders/lumen_line.frag
         shaders/lumen_ring.vert
         shaders/lumen_ring.frag
+        presets/field.json
+        presets/sphere.json
+        presets/orb.json
+        presets/neural.json
         apps/archie-stage.desktop
         apps/archie-voice.desktop
         apps/archie-editor.desktop
@@ -95,3 +114,25 @@ target_compile_definitions(archie-display PRIVATE
 )
 
 install(TARGETS archie-display RUNTIME DESTINATION bin)
+
+option(ARCHIE_NATIVE_BUILD_TESTS "Build native lifecycle and transport tests" OFF)
+if(ARCHIE_NATIVE_BUILD_TESTS)
+    find_package(Qt6 6.6 REQUIRED COMPONENTS Test)
+    enable_testing()
+    qt_add_executable(test_native tests/test_native.cpp
+        src/LumenField.cpp src/LumenField.h src/LumenGeometry.cpp src/LumenGeometry.h)
+    target_include_directories(test_native PRIVATE src)
+    target_link_libraries(test_native PRIVATE archie::visual Qt6::Quick3D Qt6::Network Qt6::Test)
+    qt_add_resources(test_native "archie-test-presets" PREFIX "/archie" BASE "${CMAKE_CURRENT_SOURCE_DIR}"
+        FILES presets/field.json presets/sphere.json presets/orb.json presets/neural.json)
+    add_test(NAME native_contracts COMMAND test_native)
+    qt_add_executable(test_shell_runtime tests/test_shell_runtime.cpp src/ShellRuntime.cpp src/ShellRuntime.h)
+    target_include_directories(test_shell_runtime PRIVATE src)
+    target_link_libraries(test_shell_runtime PRIVATE Qt6::Core Qt6::Test)
+    add_test(NAME shell_runtime_contracts COMMAND test_shell_runtime)
+    qt_add_executable(test_display_control tests/test_display_control.cpp src/DisplayControl.cpp src/DisplayControl.h)
+    target_include_directories(test_display_control PRIVATE src)
+    target_link_libraries(test_display_control PRIVATE Qt6::Network Qt6::Test)
+    add_test(NAME display_control_contracts COMMAND test_display_control)
+    set_target_properties(test_native test_shell_runtime test_display_control PROPERTIES WIN32_EXECUTABLE FALSE)
+endif()

@@ -90,6 +90,7 @@ LumenInstancing::LumenInstancing(QQuick3DObject *parent) : QQuick3DInstancing(pa
 
 void LumenInstancing::setTable(QByteArray table, int count)
 {
+    if (m_count == std::max(0, count) && m_table == table) return;
     m_table = std::move(table);
     m_count = std::max(0, count);
     markDirty();

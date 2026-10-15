@@ -12,6 +12,7 @@ Item {
     // Reveal (MOVIMIENTO.md): opacity plus a short slide (panels) or scale (windows); only
     // transform and opacity. Quiet keeps opacity alone; reduced motion shows or hides at once.
     property bool shown: true
+    enabled: shown
     property real enterDy: 0
     property real enterScale: 1
     property int durIn: Theme.durPanel
@@ -29,7 +30,7 @@ Item {
     readonly property color fill: kind === "window" ? Theme.win : kind === "dock" ? Theme.dock : Theme.panel
     readonly property int shY: kind === "window" ? 18 : kind === "dock" ? 8 : 24
     readonly property int shBlur: kind === "window" ? 50 : kind === "dock" ? 24 : 70
-    readonly property real shA: kind === "window" ? 0.45 : kind === "dock" ? 0.35 : 0.55
+    readonly property real shA: (Theme.light ? 0.4 : 1) * (kind === "window" ? 0.45 : kind === "dock" ? 0.35 : 0.55)
 
     // Soft shadow: 8 rings, each a little wider and fainter.
     Repeater {
@@ -44,7 +45,7 @@ Item {
     }
     Rectangle { // tight contact shadow
         x: 0; y: 2; width: p.width; height: p.height; radius: p.radius
-        color: Qt.rgba(0, 0, 0, p.kind === "dock" ? 0.2 : 0.28)
+        color: Qt.rgba(0, 0, 0, Theme.light ? 0.06 : p.kind === "dock" ? 0.2 : 0.28)
     }
     Rectangle {
         id: body

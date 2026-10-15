@@ -1,3 +1,16 @@
+# Shell nativa de ArchieOS
+
+La integración operativa se ejecuta con `archie-display --shell`, reutiliza el Orbe
+C++/Qt existente y recibe proyecciones reales de lectura del backend. Ver
+[arquitectura, arranque, límites y pruebas](../../../docs/gui/NATIVE_INTEGRATION.md).
+El modo claro beta está en Ajustes > Apariencia; oscuro sigue por defecto.
+
+El resto de este documento es la **referencia histórica del prototipo** anterior
+a esta integración. Sus capturas, muestras y cifras no acreditan el estado actual.
+WebEngine y el servidor externo ya no son el camino de arranque operativo.
+
+---
+
 # Prototipo de la shell profesional · diseño Archie Mac (Fase B)
 
 Qt Quick puro, **sin Quickshell**, datos sintéticos rotulados ("DATOS DE DISEÑO"). No habla con

@@ -1,0 +1,40 @@
+import QtQuick
+import QtQuick.Window
+
+// Host-owned native window. One viewport, one read-only bridge, no extra OS authority.
+Window {
+    id:window
+    width:1920; height:1080; visible:true
+    title:"ArchieOS"
+    color:Theme.desktop
+    readonly property string bridgeLink:desktop.bridge.link
+    readonly property string orbDiagnostics:desktop.orbDiagnostics
+    Component.onCompleted: if (typeof shellColorMode !== "undefined") Theme.colorMode=shellColorMode
+    Main { id:desktop; anchors.fill:parent }
+    function applyVisualProfile(value) {
+        var index=["sphere","orb","field","neural","crown","atlas","dense"].indexOf(value)
+        if (index<0) return false
+        Demo.orbProfile=index
+        if (typeof lumen!=="undefined") lumen.applyProfile(value)
+        Demo.orbShow=true; Demo.bare=true
+        return true
+    }
+    Connections {
+        target:typeof displayControl === "undefined" ? null : displayControl
+        function onCommandReceived(action,value,enabled) {
+            if (action==="scene") {
+                if (value==="orb") desktop.run("app.orb")
+                else if (value==="forge") desktop.run("app.forge")
+                else if (value==="world") { desktop.actionNote="World sigue disponible en Observatory; no se convierte en una vista ficticia." }
+            } else if (action==="cinematic" || action==="preset") {
+                window.applyVisualProfile(value)
+            } else if (action==="overlay" && typeof lumen !== "undefined") {
+                if (value==="hud") Demo.orbHud=enabled
+                else lumen.setSetting(value,enabled)
+            } else if (action==="panel") {
+                desktop.run("overlay." + (value==="notifications" ? "notif" : value))
+            }
+        }
+    }
+    onClosing: if (typeof shellRuntime !== "undefined") shellRuntime.running=false
+}

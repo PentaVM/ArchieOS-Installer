@@ -46,63 +46,43 @@ Item {
             }
         }
         // 2. design samples say they are samples
-        var must = ["NotificationCenter", "ForgeWindow", "InspectorPanel", "SettingsWindow", "AuthDialog"]
+        var must = ["AuthDialog"]
         for (var m = 0; m < must.length; m++) {
             Demo.state = "normal"
             var d = make(must[m])
             check(must[m] + " is labelled Diseño", texts(d).indexOf("Diseño") >= 0)
             d.destroy()
         }
-        // The switcher lists the real windows but says what is inside them is a sample.
-        Demo.state = "normal"
-        var sw0 = make("WindowSwitcher")
-        check("WindowSwitcher says its content is a sample", texts(sw0).indexOf("contenido de ejemplo") >= 0)
-        sw0.destroy()
         // 3. the authorization dialog grants nothing and says why
         var ad = make("AuthDialog")
         var at = texts(ad)
         check("auth: Rechazar offered", at.indexOf("Rechazar") >= 0)
         check("auth: Permitir disabled with its reason", at.indexOf("Permitir no está disponible") >= 0)
         ad.destroy()
-        // 4. empty means empty: no phantom rows
-        Demo.state = "vacio"
-        var fg = make("ForgeWindow")
-        check("forge empty: says so", texts(fg).indexOf("Ningún puente registrado") >= 0)
-        check("forge empty: no bridge rows", texts(fg).indexOf("freecad-bridge") < 0)
-        fg.destroy()
-        var nc = make("NotificationCenter")
-        check("notifications empty: no phantom job", texts(nc).indexOf("freecad") < 0)
-        nc.destroy()
-        // the centre really dismisses: one entry, then all of them, then the examples come back
-        Demo.state = "normal"
-        var nd = make("NotificationCenter")
-        check("notifications: five examples at first", nd.live === 5 && texts(nd).indexOf("Dispositivo nuevo en la red") >= 0)
-        Demo.dismiss("n4")
-        check("notifications: one dismissed", nd.live === 4 && texts(nd).indexOf("Dispositivo nuevo en la red") < 0)
-        Demo.dismissAll(nd.keys)
-        check("notifications: all dismissed shows 'Todo al día'", nd.allGone && texts(nd).indexOf("Todo al día") >= 0 && texts(nd).indexOf("freecad") < 0)
-        Demo.restoreNotifs()
-        check("notifications: examples restored", nd.live === 5 && texts(nd).indexOf("Todo al día") < 0)
-        nd.destroy()
-        // 5. unreadable is not alive: offline never says "en vivo"
-        Demo.state = "offline"
-        var fo = make("ForgeWindow")
-        check("forge offline: no 'en vivo'", texts(fo).indexOf("en vivo") < 0)
-        check("forge offline: 'sin lectura'", texts(fo).indexOf("sin lectura") >= 0)
-        fo.destroy()
-        // 6. errors show the reason
-        Demo.state = "error"
-        var si = make("InspectorPanel")
-        check("inspector error: reason shown", texts(si).indexOf("No se pudieron leer las trayectorias") >= 0)
-        check("inspector error: IRIS state still not drawn", texts(si).indexOf("No hay forma de leerlo") >= 0)
-        si.destroy()
-        // 7. IRIS internal state is never drawn, in any state
+        // Operational surfaces cannot manufacture rows by changing the old demo state.
         for (var k = 0; k < states.length; k++) {
             Demo.state = states[k]
+            var fg = make("ForgeWindow")
+            check("forge " + states[k] + ": no invented jobs", fg.records.length === 0 && fg.modules.length === 0)
+            fg.destroy()
+            var nc = make("NotificationCenter")
+            check("notifications " + states[k] + ": no invented Policy or jobs", nc.records.length === 0 && texts(nc).indexOf("Policy concedió") < 0)
+            nc.destroy()
+            var settings = make("SettingsWindow")
+            check("settings " + states[k] + ": no invented providers/models", settings.providers.length === 0 && settings.models.length === 0)
+            settings.destroy()
             var ii = make("InspectorPanel")
-            check("inspector " + states[k] + ": IRIS unreadable", texts(ii).indexOf("sin lectura") >= 0)
+            check("inspector " + states[k] + ": no invented trajectory or workflow", ii.trajectories.length === 0 && ii.observations.length === 0)
             ii.destroy()
         }
+        var vault = make("VaultWindow", "width: 1060; height: 720")
+        check("vault: default has no invented files or copy", vault.rows.length === 0 && !vault.fileOperationsAvailable && !vault.canUndo)
+        vault.designSamples = true
+        check("vault: explicit reference preview has sample label", vault.rows.length > 0 && texts(vault).indexOf("Diseño") >= 0 && !vault.canUndo)
+        vault.destroy()
+        var workspace = make("WorkspaceMenu")
+        check("workspace: domain cannot be inferred from view", !workspace.domainSwitchAvailable && workspace.sel === "" && workspace.domainSwitchReason.length > 0)
+        workspace.destroy()
         Demo.state = "normal"
 
         // 8. motion profiles

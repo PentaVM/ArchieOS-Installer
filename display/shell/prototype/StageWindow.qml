@@ -17,18 +17,18 @@ Panel {
         Lights { x: 16; anchors.verticalCenter: parent.verticalCenter; wid: st.wid }
         Row { anchors.centerIn: parent
             Text { text: "Stage"; color: Theme.t1; font.family: Theme.disp; font.pixelSize: 17; font.weight: Font.DemiBold; font.letterSpacing: -0.17 }
-            Text { text: " — apps de Archie"; color: Theme.t2; font.family: Theme.disp; font.pixelSize: 17; font.weight: Font.Medium; font.letterSpacing: -0.17 } } }
+            Text { text: " — vista local"; color: Theme.t2; font.family: Theme.disp; font.pixelSize: 17; font.weight: Font.Medium; font.letterSpacing: -0.17 } } }
     Column { x: 20; y: 72; width: parent.width - 40; spacing: 16
         Row { spacing: 14
-            Chip { icon: "archie"; tone: "arch"; text: "Autoridad: Archie"; anchors.verticalCenter: parent.verticalCenter }
+            Chip { icon: "unknown"; tone: "unk"; text: "Autoridad: sin lectura"; anchors.verticalCenter: parent.verticalCenter }
             Row { spacing: 6; anchors.verticalCenter: parent.verticalCenter
                 Icon { name: "pointer"; size: 14; color: Theme.t3; anchors.verticalCenter: parent.verticalCenter }
-                Text { text: "Tú ganas el control al tocar el ratón"; color: Theme.t2; font.family: Theme.font; font.pixelSize: 13; anchors.verticalCenter: parent.verticalCenter } } }
+                Text { text: "Core y Policy autorizan las operaciones"; color: Theme.t2; font.family: Theme.font; font.pixelSize: 13; anchors.verticalCenter: parent.verticalCenter } } }
         Item { width: parent.width; height: st.height - 72 - 20 - 34
             DashedRect { anchors.fill: parent; radius: Theme.rCard; color: Theme.hair }
             Rectangle { anchors.fill: parent; radius: Theme.rCard; color: Qt.rgba(0, 0, 0, 0.22) }
             DashedRect { anchors.fill: parent; radius: Theme.rCard; color: Theme.hair }
             Column { anchors.centerIn: parent; spacing: 4
-                Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Compositor de Stage"; color: Theme.t2; font.family: Theme.font; font.pixelSize: 13 }
-                Text { anchors.horizontalCenter: parent.horizontalCenter; text: "otro programa · fuera de este rediseño"; color: Theme.t3; font.family: Theme.font; font.pixelSize: 11 } } } }
+                Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Sin canal gráfico del compositor"; color: Theme.t2; font.family: Theme.font; font.pixelSize: 13 }
+                Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Esta vista no inicia Stage ni representa su sesión"; color: Theme.t3; font.family: Theme.font; font.pixelSize: 11 } } } }
 }

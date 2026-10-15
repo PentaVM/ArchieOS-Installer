@@ -1,8 +1,7 @@
 import QtQuick
 
-// Search, 720 px. DESIGN SAMPLE. Searches the catalogue of actions and capabilities, filtered by
-// permissions. It does not search the web while typing and draws no relations between results
-// (there is no graph to read). A capability that needs escalation is disabled and says why.
+// Searches local views through one eligible list for keyboard and mouse. It neither searches
+// the web while typing nor claims a permission to operate files or change policy.
 Panel {
     id: sp
     kind: "panel"
@@ -10,17 +9,25 @@ Panel {
     height: foot.y + foot.height
     enterDy: -8
     durIn: Theme.durPalette; durOut: Theme.durPaletteClose
-    property string st: Demo.state
+    property var bridge: null
+    property string st: bridge ? (bridge.silent ? "stale" : (bridge.link === "waiting" || bridge.link === "displayd_offline" || bridge.link === "daemon_unreachable" ? "offline" : bridge.link === "invalid" ? "error" : "normal")) : "normal"
     property string query: inp.text
+    property int current: 0
     signal activated(string act)
     function m(a, b) { var q = query.trim().toLowerCase(); return q === "" || (a + " " + b).toLowerCase().indexOf(q) >= 0 }
     readonly property var acts: [
-        { t: "Mostrar actividad de Archie", s: "Abre el panel de trabajos y autorizaciones", a: "overlay.activity" },
-        { t: "Abrir la vista general de ventanas", s: "Muestra las ventanas por app y por dominio", a: "overlay.switcher" },
-        { t: "Leer espacios de trabajo", s: "Capacidad de Archie sobre Vault", a: "app.vault" },
-        { t: "Escribir en motor-bracket", s: "Capacidad de Archie sobre Vault", a: "" } ]
-    readonly property bool noMatch: !(m(acts[0].t, acts[0].s) || m(acts[1].t, acts[1].s) || m(acts[2].t, acts[2].s) || m(acts[3].t, acts[3].s))
-    onShownChanged: if (shown) { inp.text = ""; inp.forceActiveFocus() }
+        { t: "Mostrar actividad de Archie", s: "Abre la vista local de trabajos", a: "overlay.activity", icon: "activity", requiresLive: false },
+        { t: "Abrir la vista general de ventanas", s: "Ventanas locales de esta shell", a: "overlay.switcher", icon: "windows", requiresLive: false } ]
+    readonly property var eligibleRows: acts.filter(function(r) {
+        return shown && st !== "error" && st !== "vacio" && r.a !== "" && m(r.t, r.s)
+            && (!r.requiresLive || (st !== "offline" && st !== "degraded" && st !== "stale"))
+    })
+    readonly property bool noMatch: eligibleRows.length === 0
+    function activateIndex(i) { var row = eligibleRows[i]; if (!shown || !row) return false; activated(row.a); return true }
+    function activateCurrent() { return activateIndex(current) }
+    onQueryChanged: current = 0
+    onEligibleRowsChanged: current = Math.max(0, Math.min(current, eligibleRows.length - 1))
+    onShownChanged: if (shown) { inp.text = ""; current = 0; inp.forceActiveFocus() }
 
     component Result: Rectangle {
         id: r
@@ -35,10 +42,11 @@ Panel {
         property bool dis: false
         property bool ring: false
         property string act: ""
+        property int rowIndex: -1
         width: parent ? parent.width : 600; height: 50; radius: 9
         color: (on || ring) ? Theme.sel : "transparent"; border.width: 1; border.color: on ? Theme.tint(Theme.acc, 0.35) : "transparent"
         Rectangle { anchors.fill: parent; radius: 9; color: "transparent"; border.width: 2; border.color: Theme.acc; visible: r.ring }
-        Rectangle { x: 12; anchors.verticalCenter: parent.verticalCenter; width: 32; height: 32; radius: 8; color: Qt.rgba(1, 1, 1, 0.05); border.width: 1; border.color: Theme.hair
+        Rectangle { x: 12; anchors.verticalCenter: parent.verticalCenter; width: 32; height: 32; radius: 8; color: Theme.raised; border.width: 1; border.color: Theme.hair
             Icon { anchors.centerIn: parent; name: r.glyph; size: 16; color: r.dis ? Theme.tdis : Theme.t2 } }
         Column { x: 56; anchors.verticalCenter: parent.verticalCenter; width: parent.width - 56 - 230
             Text { width: parent.width; elide: Text.ElideRight; text: r.title; color: r.dis ? Theme.tdis : Theme.t1; font.family: Theme.font; font.pixelSize: 14; font.weight: Font.Medium }
@@ -46,7 +54,7 @@ Panel {
         Row { anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter; spacing: 8
             Chip { kind: true; small: true; text: r.kind; anchors.verticalCenter: parent.verticalCenter }
             Chip { visible: r.statusText !== ""; small: true; text: r.statusText; icon: r.statusIcon; tone: r.statusTone; anchors.verticalCenter: parent.verticalCenter } }
-        MouseArea { anchors.fill: parent; enabled: !r.dis && r.act !== ""; hoverEnabled: true; onClicked: sp.activated(r.act) }
+        MouseArea { anchors.fill: parent; enabled: !r.dis && r.act !== ""; hoverEnabled: true; onEntered: sp.current = r.rowIndex; onClicked: sp.activateIndex(r.rowIndex) }
     }
 
     Column { id: col; x: 16; y: 16; width: parent.width - 32; spacing: 0
@@ -56,16 +64,16 @@ Panel {
                 Icon { name: "search"; size: 18; color: Theme.t2; anchors.verticalCenter: parent.verticalCenter }
                 Item { width: 440; height: 26; anchors.verticalCenter: parent.verticalCenter
                     TextInput { id: inp; anchors.fill: parent; verticalAlignment: TextInput.AlignVCenter; clip: true
-                        color: Theme.t1; font.family: Theme.font; font.pixelSize: 17; selectionColor: Theme.acc; cursorDelegate: Rectangle { width: 1.5; color: Theme.acc }
+                        color: Theme.t1; font.family: Theme.font; font.pixelSize: 17; selectionColor: Theme.acc; selectedTextColor: Theme.onAccent; cursorDelegate: Rectangle { width: 1.5; color: Theme.acc }
                         Keys.onPressed: function (e) {
-                            if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) {
-                                for (var i = 0; i < sp.acts.length; i++) if (sp.acts[i].a !== "" && sp.m(sp.acts[i].t, sp.acts[i].s)) { sp.activated(sp.acts[i].a); break }
-                                e.accepted = true } } }
+                            if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) { sp.activateCurrent(); e.accepted = true }
+                            else if (e.key === Qt.Key_Down) { sp.current = Math.min(sp.eligibleRows.length - 1, sp.current + 1); e.accepted = true }
+                            else if (e.key === Qt.Key_Up) { sp.current = Math.max(0, sp.current - 1); e.accepted = true } } }
                     Text { visible: inp.text === ""; text: "Buscar acciones y capacidades"; color: Theme.tdis; font.family: Theme.font; font.pixelSize: 14; anchors.verticalCenter: parent.verticalCenter } } }
             Row { anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter; spacing: 10
                 Chip { visible: sp.st !== "normal" || Demo.focusRing; anchors.verticalCenter: parent.verticalCenter
                     text: sp.st === "vacio" ? "0 resultados" : (sp.st === "error" ? "error de lectura" : (sp.st === "offline" ? "archied no responde" : (sp.st === "degraded" ? "datos parciales" : (sp.st === "stale" ? "desactualizado" : "actualizado"))))
-                    sub: sp.st === "offline" ? "último estado hace 2 min" : (sp.st === "stale" ? "hace 18 min" : (sp.st === "normal" ? "hace 4 s" : ""))
+                    sub: sp.bridge ? "hace " + Math.floor(sp.bridge.ageMs / 1000) + " s" : "vista local"
                     icon: sp.st === "vacio" ? "recents" : (sp.st === "error" || sp.st === "offline" ? "bad" : (sp.st === "degraded" ? "warn" : (sp.st === "stale" ? "recents" : "done")))
                     tone: sp.st === "vacio" ? "neutral" : (sp.st === "error" || sp.st === "offline" ? "bad" : (sp.st === "degraded" || sp.st === "stale" ? "warn" : "ok")) }
                 Kbd { label: "Esc"; anchors.verticalCenter: parent.verticalCenter } } }
@@ -74,27 +82,18 @@ Panel {
         ErrBox { visible: sp.st === "error"; text: "No se pudo consultar el catálogo: respuesta no válida del bridge." }
         VoidBox { visible: sp.st === "vacio" || sp.noMatch; icon: "search"; title: sp.query === "" ? "Sin resultados" : "Sin resultados para «" + sp.query + "»"; text: "No hay acciones ni capacidades que coincidan y estén permitidas para ti." }
 
-        Column { visible: sp.st !== "error" && sp.st !== "vacio" && !sp.noMatch; width: parent.width; opacity: sp.st === "stale" ? 0.62 : 1
-            Eyebrow { text: "Acciones"; leftPadding: 12; topPadding: 12; bottomPadding: 4 }
-            Result { visible: sp.m(title, sub); act: "overlay.activity"; glyph: "activity"; title: "Mostrar actividad de Archie"; sub: "Abre el panel de trabajos y autorizaciones"; kind: "Acción"; on: true; ring: Demo.focusRing
-                statusText: sp.st === "offline" ? "" : "permitida"; statusIcon: "done"; statusTone: "ok" }
-            Result { visible: sp.st !== "offline" && sp.st !== "degraded" && sp.m(title, sub); act: "overlay.switcher"; glyph: "windows"; title: "Abrir la vista general de ventanas"; sub: "Muestra las ventanas por app y por dominio"; kind: "Acción"
-                statusText: "permitida"; statusIcon: "done"; statusTone: "ok" }
-            Eyebrow { text: "Capacidades"; leftPadding: 12; topPadding: 12; bottomPadding: 4 }
-            Column { visible: sp.st === "normal" || sp.st === "stale"; width: parent.width
-                Result { visible: sp.m(title, sub); act: "app.vault"; glyph: "dkVault"; title: "Leer espacios de trabajo"; sub: "Capacidad de Archie sobre Vault"; kind: "Capacidad"; statusText: "permitida"; statusIcon: "done"; statusTone: "ok" }
-                Result { visible: sp.m(title, sub); glyph: "lock"; dis: true; title: "Escribir en motor-bracket"; sub: "Capacidad de Archie sobre Vault"; kind: "Capacidad"
-                    statusText: "requiere autorización"; statusIcon: "pause"; statusTone: "warn" }
-                Item { width: parent.width; height: 36; Why { x: 12; width: parent.width - 24; anchors.verticalCenter: parent.verticalCenter; text: "Requiere autorización: la escalada de Policy todavía no tiene vía." } } }
-            Result { visible: sp.st === "offline"; glyph: "unknown"; title: "Capacidades de Archie"; sub: "sin lectura mientras archied no responda"; kind: "Capacidad"
-                statusText: "no medido"; statusIcon: "unknown"; statusTone: "unk" }
-            Result { visible: sp.st === "degraded"; glyph: "unknown"; title: "Algunas capacidades"; sub: "bridge sin datos: lista parcial"; kind: "Capacidad"
-                statusText: "datos parciales"; statusIcon: "warn"; statusTone: "warn" } }
+        Column { visible: !sp.noMatch; width: parent.width
+            Eyebrow { text: "Vistas locales"; leftPadding: 12; topPadding: 12; bottomPadding: 4 }
+            Repeater { model: sp.eligibleRows
+                delegate: Result { rowIndex: index; act: modelData.a; glyph: modelData.icon; title: modelData.t; sub: modelData.s; kind: "Vista"; on: index === sp.current } }
+        }
+        Item { width: 1; height: 8 }
+        NoteBox { text: "Leer o escribir archivos y cambiar permisos no está disponible: no hay un contrato de ejecución desde esta búsqueda." }
         Item { visible: sp.st === "offline" || sp.st === "stale"; width: 1; height: 10 }
         NoteBox { visible: sp.st === "offline"; text: "El catálogo de capacidades no se puede filtrar por permisos sin archied." }
-        NoteBox { visible: sp.st === "stale"; icon: "recents"; text: "Catálogo leído hace 18 min." }
+        NoteBox { visible: sp.st === "stale"; icon: "recents"; text: "Sin lectura actual del catálogo." }
         Item { width: 1; height: 8 }
     }
     FootHints { id: foot; y: col.y + col.implicitHeight + 4; x: 0; width: sp.width
-        hints: [["↑↓", "elegir"], ["↵", "abrir"], ["Esc", "cerrar"]]; note: "filtrado por permisos" }
+        hints: [["↑↓", "elegir"], ["↵", "abrir"], ["Esc", "cerrar"]]; note: "sin autoridad de ejecución" }
 }
