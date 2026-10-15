@@ -104,3 +104,9 @@ fuentes previas sin formatear. Se reprodujo el fallo con `rustfmt 1.88.0` sobre
 crates ajenos para ocultarlo; las fuentes modificadas por esta integración sí
 pasan con la versión fijada por CI. El resultado de CI remoto debe comprobarse
 sobre la nueva cabeza, sin reutilizar los checks del commit anterior.
+
+Publicación: los commits se subieron por fast-forward a la rama del PR41, que
+permanece abierto como Draft. GitHub informa `mergeable: CONFLICTING` frente a
+`main` (`8e0cf223`); no hay checks nuevos sobre esta cabeza. Resolver y revalidar
+esa combinación queda pendiente antes de considerar un merge. Los resultados
+locales anteriores corresponden a esta rama, no a un árbol combinado con main.
