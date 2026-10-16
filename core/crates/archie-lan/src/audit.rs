@@ -17,6 +17,7 @@
 //! | `unusual-destination` | a device learned for a day sends over 25 MB to an outside destination it had not used before |
 //! | `traffic-surge` | a device that has been learned for a day sends far more in ten minutes than it usually does |
 //! | `rogue-dhcp-server` | a second device answers DHCP (an offer or acknowledgement) when another already does: it can hand out its own router and DNS |
+//! | `beacon-suspect` | a device learned for a day starts calling a new outside destination on a clock (a regular interval, scored as RITA does), the way malware checks in with its controller |
 //! | `rogue-router-advertisement` | a device not seen before offers itself as an IPv6 router on the link, or one other than the known router does |
 //!
 //! Alongside the rules it keeps what each device says about itself in the clear (DHCP
@@ -28,7 +29,7 @@
 use crate::capture::Packet;
 use crate::is_lan;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 const MAX_DEVICES: usize = 4096;
@@ -64,6 +65,13 @@ const SURGE_SIGMAS: f64 = 6.0;
 const NEW_DESTINATION_BYTES: u64 = 25_000_000;
 /// One device's surges are told at most once in this long.
 const SURGE_COOLDOWN_MS: u64 = 60 * 60 * 1000;
+/// How clock-like a rhythm must be to be kept on the device, and to be told.
+const BEACON_KEPT_SCORE: u8 = 70;
+const BEACON_TOLD_SCORE: u8 = 85;
+/// Device and destination pairs whose contacts are kept (33 times each).
+const MAX_CONTACTED: usize = 4_096;
+const DAY_MS: u64 = 24 * 60 * 60 * 1000;
+const PRUNE_EVERY_MS: u64 = 60 * 1000;
 const STATE_FORMAT: &str = "archie-netwatch-state-v1";
 const TOLD_FORMAT: &str = "archie-netwatch-told-v1";
 
@@ -101,6 +109,20 @@ pub struct Device {
     pub lldp_name: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub nbns_names: BTreeSet<String>,
+    /// Outside destinations it calls on a clock, by the same label as `sent_to`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub beacons: BTreeMap<String, Beacon>,
+}
+
+/// A clock-like rhythm of connections to one destination (`crate::beacon`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Beacon {
+    /// The median interval between contacts, in seconds.
+    pub every_s: u64,
+    /// 0..=100: how clock-like, as last scored.
+    pub score: u8,
+    pub first_ms: u64,
+    pub last_ms: u64,
 }
 
 /// A device's usual sending, learned per ten-minute bucket as an exponentially
@@ -316,6 +338,7 @@ impl State {
                 device.sent_to.len(),
                 "outside peers of one device",
             )?;
+            over(limits.peers, device.beacons.len(), "rhythms of one device")?;
             for (count, what) in [
                 (device.ja4.len(), "TLS fingerprints of one device"),
                 (device.user_agents.len(), "User-Agents of one device"),
@@ -327,6 +350,7 @@ impl State {
                 .asked
                 .iter()
                 .chain(device.sent_to.keys())
+                .chain(device.beacons.keys())
                 .chain(device.hostname.iter())
                 .chain(device.dhcp_requested.iter())
                 .chain(device.dhcp_vendor.iter())
@@ -513,6 +537,11 @@ pub struct Audit {
     /// client's discover and request come from 0.0.0.0; LLDP has no IP at all), by
     /// hardware address, until the device is first seen with one.
     pending: HashMap<String, Introduced>,
+    /// When each device last contacted each outside destination, by hardware address and
+    /// label, for `crate::beacon`. In memory only: a restart starts the count again.
+    contacts: HashMap<(String, String), VecDeque<u64>>,
+    /// When `contacts` was last pruned, so a full map is not swept on every frame.
+    pruned_ms: u64,
 }
 
 /// What a device says of itself outside IP: its DHCP client and its LLDP announcement.
@@ -589,6 +618,8 @@ impl Audit {
             fresh: HashSet::new(),
             told: Told::default(),
             pending: HashMap::new(),
+            contacts: HashMap::new(),
+            pruned_ms: 0,
         }
     }
 
@@ -730,12 +761,13 @@ impl Audit {
             }
         }
 
-        if let Some(peer) = outside {
-            let label = self
-                .named
+        let label = outside.map(|peer| {
+            self.named
                 .get(&peer)
                 .cloned()
-                .unwrap_or_else(|| peer.to_string());
+                .unwrap_or_else(|| peer.to_string())
+        });
+        if let Some(label) = label.clone() {
             let known = device.sent_to.contains_key(&label);
             // Past the cap a destination is not tracked at all, so it cannot be new.
             if device.sent_to.len() < MAX_PEERS || known {
@@ -802,12 +834,83 @@ impl Audit {
                 });
             }
         }
+        if let Some(label) = label.filter(|_| packet.opening) {
+            self.contacted(&mut alerts, packet.at_ms, mac, label);
+        }
         if packet.opening {
             if let Some(((_, port), destination)) = packet.tcp.zip(packet.destination) {
                 self.opened(&mut alerts, packet.at_ms, mac, destination, port);
             }
         }
         alerts
+    }
+
+    /// `mac` opened a connection to the outside destination `label`. A clock-like rhythm
+    /// is kept on the device; one to a destination it took up after it was learned is told.
+    fn contacted(&mut self, alerts: &mut Vec<Alert>, at_ms: u64, mac: &str, label: String) {
+        let key = (mac.to_string(), label);
+        if self.contacts.len() >= MAX_CONTACTED && !self.contacts.contains_key(&key) {
+            // Forget pairs quiet for a day, at most once a minute; until that frees room,
+            // a new pair is not tracked.
+            if at_ms.saturating_sub(self.pruned_ms) < PRUNE_EVERY_MS {
+                return;
+            }
+            self.pruned_ms = at_ms;
+            self.contacts.retain(|_, contacts| {
+                contacts
+                    .back()
+                    .is_some_and(|&last| at_ms.saturating_sub(last) < DAY_MS)
+            });
+            if self.contacts.len() >= MAX_CONTACTED {
+                return;
+            }
+        }
+        let contacts = self.contacts.entry(key.clone()).or_default();
+        if !crate::beacon::note(contacts, at_ms) {
+            return;
+        }
+        let Some(rhythm) = crate::beacon::rhythm(contacts) else {
+            return;
+        };
+        let Some(device) = self.state.devices.get_mut(mac) else {
+            return;
+        };
+        let (mac, label) = key;
+        if rhythm.score < BEACON_KEPT_SCORE {
+            device.beacons.remove(&label);
+            return;
+        }
+        if device.beacons.len() >= MAX_PEERS && !device.beacons.contains_key(&label) {
+            return;
+        }
+        let first_ms = device.beacons.get(&label).map_or(at_ms, |b| b.first_ms);
+        device.beacons.insert(
+            label.clone(),
+            Beacon {
+                every_s: rhythm.every_ms / 1000,
+                score: rhythm.score,
+                first_ms,
+                last_ms: at_ms,
+            },
+        );
+        let key = (mac, label);
+        if rhythm.score >= BEACON_TOLD_SCORE && self.fresh.contains(&key) {
+            let (mac, label) = key;
+            self.tell(
+                alerts,
+                format!("beacon {mac} {label}"),
+                at_ms,
+                Severity::Warning,
+                "beacon-suspect",
+                &mac,
+                format!(
+                    "calls {label}, which it took up recently, about every {} s, as regularly \
+                     as a clock ({} of 100)",
+                    rhythm.every_ms / 1000,
+                    rhythm.score
+                ),
+            );
+        }
     }
 
     /// A DHCP offer or acknowledgement from `mac`. The first server is learned; another
@@ -1257,6 +1360,46 @@ mod tests {
             .flat_map(|i| audit.see(&sent(later + i * 1_000, 1_000_000)))
             .collect();
         assert_eq!(rules(&again), ["traffic-surge"]);
+    }
+
+    #[test]
+    fn a_learned_device_calling_somewhere_new_on_a_clock_is_told_once() {
+        let mut audit = Audit::new(State::default(), learned());
+        let open = |peer: &str, at_ms: u64| Packet {
+            destination: Some(peer.parse().unwrap()),
+            tcp: Some((50_000, 443)),
+            opening: true,
+            ..from(TV, "192.168.1.84", at_ms)
+        };
+        // Its vendor's keep-alive, every ten minutes from the start: kept, not told.
+        let day = u64::from(BASELINE_BUCKETS) + 1;
+        for bucket in 1..=day {
+            audit.see(&open("198.51.100.20", bucket * BUCKET_MS));
+        }
+        assert!(audit.state.devices[TV].baseline.learned());
+        assert_eq!(
+            audit.state.devices[TV].beacons["198.51.100.20"].every_s,
+            BUCKET_MS / 1000
+        );
+        // Then it starts checking in with somewhere new every minute, with jitter.
+        let now = (day + 1) * BUCKET_MS;
+        let mut told: Vec<Alert> = (0..40u64)
+            .flat_map(|i| {
+                audit.see(&open(
+                    "203.0.113.9",
+                    now + i * 60_000 + ((i * 2_654_435_761) >> 7) % 6_000,
+                ))
+            })
+            .collect();
+        told.extend(audit.see(&open("198.51.100.20", now + 41 * 60_000)));
+        assert_eq!(rules(&told), ["beacon-suspect"]);
+        assert!(told[0].detail.contains("203.0.113.9"), "{}", told[0].detail);
+        let beacon = &audit.state.devices[TV].beacons["203.0.113.9"];
+        assert!((58..=66).contains(&beacon.every_s), "{beacon:?}");
+        assert!(beacon.score >= BEACON_TOLD_SCORE, "{beacon:?}");
+        // It survives a save and a load.
+        let saved = serde_json::to_vec(&audit.state).unwrap();
+        assert_eq!(State::parse(&saved).unwrap().devices[TV].beacons.len(), 2);
     }
 
     #[test]

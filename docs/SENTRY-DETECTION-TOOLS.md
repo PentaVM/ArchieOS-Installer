@@ -25,6 +25,7 @@ with only the broadcast view, and says more with a mirror.
 | Names a device gives | DHCP host name, LLDP system name, NetBIOS name, HTTP User-Agent | — |
 | `rogue-dhcp-server` | a second DHCP server answering after the learning window | — |
 | `rogue-router-advertisement` | an IPv6 RA from a host that is not the router | — |
+| `beacon-suspect` and `beacons` | a clock-like rhythm of connections to one outside destination, scored as RITA does; told only for a destination taken up after the device was learned | — (method reimplemented) |
 
 `archie-netwatch report` prints a `profiles` array: per device, the vendor, whether the
 MAC is randomized, the hints with the evidence behind each one, and the raw fingerprints.
@@ -42,10 +43,9 @@ its basis.
    `hickory-proto` + `oui-data`, all MIT/Apache). The broadcast view above needs no
    dissector: parsing ARP, DHCP, mDNS and RA directly removes the TShark start-up and the
    CSV round trip for the always-on part, and keeps TShark for full captures.
-3. **Beacon scoring** in Rust, after RITA's method (regular intervals, constant sizes, long
-   duration to one destination). RITA itself is GPL-3 and needs ClickHouse, so the method
-   is reimplemented over the flows Sentry already keeps. This is the main signal for a
-   compromised camera or plug calling home.
+3. **Beacon scoring**: first part done (see the log below). Still to do: the data-size
+   half of RITA's score (constant request sizes) and UDP contacts, which need per-flow
+   byte counts the capture does not keep yet.
 4. **Aya eBPF** (Rust, MIT/Apache; the kernel part GPL-2). On the gateway or the
    operator's own machine: per-process flow accounting with no packet copies, cheaper than
    pcap for "which program is talking". Needs a recent kernel and CAP_BPF.
@@ -67,6 +67,33 @@ its basis.
 - **Active scanning of anything but the owner's own devices** (nmap-style sweeps of the
   WAN, credential attempts, exploit checks): out of scope. Sentry asks a device it owns
   through the device's documented interface, after Policy and the owner allow it.
+
+## Log of the improvement rounds
+
+### 2026-10-16: beacon scoring
+
+- **Compared.** RITA (Active Countermeasures; GPL-3, needs ClickHouse) scores the intervals
+  between connections by Bowley skewness and median absolute deviation, plus connection
+  count and data sizes. BAYWATCH (Hu et al., IBM, DSN 2016) finds periods with a
+  spectral analysis (FFT) and then filters by how many hosts reach the destination. Flare
+  and Zeek beacon scripts are in Python or need Zeek.
+- **Chosen.** RITA's interval statistics, reimplemented (`archie-lan/src/beacon.rs`): they
+  work on a short window (33 contacts) and cost a sort of 32 numbers per contact, where
+  an FFT needs a long, evenly sampled series. From BAYWATCH, the idea that a rhythm alone
+  is not news: the alert is kept for destinations a device took up after it was learned,
+  and every other rhythm is only recorded on the device.
+- **Tested.** A one-minute clock with ±6 s jitter scores 90 or more; exponential gaps
+  (a person browsing) score under 70 in 20 seeded runs; bursts, 2 s polling and fewer than
+  12 contacts are not scored; an audit test tells a new clock once and keeps a vendor's
+  ten-minute keep-alive quiet; rhythms survive a save and a load.
+- **Measured.** `archie-netwatch read` of 300,000 TCP SYNs from 50 devices to 1,000 outside
+  addresses (the worst case: every frame a new connection out), 3 runs each, the
+  process's own CPU without TShark: 2.13–2.25 s before, 2.38–2.49 s after, about 0.8 µs
+  per connection. The first version swept the full contact map on every frame once it held
+  4,096 pairs (6.4–7.0 s); pruning is now at most once a minute.
+- **Not done.** A pcap fixture: the alert needs a device learned for a day, which a
+  fixture of that length does not justify; the unit tests drive the same code path.
+  Popularity filtering (BAYWATCH) waits for more than one sensor.
 
 ## How a tool is accepted
 

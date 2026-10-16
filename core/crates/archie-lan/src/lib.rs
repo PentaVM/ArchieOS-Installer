@@ -28,6 +28,7 @@
 
 pub mod audit;
 pub mod autonomy;
+pub mod beacon;
 pub mod capture;
 pub mod classify;
 pub mod dns_sd;
