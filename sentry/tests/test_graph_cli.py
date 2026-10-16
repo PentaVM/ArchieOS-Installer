@@ -79,7 +79,7 @@ class GraphCLI(unittest.TestCase):
                      "trait\towner\twanda.tag\tpossible_friend\tmodel_inferred\t-\tmodel\n")
         node = self.view()["nodes"][0]
         self.assertEqual([t["basis"] for t in node["tags"]], ["owner_declared", "model_inferred"])
-        self.assertEqual(node["tags"], node["traits"])
+        self.assertEqual(node["traits"], [])
 
     def test_projection_applies_existing_load_refusals(self):
         self.fixture("subject\treporter\tpublic_figure\tReporter\n"
@@ -171,6 +171,25 @@ class GraphCLI(unittest.TestCase):
         self.assertEqual(writer.returncode, 0, err)
         self.assertTrue(Path(str(self.graph) + ".lock").is_file())
         self.assertIn("after-crash", {n["id"] for n in self.view()["nodes"]})
+
+    def test_readers_neither_wait_for_a_writer_nor_need_the_lock_file(self):
+        self.fixture()
+        helper = CLI.parent / ("sentry-lock-holder.exe" if os.name == "nt" else "sentry-lock-holder")
+        holder = subprocess.Popen([str(helper), str(self.graph)], stdin=subprocess.PIPE,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: holder.poll() is None and holder.kill())
+        self.assertEqual(holder.stdout.readline().strip(), "locked")
+        # A transaction in progress does not hold readers back.
+        for command in (["export-json"], ["show"], ["check"]):
+            result = subprocess.run([str(CLI), *command], env=self.env, capture_output=True,
+                                    text=True, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        holder.kill()
+        holder.communicate(timeout=10)
+        # Nor does a reader create the lock file next to a graph it only reads.
+        Path(str(self.graph) + ".lock").unlink()
+        self.assertEqual(self.run_cli("export-json").returncode, 0)
+        self.assertFalse(Path(str(self.graph) + ".lock").exists())
 
 
 if __name__ == "__main__":

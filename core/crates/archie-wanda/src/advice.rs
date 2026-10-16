@@ -45,7 +45,7 @@ pub fn validate(
             || item.evidence_refs.len() > 64
             || item.evidence_refs.iter().any(|r| !references.contains(r))
             || item.expires_at_ms <= now_ms
-            || item.expires_at_ms > now_ms.saturating_add(24 * 3_600_000)
+            || item.expires_at_ms > now_ms.saturating_add(crate::ADVICE_HORIZON_MS)
             || item.alternatives.len() > 8
             || item.alternatives.iter().any(|s| !bounded(s, 500))
             || (matches!(item.kind.as_str(), "relationship" | "reflection")

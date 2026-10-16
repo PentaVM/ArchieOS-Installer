@@ -261,3 +261,53 @@ async fn proactive_refresh_coalesces_unchanged_context_but_processes_new_message
     api_task.abort();
     model_task.abort();
 }
+
+async fn refuse(State(calls): State<Arc<AtomicUsize>>) -> axum::http::StatusCode {
+    calls.fetch_add(1, Ordering::SeqCst);
+    axum::http::StatusCode::INTERNAL_SERVER_ERROR
+}
+
+#[tokio::test]
+async fn a_failing_model_is_retried_with_backoff_not_every_tick() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let model_task = tokio::spawn(
+        axum::serve(
+            listener,
+            Router::new()
+                .route("/v1/chat/completions", post(refuse))
+                .with_state(calls.clone()),
+        )
+        .into_future(),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let store = fixture(
+        dir.path(),
+        &format!("http://{address}/v1/"),
+        Locality::Local,
+    );
+    let domain = ContextDomain::personal("owner").unwrap();
+    let mut event = store.events(&domain, 1, 1000).unwrap().remove(0).event;
+    event.event_id = "live-1".into();
+    event.observed_at_ms = archie_wanda::server::now_ms();
+    store
+        .ingest(
+            "source-fixture-secret",
+            &[event.clone()],
+            event.observed_at_ms,
+        )
+        .unwrap();
+    let service = archie_wanda::server::Service::new(store);
+    service.refresh().await;
+    let first = calls.load(Ordering::SeqCst);
+    assert!(first >= 1, "the model was never asked");
+    service.refresh().await;
+    service.refresh().await;
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        first,
+        "the same evidence waits out its backoff after a failure"
+    );
+    model_task.abort();
+}

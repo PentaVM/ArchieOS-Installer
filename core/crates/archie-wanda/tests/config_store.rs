@@ -38,7 +38,7 @@ fn config(dir: &Path) -> WandaConfig {
             token_env: None,
             allow_presumed_owner: false,
             enabled: true,
-            chat_domains: BTreeMap::from([("work-chat".into(), work())]),
+            chat_domains: BTreeMap::from([("120363042000000001@G.US".into(), work())]),
         }],
         quality_tier: 50,
         deep_quality_tier: 80,
@@ -104,6 +104,28 @@ fn replay_is_idempotent_while_changed_content_is_a_collision() {
         store.sources(&domain(), 2_000).unwrap()[0].last_observed_at_ms,
         Some(2_000)
     );
+    // The repost was a sighting, not a new message: a newer message stays first.
+    let mut newer = event("two");
+    newer.observed_at_ms = 2_500;
+    store
+        .ingest("device-secret-fixture", &[newer], 2_500)
+        .unwrap();
+    let mut again = event("one");
+    again.observed_at_ms = 3_000;
+    store
+        .ingest("device-secret-fixture", &[again], 3_000)
+        .unwrap();
+    let order: Vec<_> = store
+        .events(&domain(), 64, 3_000)
+        .unwrap()
+        .into_iter()
+        .map(|e| e.event.event_id)
+        .collect();
+    assert_eq!(order, ["two", "one"]);
+    assert_eq!(
+        store.sources(&domain(), 3_000).unwrap()[0].last_observed_at_ms,
+        Some(3_000)
+    );
 }
 
 #[test]
@@ -114,13 +136,25 @@ fn trusted_chat_routing_separates_identical_identifiers_and_namespaces() {
     let store = WandaStore::new(cfg).unwrap();
     let personal = event("same");
     let mut professional = personal.clone();
-    professional.chat_id = "work-chat".into();
+    professional.chat_id = "120363042000000001@g.us".into();
     professional.text = "work-only-fixture".into();
+    // A display title never routes, even one spelled like the work chat's address.
+    let mut renamed = event("renamed");
+    renamed.chat_id = "title:120363042000000001@g.us".into();
     let report = store
-        .ingest("device-secret-fixture", &[personal, professional], 1_000)
+        .ingest(
+            "device-secret-fixture",
+            &[personal, professional, renamed],
+            1_000,
+        )
         .unwrap();
-    assert_eq!(report.accepted, 2);
+    assert_eq!(report.accepted, 3);
     let private = store.events(&domain(), 64, 1_000).unwrap();
+    assert!(private.iter().any(|e| e.event.event_id == "renamed"));
+    let private: Vec<_> = private
+        .into_iter()
+        .filter(|e| e.event.event_id != "renamed")
+        .collect();
     let corporate = store.events(&work(), 64, 1_000).unwrap();
     assert_eq!(private.len(), 1);
     assert_eq!(corporate.len(), 1);
@@ -141,7 +175,7 @@ fn trusted_chat_routing_separates_identical_identifiers_and_namespaces() {
         .unwrap();
     archie_cerebra::vault_io::persist_vault(&vault_dir, &vault).unwrap();
     drop(vault);
-    assert_eq!(store.events(&domain(), 64, 1_000).unwrap().len(), 1);
+    assert_eq!(store.events(&domain(), 64, 1_000).unwrap().len(), 2);
 }
 
 #[test]

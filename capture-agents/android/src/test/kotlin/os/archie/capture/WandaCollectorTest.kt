@@ -26,12 +26,18 @@ class WandaCollectorTest {
             .setStyle(style).setGroupSummary(summary).build()
         return StatusBarNotification("com.whatsapp", "com.whatsapp", 1, "chat", 1000, 0, value, android.os.Process.myUserHandle(), null, 1790000000010)
     }
+    @Test fun onlyTheConversationAddressIsSentAsTheChatId() {
+        assertEquals("120363042000000001@g.us", WandaNotification.chatId("120363042000000001@g.us", "Trabajo", "key"))
+        assertEquals("34600000000@s.whatsapp.net", WandaNotification.chatId("34600000000@s.whatsapp.net", "Ana", "key"))
+        assertEquals("title:Trabajo", WandaNotification.chatId("not-a-jid", "Trabajo", "key"))
+        assertEquals("title:key", WandaNotification.chatId(null, " ", "key"))
+    }
     @Test fun groupSenderIsSeparateFromConversationAndRepostDeduplicates() {
         val collector = WandaCollector("phone-fixture")
         val snapshot = WandaNotification.read(notification())!!
         val first = collector.collect(snapshot, ActorSession.Actor.CONFIRMED_OWNER, paired, 1790000000020)
         assertEquals(1, first.size)
-        assertEquals("Family", first.single().chatId)
+        assertEquals("title:Family", first.single().chatId)
         assertEquals("Ana", first.single().sender)
         assertEquals("counterparty", first.single().author)
         assertEquals(1790000000000, first.single().sentAtMs)

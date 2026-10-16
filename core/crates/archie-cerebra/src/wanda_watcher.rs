@@ -26,7 +26,6 @@
 //! The salt comes from local configuration (`[sentry.chat_exports]`); it is a
 //! pseudonym key, not a defence — see the bridge's module note.
 
-use crate::pillars::PillarContext;
 use crate::vault_io::{self, VaultIoError};
 use crate::wanda_bridge::{
     parse_instagram_export, parse_notification_dump, parse_whatsapp_export, record_chat_context,
@@ -89,9 +88,6 @@ impl ExportKind {
 /// folder cannot grow the report without limit.
 #[derive(Debug, Default)]
 pub struct WatchReport {
-    /// Scoped references retained for the existing cognitive loop, bounded to
-    /// the newest 64 batches. This is context, not an authority grant.
-    pub contexts: Vec<PillarContext>,
     /// Export files seen with an extension the bridge parses.
     pub files_seen: u64,
     /// Files parsed and recorded this pass.
@@ -210,7 +206,7 @@ fn ingest(
     kind: ExportKind,
     path: &Path,
     salt: &str,
-) -> Result<(u64, u64, Vec<PillarContext>), WatcherError> {
+) -> Result<(u64, u64), WatcherError> {
     let bytes =
         std::fs::read(path).map_err(|e| WatcherError::Io(format!("{}: {e}", path.display())))?;
     if bytes.is_empty() || bytes.len() as u64 > MAX_EXPORT_BYTES {
@@ -224,18 +220,13 @@ fn ingest(
     let messages = parse_export(kind, path, &text, salt)
         .map_err(|e| WatcherError::Parse(format!("{}: {e}", path.display())))?;
     let mut recorded = (0u64, 0u64);
-    let mut contexts = Vec::new();
     for batch in messages.chunks(MAX_MESSAGES_PER_BATCH) {
         if let Some(batch) = record_chat_context(vault, domain, task_id, batch)?.batch() {
             recorded.0 += batch.messages().len() as u64;
             recorded.1 += batch.chats().len() as u64;
-            if contexts.len() == 64 {
-                contexts.remove(0);
-            }
-            contexts.push(batch.context().clone());
         }
     }
-    Ok((recorded.0, recorded.1, contexts))
+    Ok(recorded)
 }
 
 /// Ingest one export file by path, journal entry included. This is the manual
@@ -278,8 +269,7 @@ pub fn ingest_export_file_in_domain(
     }
     let mut vault = vault_io::open_vault(vault_dir)?;
     match ingest(&mut vault, domain, task_id, kind, file, salt) {
-        Ok((messages, chats, contexts)) => {
-            report.contexts = contexts;
+        Ok((messages, chats)) => {
             report.files_ingested = 1;
             report.messages_recorded = messages;
             report.chats_recorded = chats;
@@ -359,11 +349,7 @@ pub fn watch_exports_once_in_domain(
         let open = vault.as_mut().expect("opened above");
         let kind = ExportKind::of(&path).expect("filtered above");
         match ingest(open, domain, task_id, kind, &path, salt) {
-            Ok((messages, chats, contexts)) => {
-                report.contexts.extend(contexts);
-                if report.contexts.len() > 64 {
-                    report.contexts.drain(..report.contexts.len() - 64);
-                }
+            Ok((messages, chats)) => {
                 report.files_ingested += 1;
                 report.messages_recorded += messages;
                 report.chats_recorded += chats;
@@ -389,7 +375,14 @@ pub fn watch_exports_once_in_domain(
     Ok(report)
 }
 
+/// The journal key of an export recorded into `domain`. The owner's personal domain keeps
+/// the plain content id it has always had, so journals written before domains existed stay
+/// valid; any other domain is keyed by its path too, so the same file can be recorded once
+/// per domain without one hiding the other.
 fn scoped_content_id(domain: &ContextDomain, bytes: &[u8]) -> String {
+    if ContextDomain::personal("owner").is_ok_and(|owner| &owner == domain) {
+        return content_id(bytes);
+    }
     let mut material = domain.path().as_bytes().to_vec();
     material.push(0);
     material.extend_from_slice(bytes);
@@ -399,6 +392,15 @@ fn scoped_content_id(domain: &ContextDomain, bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn journals_from_before_domains_still_recognise_their_exports() {
+        let owner = ContextDomain::personal("owner").unwrap();
+        let work = ContextDomain::work("studio", "building").unwrap();
+        let bytes = b"[10/10/2026, 14:32:01] Ana: hola\n";
+        assert_eq!(scoped_content_id(&owner, bytes), content_id(bytes));
+        assert_ne!(scoped_content_id(&work, bytes), content_id(bytes));
+    }
 
     /// Every export in these tests is a fixture written for the test: fixture
     /// names, a fixture phone number, fixture text. No real chat took part.

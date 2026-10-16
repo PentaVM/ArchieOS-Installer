@@ -4,6 +4,7 @@
 #![forbid(unsafe_code)]
 
 pub mod advice;
+pub mod chat;
 pub mod client;
 pub mod config;
 pub mod graph;
@@ -41,3 +42,9 @@ pub enum WandaError {
 pub const MAX_REQUEST_BYTES: usize = 256 * 1024;
 pub const MAX_BATCH: usize = 32;
 pub const MAX_CONTEXT: usize = 64;
+/// How long a recommendation may stand, and so how long the evidence it cites is kept.
+pub const ADVICE_HORIZON_MS: i64 = 24 * 3_600_000;
+/// The share of one query's context the person graph may take.
+pub const GRAPH_CONTEXT_BYTES: usize = 16 * 1024;
+/// One query's whole context: question, graph and events.
+pub const QUERY_CONTEXT_BYTES: usize = 32 * 1024;

@@ -1,15 +1,24 @@
 # Wanda: personas, contexto y propuestas
 
-Wanda usa el `PersonGraph` C++ existente. `archie-sentry export-json --all`
-proyecta sus perfiles, etiquetas, relaciones declaradas e hipótesis. La proyección
-no convierte una hipótesis en relación ni establece consentimiento. Las escrituras
-del CLI mantienen un lock del sistema durante carga, modificación y guardado.
+Wanda usa el `PersonGraph` C++ existente. `archie-sentry export-json` (nunca con
+`--all`) proyecta sus perfiles, etiquetas, relaciones declaradas e hipótesis; los rasgos
+sensibles y sus notas salen redactados, para la vista y para el modelo. Las etiquetas
+(`wanda.tag`) van sólo en `tags`. La proyección no convierte una hipótesis en relación
+ni establece consentimiento. Las escrituras del CLI mantienen un lock del sistema
+durante carga, modificación y guardado; las lecturas (`show`, `check`, `person`,
+`mutual`, `path`, `export-json`) no lo toman, porque cada guardado es un rename
+atómico: un lector con acceso de sólo lectura funciona y no espera a un escritor.
 
 `archie-wanda` conecta esa autoridad con Vault, `PillarContext`, Cerebra y el runtime
 de modelos existente. No mantiene una segunda base de personas ni otro Cortex.
 Los mensajes completos quedan cifrados como `Restricted`, con caducidad configurable
 de 1–720 horas (168 por defecto). Cada dispositivo tiene un token, fuente y dominio
-fijos; sólo la configuración local puede asignar un chat a un proyecto laboral.
+fijos; sólo la configuración local puede asignar un chat a un proyecto laboral, y sólo
+por su JID (`<número>@s.whatsapp.net`, `<id>@g.us`, `<id>@lid`; `@c.us` equivale a
+`@s.whatsapp.net`). El título de un chat no es único y cualquier miembro de un grupo
+puede cambiarlo, así que los colectores lo envían como `title:<nombre>` y nunca enruta:
+ese evento se queda en el dominio de su fuente. Un reenvío del mismo mensaje no lo
+reescribe ni lo vuelve "nuevo"; sólo actualiza la última vez que se vio la fuente.
 Los productores no pueden enviar rutas, elegir un dominio ni declarar permisos.
 
 ## Ejecutar
@@ -40,7 +49,7 @@ source = "whatsapp_visible_dom"
 token_file = "/var/lib/archie/secrets/wanda-browser.token"
 allow_presumed_owner = true
 [sources.chat_domains]
-"EXPLICIT_WORK_CHAT_ID" = "work/studio/house"
+"120363042000000001@g.us" = "work/studio/house"
 ```
 
 Usar rutas sin `..` después de resolver la ubicación del archivo; la validación
@@ -94,7 +103,12 @@ El modo `--proactive` comprueba contexto cada 30 s. Agrupa cambios mediante refe
 y fecha de modificación del grafo; repeticiones no disparan otra inferencia. Mantiene
 una única inferencia en vuelo, sin cola ilimitada. Una consulta mientras está ocupado
 recibe 503. Los resultados se conservan en memoria del servicio; reiniciarlo no elimina
-evidencias, pero requiere recalcular las propuestas. `pending_events` es una cota del
+evidencias, pero requiere recalcular las propuestas. Una consulta que no produce
+propuestas (modelo caído, salida inválida) no borra las últimas válidas, y el ciclo
+proactivo reintenta esa misma evidencia con espera creciente (1 min, 2, 4… hasta 1 h).
+El grafo que ve el modelo es el dueño y las personas más cercanas, recortado de una en
+una hasta caber en 16 KiB; la instantánea citada vive tanto como puede vivir una
+propuesta (24 h). Todo el trabajo con el Vault corre fuera de los hilos del runtime. `pending_events` es una cota del
 lote reciente pendiente, no el número total de mensajes históricos.
 
 `deep` exige el piso de calidad configurado en el router existente, no un tamaño de

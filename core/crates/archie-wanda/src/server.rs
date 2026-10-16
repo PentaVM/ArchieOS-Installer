@@ -16,61 +16,145 @@ use axum::{
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::{RwLock, Semaphore};
 
+/// The first retry of evidence the model could not turn into advice, and the longest wait.
+const RETRY_BASE_MS: i64 = 60_000;
+const RETRY_CAP_MS: i64 = 3_600_000;
+const REFRESH_QUESTION: &str = "Revisa las evidencias recientes. Propón detalles, respuestas y compromisos útiles; distingue lo observado de las hipótesis y ofrece alternativas. No inventes ofertas o intenciones.";
+
+/// A generation the model failed on, and when it may be tried again.
+struct Attempt {
+    generation: String,
+    failures: u32,
+    retry_at_ms: i64,
+}
+
 pub struct Service {
     store: WandaStore,
+    /// The last advice that was produced, per domain. A later failure never replaces it;
+    /// the view drops each recommendation on its own once it or its evidence expires.
     last: RwLock<BTreeMap<ContextDomain, QueryResponse>>,
     processed: RwLock<BTreeMap<ContextDomain, String>>,
+    failed: RwLock<BTreeMap<ContextDomain, Attempt>>,
     inference: Semaphore,
 }
+
+/// What a domain's evidence is, for deciding whether it was already reasoned over. Full
+/// bodies never enter the ledger. Reposts do not trigger another inference; new event IDs
+/// or authoritative graph writes do. Reads the filesystem: call from blocking work.
+fn generation(
+    store: &WandaStore,
+    domain: &ContextDomain,
+    events: &[crate::types::StoredEvent],
+) -> String {
+    let mut refs = events
+        .iter()
+        .map(|e| e.evidence_ref.to_string())
+        .collect::<Vec<_>>();
+    refs.sort();
+    let modified = store
+        .config()
+        .domains
+        .iter()
+        .find(|b| &b.domain == domain)
+        .and_then(|b| std::fs::metadata(&b.graph_path).ok())
+        .and_then(|m| m.modified().ok());
+    format!("{refs:?}:{modified:?}")
+}
+
 impl Service {
     pub fn new(store: WandaStore) -> Arc<Self> {
         Arc::new(Self {
             store,
             last: RwLock::new(BTreeMap::new()),
             processed: RwLock::new(BTreeMap::new()),
+            failed: RwLock::new(BTreeMap::new()),
             inference: Semaphore::new(1),
         })
     }
-    fn generation(&self, domain: &ContextDomain, events: &[crate::types::StoredEvent]) -> String {
-        // Full bodies never enter the generation ledger. Reposts do not trigger
-        // another inference; new event IDs or authoritative graph writes do.
-        let mut refs = events
-            .iter()
-            .map(|e| e.evidence_ref.to_string())
-            .collect::<Vec<_>>();
-        refs.sort();
-        let modified = self
-            .store
-            .config()
-            .domains
-            .iter()
-            .find(|b| &b.domain == domain)
-            .and_then(|b| std::fs::metadata(&b.graph_path).ok())
-            .and_then(|m| m.modified().ok());
-        format!("{refs:?}:{modified:?}")
+    /// The domain's newest events and their generation.
+    async fn current(
+        &self,
+        domain: &ContextDomain,
+        now: i64,
+    ) -> Result<(usize, String), WandaError> {
+        let domain = domain.clone();
+        self.store
+            .blocking(move |store| {
+                let events = store.events(&domain, 64, now)?;
+                Ok((events.len(), generation(store, &domain, &events)))
+            })
+            .await
+    }
+    /// Records how a query over `generation` went. Advice that came back replaces the
+    /// last advice; anything else leaves it and backs the generation off, doubling from
+    /// a minute to an hour, so a model that is down is not asked again every tick.
+    async fn settle(
+        &self,
+        domain: &ContextDomain,
+        generation: String,
+        result: Option<&QueryResponse>,
+        now: i64,
+    ) {
+        match result {
+            Some(result) if result.state == "ready" => {
+                self.failed.write().await.remove(domain);
+                self.processed
+                    .write()
+                    .await
+                    .insert(domain.clone(), generation);
+                self.last
+                    .write()
+                    .await
+                    .insert(domain.clone(), result.clone());
+            }
+            _ => {
+                let mut failed = self.failed.write().await;
+                let failures = failed
+                    .get(domain)
+                    .filter(|a| a.generation == generation)
+                    .map_or(1, |a| a.failures.saturating_add(1));
+                let wait = RETRY_BASE_MS
+                    .saturating_mul(1i64 << failures.saturating_sub(1).min(10))
+                    .min(RETRY_CAP_MS);
+                failed.insert(
+                    domain.clone(),
+                    Attempt {
+                        generation,
+                        failures,
+                        retry_at_ms: now.saturating_add(wait),
+                    },
+                );
+            }
+        }
     }
     /// Coalesced caller-owned timer, not a separate cognitive engine. An unavailable
-    /// model keeps evidence pending. One inference may run; there is no request queue.
+    /// model keeps evidence pending and is retried with backoff. One inference may run;
+    /// there is no request queue.
     pub async fn refresh(&self) {
         for domain in self.store.domains() {
             let Ok(_permit) = self.inference.try_acquire() else {
                 return;
             };
             let now = now_ms();
-            let Ok(events) = self.store.events(&domain, 64, now) else {
+            let Ok((count, generation)) = self.current(&domain, now).await else {
                 continue;
             };
-            if events.is_empty() {
+            if count == 0 || self.processed.read().await.get(&domain) == Some(&generation) {
                 continue;
             }
-            let generation = self.generation(&domain, &events);
-            if self.processed.read().await.get(&domain) == Some(&generation) {
+            if self
+                .failed
+                .read()
+                .await
+                .get(&domain)
+                .is_some_and(|a| a.generation == generation && now < a.retry_at_ms)
+            {
                 continue;
             }
-            if let Ok(result)=crate::runtime::query(&self.store,&domain,"Revisa las evidencias recientes. Propón detalles, respuestas y compromisos útiles; distingue lo observado de las hipótesis y ofrece alternativas. No inventes ofertas o intenciones.",false,now).await {
-                if result.state=="ready" {self.processed.write().await.insert(domain.clone(),generation);}
-                self.last.write().await.insert(domain,result);
-            }
+            let result =
+                crate::runtime::query(&self.store, &domain, REFRESH_QUESTION, false, now).await;
+            self.settle(&domain, generation, result.as_ref().ok(), now)
+                .await;
         }
     }
 }
@@ -197,28 +281,20 @@ async fn query(
         .inference
         .try_acquire()
         .map_err(|_| WandaError::Busy)?;
-    let events = service.store.events(&request.domain, 64, now_ms())?;
-    let generation = service.generation(&request.domain, &events);
+    let now = now_ms();
+    let (_, generation) = service.current(&request.domain, now).await?;
     let result = crate::runtime::query(
         &service.store,
         &request.domain,
         &request.question,
         request.deep,
-        now_ms(),
+        now,
     )
-    .await?;
-    if result.state == "ready" {
-        service
-            .processed
-            .write()
-            .await
-            .insert(request.domain.clone(), generation);
-    }
+    .await;
     service
-        .last
-        .write()
-        .await
-        .insert(request.domain, result.clone());
+        .settle(&request.domain, generation, result.as_ref().ok(), now)
+        .await;
+    let result = result?;
     Ok(Json(result))
 }
 #[derive(serde::Deserialize)]
@@ -237,14 +313,23 @@ async fn view(
     let graph = crate::graph::project(service.store.config(), &request.domain)
         .await
         .ok();
-    let sources = service.store.sources(&request.domain, now)?;
-    let events = service.store.events(&request.domain, 64, now)?;
-    let generation = service.generation(&request.domain, &events);
+    let domain = request.domain.clone();
+    let (sources, count, generation, entries) = service
+        .store
+        .blocking(move |store| {
+            let sources = store.sources(&domain, now)?;
+            let events = store.events(&domain, 64, now)?;
+            let generation = generation(store, &domain, &events);
+            let vault = archie_cerebra::vault_io::open_vault(&store.vault_path())
+                .map_err(|_| WandaError::Storage)?;
+            Ok((sources, events.len(), generation, vault.sealed_entries()))
+        })
+        .await?;
     let pending_events = if service.processed.read().await.get(&request.domain) == Some(&generation)
     {
         0
     } else {
-        events.len()
+        count
     };
     let mut recommendations = service
         .last
@@ -254,9 +339,6 @@ async fn view(
         .map(|r| r.recommendations.clone())
         .unwrap_or_default();
     // A cited source must still exist in this scope and remain within retention.
-    let dir = service.store.vault_path();
-    let vault = archie_cerebra::vault_io::open_vault(&dir).map_err(|_| WandaError::Storage)?;
-    let entries = vault.sealed_entries();
     recommendations.retain(|r| {
         r.expires_at_ms > now
             && r.evidence_refs.iter().all(|s| {

@@ -12,13 +12,25 @@
     const box = element.getBoundingClientRect();
     return box.width > 0 && box.height > 0 && box.bottom > 0 && box.right > 0 && box.top < view.innerHeight && box.left < view.innerWidth;
   }
+  // A rendered message's data-id is `<fromMe>_<chat JID>_<message id>[_<participant>]`.
+  // The JID is the chat's stable address; the header title is a display name that is not
+  // unique and that any group member can change, so it is sent only as `title:<name>`,
+  // which the server never routes to another domain.
+  const JID = /^(?:true|false)_([0-9-]+(?::[0-9]+)?@(?:c\.us|g\.us|s\.whatsapp\.net|lid))_/u;
+  function conversationOf(main) {
+    for (const node of main.querySelectorAll('[data-id]')) {
+      const jid = node.getAttribute('data-id')?.match(JID)?.[1];
+      if (jid) return jid;
+    }
+    const title = main.querySelector('header span[title]')?.getAttribute('title')?.trim();
+    return title ? `title:${title}` : null;
+  }
   function visibleMessages(document) {
     const view = document.defaultView;
     if (!view || document.visibilityState !== 'visible') return [];
     const main = document.querySelector('#main');
     if (!main) return [];
-    const chat = main.querySelector('header span[title]');
-    const chatId = chat?.getAttribute('title')?.trim();
+    const chatId = conversationOf(main);
     if (!bounded(chatId)) return [];
     const result = [];
     for (const bubble of main.querySelectorAll('.message-in, .message-out')) {
@@ -68,7 +80,7 @@
       return result;
     }
   }
-  root.WandaContent = { visibleMessages, Collector };
+  root.WandaContent = { visibleMessages, conversationOf, Collector };
   if (typeof chrome === 'undefined' || !chrome.runtime?.id || location.origin !== 'https://web.whatsapp.com') return;
   const collector = new Collector();
   let busy = false, rerun = false, timer;

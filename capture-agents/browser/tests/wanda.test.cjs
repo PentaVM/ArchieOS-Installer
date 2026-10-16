@@ -16,8 +16,8 @@ test('visible WhatsApp collector preserves group sender, direction and excludes 
     await page.route('https://wanda-fixture.test/**', route => route.fulfill({ contentType: 'text/html', body: '<html></html>' }));
     await page.goto('https://wanda-fixture.test/');
     await page.setContent(`<div id="main"><header><button title="Open profile">Profile</button><span title="Family">Family</span></header>
-      <div class="message-in" data-id="false_group_1"><div data-pre-plain-text="[10:30, 12/10/2026] Ana: "><span class="selectable-text">Meet tomorrow</span></div></div>
-      <div class="message-out" data-id="true_group_2"><div data-pre-plain-text="[10:31, 12/10/2026] Me: "><span class="selectable-text">I can come</span></div></div>
+      <div class="message-in" data-id="false_120363042000000001@g.us_3EB0A1_34600000001@c.us"><div data-pre-plain-text="[10:30, 12/10/2026] Ana: "><span class="selectable-text">Meet tomorrow</span></div></div>
+      <div class="message-out" data-id="true_120363042000000001@g.us_3EB0A2"><div data-pre-plain-text="[10:31, 12/10/2026] Me: "><span class="selectable-text">I can come</span></div></div>
       <div class="message-in" style="display:none" data-id="hidden"><span class="selectable-text">Hidden private text</span></div>
       <div class="message-in" data-id="draft"><div contenteditable="true"><span class="selectable-text">Unsent draft</span></div></div>
       <div class="message-in" style="position:absolute;top:9999px" data-id="offscreen"><span class="selectable-text">Offscreen</span></div>
@@ -26,10 +26,16 @@ test('visible WhatsApp collector preserves group sender, direction and excludes 
     const result = await page.evaluate(() => WandaContent.visibleMessages(document));
     assert.equal(result.length, 2);
     assert.deepEqual(result.map(m => [m.chat_id, m.sender, m.author, m.text]), [
-      ['Family', 'Ana', 'counterparty', 'Meet tomorrow'], ['Family', 'Me', 'owner', 'I can come']
+      ['120363042000000001@g.us', 'Ana', 'counterparty', 'Meet tomorrow'], ['120363042000000001@g.us', 'Me', 'owner', 'I can come']
     ]);
+    // Without a rendered address the title is sent as a label, which never routes.
+    assert.equal(await page.evaluate(() => {
+      const main = document.createElement('div');
+      main.innerHTML = '<header><span title="Trabajo">Trabajo</span></header><div data-id="false_group_1"></div>';
+      return WandaContent.conversationOf(main);
+    }), 'title:Trabajo');
     assert.equal(result[0].sent_at_ms, null, 'locale DOM time must not be guessed as epoch');
-    assert.equal(result[0].source_message_id, 'false_group_1');
+    assert.equal(result[0].source_message_id, 'false_120363042000000001@g.us_3EB0A1_34600000001@c.us');
     const gates = await page.evaluate(async () => {
       const rows = WandaContent.visibleMessages(document);
       const collector = new WandaContent.Collector();

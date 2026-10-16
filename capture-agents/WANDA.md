@@ -75,7 +75,10 @@ flush. It checks permission before extracting notification text. Its queue
 flushes every two seconds, with four-second connect/read timeouts.
 
 `NotificationCompat.MessagingStyle` yields individual senders, text and source
-message timestamps. Conversation title stays separate from the sender. Summary
+message timestamps. Conversation title stays separate from the sender. The chat
+id is the conversation shortcut when it is a WhatsApp JID; otherwise it is sent as
+`title:<name>`, which the server never routes to another domain. The browser takes
+the JID from a rendered message's `data-id` the same way. Summary
 notifications are skipped. Reposts deduplicate by source/chat/sender/time/content.
 If MessagingStyle is absent, big-text/text extras provide an incoming preview
 with unknown send time. Empty/redacted text is not evidence. Coverage is

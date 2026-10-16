@@ -16,8 +16,7 @@ object WandaNotification {
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim().orEmpty()
         val style = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(notification)
         if (style != null) {
-            val chat = style.conversationTitle?.toString()?.trim()?.takeIf { it.isNotEmpty() }
-                ?: notification.shortcutId?.takeIf { it.isNotEmpty() } ?: title.ifEmpty { sbn.key }
+            val chat = chatId(notification.shortcutId, style.conversationTitle?.toString() ?: title, sbn.key)
             val messages = style.messages.takeLast(256).map { message ->
                 val person = message.person
                 WandaNotificationMessage(person?.name?.toString()?.trim()?.takeIf { it.isNotEmpty() }
@@ -29,9 +28,23 @@ object WandaNotification {
         // A post time is an observation time, not a missing message's invented send time.
         val text = (extras.getCharSequence(Notification.EXTRA_BIG_TEXT)
             ?: extras.getCharSequence(Notification.EXTRA_TEXT))?.toString().orEmpty()
-        return WandaNotificationSnapshot(sbn.key, notification.shortcutId?.takeIf { it.isNotEmpty() }
-            ?: title.ifEmpty { sbn.key }, listOf(WandaNotificationMessage(title.ifEmpty { "unknown" }, text, null)))
+        return WandaNotificationSnapshot(sbn.key, chatId(notification.shortcutId, title, sbn.key),
+            listOf(WandaNotificationMessage(title.ifEmpty { "unknown" }, text, null)))
     }
+
+    /**
+     * WhatsApp's conversation shortcut is the chat's JID, its stable address. A title is a
+     * display name anyone in a group can change, so it is sent only as `title:<name>`, which
+     * the server never routes to another domain.
+     */
+    fun chatId(shortcutId: String?, title: String?, fallback: String): String {
+        val shortcut = shortcutId?.trim().orEmpty()
+        if (JID.matches(shortcut)) return shortcut
+        val name = title?.trim().orEmpty()
+        return if (name.isNotEmpty()) "title:$name" else "title:$fallback"
+    }
+
+    private val JID = Regex("^[0-9-]+(:[0-9]+)?@(s\\.whatsapp\\.net|c\\.us|g\\.us|lid)$")
 }
 
 class WandaCollector(private val deviceId: String) {

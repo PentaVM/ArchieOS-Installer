@@ -17,8 +17,10 @@ pub async fn project(
     }
     // Only the trusted config selects paths. The existing CLI loads, validates
     // and projects the graph; Wanda never implements an alternative TSV parser.
+    // Never `--all`: sensitive values and their notes stay redacted for the view and
+    // the model alike, as the projection promises.
     let mut child = tokio::process::Command::new(&config.graph_binary)
-        .args(["export-json", "--all"])
+        .arg("export-json")
         .env("ARCHIE_SENTRY_GRAPH", &binding.graph_path)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

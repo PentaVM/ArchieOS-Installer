@@ -29,6 +29,7 @@
 #include <fstream>
 #include <cstdlib>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -282,9 +283,19 @@ int main(int argc, char** argv) {
         std::filesystem::create_directories(store.path().parent_path(), ec);
         if (ec) { return fail("graph directory could not be created", kStoreProblem); }
     }
-    auto transaction = GraphTransaction::acquire(store.path());
-    if (!transaction) {
-        return fail(describe(transaction.error()), kStoreProblem);
+    // Writers hold the transaction across load -> edit -> save. Readers do not take it:
+    // every save is an atomic rename, so a reader sees one whole graph or the next, and
+    // a reader with read-only access to the graph directory (the Wanda service) must not
+    // need to create or lock anything there, nor queue behind a writer.
+    static constexpr std::array<std::string_view, 6> kReadOnly{
+        "show", "check", "person", "mutual", "path", "export-json"};
+    std::optional<GraphTransaction> transaction;
+    if (std::ranges::find(kReadOnly, command) == kReadOnly.end()) {
+        auto acquired = GraphTransaction::acquire(store.path());
+        if (!acquired) {
+            return fail(describe(acquired.error()), kStoreProblem);
+        }
+        transaction.emplace(std::move(*acquired));
     }
 
     if (command == "init") {

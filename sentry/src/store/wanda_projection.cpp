@@ -168,8 +168,10 @@ std::expected<std::string, ProjectionError> project_wanda_json(const PersonGraph
                 if (!first_trait) { out.raw(","); } first_trait = false;
                 trait_json(out, trait, reveal);
             }
+            // Tags are written once, in `tags`; `traits` holds everything else.
             out.raw("],\"traits\":["); first_trait = true;
             for (const auto& trait : profile.traits) {
+                if (trait.key == "wanda.tag") { continue; }
                 if (!first_trait) { out.raw(","); } first_trait = false;
                 trait_json(out, trait, reveal);
             }

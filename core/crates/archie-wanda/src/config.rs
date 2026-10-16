@@ -171,10 +171,9 @@ impl WandaConfig {
                         || !s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
                 })
                 || source.chat_domains.len() > 1024
-                || source
-                    .chat_domains
-                    .iter()
-                    .any(|(chat, domain)| !bounded_id(chat) || !domains.contains(domain))
+                || source.chat_domains.iter().any(|(chat, domain)| {
+                    crate::chat::routing_key(chat).is_none() || !domains.contains(domain)
+                })
             {
                 return Err(invalid());
             }
