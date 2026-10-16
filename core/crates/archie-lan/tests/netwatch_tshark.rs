@@ -1,6 +1,6 @@
 //! archie-netwatch reading a real capture through a real TShark: the field names it asks
-//! for exist, and a rogue DHCP server, a rogue IPv6 router and a DHCP starvation flood are
-//! told, with what the devices said of themselves kept for them.
+//! for exist, and a rogue DHCP server, a rogue IPv6 router, a DHCP starvation flood and a
+//! switch table flood are told, with what the devices said of themselves kept for them.
 //!
 //! ```text
 //! cargo test -p archie-lan --test netwatch_tshark -- --ignored
@@ -49,7 +49,8 @@ fn a_rogue_dhcp_server_and_a_rogue_router_are_told_from_a_real_capture() {
         [
             "rogue-dhcp-server",
             "rogue-router-advertisement",
-            "dhcp-starvation"
+            "dhcp-starvation",
+            "mac-flood"
         ]
     );
     let starvation = report["alerts"]
@@ -59,6 +60,8 @@ fn a_rogue_dhcp_server_and_a_rogue_router_are_told_from_a_real_capture() {
         .find(|a| a["rule"] == "dhcp-starvation")
         .unwrap();
     assert_eq!(starvation["device"], "02:00:5e:dd:ee:ff");
+    // The flood's made-up addresses are not kept as devices.
+    assert!(report["profiles"].as_array().unwrap().len() < 10);
     let windows = report["profiles"]
         .as_array()
         .unwrap()

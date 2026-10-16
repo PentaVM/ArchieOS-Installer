@@ -25,6 +25,7 @@ with only the broadcast view, and says more with a mirror.
 | Names a device gives | DHCP host name, LLDP system name, NetBIOS name, HTTP User-Agent | — |
 | `rogue-dhcp-server` | a second DHCP server answering after the learning window | — |
 | `rogue-router-advertisement` | an IPv6 RA from a host that is not the router | — |
+| `mac-flood` | 20+ unknown hardware addresses sending in a minute; the flood is kept out of the inventory | — |
 | `dhcp-starvation` | 30+ unknown DHCP clients in a minute, by the DHCP client address (`chaddr`) | — |
 | `beacon-suspect` and `beacons` | a clock-like rhythm of connections to one outside destination, scored as RITA does; told only for a destination taken up after the device was learned | — (method reimplemented) |
 
@@ -116,9 +117,31 @@ its basis.
   own CPU 0.31–0.34 s before and 0.36–0.38 s after (2 runs each; about 1 µs per
   discover). The 300,000-SYN capture is unchanged (2.46–2.50 s vs 2.46–2.58 s). The window
   keeps at most 4,096 messages.
-- **Next.** The same flood shape with source addresses instead of DHCP (`macof`, filling a
-  switch's address table) would make one `new-device` alert per made-up address up to the
-  4,096-device cap; it should become one alert for the flood.
+- **Next.** The same flood shape with source addresses instead of DHCP (`macof`): done in
+  the next round.
+
+### 2026-10-16: switch table (MAC) flood
+
+- **Compared.** Switches defend with port security (a cap on hardware addresses per port)
+  and alarm on their own table filling up, which a home switch rarely reports. arpwatch
+  reports each new station ("new station" mails), which is exactly the storm this replaces;
+  Zeek and Suricata have no stock detection for it.
+- **Chosen.** The same sliding minute as `dhcp-starvation`, now one `Burst` type for both:
+  distinct hardware addresses not known as devices, from every frame, before any IP
+  filter (macof's made-up IP addresses are mostly outside the LAN, so the IP-based device
+  path never saw them). Nothing counts during the first minute or the learning time, when
+  every device is new. During a flood unknown addresses are not made devices.
+- **Before this.** A macof capture of 100,000 frames, read after a minute of quiet, gave
+  399 `new-device` alerts and 399 made-up devices in the state (the 0.4 % of its random IP
+  addresses that fall in private ranges); with a longer flood, up to the 4,096-device cap,
+  after which real newcomers are not recorded.
+- **Tested.** Unit test: 40 devices arriving in the first minute are quiet; two guests'
+  devices later are two `new-device` alerts; a thousand made-up senders in a second are one
+  `mac-flood`, fewer than 20 `new-device`, and known devices are still updated. TShark end
+  to end: the fixture now ends with 60 macof-style frames, told as `mac-flood`.
+- **Measured.** The same 100,000-frame capture: 400 alerts and 399 devices before, 3 alerts
+  (one `mac-flood`) and 1 device after; own CPU 0.63–0.64 s before, 0.66–0.67 s after. The
+  300,000-SYN capture: 2.52–2.59 s before, 2.32–2.54 s after (noise).
 
 ## How a tool is accepted
 

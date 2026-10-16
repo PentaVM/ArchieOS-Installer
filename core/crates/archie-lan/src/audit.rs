@@ -18,6 +18,7 @@
 //! | `traffic-surge` | a device that has been learned for a day sends far more in ten minutes than it usually does |
 //! | `rogue-dhcp-server` | a second device answers DHCP (an offer or acknowledgement) when another already does: it can hand out its own router and DNS |
 //! | `beacon-suspect` | a device learned for a day starts calling a new outside destination on a clock (a regular interval, scored as RITA does), the way malware checks in with its controller |
+//! | `mac-flood` | 20 or more hardware addresses not known as devices send within a minute, after the first minute: a tool filling the switch's address table so it repeats everyone's traffic to every port. While it lasts, unknown addresses are not kept as devices |
 //! | `dhcp-starvation` | 30 or more hardware addresses not known as devices ask DHCP for an address within a minute: a tool exhausting the router's pool, so that a rogue server can answer instead |
 //! | `rogue-router-advertisement` | a device not seen before offers itself as an IPv6 router on the link, or one other than the known router does |
 //!
@@ -72,6 +73,8 @@ const BEACON_TOLD_SCORE: u8 = 85;
 /// Device and destination pairs whose contacts are kept (33 times each).
 const MAX_CONTACTED: usize = 4_096;
 const DAY_MS: u64 = 24 * 60 * 60 * 1000;
+/// Unknown hardware addresses sending within the window that make a flood.
+const FLOOD_SENDERS: usize = 20;
 /// Unknown DHCP clients within the window that make a starvation attack.
 const STARVATION_CLIENTS: usize = 30;
 const STARVATION_WINDOW_MS: u64 = 60 * 1000;
@@ -549,19 +552,22 @@ pub struct Audit {
     /// When `contacts` was last pruned, so a full map is not swept on every frame.
     pruned_ms: u64,
     /// DHCP clients asking for an address in the last minute, for `dhcp-starvation`.
-    asking: Asking,
+    asking: Burst,
+    /// Hardware addresses not known as devices that sent in the last minute, for
+    /// `mac-flood`.
+    arriving: Burst,
 }
 
-/// DHCP discovers and requests of the last minute: when, for which client hardware
-/// address, from which Ethernet sender; with the count per client, so a flood costs
-/// constant work per frame.
+/// What happened in the last minute, by key (a DHCP client's hardware address, or a
+/// sender's), with the Ethernet sender that carried it; with the count per key, so a flood
+/// costs constant work per frame.
 #[derive(Debug, Default)]
-struct Asking {
+struct Burst {
     recent: VecDeque<(u64, String, String)>,
     per_client: HashMap<String, u32>,
 }
 
-impl Asking {
+impl Burst {
     fn add(&mut self, at_ms: u64, client: String, sender: String) {
         while self.recent.len() >= MAX_ASKING
             || self
@@ -673,7 +679,8 @@ impl Audit {
             pending: HashMap::new(),
             contacts: HashMap::new(),
             pruned_ms: 0,
-            asking: Asking::default(),
+            asking: Burst::default(),
+            arriving: Burst::default(),
         }
     }
 
@@ -725,8 +732,17 @@ impl Audit {
                 }
             }
         }
+        let flooding = packet
+            .source_mac
+            .as_deref()
+            .is_some_and(|mac| self.arrived(&mut alerts, packet.at_ms, mac));
         if matches!(packet.dhcp_message, Some(1 | 3)) {
             self.asked_dhcp(&mut alerts, packet);
+        }
+        // During a flood an unknown address is not made a device: thousands of made-up
+        // ones would fill the inventory and keep real newcomers out.
+        if flooding {
+            return alerts;
         }
         // A frame from outside the LAN was put on the wire by the router: its hardware
         // address is the router's, and the traffic is not the router's own.
@@ -968,6 +984,40 @@ impl Audit {
                 ),
             );
         }
+    }
+
+    /// A frame from `mac`. Many hardware addresses never seen before, within a minute, are a
+    /// tool flooding the switch's address table (`macof`): a switch whose table is full
+    /// sends every frame to every port, where anyone can read it. Returns whether `mac` is
+    /// unknown while that goes on.
+    fn arrived(&mut self, alerts: &mut Vec<Alert>, at_ms: u64, mac: &str) -> bool {
+        // The first minute (or the learning time) everything is new.
+        let warming = self.settings.learn_ms.max(STARVATION_WINDOW_MS);
+        if self.state.devices.contains_key(mac)
+            || at_ms.saturating_sub(self.state.started_ms) < warming
+        {
+            return false;
+        }
+        self.arriving.add(at_ms, mac.to_string(), mac.to_string());
+        let senders = self.arriving.per_client.len();
+        if senders < FLOOD_SENDERS {
+            return false;
+        }
+        if self.told.cooled("mac-flood", at_ms, SURGE_COOLDOWN_MS) {
+            alerts.push(Alert {
+                at_ms,
+                severity: Severity::High,
+                rule: "mac-flood".into(),
+                device: mac.into(),
+                detail: format!(
+                    "{senders} hardware addresses never seen before sent frames within a \
+                     minute, {mac} among them. Flooding a switch's address table makes it \
+                     send everyone's traffic to every port; while it lasts, new addresses \
+                     are not kept as devices"
+                ),
+            });
+        }
+        true
     }
 
     /// A DHCP discover or request. Many clients the network does not know, asking within a
@@ -1456,6 +1506,56 @@ mod tests {
             .flat_map(|i| audit.see(&sent(later + i * 1_000, 1_000_000)))
             .collect();
         assert_eq!(rules(&again), ["traffic-surge"]);
+    }
+
+    #[test]
+    fn a_flood_of_made_up_hardware_addresses_is_one_alert_and_kept_out() {
+        let mut audit = Audit::new(
+            State::default(),
+            Settings {
+                learn_ms: 0,
+                gateway: None,
+                gateway_v6: None,
+            },
+        );
+        let made_up = |i: u64| format!("0a:00:00:00:{:02x}:{:02x}", i / 256, i % 256);
+        // The first minute everything is new: a busy network's devices arriving is quiet.
+        let arriving: Vec<Alert> = (0..40)
+            .flat_map(|i| audit.see(&from(&made_up(i), "192.168.1.20", 1 + i * 1_000)))
+            .filter(|a| a.rule == "mac-flood")
+            .collect();
+        assert!(arriving.is_empty());
+        assert_eq!(audit.state.devices.len(), 40);
+        // Afterwards a guest's phone and laptop are two new devices, not a flood.
+        let guests: Vec<Alert> = (0..2)
+            .flat_map(|i| audit.see(&from(&made_up(500 + i), "192.168.1.30", 120_000 + i)))
+            .collect();
+        assert_eq!(rules(&guests), ["new-device", "new-device"]);
+        // macof: a thousand made-up senders in a second, most from outside addresses.
+        let flood: Vec<Alert> = (1_000..2_000)
+            .flat_map(|i| {
+                let source = if i % 10 == 0 {
+                    "192.168.1.77"
+                } else {
+                    "45.3.2.1"
+                };
+                audit.see(&from(&made_up(i), source, 300_000 + i))
+            })
+            .collect();
+        let told = rules(&flood);
+        assert_eq!(
+            told.iter().filter(|r| **r == "mac-flood").count(),
+            1,
+            "{told:?}"
+        );
+        assert!(
+            told.iter().filter(|r| **r == "new-device").count() < FLOOD_SENDERS,
+            "{told:?}"
+        );
+        assert!(audit.state.devices.len() < 42 + FLOOD_SENDERS);
+        // Known devices go on being seen during it.
+        audit.see(&from(&made_up(3), "192.168.1.20", 300_500));
+        assert_eq!(audit.state.devices[&made_up(3)].last_seen_ms, 300_500);
     }
 
     #[test]

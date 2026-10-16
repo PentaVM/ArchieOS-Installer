@@ -1,6 +1,7 @@
 # Writes rogue-dhcp-and-ra.pcap (scapy): a Windows client, the router, an LLDP switch, a
 # second device that answers DHCP and advertises itself as an IPv6 router, and then a DHCP
-# starvation flood (one sender, 40 client addresses). Nothing is sent.
+# starvation flood (one sender, 40 client addresses), then a macof-style flood of 60
+# made-up hardware addresses. Nothing is sent.
 #   python3 -I make_rogue_pcap.py rogue-dhcp-and-ra.pcap
 import sys
 from scapy.all import Ether, IP, UDP, TCP, BOOTP, DHCP, IPv6, ICMPv6ND_RA, ICMPv6NDOptSrcLLAddr, Raw, wrpcap, ARP, load_layer, load_contrib
@@ -52,4 +53,10 @@ for i in range(40):
     chaddr = bytes.fromhex("0200%08x" % (0xc0de0000 + i))
     at(Ether(src=starver, dst="ff:ff:ff:ff:ff:ff")/IP(src="0.0.0.0", dst="255.255.255.255")/UDP(sport=68, dport=67)/
        BOOTP(chaddr=chaddr, xid=i)/DHCP(options=[("message-type","discover"),"end"]), 130 + i * 0.2)
+# Then a table flood, as macof sends it: made-up source and destination hardware and IP
+# addresses, 60 frames in a second.
+for i in range(60):
+    src = "0a:%02x:%02x:00:00:%02x" % (i * 7 % 256, i * 13 % 256, i)
+    dst = "0e:%02x:00:00:00:%02x" % (i * 11 % 256, i)
+    at(Ether(src=src, dst=dst)/IP(src="45.%d.%d.1" % (i, i * 3 % 256), dst="81.%d.2.%d" % (i, i))/TCP(sport=1000 + i, dport=2000 + i, flags="S"), 300 + i / 60)
 wrpcap(sys.argv[1], f)
