@@ -13,7 +13,7 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 /// The fields, in the order they are printed, one frame to a line, tab between.
-pub const FIELDS: [&str; 37] = [
+pub const FIELDS: [&str; 39] = [
     "frame.time_epoch",
     "frame.len",
     "eth.src",
@@ -51,6 +51,8 @@ pub const FIELDS: [&str; 37] = [
     "nbns.flags.response",
     "dhcpv6.msgtype",
     "icmp.type",
+    "arp.opcode",
+    "arp.dst.proto_ipv4",
 ];
 
 /// Enough of each frame for the names above; the rest is never copied off the interface.
@@ -139,6 +141,9 @@ pub struct Packet {
     /// An ICMP Redirect (IPv4 type 5, IPv6 type 137): the sender tells a host to send its
     /// traffic for some destination through another router.
     pub redirect: bool,
+    /// The address an ARP request asks about ("who has …"), when it is not the sender's
+    /// own (a gratuitous announcement).
+    pub arp_asked: Option<Ipv4Addr>,
 }
 
 fn flag(text: &str) -> bool {
@@ -266,6 +271,10 @@ pub fn parse(line: &str) -> Option<Packet> {
         dhcpv6_answer: matches!(fields[35], "2" | "7")
             && ports(fields[14], fields[15]).is_some_and(|(s, _)| s == 547),
         redirect: fields[36] == "5" || fields[25] == "137",
+        arp_asked: (fields[37] == "1")
+            .then(|| fields[38].parse::<Ipv4Addr>().ok())
+            .flatten()
+            .filter(|asked| fields[9].parse::<Ipv4Addr>().ok() != Some(*asked)),
     })
 }
 
@@ -467,6 +476,19 @@ pub(crate) mod tests {
         }
         let echo = parse(&line(&[("frame.time_epoch", "1"), ("icmp.type", "8")])).unwrap();
         assert!(!echo.redirect);
+        let who_has = |asked: &str| {
+            parse(&line(&[
+                ("frame.time_epoch", "1"),
+                ("arp.src.hw_mac", "02:00:5e:12:34:56"),
+                ("arp.src.proto_ipv4", "192.168.1.77"),
+                ("arp.opcode", "1"),
+                ("arp.dst.proto_ipv4", asked),
+            ]))
+            .unwrap()
+            .arp_asked
+        };
+        assert_eq!(who_has("192.168.1.9"), Some("192.168.1.9".parse().unwrap()));
+        assert_eq!(who_has("192.168.1.77"), None, "a gratuitous announcement");
         assert!(!advertise("546"), "only a server's port answers");
         // A second occurrence of an address field is not the frame's own (ICMP errors).
         fields.push(("ip.dst", "192.168.1.1,10.0.0.1"));

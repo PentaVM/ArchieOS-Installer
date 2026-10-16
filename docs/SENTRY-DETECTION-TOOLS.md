@@ -25,6 +25,7 @@ with only the broadcast view, and says more with a mirror.
 | Names a device gives | DHCP host name, LLDP system name, NetBIOS name, HTTP User-Agent | — |
 | `rogue-dhcp-server` | a second DHCP server answering after the learning window | — |
 | `rogue-router-advertisement` | an IPv6 RA from a host that is not the router | — |
+| `arp-sweep` | one device asking ARP for 50+ addresses in a minute (a LAN scan) | — |
 | `icmp-redirect` | an ICMP/ICMPv6 Redirect from anyone but the router | — |
 | `retired-tls` and `tls_versions` | a device whose TLS client stops at 1.1 or older, read from its JA4 | — |
 | `rogue-dhcpv6-server` | a device other than the router answering DHCPv6 (mitm6) | — |
@@ -224,6 +225,25 @@ its basis.
   itself, told as `icmp-redirect`.
 - **Measured.** The 300,000-SYN capture, own CPU: 2.57 s before (one outlier run at
   3.41 s), 2.44–2.58 s after: one more TShark column, no measurable cost.
+
+### 2026-10-16: ARP sweeps
+
+- **Compared.** arpwatch keeps who-is-who but does not count questions; Snort/Suricata
+  see no ARP (they start at IP); Zeek needs its `arp` analyzer script, not loaded by
+  default. Sentry's `host-sweep` counted TCP openings only, which a switched network hides,
+  while an ARP sweep is the first thing a LAN scan does and is broadcast.
+- **Chosen.** Count the distinct addresses each device asks ARP about over a sliding
+  minute (the same `Burst` window as the DHCP and flood rules; new TShark fields
+  `arp.opcode` and `arp.dst.proto_ipv4`; gratuitous announcements excluded). 50 in a minute
+  is a warning, once an hour per device: a scan, not yet an attack, and the owner's own
+  network apps do it too.
+- **Tested.** Capture test: a request is read, a gratuitous one is not. Audit test: a
+  laptop asking for the router and a printer 200 times is quiet; 60 addresses at one every
+  1.5 s is quiet; `nmap -sn` over a /24 in two seconds is one alert. TShark end to end: the
+  fixture has 60 ARP requests in 1.2 s, told with the scanner's address.
+- **Measured.** 100,000 ARP requests from one scanner: one alert; own CPU 0.55–0.60 s before,
+  0.76–0.82 s after (about 2 µs a request, the window's strings). The 300,000-SYN capture
+  is within noise (2.38–2.73 s before, 2.65–2.72 s after).
 
 ## How a tool is accepted
 

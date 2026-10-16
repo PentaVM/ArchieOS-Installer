@@ -19,6 +19,7 @@
 //! | `rogue-dhcp-server` | a second device answers DHCP (an offer or acknowledgement) when another already does: it can hand out its own router and DNS |
 //! | `beacon-suspect` | a device learned for a day starts calling a new outside destination on a clock (a regular interval, scored as RITA does), the way malware checks in with its controller |
 //! | `rogue-dhcpv6-server` | a device that is not the router answers DHCPv6 (an advertise or reply), or, once servers are known, a new one does: mitm6 makes itself every Windows machine's IPv6 DNS server this way |
+//! | `arp-sweep` | one device asks ARP for 50 or more different addresses within a minute: a scan of the network (nmap -sn, arp-scan, netdiscover, or a network app on a phone). ARP requests are broadcast, so a switched network shows them all |
 //! | `icmp-redirect` | a device other than the router sends an ICMP Redirect (IPv4 or IPv6), telling a host to route through it: a way into the middle of its traffic without touching ARP |
 //! | `retired-tls` | a device's TLS client offers nothing newer than TLS 1.1 (RFC 8996 retired 1.0 and 1.1 in 2021): firmware that has not been updated in years, usually a camera or an appliance |
 //! | `name-poisoning` | a device answers LLMNR or NetBIOS name queries for three different names, or for `wpad`: Responder's way of taking other machines' traffic and password hashes. An honest Windows machine answers for its own name |
@@ -77,6 +78,10 @@ const BEACON_TOLD_SCORE: u8 = 85;
 /// Device and destination pairs whose contacts are kept (33 times each).
 const MAX_CONTACTED: usize = 4_096;
 const DAY_MS: u64 = 24 * 60 * 60 * 1000;
+/// Different addresses one device may ask ARP about within a minute before it is told.
+const ARP_SWEEP_TARGETS: usize = 50;
+/// Devices whose ARP questions are counted at once.
+const MAX_ARP_ASKERS: usize = 256;
 /// Different LLMNR or NetBIOS names one device may answer for before it is told.
 const POISONING_NAMES: usize = 3;
 /// Unknown hardware addresses sending within the window that make a flood.
@@ -569,6 +574,8 @@ pub struct Audit {
     /// The LLMNR and NetBIOS names each device answered for, for `name-poisoning`. In
     /// memory only.
     answering: HashMap<String, BTreeSet<String>>,
+    /// The addresses each device asked ARP about in the last minute, for `arp-sweep`.
+    arp_asking: HashMap<String, Burst>,
 }
 
 /// What happened in the last minute, by key (a DHCP client's hardware address, or a
@@ -695,6 +702,7 @@ impl Audit {
             asking: Burst::default(),
             arriving: Burst::default(),
             answering: HashMap::new(),
+            arp_asking: HashMap::new(),
         }
     }
 
@@ -731,6 +739,9 @@ impl Audit {
         }
         if let Some((mac, address)) = &packet.neighbor {
             self.claim(&mut alerts, packet.at_ms, mac, IpAddr::V6(*address));
+        }
+        if let Some((mac, asked)) = packet.source_mac.as_deref().zip(packet.arp_asked) {
+            self.asked_arp(&mut alerts, packet.at_ms, mac, asked);
         }
         // A client's own DHCP messages (discover, request, inform) describe its stack, and an
         // LLDP frame names its sender. Neither needs the device to have an address yet.
@@ -1029,6 +1040,33 @@ impl Audit {
                     rhythm.score
                 ),
             );
+        }
+    }
+
+    /// `mac` asked ARP who has `asked`. A device asks for the few it talks to; one asking
+    /// for most of the network is scanning it.
+    fn asked_arp(&mut self, alerts: &mut Vec<Alert>, at_ms: u64, mac: &str, asked: Ipv4Addr) {
+        if !self.arp_asking.contains_key(mac) && self.arp_asking.len() >= MAX_ARP_ASKERS {
+            return;
+        }
+        let burst = self.arp_asking.entry(mac.to_string()).or_default();
+        burst.add(at_ms, asked.to_string(), mac.to_string());
+        let asked_for = burst.per_client.len();
+        if asked_for >= ARP_SWEEP_TARGETS
+            && self
+                .told
+                .cooled(&format!("arp-sweep {mac}"), at_ms, SURGE_COOLDOWN_MS)
+        {
+            alerts.push(Alert {
+                at_ms,
+                severity: Severity::Warning,
+                rule: "arp-sweep".into(),
+                device: mac.into(),
+                detail: format!(
+                    "asked ARP for {asked_for} addresses of the network within a minute: a scan \
+                     of the LAN (nmap -sn, arp-scan, netdiscover), or a network app on a phone"
+                ),
+            });
         }
     }
 
@@ -1704,6 +1742,39 @@ mod tests {
             .flat_map(|i| audit.see(&sent(later + i * 1_000, 1_000_000)))
             .collect();
         assert_eq!(rules(&again), ["traffic-surge"]);
+    }
+
+    #[test]
+    fn asking_arp_for_most_of_the_network_is_a_scan() {
+        let mut audit = Audit::new(State::default(), learned());
+        let who_has = |mac: &str, asked: u64, at_ms: u64| Packet {
+            at_ms,
+            source_mac: Some(mac.into()),
+            arp_asked: Some(Ipv4Addr::from(0xc0a8_0100 + asked as u32)),
+            ..Packet::default()
+        };
+        // A laptop asks for the router and a printer, over and over: quiet.
+        let usual: Vec<Alert> = (0..200)
+            .flat_map(|i| audit.see(&who_has(TV, 1 + (i % 2) * 20, i * 100)))
+            .collect();
+        assert!(usual.is_empty());
+        // A slow walk over 60 addresses, one every 1.5 s, never has 50 in a minute.
+        let slow: Vec<Alert> = (1..61)
+            .flat_map(|i| audit.see(&who_has("02:00:5e:00:00:01", i, 100_000 + i * 1_500)))
+            .collect();
+        assert!(slow.is_empty(), "{slow:?}");
+        // nmap -sn over the /24 in two seconds: told once.
+        let scanner = "02:00:5e:12:34:56";
+        let told: Vec<Alert> = (1..255)
+            .flat_map(|i| audit.see(&who_has(scanner, i, 300_000 + i * 8)))
+            .collect();
+        assert_eq!(rules(&told), ["arp-sweep"]);
+        assert_eq!(told[0].device, scanner);
+        assert!(
+            told[0].detail.contains("50 addresses"),
+            "{}",
+            told[0].detail
+        );
     }
 
     #[test]
