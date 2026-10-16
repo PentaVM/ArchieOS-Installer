@@ -5,8 +5,13 @@
 use std::process::Command;
 
 fn netwatch(state: &std::path::Path, extra: &[&str]) -> std::process::Output {
-    let fixture =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dnsmasq.leases");
+    netwatch_file("dnsmasq.leases", state, extra)
+}
+
+fn netwatch_file(name: &str, state: &std::path::Path, extra: &[&str]) -> std::process::Output {
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name);
     Command::new(env!("CARGO_BIN_EXE_archie-netwatch"))
         .arg("leases")
         .arg(&fixture)
@@ -54,5 +59,23 @@ fn the_router_s_leases_fill_the_inventory() {
     assert!(!refused.status.success());
     assert!(!state.join("other").exists());
     std::fs::remove_file(&other).unwrap();
+    std::fs::remove_dir_all(&state).unwrap();
+}
+
+#[test]
+fn a_pfsense_lease_file_is_read_too() {
+    let state = std::env::temp_dir().join(format!("netwatch-isc-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&state);
+    let read = netwatch_file("dhcpd.leases", &state, &[]);
+    let stderr = String::from_utf8_lossy(&read.stderr);
+    assert!(
+        stderr.contains("1 leases, 0 alerts, 1 devices known"),
+        "{stderr}"
+    );
+    let saved: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(state.join("state.json")).unwrap()).unwrap();
+    let nas = &saved["devices"]["00:11:22:33:44:55"];
+    assert_eq!(nas["hostname"], "nas");
+    assert_eq!(nas["leased_until_s"], 1_792_152_000u64);
     std::fs::remove_dir_all(&state).unwrap();
 }

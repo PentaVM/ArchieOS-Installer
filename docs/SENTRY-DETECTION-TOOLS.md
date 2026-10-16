@@ -304,6 +304,22 @@ its basis.
   2 MB file is refused before anything is written.
 - **Measured.** Not on the capture path.
 
+### 2026-10-16: more lease formats
+
+- **Compared.** Which routers the owner is likely to run beyond dnsmasq: pfSense and
+  OPNsense (ISC dhcpd; OPNsense also offers Kea and dnsmasq), and OpenWrt reached through
+  LuCI's RPC (`luci-rpc getDHCPLeases`, JSON) rather than the file. Kea's CSV lease file
+  and SNMP remain for later.
+- **Chosen.** Read all three by shape: JSON if it starts with `{`, ISC if a line starts
+  with `lease `, dnsmasq otherwise. ISC keeps only active bindings and the last block for
+  each address (dhcpd appends); its `ends` dates are UTC and converted with Hinnant's
+  days-from-civil; OpenWrt's relative `expires` is added to the time the file is read.
+- **Tested.** ISC: two blocks for one address keep the later (ends 2026-10-16 12:00:00
+  UTC, checked against Python's `calendar.timegm`), a free binding is skipped, `ends never`
+  is no end. JSON: relative expiry, `false` as no end, a bad MAC and the IPv6 list skipped,
+  broken JSON gives nothing. CLI end to end on a pfSense-style fixture.
+- **Measured.** Not on the capture path.
+
 ## How a tool is accepted
 
 A tool joins Sentry when, on a recorded pcap of the owner's network and on the fixtures in

@@ -231,7 +231,7 @@ fn leases(file: &Path, directory: &Path, settings: Settings) -> Result<(), Strin
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as u64);
-    let leases = archie_lan::leases::parse(&text);
+    let leases = archie_lan::leases::parse(&text, now_ms / 1000);
     let alerts: Vec<Alert> = leases
         .iter()
         .flat_map(|lease| audit.leased(lease, now_ms))

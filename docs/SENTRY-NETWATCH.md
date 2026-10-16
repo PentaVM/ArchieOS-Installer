@@ -109,8 +109,15 @@ and User-Agent are all kept.
 
 On a switched network Sentry hears a device only when it broadcasts. The router hands every
 device its address, so its DHCP lease table names them all. `leases` reads that table in
-dnsmasq's format (`<expiry> <mac> <ip> <hostname|*> <client-id|*>`), which OpenWrt
-(`/tmp/dhcp.leases`), Pi-hole, DD-WRT, Tomato and Asuswrt-Merlin all write:
+any of three formats, told apart by their shape:
+
+- dnsmasq's file (`<expiry> <mac> <ip> <hostname|*> <client-id|*>`): OpenWrt
+  (`/tmp/dhcp.leases`), Pi-hole, DD-WRT, Tomato, Asuswrt-Merlin;
+- ISC dhcpd's `dhcpd.leases` (`lease <ip> { … }` blocks; only `binding state active`, the
+  last block for an address holds): pfSense (`/var/dhcpd/var/db/dhcpd.leases`), OPNsense
+  with the ISC backend, Linux servers;
+- OpenWrt's `ubus call luci-rpc getDHCPLeases` output (JSON; its `expires` counts seconds
+  from when it was taken, so the file should be read soon after).
 
 ```bash
 scp root@192.168.1.1:/tmp/dhcp.leases . && archie-netwatch leases dhcp.leases --state-dir DIR
