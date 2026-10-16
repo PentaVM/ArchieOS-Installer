@@ -96,12 +96,19 @@ pub fn convert(info: &ResolvedService, scope: &Scope) -> Vec<Device> {
         services: vec![kind.to_string()],
     })
     .map(|c| c.as_str().into());
-    info.addresses
+    // One host publishes an IPv4 address and often link-local and private IPv6 ones too;
+    // it is one device, listed once: by its IPv4 address when it has one in scope, else by
+    // its lowest IPv6 address (private before link-local).
+    let address = info
+        .addresses
         .iter()
         .filter(|ip| scope.accepts(ip))
-        .take(64)
+        .map(ScopedIp::to_ip_addr)
+        .min_by_key(|ip| (ip.is_ipv6(), *ip));
+    address
+        .into_iter()
         .map(|ip| Device {
-            address: ip.to_ip_addr().to_string(),
+            address: ip.to_string(),
             class: class.clone(),
             name: bounded(name),
             model: fact(&["ty", "model", "md", "am"]),

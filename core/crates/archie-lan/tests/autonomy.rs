@@ -52,6 +52,12 @@ fn light_and_deep_cadences_are_independent_and_failure_backoff_recovers() {
         !controller.deep_due(99),
         "clock rollback caused another expensive probe"
     );
+    let mut ahead = Controller::new(Settings::default()).unwrap();
+    ahead.record_success(&live(1_000_000), true).unwrap();
+    assert!(
+        ahead.deep_due(1_000_000 - 601),
+        "a clock stepped back by more than an interval must not suppress deep passes"
+    );
     assert_eq!(controller.record_failure("no interface").unwrap(), 30);
     assert_eq!(controller.record_failure("no interface").unwrap(), 60);
     for _ in 0..10 {
@@ -220,4 +226,167 @@ fn unchanged_live_state_excludes_internal_monitor_timestamps() {
     let first = controller.record_success(&live(100), false).unwrap();
     let next = controller.record_success(&live(130), false).unwrap();
     assert_eq!(first.devices[0].state, next.devices[0].state);
+}
+
+fn device(address: &str, seen_by: &[&str], state: &[(&str, &str)]) -> Device {
+    Device {
+        address: address.into(),
+        seen_by: seen_by.iter().map(|s| s.to_string()).collect(),
+        state: state
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
+        ..Default::default()
+    }
+}
+
+fn pass(now: u64, devices: Vec<Device>) -> Inventory {
+    Inventory {
+        format: FORMAT,
+        scanned_unix: now,
+        devices,
+    }
+}
+
+#[test]
+fn what_a_deep_pass_saw_stands_through_the_light_passes_after_it() {
+    let mut controller = Controller::new(Settings::default()).unwrap();
+    let mac = ("neighbor.mac", "aa:bb:cc:dd:ee:01");
+    // A silent device only the TCP sweep hears, and a TV heard by SSDP with open ports.
+    let deep = controller
+        .record_success(
+            &pass(
+                100,
+                vec![
+                    device(
+                        "10.0.0.7",
+                        &["tcp-presence", "neighbor-cache"],
+                        &[("open_tcp_ports", "80"), mac],
+                    ),
+                    device(
+                        "10.0.0.8",
+                        &["ssdp", "tcp-presence"],
+                        &[("open_tcp_ports", "8060")],
+                    ),
+                ],
+            ),
+            true,
+        )
+        .unwrap();
+    let light = controller
+        .record_success(
+            &pass(
+                130,
+                vec![
+                    device("10.0.0.7", &["neighbor-cache"], &[mac]),
+                    device("10.0.0.8", &["ssdp"], &[]),
+                ],
+            ),
+            false,
+        )
+        .unwrap();
+    assert_eq!(
+        light.devices, deep.devices,
+        "a light pass changed nothing that was seen"
+    );
+    // Not even in the cache on a light pass: the deep observation still stands.
+    let quiet = controller
+        .record_success(&pass(160, vec![]), false)
+        .unwrap();
+    assert_eq!(quiet.devices[0].seen_by, ["tcp-presence"]);
+    assert_eq!(quiet.devices[0].state["open_tcp_ports"], "80");
+    // The next deep pass that does not hear it ends it.
+    let next = controller
+        .record_success(
+            &pass(700, vec![device("10.0.0.7", &["neighbor-cache"], &[mac])]),
+            true,
+        )
+        .unwrap();
+    assert_eq!(next.devices[0].seen_by, ["history-cache"]);
+}
+
+#[test]
+fn a_device_the_cache_still_holds_is_kept_past_retention() {
+    let mut controller = Controller::new(Settings::default()).unwrap();
+    let cached = || {
+        device(
+            "10.0.0.9",
+            &["neighbor-cache"],
+            &[("neighbor.mac", "aa:bb:cc:dd:ee:02")],
+        )
+    };
+    controller
+        .record_success(&pass(100, vec![cached()]), true)
+        .unwrap();
+    for now in [50_000, 100_000, 150_000] {
+        let output = controller
+            .record_success(&pass(now, vec![cached()]), false)
+            .unwrap();
+        assert_eq!(output.devices.len(), 1, "dropped at {now}");
+    }
+    // Once nothing has seen it for the whole retention, it goes.
+    let output = controller
+        .record_success(&pass(150_000 + 86_401, vec![]), false)
+        .unwrap();
+    assert!(output.devices.is_empty());
+}
+
+#[test]
+fn times_from_before_a_clock_step_back_still_expire() {
+    let mut controller = Controller::new(Settings::default()).unwrap();
+    controller
+        .record_success(
+            &pass(10_000_000, vec![device("10.0.0.10", &["ssdp"], &[])]),
+            true,
+        )
+        .unwrap();
+    // The clock is corrected back; the record is now anchored at the corrected time.
+    assert_eq!(
+        controller
+            .record_success(&pass(100, vec![]), false)
+            .unwrap()
+            .devices
+            .len(),
+        1
+    );
+    assert!(controller
+        .record_success(&pass(100 + 86_401, vec![]), false)
+        .unwrap()
+        .devices
+        .is_empty());
+}
+
+#[test]
+fn the_device_limit_makes_room_from_devices_not_seen_now() {
+    let settings = Settings {
+        max_devices: 2,
+        ..Settings::default()
+    };
+    let mut controller = Controller::new(settings).unwrap();
+    controller
+        .record_success(
+            &pass(
+                100,
+                vec![
+                    device("10.0.0.1", &["ssdp"], &[]),
+                    device("10.0.0.2", &["ssdp"], &[]),
+                ],
+            ),
+            true,
+        )
+        .unwrap();
+    let output = controller
+        .record_success(
+            &pass(
+                200,
+                vec![
+                    device("10.0.0.2", &["ssdp"], &[]),
+                    device("10.0.0.3", &["ssdp"], &[]),
+                ],
+            ),
+            false,
+        )
+        .unwrap();
+    let addresses: Vec<_> = output.devices.iter().map(|d| d.address.as_str()).collect();
+    assert_eq!(addresses, ["10.0.0.2", "10.0.0.3"]);
 }

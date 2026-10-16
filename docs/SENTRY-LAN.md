@@ -17,7 +17,8 @@ archie-lan scan --mdns-backend hybrid --seconds 12
 
 `--bind` selects an assigned private IPv4 interface. With no binding, Sentry uses
 its default-route source address. `--probe-local` obtains that interface's subnet
-mask through Sentry's own interface API; it rejects subnets larger than /24.
+mask through Sentry's own interface API; on a network wider than /24 it sweeps only
+the /24 around the selected address.
 `--subnet` is an explicit private /24..=/32 scope containing the chosen interface.
 Native discovery uses IPv4. The optional `mdns-sd`/`hybrid` backend adds private
 IPv6 DNS-SD observations on the selected interface; HTTP and TCP remain IPv4.
@@ -60,12 +61,13 @@ When another discovery source responds, that source supplies current observation
 ## Autonomous monitor
 
 `watch --autonomous` combines native discovery with the pinned upstream `mdns-sd`
-backend by default. Light passes run 30 seconds after the previous pass finishes;
+backend on deep passes; light passes use native discovery only, and the deep sources'
+observations stand until the next deep pass. Light passes run 30 seconds after the
+previous pass finishes;
 TCP passes, when explicitly enabled by `--probe-local`/`--subnet`, are scheduled
 separately every 600 seconds with a default 75-second budget. No passes overlap.
 `modules/sentry/lan.toml` enables this worker under Core's existing permissions.
-Large local subnets skip deep probing and record the reason without disabling
-service discovery. The legacy scan/watch defaults stay native and retain their
+Large local subnets are swept in the /24 around this node. The legacy scan/watch defaults stay native and retain their
 15-second TCP budget; legacy watch cadence stays 300 seconds.
 
 Default sidecars are `lan.history.json` and `lan.health.json`; `--history` and

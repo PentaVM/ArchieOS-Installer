@@ -45,6 +45,19 @@ struct Record {
     last_cache_unix: Option<u64>,
     #[serde(default)]
     last_neighbor_mac: Option<String>,
+    /// What the last deep pass saw of this device through [`DEEP_SOURCES`], if anything.
+    #[serde(default)]
+    deep: Option<Device>,
+}
+
+impl Record {
+    /// The last time anything placed this device here: an answer, a cache entry, or its
+    /// first appearance. Retention runs from this.
+    fn anchor(&self) -> u64 {
+        self.last_response_unix
+            .unwrap_or(self.first_known_unix)
+            .max(self.last_cache_unix.unwrap_or(0))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,11 +80,77 @@ pub struct Controller {
 }
 
 fn cache_only(device: &Device) -> bool {
-    !device.seen_by.is_empty()
-        && device
-            .seen_by
+    archie_types::lan::cache_only(&device.seen_by)
+}
+
+/// Sources only a deep pass runs. What they saw stands until the next deep pass, so a
+/// light pass in between neither loses it nor makes devices and their fields flicker.
+pub const DEEP_SOURCES: [&str; 2] = ["tcp-presence", "mdns-sd"];
+
+fn deep_key(key: &str) -> bool {
+    key == "open_tcp_ports" || key.starts_with("mdns.")
+}
+
+/// The part of a device a deep source vouched for: who it is, the deep sources that saw
+/// it and their fields. Never its power, app or session state, which only a pass that
+/// heard it now may report.
+fn deep_part(device: &Device) -> Option<Device> {
+    let seen_by: Vec<String> = device
+        .seen_by
+        .iter()
+        .filter(|s| DEEP_SOURCES.contains(&s.as_str()))
+        .cloned()
+        .collect();
+    (!seen_by.is_empty()).then(|| Device {
+        address: device.address.clone(),
+        class: device.class.clone(),
+        name: device.name.clone(),
+        manufacturer: device.manufacturer.clone(),
+        model: device.model.clone(),
+        services: device.services.clone(),
+        seen_by,
+        state: device
+            .state
             .iter()
-            .all(|s| matches!(s.as_str(), "neighbor-cache" | "history-cache"))
+            .filter(|(key, _)| deep_key(key))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect(),
+    })
+}
+
+/// A light pass's device with the last deep pass's evidence added back.
+fn with_deep(mut device: Device, deep: &Device) -> Device {
+    for source in &deep.seen_by {
+        if !device.seen_by.contains(source) && device.seen_by.len() < 8 {
+            device.seen_by.push(source.clone());
+        }
+    }
+    for (key, value) in &deep.state {
+        if device.state.len() < 64 {
+            device
+                .state
+                .entry(key.clone())
+                .or_insert_with(|| value.clone());
+        }
+    }
+    for service in &deep.services {
+        if device.services.len() < 64 && !device.services.contains(service) {
+            device.services.push(service.clone());
+        }
+    }
+    if device.class.is_none() {
+        device.class.clone_from(&deep.class);
+    }
+    for (slot, value) in [
+        (&mut device.name, &deep.name),
+        (&mut device.model, &deep.model),
+        (&mut device.manufacturer, &deep.manufacturer),
+    ] {
+        if slot.is_empty() {
+            slot.clone_from(value);
+        }
+    }
+    device
 }
 
 fn valid_device(device: &Device) -> Result<(), String> {
@@ -141,6 +220,12 @@ impl Controller {
                 return Err("history identity/address mismatch".into());
             }
             valid_device(&record.device)?;
+            if let Some(deep) = &record.deep {
+                if deep.address != *key {
+                    return Err("history identity/address mismatch".into());
+                }
+                valid_device(deep)?;
+            }
             if record
                 .last_neighbor_mac
                 .as_ref()
@@ -173,7 +258,16 @@ impl Controller {
     pub fn deep_due(&self, now: u64) -> bool {
         self.state
             .last_deep_unix
-            .is_none_or(|last| now >= last && now - last >= self.settings.deep_seconds)
+            // A recorded time ahead of now means the clock stepped back. A small step
+            // (within one deep interval) is waited out; a larger one runs the deep pass
+            // rather than suppress it until wall time catches up, hours or years later.
+            .is_none_or(|last| {
+                if now >= last {
+                    now - last >= self.settings.deep_seconds
+                } else {
+                    last - now > self.settings.deep_seconds
+                }
+            })
     }
     pub fn record_failure(&mut self, error: &str) -> Result<u64, String> {
         self.state.failures = self.state.failures.saturating_add(1);
@@ -203,19 +297,40 @@ impl Controller {
         }
         let now = inventory.scanned_unix;
         let mut next = self.state.clone();
-        for device in &inventory.devices {
-            if next.records.len() >= self.settings.max_devices
-                && !next.records.contains_key(&device.address)
-            {
-                let oldest = next
-                    .records
-                    .iter()
-                    .min_by_key(|(_, r)| r.last_response_unix.unwrap_or(r.first_known_unix))
-                    .map(|(key, _)| key.clone());
-                if let Some(key) = oldest {
-                    next.records.remove(&key);
-                }
+        // Times ahead of now were written before the clock stepped back. They are read as
+        // now, so retention and scheduling measure from something that has happened.
+        for record in next.records.values_mut() {
+            record.first_known_unix = record.first_known_unix.min(now);
+            record.last_response_unix = record.last_response_unix.map(|t| t.min(now));
+            record.last_cache_unix = record.last_cache_unix.map(|t| t.min(now));
+        }
+        next.last_success_unix = next.last_success_unix.map(|t| t.min(now));
+        next.last_deep_unix = next.last_deep_unix.map(|t| t.min(now));
+        let live: BTreeMap<&str, &Device> = inventory
+            .devices
+            .iter()
+            .map(|device| (device.address.as_str(), device))
+            .collect();
+        // Room for the newcomers is made once, from the records this pass did not see,
+        // oldest first; the live inventory itself is never larger than the limit.
+        let incoming = live
+            .keys()
+            .filter(|address| !next.records.contains_key(**address))
+            .count();
+        let overflow = (next.records.len() + incoming).saturating_sub(self.settings.max_devices);
+        if overflow > 0 {
+            let mut unseen: Vec<(u64, String)> = next
+                .records
+                .iter()
+                .filter(|(address, _)| !live.contains_key(address.as_str()))
+                .map(|(address, record)| (record.anchor(), address.clone()))
+                .collect();
+            unseen.sort();
+            for (_, address) in unseen.into_iter().take(overflow) {
+                next.records.remove(&address);
             }
+        }
+        for device in &inventory.devices {
             let record = next
                 .records
                 .entry(device.address.clone())
@@ -225,6 +340,7 @@ impl Controller {
                     last_response_unix: None,
                     last_cache_unix: None,
                     last_neighbor_mac: None,
+                    deep: None,
                 });
             if cache_only(device) {
                 let changed_mac = device
@@ -242,6 +358,7 @@ impl Controller {
                     record.device = device.clone();
                     record.first_known_unix = now;
                     record.last_response_unix = None;
+                    record.deep = None;
                 }
                 record.last_cache_unix = Some(now);
                 if record.last_response_unix.is_none() {
@@ -254,23 +371,33 @@ impl Controller {
             if let Some(mac) = device.state.get("neighbor.mac") {
                 record.last_neighbor_mac = Some(mac.clone());
             }
+            if deep {
+                record.deep = deep_part(device);
+            }
         }
-        next.records.retain(|_, record| {
-            let anchor = record.last_response_unix.unwrap_or(record.first_known_unix);
-            now.saturating_sub(anchor) <= self.settings.retention_seconds
+        if deep {
+            for (address, record) in &mut next.records {
+                if !live.contains_key(address.as_str()) {
+                    record.deep = None;
+                }
+            }
+        }
+        let retention = self.settings.retention_seconds;
+        next.records.retain(|address, record| {
+            live.contains_key(address.as_str()) || now - record.anchor() <= retention
         });
         let mut devices = Vec::new();
-        for record in next.records.values() {
-            let current = inventory
-                .devices
-                .iter()
-                .find(|d| d.address == record.device.address);
-            let mut device = if let Some(current) = current {
-                current.clone()
-            } else {
-                record.device.clone()
+        for (address, record) in &next.records {
+            // On a light pass, what the last deep pass saw still stands.
+            let carried = if deep { None } else { record.deep.as_ref() };
+            let current = match (live.get(address.as_str()), carried) {
+                (Some(live), Some(deep)) => Some(with_deep((*live).clone(), deep)),
+                (Some(live), None) => Some((*live).clone()),
+                (None, Some(deep)) => Some(deep.clone()),
+                (None, None) => None,
             };
-            if current.is_none() || current.is_some_and(cache_only) {
+            let mut device = current.clone().unwrap_or_else(|| record.device.clone());
+            if current.as_ref().is_none_or(cache_only) {
                 device.name.clone_from(&record.device.name);
                 device.model.clone_from(&record.device.model);
                 device.manufacturer.clone_from(&record.device.manufacturer);
@@ -278,8 +405,8 @@ impl Controller {
                 device.services.clone_from(&record.device.services);
                 // Old power/app/session state is never represented as current.
                 device.state.clear();
-                if let Some(current) = current {
-                    for key in ["neighbor.mac", "neighbor.status", "neighbor.source"] {
+                if let Some(current) = &current {
+                    for key in ["neighbor.mac", "neighbor.source"] {
                         if let Some(value) = current.state.get(key) {
                             device.state.insert(key.into(), value.clone());
                         }
@@ -318,6 +445,9 @@ impl Controller {
                         .insert("history.last_cache_unix".into(), last.to_string());
                 }
             }
+            // Sources in one order, whichever pass listed them first.
+            device.seen_by.sort();
+            device.seen_by.dedup();
             devices.push(device);
         }
         next.last_success_unix = Some(now);

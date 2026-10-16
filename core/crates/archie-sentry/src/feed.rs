@@ -437,12 +437,7 @@ impl Snapshot {
             // Reading a system cache now does not mean the peer was seen now.
             // Candidates remain available to Core's inventory/world view, but do
             // not become live DeviceSeen events in the context feeder.
-            if !device.seen_by.is_empty()
-                && device
-                    .seen_by
-                    .iter()
-                    .all(|source| matches!(source.as_str(), "neighbor-cache" | "history-cache"))
-            {
+            if archie_types::lan::cache_only(&device.seen_by) {
                 continue;
             }
             let mut facts = BTreeMap::new();

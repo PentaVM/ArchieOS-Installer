@@ -443,11 +443,7 @@ pub fn unify(
                 .address
                 .parse()
                 .map_err(|_| UnifyError::Malformed("inventory device address"))?;
-            let cache_only = !device.seen_by.is_empty()
-                && device
-                    .seen_by
-                    .iter()
-                    .all(|source| matches!(source.as_str(), "neighbor-cache" | "history-cache"));
+            let cache_only = archie_types::lan::cache_only(&device.seen_by);
             let observed_at = (!cache_only).then_some(inventory.scanned_unix);
             let mut fact = SourceFact {
                 first_seen_unix: observed_at,

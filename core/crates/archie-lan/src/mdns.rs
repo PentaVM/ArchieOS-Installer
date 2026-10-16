@@ -388,18 +388,31 @@ fn multicast_socket(local: Ipv4Addr) -> std::io::Result<UdpSocket> {
     multicast_socket_on(local, 5353)
 }
 
+/// A passive listener for multicast announcements on the mDNS group. It is bound to the
+/// group address, not 0.0.0.0, so it receives only datagrams sent to the group: unicast
+/// queries and replies for port 5353 keep reaching the system's own responder (avahi,
+/// systemd-resolved), which a wildcard bind on a shared port would take from it. Windows
+/// cannot bind a multicast address, so there the listener is not opened and discovery
+/// relies on the unicast replies to this node's own queries.
+#[cfg(unix)]
 fn multicast_socket_on(local: Ipv4Addr, port: u16) -> std::io::Result<UdpSocket> {
     use socket2::{Domain, Protocol, Socket, Type};
     let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
     socket.set_reuse_address(true)?;
-    #[cfg(unix)]
     socket.set_reuse_port(true)?;
-    socket.bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED, port)).into())?;
+    socket.bind(&SocketAddr::from((Ipv4Addr::new(224, 0, 0, 251), port)).into())?;
     socket.join_multicast_v4(&Ipv4Addr::new(224, 0, 0, 251), &local)?;
     socket.set_multicast_if_v4(&local)?;
     socket.set_multicast_ttl_v4(255)?;
     socket.set_nonblocking(true)?;
     Ok(socket.into())
+}
+
+#[cfg(not(unix))]
+fn multicast_socket_on(_local: Ipv4Addr, _port: u16) -> std::io::Result<UdpSocket> {
+    Err(std::io::Error::other(
+        "passive listener not opened: port 5353 is left to the system responder",
+    ))
 }
 
 pub fn browse_report(local: Ipv4Addr, listen: Duration) -> std::io::Result<BrowseReport> {
@@ -609,6 +622,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn multicast_listener_actually_receives_group_only_datagrams() {
         let local = crate::lan_address().unwrap_or(Ipv4Addr::LOCALHOST);
@@ -641,6 +655,23 @@ mod tests {
                 Instant::now() < until,
                 "group-only reply was never received"
             );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        // A unicast datagram to the same port is the system responder's, never ours.
+        let unicast = uuid::Uuid::new_v4().to_string();
+        UdpSocket::bind((local, 0))
+            .unwrap()
+            .send_to(unicast.as_bytes(), (local, port))
+            .unwrap();
+        let until = Instant::now() + Duration::from_millis(300);
+        while Instant::now() < until {
+            if let Ok((length, _)) = receiver.recv_from(&mut bytes) {
+                assert_ne!(
+                    &bytes[..length],
+                    unicast.as_bytes(),
+                    "took a unicast datagram"
+                );
+            }
             std::thread::sleep(Duration::from_millis(10));
         }
     }

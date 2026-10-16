@@ -195,6 +195,7 @@ pub fn run(settings: Settings, mut options: Options) -> io::Result<()> {
     loop {
         let mut pass = options.clone();
         let mut deep_skip = None;
+        let mut deep = false;
         let prepared = (|| -> io::Result<()> {
             if let Some(controller) = &mut controller {
                 if let Ok(address) = pass.bind.map(Ok).unwrap_or_else(archie_lan::lan_address) {
@@ -224,9 +225,15 @@ pub fn run(settings: Settings, mut options: Options) -> io::Result<()> {
                         controller.set_scope(&scope).map_err(io::Error::other)?;
                     }
                 }
-                if !controller.deep_due(now()) {
+                deep = controller.deep_due(now());
+                if !deep {
+                    // A light pass is the native listeners only: no TCP sweep and no
+                    // DNS-SD library daemon. What those saw on the last deep pass stands.
                     pass.probe_local = false;
                     pass.subnet = None;
+                    if matches!(pass.mdns_backend, Some(Backend::Hybrid)) {
+                        pass.mdns_backend = Some(Backend::Native);
+                    }
                 }
                 if pass.probe_local || pass.subnet.is_some() {
                     match pass.bind.map(Ok).unwrap_or_else(archie_lan::lan_address) {
@@ -251,7 +258,7 @@ pub fn run(settings: Settings, mut options: Options) -> io::Result<()> {
                 let mut next = controller.clone();
                 let output = if let Some(candidate) = &mut next {
                     candidate
-                        .record_success(&report.inventory, report.diagnostics.presence.is_some())
+                        .record_success(&report.inventory, deep)
                         .map_err(io::Error::other)?
                 } else {
                     report.inventory

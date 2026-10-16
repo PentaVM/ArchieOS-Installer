@@ -77,3 +77,30 @@ fn private_ipv6_preserves_interface_scope_and_never_becomes_a_raw_http_target() 
     assert_eq!(devices[0].state["mdns.interface_index"], "7");
     assert!(!devices[0].state.keys().any(|key| key.contains("endpoint")));
 }
+
+#[test]
+fn a_host_with_ipv4_and_ipv6_addresses_is_one_device() {
+    let scope = Scope::new(
+        "10.0.0.7".parse().unwrap(),
+        "255.255.255.0".parse().unwrap(),
+        "lan-test",
+        7,
+    );
+    let v6 = |addr: &str| {
+        serde_json::from_value::<ScopedIp>(
+            serde_json::json!({"V6":{"addr":addr,"scope_id":{"name":"lan-test","index":7}}}),
+        )
+        .unwrap()
+    };
+    let mut info = service();
+    info.addresses.insert(v6("fe80::42"));
+    info.addresses.insert(v6("fd00::42"));
+    let devices = convert(&info, &scope);
+    assert_eq!(devices.len(), 1);
+    assert_eq!(devices[0].address, "10.0.0.42");
+    // Without IPv4, the private address is preferred to the link-local one.
+    info.addresses = HashSet::from([v6("fe80::42"), v6("fd00::42")]);
+    let devices = convert(&info, &scope);
+    assert_eq!(devices.len(), 1);
+    assert_eq!(devices[0].address, "fd00::42");
+}

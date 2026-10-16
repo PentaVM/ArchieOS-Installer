@@ -387,24 +387,18 @@ pub fn scan_with(options: ScanOptions, listen: Duration) -> std::io::Result<Scan
                     error: None,
                 },
             );
+            let mut index = index_of(&inventory.devices);
             for neighbor in records {
-                let address = neighbor.address.to_string();
-                if !inventory.devices.iter().any(|d| d.address == address) {
-                    inventory.devices.push(Device {
-                        address: address.clone(),
-                        ..Default::default()
-                    });
-                }
-                let device = inventory
-                    .devices
-                    .iter_mut()
-                    .find(|d| d.address == address)
-                    .unwrap();
+                let device = device_at(
+                    &mut inventory.devices,
+                    &mut index,
+                    &neighbor.address.to_string(),
+                );
                 device.seen_by.push("neighbor-cache".into());
                 device.state.insert("neighbor.mac".into(), neighbor.mac);
-                device
-                    .state
-                    .insert("neighbor.status".into(), neighbor.status);
+                // The entry's reachability state (REACHABLE, STALE, DELAY…) changes by
+                // itself every few seconds; as a device fact it would be a change on
+                // almost every pass, so it is not one.
                 device.state.insert(
                     "neighbor.source".into(),
                     "system-cache; reachability unconfirmed".into(),
@@ -441,24 +435,39 @@ pub fn scan_with(options: ScanOptions, listen: Duration) -> std::io::Result<Scan
             "advertisements are unauthenticated device claims; ownership is unknown"] } })
 }
 
+/// Where each address sits in `devices`, built once per merge.
+fn index_of(devices: &[Device]) -> BTreeMap<String, usize> {
+    devices
+        .iter()
+        .enumerate()
+        .map(|(at, device)| (device.address.clone(), at))
+        .collect()
+}
+
+/// The device at `address`, added empty when no source has listed it yet.
+fn device_at<'a>(
+    devices: &'a mut Vec<Device>,
+    index: &mut BTreeMap<String, usize>,
+    address: &str,
+) -> &'a mut Device {
+    let at = *index.entry(address.to_owned()).or_insert_with(|| {
+        devices.push(Device {
+            address: address.to_owned(),
+            ..Default::default()
+        });
+        devices.len() - 1
+    });
+    &mut devices[at]
+}
+
 pub fn merge_observations(
     inventory: &mut Inventory,
     discovered: &[wsdiscovery::Match],
     presence: &[(Ipv4Addr, Vec<u16>)],
 ) {
+    let mut index = index_of(&inventory.devices);
     for found in discovered {
-        let address = found.from.to_string();
-        if !inventory.devices.iter().any(|d| d.address == address) {
-            inventory.devices.push(Device {
-                address: address.clone(),
-                ..Default::default()
-            });
-        }
-        let device = inventory
-            .devices
-            .iter_mut()
-            .find(|d| d.address == address)
-            .unwrap();
+        let device = device_at(&mut inventory.devices, &mut index, &found.from.to_string());
         if device.class.is_none() {
             device.class.clone_from(&found.class);
         }
@@ -477,18 +486,7 @@ pub fn merge_observations(
         }
     }
     for (address, ports) in presence {
-        let address = address.to_string();
-        if !inventory.devices.iter().any(|d| d.address == address) {
-            inventory.devices.push(Device {
-                address: address.clone(),
-                ..Default::default()
-            });
-        }
-        let device = inventory
-            .devices
-            .iter_mut()
-            .find(|d| d.address == address)
-            .unwrap();
+        let device = device_at(&mut inventory.devices, &mut index, &address.to_string());
         if !device.seen_by.iter().any(|s| s == "tcp-presence") {
             device.seen_by.push("tcp-presence".into());
         }

@@ -41,9 +41,26 @@ third-party repo is executed blindly or allowed to enroll/control devices.
   a changed MAC on the same IP drops the old label. Candidate ownership stays unknown.
   Internal response clocks stay in the private history and stale-row annotations;
   unchanged live states do not emit artificial feeder changes on every poll.
-- Light passes and expensive TCP passes have separate clocks. Default light cadence
-  30 seconds, deep cadence 600 seconds, TCP budget 75 seconds. A large/unsupported
-  subnet skips deep probing with a reported reason while other discovery continues.
+- Light passes and deep passes have separate clocks. Default light cadence 30
+  seconds, deep cadence 600 seconds, TCP budget 75 seconds. A light pass runs the
+  native listeners only; the deep pass adds the TCP sweep and the `mdns-sd` daemon.
+  What the deep sources (`tcp-presence`, `mdns-sd`) saw stands until the next deep
+  pass: a light pass neither drops it nor makes a device or its fields flicker. Only
+  identity and those sources' own fields carry over, never power/app/session state.
+- A local network wider than /24 is swept only in the /24 around this node.
+- History retention runs from the last answer, the last cache sighting or the first
+  appearance, whichever is latest; a device in the current inventory is never pruned.
+  The device limit evicts records not seen in this pass, oldest first.
+- A clock that steps back is handled: recorded times ahead of now are read as now,
+  and a deep pass recorded more than one interval in the future no longer holds
+  deep passes back until wall time catches up.
+- The neighbour table's reachability state (REACHABLE/STALE/DELAY) is not a device
+  fact; it changes by itself every few seconds. `seen_by` is reported sorted.
+- The native passive mDNS listener binds the group address 224.0.0.251:5353, so it
+  receives only group traffic and unicast for 5353 still reaches the system's
+  responder (avahi, systemd-resolved). On Windows it is not opened.
+- DNS-SD lists a host once: by its IPv4 address when it has one in scope, else by
+  its lowest IPv6 address (private before link-local).
 - Errors preserve the last successful inventory and use exponential retry delay
   from 30 to 300 seconds by default. Publication/validation errors use the same
   backoff; failed health persistence is also visible on stderr. Startup lock/history

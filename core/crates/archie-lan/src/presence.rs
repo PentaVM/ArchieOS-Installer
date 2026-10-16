@@ -61,7 +61,10 @@ impl Subnet {
                     if mask.leading_ones() + mask.trailing_zeros() != 32 {
                         return Err("interface has a noncontiguous subnet mask".into());
                     }
-                    return format!("{local}/{}", mask.leading_ones()).parse();
+                    // A wider network (a /23, a /16) is swept only in the /24 around
+                    // this node: the sweep stays bounded, and the rest of discovery is
+                    // not given up because the network is large.
+                    return format!("{local}/{}", mask.leading_ones().max(24)).parse();
                 }
             }
         }
