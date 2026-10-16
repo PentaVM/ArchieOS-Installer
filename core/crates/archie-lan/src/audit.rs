@@ -18,6 +18,7 @@
 //! | `traffic-surge` | a device that has been learned for a day sends far more in ten minutes than it usually does |
 //! | `rogue-dhcp-server` | a second device answers DHCP (an offer or acknowledgement) when another already does: it can hand out its own router and DNS |
 //! | `beacon-suspect` | a device learned for a day starts calling a new outside destination on a clock (a regular interval, scored as RITA does), the way malware checks in with its controller |
+//! | `name-poisoning` | a device answers LLMNR or NetBIOS name queries for three different names, or for `wpad`: Responder's way of taking other machines' traffic and password hashes. An honest Windows machine answers for its own name |
 //! | `mac-flood` | 20 or more hardware addresses not known as devices send within a minute, after the first minute: a tool filling the switch's address table so it repeats everyone's traffic to every port. While it lasts, unknown addresses are not kept as devices |
 //! | `dhcp-starvation` | 30 or more hardware addresses not known as devices ask DHCP for an address within a minute: a tool exhausting the router's pool, so that a rogue server can answer instead |
 //! | `rogue-router-advertisement` | a device not seen before offers itself as an IPv6 router on the link, or one other than the known router does |
@@ -73,6 +74,8 @@ const BEACON_TOLD_SCORE: u8 = 85;
 /// Device and destination pairs whose contacts are kept (33 times each).
 const MAX_CONTACTED: usize = 4_096;
 const DAY_MS: u64 = 24 * 60 * 60 * 1000;
+/// Different LLMNR or NetBIOS names one device may answer for before it is told.
+const POISONING_NAMES: usize = 3;
 /// Unknown hardware addresses sending within the window that make a flood.
 const FLOOD_SENDERS: usize = 20;
 /// Unknown DHCP clients within the window that make a starvation attack.
@@ -556,6 +559,9 @@ pub struct Audit {
     /// Hardware addresses not known as devices that sent in the last minute, for
     /// `mac-flood`.
     arriving: Burst,
+    /// The LLMNR and NetBIOS names each device answered for, for `name-poisoning`. In
+    /// memory only.
+    answering: HashMap<String, BTreeSet<String>>,
 }
 
 /// What happened in the last minute, by key (a DHCP client's hardware address, or a
@@ -681,6 +687,7 @@ impl Audit {
             pruned_ms: 0,
             asking: Burst::default(),
             arriving: Burst::default(),
+            answering: HashMap::new(),
         }
     }
 
@@ -910,6 +917,9 @@ impl Audit {
         if let Some(label) = label.filter(|_| packet.opening) {
             self.contacted(&mut alerts, packet.at_ms, mac, label);
         }
+        if let Some(name) = &packet.answered_name {
+            self.answered_name(&mut alerts, packet.at_ms, mac, source, name);
+        }
         if packet.opening {
             if let Some(((_, port), destination)) = packet.tcp.zip(packet.destination) {
                 self.opened(&mut alerts, packet.at_ms, mac, destination, port);
@@ -984,6 +994,54 @@ impl Audit {
                 ),
             );
         }
+    }
+
+    /// `mac` answered an LLMNR or NetBIOS name query for `name`. A machine answers for its
+    /// own name; one answering for many, or for `wpad` (the name browsers look up to find
+    /// a proxy), is poisoning name resolution.
+    fn answered_name(
+        &mut self,
+        alerts: &mut Vec<Alert>,
+        at_ms: u64,
+        mac: &str,
+        source: IpAddr,
+        name: &str,
+    ) {
+        if !self.answering.contains_key(mac) && self.answering.len() >= MAX_REMEMBERED {
+            return;
+        }
+        let names = self.answering.entry(mac.to_string()).or_default();
+        if names.len() < POISONING_NAMES || names.contains(name) {
+            names.insert(name.to_string());
+        }
+        let wpad = name == "wpad";
+        if !wpad && names.len() < POISONING_NAMES {
+            return;
+        }
+        let shown: Vec<&str> = names.iter().map(String::as_str).collect();
+        let detail = if wpad {
+            format!(
+                "answers from {source} for wpad, the name browsers look up to find a proxy: \
+                 whoever answers it can read their web traffic"
+            )
+        } else {
+            format!(
+                "answers from {source} for {} names over LLMNR or NetBIOS ({}): a machine \
+                 answers for its own name, Responder answers for all of them to collect \
+                 password hashes",
+                shown.len(),
+                shown.join(", ")
+            )
+        };
+        self.tell(
+            alerts,
+            format!("poison {mac}"),
+            at_ms,
+            Severity::High,
+            "name-poisoning",
+            mac,
+            detail,
+        );
     }
 
     /// A frame from `mac`. Many hardware addresses never seen before, within a minute, are a
@@ -1506,6 +1564,40 @@ mod tests {
             .flat_map(|i| audit.see(&sent(later + i * 1_000, 1_000_000)))
             .collect();
         assert_eq!(rules(&again), ["traffic-surge"]);
+    }
+
+    #[test]
+    fn answering_for_other_machines_names_is_told_once() {
+        let mut audit = Audit::new(State::default(), learned());
+        let answer = |mac: &str, ip: &str, name: &str, at_ms: u64| Packet {
+            answered_name: Some(name.into()),
+            ..from(mac, ip, at_ms)
+        };
+        // A Windows machine answers for its own name, again and again: quiet.
+        let own: Vec<Alert> = (0..10)
+            .flat_map(|i| audit.see(&answer(TV, "192.168.1.84", "desktop-archie", i)))
+            .collect();
+        assert!(own.is_empty());
+        // Responder answers for whatever is asked.
+        let rogue = "02:00:5e:11:22:33";
+        let mut told = Vec::new();
+        for (i, name) in ["fileserv", "printer01", "nas", "intranet"]
+            .iter()
+            .enumerate()
+        {
+            told.extend(audit.see(&answer(rogue, "192.168.1.99", name, 100 + i as u64)));
+        }
+        assert_eq!(rules(&told), ["name-poisoning"]);
+        assert_eq!(told[0].severity, Severity::High);
+        assert!(
+            told[0].detail.contains("fileserv, nas, printer01"),
+            "{}",
+            told[0].detail
+        );
+        // wpad alone is enough.
+        let wpad = audit.see(&answer("02:00:5e:44:55:66", "192.168.1.98", "wpad", 200));
+        assert_eq!(rules(&wpad), ["name-poisoning"]);
+        assert!(wpad[0].detail.contains("proxy"), "{}", wpad[0].detail);
     }
 
     #[test]

@@ -25,6 +25,7 @@ with only the broadcast view, and says more with a mirror.
 | Names a device gives | DHCP host name, LLDP system name, NetBIOS name, HTTP User-Agent | — |
 | `rogue-dhcp-server` | a second DHCP server answering after the learning window | — |
 | `rogue-router-advertisement` | an IPv6 RA from a host that is not the router | — |
+| `name-poisoning` | a device answering LLMNR/NetBIOS for 3+ names, or for `wpad` (Responder) | — |
 | `mac-flood` | 20+ unknown hardware addresses sending in a minute; the flood is kept out of the inventory | — |
 | `dhcp-starvation` | 30+ unknown DHCP clients in a minute, by the DHCP client address (`chaddr`) | — |
 | `beacon-suspect` and `beacons` | a clock-like rhythm of connections to one outside destination, scored as RITA does; told only for a destination taken up after the device was learned | — (method reimplemented) |
@@ -142,6 +143,26 @@ its basis.
 - **Measured.** The same 100,000-frame capture: 400 alerts and 399 devices before, 3 alerts
   (one `mac-flood`) and 1 device after; own CPU 0.63–0.64 s before, 0.66–0.67 s after. The
   300,000-SYN capture: 2.52–2.59 s before, 2.32–2.54 s after (noise).
+
+### 2026-10-16: LLMNR and NetBIOS poisoning (Responder)
+
+- **Compared.** Respounder (Go, Rapid7) and similar canaries ask the link for a made-up name
+  and flag whoever answers: certain, but active (Sentry would send queries), so it is left
+  for a Policy-approved mode. Conveigh/Inveigh and Zeek scripts watch answers passively;
+  Suricata has ET rules for specific Responder versions.
+- **Chosen.** Passive: count the distinct names each device answers for over LLMNR (a DNS
+  response from UDP 5355) and NetBIOS (an NBNS response; new TShark field
+  `nbns.flags.response`). Three names, or `wpad` alone, is told once per device. From the
+  canaries, the idea that answering for a name that is not yours is the whole signal.
+- **Tested.** Unit tests: LLMNR and NBNS answers are read, a question is not an answer; a
+  Windows machine answering ten times for its own name is quiet; Responder answering four
+  names is one alert naming them; `wpad` alone is told. TShark end to end: the fixture now
+  has a Windows machine answering for itself (quiet) and a Responder answering LLMNR for
+  two names and NetBIOS for WPAD, told as `name-poisoning`.
+- **Measured.** The 300,000-SYN capture, own CPU: 2.39–2.53 s before, 2.41–2.43 s after
+  (noise); the only per-frame cost is one more TShark column.
+- **Limit.** Answers are unicast; on a switched network only those to the sensor's own
+  machine are seen. The bait mode above would cover the rest.
 
 ## How a tool is accepted
 

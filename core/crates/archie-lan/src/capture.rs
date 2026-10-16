@@ -13,7 +13,7 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 /// The fields, in the order they are printed, one frame to a line, tab between.
-pub const FIELDS: [&str; 34] = [
+pub const FIELDS: [&str; 35] = [
     "frame.time_epoch",
     "frame.len",
     "eth.src",
@@ -48,6 +48,7 @@ pub const FIELDS: [&str; 34] = [
     "lldp.tlv.system.name",
     "nbns.name",
     "dhcp.hw.mac_addr",
+    "nbns.flags.response",
 ];
 
 /// Enough of each frame for the names above; the rest is never copied off the interface.
@@ -126,6 +127,10 @@ pub struct Packet {
     /// The client hardware address a DHCP message is about (`chaddr`). A client's own
     /// messages carry its Ethernet address here too; a tool exhausting the pool varies it.
     pub dhcp_client: Option<String>,
+    /// The name a device answers for over LLMNR or NetBIOS name service: the names
+    /// Windows asks the whole link when DNS does not know them, and which Responder
+    /// answers to all.
+    pub answered_name: Option<String>,
 }
 
 fn flag(text: &str) -> bool {
@@ -241,6 +246,15 @@ pub fn parse(line: &str) -> Option<Packet> {
         lldp_name: said(fields[31], 128),
         nbns_name: said(fields[32].split('<').next().unwrap_or(""), 64),
         dhcp_client: mac(fields[33]),
+        answered_name: if flag(fields[16])
+            && ports(fields[14], fields[15]).is_some_and(|(s, _)| s == 5355)
+        {
+            name(fields[17])
+        } else if flag(fields[34]) {
+            name(fields[32].split('<').next().unwrap_or("").trim())
+        } else {
+            None
+        },
     })
 }
 
@@ -408,6 +422,23 @@ pub(crate) mod tests {
             Some("Mozilla/5.0 (KHTML, like Gecko)")
         );
         assert_eq!(packet.nbns_name.as_deref(), Some("DESKTOP-ARCHIE"));
+        assert_eq!(packet.answered_name, None, "a question is not an answer");
+        let llmnr = parse(&line(&[
+            ("frame.time_epoch", "1"),
+            ("udp.srcport", "5355"),
+            ("udp.dstport", "50000"),
+            ("dns.flags.response", "True"),
+            ("dns.qry.name", "FileServ"),
+        ]))
+        .unwrap();
+        assert_eq!(llmnr.answered_name.as_deref(), Some("fileserv"));
+        let nbns = parse(&line(&[
+            ("frame.time_epoch", "1"),
+            ("nbns.flags.response", "True"),
+            ("nbns.name", "WPAD<00> (Workstation/Redirector)"),
+        ]))
+        .unwrap();
+        assert_eq!(nbns.answered_name.as_deref(), Some("wpad"));
         // A second occurrence of an address field is not the frame's own (ICMP errors).
         fields.push(("ip.dst", "192.168.1.1,10.0.0.1"));
         assert_eq!(

@@ -1,11 +1,13 @@
 # Writes rogue-dhcp-and-ra.pcap (scapy): a Windows client, the router, an LLDP switch, a
 # second device that answers DHCP and advertises itself as an IPv6 router, and then a DHCP
-# starvation flood (one sender, 40 client addresses), then a macof-style flood of 60
-# made-up hardware addresses. Nothing is sent.
+# starvation flood (one sender, 40 client addresses), a Responder answering LLMNR and
+# NetBIOS for other machines' names, then a macof-style flood of 60 made-up hardware
+# addresses. Nothing is sent.
 #   python3 -I make_rogue_pcap.py rogue-dhcp-and-ra.pcap
 import sys
-from scapy.all import Ether, IP, UDP, TCP, BOOTP, DHCP, IPv6, ICMPv6ND_RA, ICMPv6NDOptSrcLLAddr, Raw, wrpcap, ARP, load_layer, load_contrib
-from scapy.layers.netbios import NBNSHeader, NBNSQueryRequest
+from scapy.all import Ether, IP, UDP, TCP, BOOTP, DHCP, IPv6, ICMPv6ND_RA, ICMPv6NDOptSrcLLAddr, Raw, wrpcap, ARP, DNSQR, DNSRR, load_layer, load_contrib
+from scapy.layers.netbios import NBNSHeader, NBNSQueryRequest, NBNSQueryResponse
+from scapy.layers.llmnr import LLMNRResponse
 load_layer("tls")
 from scapy.layers.tls.all import TLS, TLSClientHello, TLS_Ext_ServerName, ServerName, TLS_Ext_SupportedGroups, TLS_Ext_SignatureAlgorithms
 load_contrib("lldp")
@@ -53,6 +55,16 @@ for i in range(40):
     chaddr = bytes.fromhex("0200%08x" % (0xc0de0000 + i))
     at(Ether(src=starver, dst="ff:ff:ff:ff:ff:ff")/IP(src="0.0.0.0", dst="255.255.255.255")/UDP(sport=68, dport=67)/
        BOOTP(chaddr=chaddr, xid=i)/DHCP(options=[("message-type","discover"),"end"]), 130 + i * 0.2)
+# The Windows client answers for its own name: honest.
+at(Ether(src=win, dst="ff:ff:ff:ff:ff:ff")/IP(src="192.168.1.50", dst="192.168.1.255")/UDP(sport=137, dport=137)/
+   NBNSHeader(RESPONSE=1, NM_FLAGS=0x50, ANCOUNT=1, QDCOUNT=0)/NBNSQueryResponse(RR_NAME="DESKTOP-ARCHIE"), 145)
+# Responder answers LLMNR for two names the Windows client asked about, then NetBIOS for WPAD.
+responder = "02:00:5e:11:22:33"
+for i, asked in enumerate(["fileserv", "printer01"]):
+    at(Ether(src=responder, dst=win)/IP(src="192.168.1.99", dst="192.168.1.50")/UDP(sport=5355, dport=50000 + i)/
+       LLMNRResponse(id=i, qd=DNSQR(qname=asked), an=DNSRR(rrname=asked, rdata="192.168.1.99")), 150 + i)
+at(Ether(src=responder, dst=win)/IP(src="192.168.1.99", dst="192.168.1.50")/UDP(sport=137, dport=137)/
+   NBNSHeader(RESPONSE=1, NM_FLAGS=0x50, ANCOUNT=1, QDCOUNT=0)/NBNSQueryResponse(RR_NAME="WPAD"), 152)
 # Then a table flood, as macof sends it: made-up source and destination hardware and IP
 # addresses, 60 frames in a second.
 for i in range(60):
