@@ -19,6 +19,7 @@
 //! | `rogue-dhcp-server` | a second device answers DHCP (an offer or acknowledgement) when another already does: it can hand out its own router and DNS |
 //! | `beacon-suspect` | a device learned for a day starts calling a new outside destination on a clock (a regular interval, scored as RITA does), the way malware checks in with its controller |
 //! | `rogue-dhcpv6-server` | a device that is not the router answers DHCPv6 (an advertise or reply), or, once servers are known, a new one does: mitm6 makes itself every Windows machine's IPv6 DNS server this way |
+//! | `retired-tls` | a device's TLS client offers nothing newer than TLS 1.1 (RFC 8996 retired 1.0 and 1.1 in 2021): firmware that has not been updated in years, usually a camera or an appliance |
 //! | `name-poisoning` | a device answers LLMNR or NetBIOS name queries for three different names, or for `wpad`: Responder's way of taking other machines' traffic and password hashes. An honest Windows machine answers for its own name |
 //! | `mac-flood` | 20 or more hardware addresses not known as devices send within a minute, after the first minute: a tool filling the switch's address table so it repeats everyone's traffic to every port. While it lasts, unknown addresses are not kept as devices |
 //! | `dhcp-starvation` | 30 or more hardware addresses not known as devices ask DHCP for an address within a minute: a tool exhausting the router's pool, so that a rogue server can answer instead |
@@ -925,6 +926,29 @@ impl Audit {
         if let Some(label) = label.filter(|_| packet.opening) {
             self.contacted(&mut alerts, packet.at_ms, mac, label);
         }
+        if let Some(version) = packet
+            .ja4
+            .as_deref()
+            .and_then(crate::fingerprint::tls_version)
+            .filter(|v| crate::fingerprint::retired_tls(v))
+        {
+            let to = packet
+                .server_name
+                .as_deref()
+                .map_or_else(String::new, |name| format!(" (to {name})"));
+            self.tell(
+                &mut alerts,
+                format!("tls {mac}"),
+                packet.at_ms,
+                Severity::Notice,
+                "retired-tls",
+                mac,
+                format!(
+                    "its TLS client offers nothing newer than {version}{to}, retired in 2021: \
+                     its firmware has likely not been updated in years"
+                ),
+            );
+        }
         if let Some(name) = &packet.answered_name {
             self.answered_name(&mut alerts, packet.at_ms, mac, source, name);
         }
@@ -1626,6 +1650,36 @@ mod tests {
             .flat_map(|i| audit.see(&sent(later + i * 1_000, 1_000_000)))
             .collect();
         assert_eq!(rules(&again), ["traffic-surge"]);
+    }
+
+    #[test]
+    fn a_device_offering_only_retired_tls_is_told_once() {
+        let mut audit = Audit::new(State::default(), learned());
+        let hello = |mac: &str, ja4: &str, at_ms: u64| Packet {
+            ja4: Some(ja4.into()),
+            server_name: Some("cam.example.net".into()),
+            ..from(mac, "192.168.1.60", at_ms)
+        };
+        assert!(audit
+            .see(&hello(TV, "t13d1516h2_8daaf6152771_02713d6af862", 1))
+            .is_empty());
+        let camera = "00:12:12:00:00:01";
+        let told: Vec<Alert> = (0..3)
+            .flat_map(|i| {
+                audit.see(&hello(
+                    camera,
+                    "t10d030100_5704bdfc91c6_e3b0c44298fc",
+                    10 + i,
+                ))
+            })
+            .collect();
+        assert_eq!(rules(&told), ["retired-tls"]);
+        assert_eq!(told[0].severity, Severity::Notice);
+        assert!(
+            told[0].detail.contains("TLS 1.0 (to cam.example.net)"),
+            "{}",
+            told[0].detail
+        );
     }
 
     #[test]

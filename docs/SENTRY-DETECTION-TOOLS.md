@@ -25,6 +25,7 @@ with only the broadcast view, and says more with a mirror.
 | Names a device gives | DHCP host name, LLDP system name, NetBIOS name, HTTP User-Agent | — |
 | `rogue-dhcp-server` | a second DHCP server answering after the learning window | — |
 | `rogue-router-advertisement` | an IPv6 RA from a host that is not the router | — |
+| `retired-tls` and `tls_versions` | a device whose TLS client stops at 1.1 or older, read from its JA4 | — |
 | `rogue-dhcpv6-server` | a device other than the router answering DHCPv6 (mitm6) | — |
 | `name-poisoning` | a device answering LLMNR/NetBIOS for 3+ names, or for `wpad` (Responder) | — |
 | `mac-flood` | 20+ unknown hardware addresses sending in a minute; the flood is kept out of the inventory | — |
@@ -183,6 +184,27 @@ its basis.
 - **Measured.** The 300,000-SYN capture, own CPU: 2.48–2.49 s before, 2.47 s after.
 - **Proposal, not done.** Blocking DHCPv6 from anything but the router is a router or
   switch change: a proposal through Policy with the owner's approval.
+
+### 2026-10-16: retired TLS (cameras and appliances left behind)
+
+- **Compared.** Zeek's `SSL::Old_Version` notice (policy `protocols/ssl/weak-keys`) and
+  Suricata's `tls.version` keyword both read the version from the handshake; both need
+  their own engine. The JA4 Sentry already keeps carries the highest version the client
+  offered in its second and third characters, the same fact.
+- **Chosen.** No new capture field: `fingerprint::tls_version` reads it from JA4, and a
+  client offering nothing newer than TLS 1.1 (retired by RFC 8996) is a `retired-tls`
+  notice once per device, naming the server it called; every profile lists
+  `tls_versions`. A notice, not a warning: it is hygiene to fix on a device the owner has,
+  not an attack. It feeds the roadmap's camera stage (which devices need firmware first).
+- **Tested.** Fingerprint test: TLS 1.3 over TCP and QUIC, TLS 1.0, SSL 3.0 and garbage
+  read correctly; a device with 1.0 and 1.3 clients lists both. Audit test: a TLS 1.3
+  client is quiet, a camera offering TLS 1.0 three times is one notice naming
+  `cam.example.net`. TShark end to end: the fixture now has a camera's TLS 1.0 ClientHello,
+  which TShark fingerprints as `t10d030100_…`, told and listed.
+- **Measured.** Not on the capture path: one string match on frames that already carry a
+  JA4, nothing new asked of TShark.
+- **Not done.** The server side (a device's own web interface offering only old TLS) needs
+  the ServerHello version, a new field; it waits for the camera stage.
 
 ## How a tool is accepted
 

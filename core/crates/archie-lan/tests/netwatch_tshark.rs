@@ -63,6 +63,19 @@ fn a_rogue_dhcp_server_and_a_rogue_router_are_told_from_a_real_capture() {
         .find(|a| a["rule"] == "dhcp-starvation")
         .unwrap();
     assert_eq!(starvation["device"], "02:00:5e:dd:ee:ff");
+    // The old camera is told, as a notice, and its profile says why.
+    assert!(report["alerts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|a| a["rule"] == "retired-tls" && a["device"] == "00:12:12:00:00:01"));
+    let camera = report["profiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["mac"] == "00:12:12:00:00:01")
+        .unwrap();
+    assert_eq!(camera["tls_versions"][0], "TLS 1.0");
     // The flood's made-up addresses are not kept as devices.
     assert!(report["profiles"].as_array().unwrap().len() < 10);
     let windows = report["profiles"]

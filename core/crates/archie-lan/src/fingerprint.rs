@@ -59,6 +59,26 @@ fn dhcp_family(vendor: &str) -> Option<&'static str> {
     }
 }
 
+/// The highest TLS version a client offered, as its JA4 says in the second and third
+/// characters ("t13…" is TLS 1.3 over TCP, "q13…" over QUIC).
+pub fn tls_version(ja4: &str) -> Option<&'static str> {
+    Some(match ja4.get(1..3)? {
+        "13" => "TLS 1.3",
+        "12" => "TLS 1.2",
+        "11" => "TLS 1.1",
+        "10" => "TLS 1.0",
+        "s3" => "SSL 3.0",
+        "s2" => "SSL 2.0",
+        _ => return None,
+    })
+}
+
+/// Versions RFC 8996 (2021) retired: a client that offers nothing newer runs a stack
+/// that has not been updated in years.
+pub fn retired_tls(version: &str) -> bool {
+    matches!(version, "TLS 1.1" | "TLS 1.0" | "SSL 3.0" | "SSL 2.0")
+}
+
 /// One hint and what it rests on.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Hint {
@@ -76,6 +96,8 @@ pub struct Profile {
     /// The DHCP options it asks for, in order: equal strings mean the same DHCP stack.
     pub dhcp_fingerprint: Option<String>,
     pub ja4: Vec<String>,
+    /// The highest TLS version each of its clients offered, from `ja4`.
+    pub tls_versions: Vec<&'static str>,
     pub user_agents: Vec<String>,
     pub lldp_name: Option<String>,
     pub netbios_names: Vec<String>,
@@ -112,6 +134,13 @@ pub fn profile(mac: &str, device: &Device) -> Profile {
         hints,
         dhcp_fingerprint: device.dhcp_requested.clone(),
         ja4: device.ja4.iter().cloned().collect(),
+        tls_versions: {
+            let mut versions: Vec<&'static str> =
+                device.ja4.iter().filter_map(|j| tls_version(j)).collect();
+            versions.sort_unstable();
+            versions.dedup();
+            versions
+        },
         user_agents: device.user_agents.iter().cloned().collect(),
         lldp_name: device.lldp_name.clone(),
         netbios_names: device.nbns_names.iter().cloned().collect(),
@@ -129,6 +158,39 @@ mod tests {
         assert_eq!(vendor("da:a1:19:00:00:01"), None);
         // 00:1A:11 is registered to Google.
         assert_eq!(vendor("00:1a:11:12:34:56"), Some("Google, Inc."));
+    }
+
+    #[test]
+    fn the_tls_version_is_read_from_ja4() {
+        assert_eq!(
+            tls_version("t13d1516h2_8daaf6152771_02713d6af862"),
+            Some("TLS 1.3")
+        );
+        assert_eq!(
+            tls_version("q13d0312h3_55b375c5d22e_06cda9e17597"),
+            Some("TLS 1.3")
+        );
+        assert_eq!(
+            tls_version("t10d030100_5704bdfc91c6_e3b0c44298fc"),
+            Some("TLS 1.0")
+        );
+        assert_eq!(
+            tls_version("ts3d020000_000000000000_000000000000"),
+            Some("SSL 3.0")
+        );
+        assert_eq!(tls_version("t"), None);
+        assert!(retired_tls("TLS 1.0") && !retired_tls("TLS 1.2"));
+        let device = Device {
+            ja4: ["t13d1516h2_a_b", "t10d030100_c_d", "t13d1516h2_e_f"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            ..Device::default()
+        };
+        assert_eq!(
+            profile("00:1a:11:12:34:56", &device).tls_versions,
+            ["TLS 1.0", "TLS 1.3"]
+        );
     }
 
     #[test]
