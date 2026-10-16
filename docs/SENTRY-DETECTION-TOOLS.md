@@ -25,6 +25,7 @@ with only the broadcast view, and says more with a mirror.
 | Names a device gives | DHCP host name, LLDP system name, NetBIOS name, HTTP User-Agent | — |
 | `rogue-dhcp-server` | a second DHCP server answering after the learning window | — |
 | `rogue-router-advertisement` | an IPv6 RA from a host that is not the router | — |
+| `lease-conflict` | an ARP claim of an address the router leased to another device | — |
 | `rogue-dns-server` | a new LAN device answering DNS after learning (not the router, not a learned Pi-hole) | — |
 | `arp-sweep` | one device asking ARP for 50+ addresses in a minute (a LAN scan) | — |
 | `icmp-redirect` | an ICMP/ICMPv6 Redirect from anyone but the router | — |
@@ -319,6 +320,23 @@ its basis.
   is no end. JSON: relative expiry, `false` as no end, a bad MAC and the IPv6 list skipped,
   broken JSON gives nothing. CLI end to end on a pfSense-style fixture.
 - **Measured.** Not on the capture path.
+
+### 2026-10-16: lease conflicts (the router as a witness)
+
+- **Compared.** arpwatch and `address-moved` see an address change hands, but only between
+  two claimants Sentry has heard; a switch's DHCP snooping binding table (Cisco Dynamic ARP
+  Inspection) drops ARP that disagrees with the leases, which a home switch cannot do.
+  Zeek's `dhcp.log` and `arp` analyzer would need joining by hand.
+- **Chosen.** The passive half of Dynamic ARP Inspection: keep the router's lease table
+  (`leased_to`: address → holder and lease end) and tell an ARP claim that disagrees with a
+  lease still holding. It works even when the real holder has not spoken since Sentry
+  started, and the other way round: a lease read after the wire showed someone else on the
+  address is checked too. A warning, not high: a static address set inside the DHCP range
+  looks the same and is far more common.
+- **Tested.** The holder claiming its own address is quiet; another device claiming it is
+  one alert naming the holder; after the lease's end the address may move freely; a lease
+  read after a conflicting claim is told; the lease table survives a save and a load.
+- **Measured.** One map lookup per IPv4 ARP claim; nothing else on the capture path.
 
 ## How a tool is accepted
 

@@ -19,6 +19,7 @@
 //! | `rogue-dhcp-server` | a second device answers DHCP (an offer or acknowledgement) when another already does: it can hand out its own router and DNS |
 //! | `beacon-suspect` | a device learned for a day starts calling a new outside destination on a clock (a regular interval, scored as RITA does), the way malware checks in with its controller |
 //! | `rogue-dhcpv6-server` | a device that is not the router answers DHCPv6 (an advertise or reply), or, once servers are known, a new one does: mitm6 makes itself every Windows machine's IPv6 DNS server this way |
+//! | `lease-conflict` | a device claims (over ARP) an address the router's DHCP server leased to another device, while that lease holds: a static address inside the DHCP range, or someone taking another device's traffic. Needs a lease table read with `archie-netwatch leases` |
 //! | `rogue-dns-server` | after the learning time, a device on the LAN that is not the router starts answering DNS to other devices: someone handing out its own DNS can send them anywhere. Servers learned while learning (a Pi-hole) stay quiet |
 //! | `arp-sweep` | one device asks ARP for 50 or more different addresses within a minute: a scan of the network (nmap -sn, arp-scan, netdiscover, or a network app on a phone). ARP requests are broadcast, so a switched network shows them all |
 //! | `icmp-redirect` | a device other than the router sends an ICMP Redirect (IPv4 or IPv6), telling a host to route through it: a way into the middle of its traffic without touching ARP |
@@ -139,6 +140,22 @@ pub struct Device {
     pub leased_until_s: Option<u64>,
 }
 
+/// The holder of one address in the router's lease table.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LeaseHolder {
+    pub mac: String,
+    /// When the lease ends, in seconds since the epoch; absent for one that does not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub until_s: Option<u64>,
+}
+
+impl LeaseHolder {
+    fn holds_at(&self, at_ms: u64) -> bool {
+        self.until_s
+            .is_none_or(|until| until.saturating_mul(1000) >= at_ms)
+    }
+}
+
 /// A clock-like rhythm of connections to one destination (`crate::beacon`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Beacon {
@@ -236,6 +253,10 @@ pub struct State {
     /// The devices that have offered themselves as IPv6 routers.
     #[serde(default)]
     pub router_advertisers: BTreeSet<String>,
+    /// Which device the router's DHCP server last leased each address to, from the lease
+    /// tables read (`archie-netwatch leases`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub leased_to: BTreeMap<Ipv4Addr, LeaseHolder>,
     /// The devices on the LAN that have answered DNS.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub dns_servers: BTreeSet<String>,
@@ -358,6 +379,14 @@ impl State {
         )?;
         over(limits.devices, self.dhcpv6_servers.len(), "DHCPv6 servers")?;
         over(limits.devices, self.dns_servers.len(), "DNS servers")?;
+        over(limits.devices, self.leased_to.len(), "leased addresses")?;
+        for holder in self.leased_to.values() {
+            over(
+                limits.name_chars,
+                holder.mac.len(),
+                "characters in one name",
+            )?;
+        }
         for device in self.devices.values() {
             over(
                 limits.addresses,
@@ -784,7 +813,55 @@ impl Audit {
             device.hostname = lease.hostname.clone();
         }
         device.leased_until_s = Some(lease.expires_s.unwrap_or(0));
+        let holder = LeaseHolder {
+            mac: mac.to_string(),
+            until_s: lease.expires_s,
+        };
+        let claimed = self
+            .state
+            .owners
+            .get(&IpAddr::V4(lease.address))
+            .filter(|owner| *owner != mac)
+            .cloned();
+        if let Some(claimant) = claimed.filter(|_| holder.holds_at(at_ms)) {
+            self.lease_conflict(&mut alerts, at_ms, &claimant, lease.address, &holder);
+        }
+        if self.state.leased_to.len() < MAX_DEVICES
+            || self.state.leased_to.contains_key(&lease.address)
+        {
+            self.state.leased_to.insert(lease.address, holder);
+        }
         alerts
+    }
+
+    /// `claimant` claims `address`, which the router leased to another device.
+    fn lease_conflict(
+        &mut self,
+        alerts: &mut Vec<Alert>,
+        at_ms: u64,
+        claimant: &str,
+        address: Ipv4Addr,
+        holder: &LeaseHolder,
+    ) {
+        let name = self
+            .state
+            .devices
+            .get(&holder.mac)
+            .and_then(|device| device.hostname.clone())
+            .map_or_else(String::new, |name| format!(" ({name})"));
+        self.tell(
+            alerts,
+            format!("lease {address} {claimant}"),
+            at_ms,
+            Severity::Warning,
+            "lease-conflict",
+            claimant,
+            format!(
+                "claims {address}, which the router leased to {}{name}: a static address inside \
+                 the DHCP range by mistake, or a device taking another's traffic",
+                holder.mac
+            ),
+        );
     }
 
     /// Takes one frame into account and returns what it gives reason to tell.
@@ -1513,6 +1590,17 @@ impl Audit {
             IpAddr::V4(v4) => self.settings.gateway == Some(v4),
             IpAddr::V6(v6) => self.settings.gateway_v6 == Some(v6),
         };
+        if let IpAddr::V4(v4) = address {
+            let holder = self
+                .state
+                .leased_to
+                .get(&v4)
+                .filter(|holder| holder.mac != mac && holder.holds_at(at_ms))
+                .cloned();
+            if let Some(holder) = holder {
+                self.lease_conflict(alerts, at_ms, mac, v4, &holder);
+            }
+        }
         match self.state.owners.get(&address).cloned() {
             Some(before) if before != mac => {
                 let (severity, what) = if gateway {
@@ -1899,6 +1987,44 @@ mod tests {
         );
         assert!(audit.see(&from(camera, "192.168.1.61", 130_000)).is_empty());
         assert_eq!(audit.state.devices.len(), 3);
+    }
+
+    #[test]
+    fn claiming_an_address_the_router_leased_to_another_is_told() {
+        let mut audit = Audit::new(State::default(), learned());
+        let lease = |mac: &str, ip: &str, until_s: Option<u64>| crate::leases::Lease {
+            expires_s: until_s,
+            mac: mac.into(),
+            address: ip.parse().unwrap(),
+            hostname: None,
+        };
+        audit.leased(&lease(TV, "192.168.1.84", Some(2_000_000)), 1_000);
+        assert_eq!(audit.state.leased_to.len(), 1);
+        // The holder claiming its own address: quiet.
+        assert!(audit.see(&claim(TV, "192.168.1.84", 2_000)).is_empty());
+        // Another device claiming it while the lease holds: told once.
+        let laptop = "02:00:5e:aa:bb:cc";
+        let told: Vec<Alert> = (0..3)
+            .flat_map(|i| audit.see(&claim(laptop, "192.168.1.84", 3_000 + i)))
+            .filter(|a| a.rule == "lease-conflict")
+            .collect();
+        assert_eq!(told.len(), 1);
+        assert_eq!(told[0].device, laptop);
+        assert!(told[0].detail.contains(TV), "{}", told[0].detail);
+        // After the lease ended the address is free to move: no conflict.
+        audit.leased(&lease(TV, "192.168.1.90", Some(10)), 1_000);
+        assert!(audit
+            .see(&claim(laptop, "192.168.1.90", 20_000))
+            .iter()
+            .all(|a| a.rule != "lease-conflict"));
+        // A lease table read after the wire already showed someone else on the address.
+        audit.see(&claim("02:00:5e:00:00:07", "192.168.1.120", 30_000));
+        let late = audit.leased(&lease("00:11:22:33:44:01", "192.168.1.120", None), 31_000);
+        assert_eq!(rules(&late), ["lease-conflict"]);
+        assert_eq!(late[0].device, "02:00:5e:00:00:07");
+        // The state keeps the lease table and still loads.
+        let saved = serde_json::to_vec(&audit.state).unwrap();
+        assert_eq!(State::parse(&saved).unwrap().leased_to.len(), 3);
     }
 
     #[test]
