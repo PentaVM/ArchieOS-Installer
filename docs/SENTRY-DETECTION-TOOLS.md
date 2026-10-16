@@ -25,6 +25,7 @@ with only the broadcast view, and says more with a mirror.
 | Names a device gives | DHCP host name, LLDP system name, NetBIOS name, HTTP User-Agent | — |
 | `rogue-dhcp-server` | a second DHCP server answering after the learning window | — |
 | `rogue-router-advertisement` | an IPv6 RA from a host that is not the router | — |
+| `dhcp-starvation` | 30+ unknown DHCP clients in a minute, by the DHCP client address (`chaddr`) | — |
 | `beacon-suspect` and `beacons` | a clock-like rhythm of connections to one outside destination, scored as RITA does; told only for a destination taken up after the device was learned | — (method reimplemented) |
 
 `archie-netwatch report` prints a `profiles` array: per device, the vendor, whether the
@@ -94,6 +95,30 @@ its basis.
 - **Not done.** A pcap fixture: the alert needs a device learned for a day, which a
   fixture of that length does not justify; the unit tests drive the same code path.
   Popularity filtering (BAYWATCH) waits for more than one sensor.
+
+### 2026-10-16: DHCP starvation
+
+- **Compared.** Switches stop it actively: DHCP snooping rate limits (Cisco's
+  `ip dhcp snooping limit rate`, 15 packets/s per untrusted port by default) and port
+  security caps on hardware addresses per port. Snort/Suricata have no stock rule for it;
+  Zeek's `dhcp.log` lists the clients, and detection is left to the analyst counting them.
+  A passive sensor cannot rate-limit, and a per-sender rate misses tools that also vary
+  the Ethernet source (DHCPig does; Yersinia can).
+- **Chosen.** Count distinct client addresses (`chaddr`, a new TShark field
+  `dhcp.hw.mac_addr`) not known as devices over a sliding minute, the passive counterpart of
+  the snooping limit. It sees both styles: one sender behind many client addresses (named
+  as such in the alert), and a flood that varies both. Known devices renewing never count.
+- **Tested.** Unit test: 29 new clients in a minute plus 50 renewals is quiet; 40 clients
+  spread over two minutes is quiet; one sender with 200 client addresses in ten seconds is
+  told once, again an hour later if it goes on. TShark end to end: the fixture now ends with
+  40 discovers from one sender, told as `dhcp-starvation` with that sender.
+- **Measured.** 60,000 discovers in a minute from made-up clients: one alert, the process's
+  own CPU 0.31–0.34 s before and 0.36–0.38 s after (2 runs each; about 1 µs per
+  discover). The 300,000-SYN capture is unchanged (2.46–2.50 s vs 2.46–2.58 s). The window
+  keeps at most 4,096 messages.
+- **Next.** The same flood shape with source addresses instead of DHCP (`macof`, filling a
+  switch's address table) would make one `new-device` alert per made-up address up to the
+  4,096-device cap; it should become one alert for the flood.
 
 ## How a tool is accepted
 

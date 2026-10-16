@@ -13,7 +13,7 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 /// The fields, in the order they are printed, one frame to a line, tab between.
-pub const FIELDS: [&str; 33] = [
+pub const FIELDS: [&str; 34] = [
     "frame.time_epoch",
     "frame.len",
     "eth.src",
@@ -47,6 +47,7 @@ pub const FIELDS: [&str; 33] = [
     "http.user_agent",
     "lldp.tlv.system.name",
     "nbns.name",
+    "dhcp.hw.mac_addr",
 ];
 
 /// Enough of each frame for the names above; the rest is never copied off the interface.
@@ -122,6 +123,9 @@ pub struct Packet {
     pub lldp_name: Option<String>,
     /// A NetBIOS name registered or asked for, without its type suffix.
     pub nbns_name: Option<String>,
+    /// The client hardware address a DHCP message is about (`chaddr`). A client's own
+    /// messages carry its Ethernet address here too; a tool exhausting the pool varies it.
+    pub dhcp_client: Option<String>,
 }
 
 fn flag(text: &str) -> bool {
@@ -236,6 +240,7 @@ pub fn parse(line: &str) -> Option<Packet> {
         user_agent: said(all[30], 256),
         lldp_name: said(fields[31], 128),
         nbns_name: said(fields[32].split('<').next().unwrap_or(""), 64),
+        dhcp_client: mac(fields[33]),
     })
 }
 
@@ -382,6 +387,7 @@ pub(crate) mod tests {
             ("tls.handshake.ja4", "t13d1516h2_8daaf6152771_02713d6af862"),
             ("http.user_agent", "Mozilla/5.0 (KHTML, like Gecko)"),
             ("nbns.name", "DESKTOP-ARCHIE<00>"),
+            ("dhcp.hw.mac_addr", "00:50:56:12:34:56"),
         ];
         let packet = parse(&line(&fields)).unwrap();
         assert_eq!(packet.dhcp_message, Some(1));
@@ -390,6 +396,7 @@ pub(crate) mod tests {
             Some("1,3,6,15,31,33,43,44,46,47,119,121,249,252")
         );
         assert_eq!(packet.dhcp_vendor.as_deref(), Some("MSFT 5.0"));
+        assert_eq!(packet.dhcp_client.as_deref(), Some("00:50:56:12:34:56"));
         assert_eq!((packet.hops, packet.window), (Some(128), Some(64240)));
         assert_eq!(
             packet.ja4.as_deref(),

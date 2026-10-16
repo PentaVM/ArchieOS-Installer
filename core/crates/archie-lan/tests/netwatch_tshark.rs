@@ -1,6 +1,6 @@
 //! archie-netwatch reading a real capture through a real TShark: the field names it asks
-//! for exist, and a rogue DHCP server and a rogue IPv6 router are told, with what the
-//! devices said of themselves kept for them.
+//! for exist, and a rogue DHCP server, a rogue IPv6 router and a DHCP starvation flood are
+//! told, with what the devices said of themselves kept for them.
 //!
 //! ```text
 //! cargo test -p archie-lan --test netwatch_tshark -- --ignored
@@ -44,7 +44,21 @@ fn a_rogue_dhcp_server_and_a_rogue_router_are_told_from_a_real_capture() {
         .filter(|a| a["severity"] == "high")
         .map(|a| a["rule"].as_str().unwrap())
         .collect();
-    assert_eq!(rules, ["rogue-dhcp-server", "rogue-router-advertisement"]);
+    assert_eq!(
+        rules,
+        [
+            "rogue-dhcp-server",
+            "rogue-router-advertisement",
+            "dhcp-starvation"
+        ]
+    );
+    let starvation = report["alerts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["rule"] == "dhcp-starvation")
+        .unwrap();
+    assert_eq!(starvation["device"], "02:00:5e:dd:ee:ff");
     let windows = report["profiles"]
         .as_array()
         .unwrap()

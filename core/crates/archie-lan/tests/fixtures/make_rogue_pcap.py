@@ -1,5 +1,6 @@
-# Writes rogue-dhcp-and-ra.pcap (scapy): a Windows client, the router, an LLDP switch, and a
-# second device that answers DHCP and advertises itself as an IPv6 router. Nothing is sent.
+# Writes rogue-dhcp-and-ra.pcap (scapy): a Windows client, the router, an LLDP switch, a
+# second device that answers DHCP and advertises itself as an IPv6 router, and then a DHCP
+# starvation flood (one sender, 40 client addresses). Nothing is sent.
 #   python3 -I make_rogue_pcap.py rogue-dhcp-and-ra.pcap
 import sys
 from scapy.all import Ether, IP, UDP, TCP, BOOTP, DHCP, IPv6, ICMPv6ND_RA, ICMPv6NDOptSrcLLAddr, Raw, wrpcap, ARP, load_layer, load_contrib
@@ -45,4 +46,10 @@ at(Ether(src=rogue, dst=win)/IP(src="192.168.1.66", dst="192.168.1.50")/UDP(spor
    BOOTP(op=2, yiaddr="192.168.1.51")/DHCP(options=[("message-type","offer"),("server_id","192.168.1.66"),"end"]), 120)
 # And offers itself as an IPv6 router.
 at(Ether(src=rogue, dst="33:33:00:00:00:01")/IPv6(src="fe80::5eff:feaa:bbcc", dst="ff02::1", hlim=255)/ICMPv6ND_RA()/ICMPv6NDOptSrcLLAddr(lladdr=rogue), 121)
+# Then one sender drains the pool: 40 discovers for 40 made-up client addresses in 8 s.
+starver = "02:00:5e:dd:ee:ff"
+for i in range(40):
+    chaddr = bytes.fromhex("0200%08x" % (0xc0de0000 + i))
+    at(Ether(src=starver, dst="ff:ff:ff:ff:ff:ff")/IP(src="0.0.0.0", dst="255.255.255.255")/UDP(sport=68, dport=67)/
+       BOOTP(chaddr=chaddr, xid=i)/DHCP(options=[("message-type","discover"),"end"]), 130 + i * 0.2)
 wrpcap(sys.argv[1], f)

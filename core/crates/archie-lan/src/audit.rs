@@ -18,6 +18,7 @@
 //! | `traffic-surge` | a device that has been learned for a day sends far more in ten minutes than it usually does |
 //! | `rogue-dhcp-server` | a second device answers DHCP (an offer or acknowledgement) when another already does: it can hand out its own router and DNS |
 //! | `beacon-suspect` | a device learned for a day starts calling a new outside destination on a clock (a regular interval, scored as RITA does), the way malware checks in with its controller |
+//! | `dhcp-starvation` | 30 or more hardware addresses not known as devices ask DHCP for an address within a minute: a tool exhausting the router's pool, so that a rogue server can answer instead |
 //! | `rogue-router-advertisement` | a device not seen before offers itself as an IPv6 router on the link, or one other than the known router does |
 //!
 //! Alongside the rules it keeps what each device says about itself in the clear (DHCP
@@ -71,6 +72,11 @@ const BEACON_TOLD_SCORE: u8 = 85;
 /// Device and destination pairs whose contacts are kept (33 times each).
 const MAX_CONTACTED: usize = 4_096;
 const DAY_MS: u64 = 24 * 60 * 60 * 1000;
+/// Unknown DHCP clients within the window that make a starvation attack.
+const STARVATION_CLIENTS: usize = 30;
+const STARVATION_WINDOW_MS: u64 = 60 * 1000;
+/// DHCP client messages kept for that window, at most.
+const MAX_ASKING: usize = 4_096;
 const PRUNE_EVERY_MS: u64 = 60 * 1000;
 const STATE_FORMAT: &str = "archie-netwatch-state-v1";
 const TOLD_FORMAT: &str = "archie-netwatch-told-v1";
@@ -542,6 +548,53 @@ pub struct Audit {
     contacts: HashMap<(String, String), VecDeque<u64>>,
     /// When `contacts` was last pruned, so a full map is not swept on every frame.
     pruned_ms: u64,
+    /// DHCP clients asking for an address in the last minute, for `dhcp-starvation`.
+    asking: Asking,
+}
+
+/// DHCP discovers and requests of the last minute: when, for which client hardware
+/// address, from which Ethernet sender; with the count per client, so a flood costs
+/// constant work per frame.
+#[derive(Debug, Default)]
+struct Asking {
+    recent: VecDeque<(u64, String, String)>,
+    per_client: HashMap<String, u32>,
+}
+
+impl Asking {
+    fn add(&mut self, at_ms: u64, client: String, sender: String) {
+        while self.recent.len() >= MAX_ASKING
+            || self
+                .recent
+                .front()
+                .is_some_and(|(at, _, _)| at_ms.saturating_sub(*at) >= STARVATION_WINDOW_MS)
+        {
+            let Some((_, gone, _)) = self.recent.pop_front() else {
+                break;
+            };
+            if let Some(count) = self.per_client.get_mut(&gone) {
+                *count -= 1;
+                if *count == 0 {
+                    self.per_client.remove(&gone);
+                }
+            }
+        }
+        *self.per_client.entry(client.clone()).or_default() += 1;
+        self.recent.push_back((at_ms, client, sender));
+    }
+
+    /// The Ethernet sender that carried the most of them, and how many senders there were.
+    fn senders(&self) -> (String, usize) {
+        let mut count: HashMap<&str, usize> = HashMap::new();
+        for (_, _, sender) in &self.recent {
+            *count.entry(sender).or_default() += 1;
+        }
+        let most = count
+            .iter()
+            .max_by_key(|(sender, n)| (**n, std::cmp::Reverse(**sender)))
+            .map_or_else(String::new, |(sender, _)| sender.to_string());
+        (most, count.len())
+    }
 }
 
 /// What a device says of itself outside IP: its DHCP client and its LLDP announcement.
@@ -620,6 +673,7 @@ impl Audit {
             pending: HashMap::new(),
             contacts: HashMap::new(),
             pruned_ms: 0,
+            asking: Asking::default(),
         }
     }
 
@@ -670,6 +724,9 @@ impl Audit {
                         .insert(mac.to_string(), earlier.merge(introduced));
                 }
             }
+        }
+        if matches!(packet.dhcp_message, Some(1 | 3)) {
+            self.asked_dhcp(&mut alerts, packet);
         }
         // A frame from outside the LAN was put on the wire by the router: its hardware
         // address is the router's, and the traffic is not the router's own.
@@ -911,6 +968,45 @@ impl Audit {
                 ),
             );
         }
+    }
+
+    /// A DHCP discover or request. Many clients the network does not know, asking within a
+    /// minute, are a tool draining the pool (one Ethernet sender behind many client
+    /// addresses gives it away; tools that vary both still show as a flood).
+    fn asked_dhcp(&mut self, alerts: &mut Vec<Alert>, packet: &Packet) {
+        let Some(sender) = packet.source_mac.clone() else {
+            return;
+        };
+        let client = packet.dhcp_client.clone().unwrap_or_else(|| sender.clone());
+        if self.state.devices.contains_key(&client) {
+            return;
+        }
+        self.asking.add(packet.at_ms, client, sender);
+        let clients = self.asking.per_client.len();
+        if clients < STARVATION_CLIENTS
+            || !self
+                .told
+                .cooled("dhcp-starvation", packet.at_ms, SURGE_COOLDOWN_MS)
+        {
+            return;
+        }
+        let (sender, senders) = self.asking.senders();
+        let from = if senders == 1 {
+            format!("all from the one Ethernet sender {sender}")
+        } else {
+            format!("from {senders} Ethernet senders, {sender} the busiest")
+        };
+        alerts.push(Alert {
+            at_ms: packet.at_ms,
+            severity: Severity::High,
+            rule: "dhcp-starvation".into(),
+            device: sender,
+            detail: format!(
+                "{clients} unknown hardware addresses asked DHCP for an address within a \
+                 minute, {from}. Draining the router's pool lets a rogue DHCP server answer \
+                 instead"
+            ),
+        });
     }
 
     /// A DHCP offer or acknowledgement from `mac`. The first server is learned; another
@@ -1360,6 +1456,57 @@ mod tests {
             .flat_map(|i| audit.see(&sent(later + i * 1_000, 1_000_000)))
             .collect();
         assert_eq!(rules(&again), ["traffic-surge"]);
+    }
+
+    #[test]
+    fn a_flood_of_unknown_dhcp_clients_is_told_once_an_hour() {
+        let mut audit = Audit::new(State::default(), learned());
+        let ask = |client: String, sender: &str, at_ms: u64| Packet {
+            at_ms,
+            source_mac: Some(sender.into()),
+            source: Some("0.0.0.0".parse().unwrap()),
+            dhcp_message: Some(1),
+            dhcp_client: Some(client),
+            ..Packet::default()
+        };
+        let client = |i: u64| format!("02:00:00:00:{:02x}:{:02x}", i / 256, i % 256);
+        // A busy evening: 29 new clients in a minute, and known ones renewing, is quiet.
+        audit.see(&from(TV, "192.168.1.84", 1));
+        let evening: Vec<Alert> = (0..29)
+            .map(|i| ask(client(i), &client(i), 1_000 + i * 2_000))
+            .chain((0..50).map(|i| ask(TV.into(), TV, 2_000 + i * 1_000)))
+            .flat_map(|p| audit.see(&p))
+            .collect();
+        assert!(evening.is_empty(), "{evening:?}");
+        // Spread over more than a minute, more clients are still not a flood.
+        let later: Vec<Alert> = (100..140)
+            .flat_map(|i| audit.see(&ask(client(i), &client(i), 200_000 + i * 3_000)))
+            .collect();
+        assert!(later.is_empty(), "{later:?}");
+        // One sender behind 40 client addresses in ten seconds is.
+        let attacker = "de:ad:be:ef:00:66";
+        let flood: Vec<Alert> = (1_000..1_200)
+            .flat_map(|i| audit.see(&ask(client(i), attacker, 900_000 + i * 50)))
+            .collect();
+        assert_eq!(rules(&flood), ["dhcp-starvation"]);
+        assert_eq!(flood[0].severity, Severity::High);
+        assert_eq!(flood[0].device, attacker);
+        assert!(
+            flood[0].detail.contains("one Ethernet sender"),
+            "{}",
+            flood[0].detail
+        );
+        // An hour later it is told again if it goes on.
+        let again: Vec<Alert> = (2_000..2_040)
+            .flat_map(|i| {
+                audit.see(&ask(
+                    client(i),
+                    attacker,
+                    900_000 + SURGE_COOLDOWN_MS + i * 50,
+                ))
+            })
+            .collect();
+        assert_eq!(rules(&again), ["dhcp-starvation"]);
     }
 
     #[test]
