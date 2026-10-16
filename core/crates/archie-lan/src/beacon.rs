@@ -8,6 +8,10 @@
 //! deviation small against the median) together mean a clock. The score is the mean of the
 //! two halves, or the intervals alone while the sizes are not known.
 //!
+//! UDP has no SYN to mark a contact, so a contact there is the first datagram after
+//! `UDP_IDLE_MS` of quiet, the way Zeek and Suricata end a UDP flow on inactivity: a QUIC
+//! session or a DNS-over-UDP check-in is one contact however many datagrams it takes.
+//!
 //! Plenty of honest devices keep a clock too (NTP, a vendor cloud's keep-alive), so a
 //! rhythm alone is recorded, not told; `crate::audit` tells it only for a destination the
 //! device started using after it was learned.
@@ -22,6 +26,10 @@ pub const KEPT: usize = 33;
 pub const MIN_CONTACTS: usize = 12;
 /// Intervals outside this are not a check-in clock.
 const SHORTEST_MS: u64 = 10_000;
+/// Quiet after which a device's next datagram to a destination is a new contact. Zeek waits
+/// a minute and Suricata 30 s; the shortest clock scored here is the bound that matters, so
+/// a check-in every 10 s over UDP is still told apart from one long session.
+pub const UDP_IDLE_MS: u64 = SHORTEST_MS;
 const LONGEST_MS: u64 = 24 * 60 * 60 * 1000;
 
 /// A device's rhythm to one destination.
@@ -43,6 +51,8 @@ pub struct Contacts {
     sizes: VecDeque<u64>,
     /// That total at the last contact.
     total: Option<u64>,
+    /// When the device last sent a datagram to the destination, for UDP contacts.
+    heard_ms: Option<u64>,
 }
 
 impl Contacts {
@@ -74,9 +84,20 @@ impl Contacts {
         true
     }
 
-    /// When the last contact was.
+    /// Notes one datagram the device sent to the destination; returns whether it opens a
+    /// contact, that is, whether it is the first after `UDP_IDLE_MS` of quiet.
+    pub fn datagram(&mut self, at_ms: u64) -> bool {
+        let opens = self
+            .heard_ms
+            .is_none_or(|heard| at_ms.saturating_sub(heard) >= UDP_IDLE_MS);
+        self.heard_ms = Some(at_ms);
+        opens
+    }
+
+    /// When the device last reached the destination: its last contact, or a later datagram
+    /// of a UDP session still going.
     pub fn last(&self) -> Option<u64> {
-        self.times.back().copied()
+        self.times.back().copied().max(self.heard_ms)
     }
 
     /// The rhythm of these contacts, once there are enough of them.
@@ -162,6 +183,23 @@ mod tests {
             kept.note(at, total);
         }
         kept
+    }
+
+    #[test]
+    fn a_datagram_opens_a_contact_only_after_a_quiet_spell() {
+        let mut kept = Contacts::default();
+        assert!(kept.datagram(1_000), "the first datagram is a contact");
+        assert!(!kept.datagram(1_050));
+        // Datagrams closer than the idle time chain into one session, however long.
+        let mut at = 1_050;
+        while at < 600_000 {
+            at += UDP_IDLE_MS - 1;
+            assert!(!kept.datagram(at));
+        }
+        assert!(kept.datagram(at + UDP_IDLE_MS));
+        // A session still going counts as the device's latest reach.
+        kept.note(1_000, None);
+        assert_eq!(kept.last(), Some(at + UDP_IDLE_MS));
     }
 
     #[test]

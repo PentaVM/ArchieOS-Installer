@@ -1106,8 +1106,9 @@ impl Audit {
                 });
             }
         }
-        if let Some(label) = label.filter(|_| packet.opening) {
-            self.contacted(&mut alerts, packet.at_ms, mac, label);
+        if let Some(label) = label.filter(|_| packet.opening || packet.udp.is_some()) {
+            let datagram = packet.udp.is_some();
+            self.contacted(&mut alerts, packet.at_ms, mac, label, datagram);
         }
         if let Some(version) = packet
             .ja4
@@ -1143,10 +1144,29 @@ impl Audit {
         alerts
     }
 
-    /// `mac` opened a connection to the outside destination `label`. A clock-like rhythm
-    /// is kept on the device; one to a destination it took up after it was learned is told.
-    fn contacted(&mut self, alerts: &mut Vec<Alert>, at_ms: u64, mac: &str, label: String) {
+    /// `mac` opened a connection to the outside destination `label`, or sent it a datagram
+    /// (`datagram`), which is a contact only after a quiet spell (`crate::beacon`). A
+    /// clock-like rhythm is kept on the device; one to a destination it took up after it
+    /// was learned is told.
+    fn contacted(
+        &mut self,
+        alerts: &mut Vec<Alert>,
+        at_ms: u64,
+        mac: &str,
+        label: String,
+        datagram: bool,
+    ) {
         let key = (mac.to_string(), label);
+        // Most datagrams belong to a session already going: settle those first.
+        let mut heard = false;
+        if datagram {
+            if let Some(contacts) = self.contacts.get_mut(&key) {
+                if !contacts.datagram(at_ms) {
+                    return;
+                }
+                heard = true;
+            }
+        }
         if self.contacts.len() >= MAX_CONTACTED && !self.contacts.contains_key(&key) {
             // Forget pairs quiet for a day, at most once a minute; until that frees room,
             // a new pair is not tracked.
@@ -1171,6 +1191,10 @@ impl Audit {
             .and_then(|device| device.sent_to.get(&key.1))
             .copied();
         let contacts = self.contacts.entry(key.clone()).or_default();
+        if datagram && !heard {
+            // The first datagram to this destination opens a contact.
+            contacts.datagram(at_ms);
+        }
         if !contacts.note(at_ms, total) {
             return;
         }
@@ -2462,6 +2486,39 @@ mod tests {
         // It survives a save and a load.
         let saved = serde_json::to_vec(&audit.state).unwrap();
         assert_eq!(State::parse(&saved).unwrap().devices[TV].beacons.len(), 2);
+    }
+
+    #[test]
+    fn a_clock_over_udp_is_scored_by_its_sessions_not_its_datagrams() {
+        let mut audit = Audit::new(State::default(), learned());
+        let send = |peer: &str, port: u16, at_ms: u64| Packet {
+            destination: Some(peer.parse().unwrap()),
+            udp: Some((50_000, port)),
+            ..from(TV, "192.168.1.84", at_ms)
+        };
+        let day = u64::from(BASELINE_BUCKETS) + 1;
+        for bucket in 1..=day {
+            audit.see(&send("198.51.100.20", 123, bucket * BUCKET_MS));
+        }
+        assert!(audit.state.devices[TV].baseline.learned());
+        let now = (day + 1) * BUCKET_MS;
+        // A long QUIC session, a datagram every 50 ms for ten minutes: one contact, no rhythm.
+        for i in 0..12_000u64 {
+            assert!(audit.see(&send("192.0.2.80", 443, now + i * 50)).is_empty());
+        }
+        assert!(!audit.state.devices[TV].beacons.contains_key("192.0.2.80"));
+        // A check-in over UDP every two minutes, with jitter, each a burst of three
+        // datagrams: one contact per burst, told once.
+        let told: Vec<Alert> = (0..30u64)
+            .flat_map(|i| {
+                let at = now + i * 120_000 + ((i * 2_654_435_761) >> 7) % 8_000;
+                (0..3).map(move |d| at + d * 200)
+            })
+            .flat_map(|at| audit.see(&send("203.0.113.9", 4_500, at)))
+            .collect();
+        assert_eq!(rules(&told), ["beacon-suspect"]);
+        let beacon = &audit.state.devices[TV].beacons["203.0.113.9"];
+        assert!((116..=128).contains(&beacon.every_s), "{beacon:?}");
     }
 
     #[test]

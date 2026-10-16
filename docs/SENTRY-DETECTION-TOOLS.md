@@ -52,8 +52,8 @@ its basis.
    `hickory-proto` + `oui-data`, all MIT/Apache). The broadcast view above needs no
    dissector: parsing ARP, DHCP, mDNS and RA directly removes the TShark start-up and the
    CSV round trip for the always-on part, and keeps TShark for full captures.
-3. **Beacon scoring**: intervals and sizes done (see the log below). Still to do: UDP
-   contacts (QUIC, DNS-over-UDP check-ins), which have no SYN to mark a contact.
+3. **Beacon scoring**: intervals, sizes and UDP contacts done (see the log below). Still
+   to do: scoring by destination name across the addresses a CDN rotates through.
 4. **Aya eBPF** (Rust, MIT/Apache; the kernel part GPL-2). On the gateway or the
    operator's own machine: per-process flow accounting with no packet copies, cheaper than
    pcap for "which program is talking". Needs a recent kernel and CAP_BPF.
@@ -362,6 +362,27 @@ its basis.
   before they are called working.
 - **Measured.** Nothing on the capture path: the read runs on its own thread every 5 minutes
   and the capture loop only checks a channel.
+
+### 2026-10-16: beacons over UDP (QUIC, DNS check-ins)
+
+- **Compared.** RITA scores UDP from Zeek's `conn.log`, where a UDP "connection" ends after
+  `udp_inactivity_timeout` (1 min); Suricata ends a UDP flow after 30 s of quiet; counting
+  every datagram as a contact (with the 1 s merge TCP uses) would make a QUIC download look
+  like a perfect clock.
+- **Chosen.** The flow-timeout idea with a shorter quiet spell: a datagram opens a contact
+  when the device has sent nothing to that destination for 10 s, the shortest interval the
+  scorer accepts. Zeek's minute would merge a 30 s check-in into one endless session. The
+  contact then goes through the same RITA scoring as a TCP SYN, sizes included.
+- **Tested.** A datagram every 50 ms for ten minutes is one contact and no rhythm; a burst
+  of three datagrams every two minutes with jitter is one contact per burst, scored at about
+  120 s and told once as `beacon-suspect`; a session still going counts as the device's
+  latest reach, so the pruning of quiet pairs does not drop it.
+- **Measured.** `Audit::see` in release, best of five runs of 500 000 packets: 262 ns for a
+  TCP packet mid-stream, 315 ns for a UDP datagram mid-session (one more map lookup; the
+  key is cloned only when a contact opens). No new state beyond one timestamp per
+  device-destination pair already tracked.
+- **Not adopted.** Zeek's 1 min timeout (hides check-ins faster than a minute), per-datagram
+  contacts (streams look like clocks).
 
 ## How a tool is accepted
 
