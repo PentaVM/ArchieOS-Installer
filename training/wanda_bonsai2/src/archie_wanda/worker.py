@@ -117,6 +117,8 @@ class Worker:
                 result = self.prepare(spec)
             elif spec['type'] == 'train':
                 result = self.train(spec)
+            elif spec['type'] == 'eval':
+                result = self.eval_job(spec)
             else:
                 raise AdmissionError('unknown job type')
             spec['result'], spec['finished_ms'] = result, now_ms()
@@ -144,9 +146,10 @@ class Worker:
 
     # ---- prepare: native frozen prefix for every admitted variant ---------------------
     def prepare(self, spec):
-        from .data import NativeTokenizer, build_examples, load_families, render, split_digest, tokenize_example
+        from .data import (NativeTokenizer, build_examples, load_families, probe_text, render, split_digest,
+                           tokenize_example, tokenize_probe)
         from .model import inspect_model
-        from .native import build_native, extract_text, sha_file
+        from .native import build_native, sha_file
         tranche = Path(spec['tranche'])
         families = load_families(tranche)
         examples = build_examples(families, spec.get('seed', 17))
@@ -170,24 +173,71 @@ class Worker:
             except AdmissionError as error:
                 rejected.append({'example_id': example.example_id, 'reason': str(error)}); continue
             _, full = render(example)
-            root = self.root/'cache'/digest({'text': full, 'base': model.sha256, 'shim': shim})[:32]
-            if not (root/'receipt.json').exists():
-                if root.exists():
-                    shutil.rmtree(root)
-                extract_text(model, full, root, self.config, self.binary, ubatch=0, split=example.split)
-                prune_reference_outputs(root)
-            info = json.loads((root/'receipt.json').read_text())
+            root, info = self.extract_cached(model, full, example.split, shim)
             if info['tokens'] != tokens.tokens or info['split'] != example.split:
                 rejected.append({'example_id': example.example_id, 'reason': 'native/tokenizer mismatch'}); continue
-            records.append({**asdict(example), 'tokens': tokens.tokens, 'prompt_tokens': tokens.prompt_tokens,
-                            'choice_row': tokens.choice_row, 'choice_token_ids': tokens.choice_token_ids,
-                            'cache': str(root)})
+            record = {**asdict(example), 'tokens': tokens.tokens, 'prompt_tokens': tokens.prompt_tokens,
+                      'choice_row': tokens.choice_row, 'choice_token_ids': tokens.choice_token_ids,
+                      'cache': str(root), 'probe': None}
+            if example.split == 'development':
+                probe = tokenize_probe(example, tokenizer, self.config.sequence_length)
+                if probe is not None:
+                    probe_root, probe_info = self.extract_cached(model, probe_text(example), example.split, shim)
+                    if probe_info['tokens'] == probe[0]:
+                        record['probe'] = {'cache': str(probe_root), 'tokens': probe[0], 'choice_token_ids': probe[1]}
+            records.append(record)
         index = {'format_version': 1, 'tranche': str(tranche), 'tranche_sha256': sha_file(tranche),
                  'split_digest': split_digest(examples), 'base_sha256': model.sha256, 'shim_sha256': shim,
                  'examples': records, 'rejected': rejected, 'created_ms': now_ms()}
         out = self.root/'datasets'/(tranche.stem+'.json')
         atomic_json(out, index)
-        return {'dataset': str(out), 'examples': len(records), 'rejected': len(rejected)}
+        return {'dataset': str(out), 'examples': len(records), 'rejected': len(rejected),
+                'dev_probes': sum(r['probe'] is not None for r in records)}
+
+    def extract_cached(self, model, text, split, shim):
+        from .native import extract_text
+        root = self.root/'cache'/digest({'text': text, 'base': model.sha256, 'shim': shim})[:32]
+        if not (root/'receipt.json').exists():
+            if root.exists():
+                shutil.rmtree(root)
+            extract_text(model, text, root, self.config, self.binary, ubatch=0, split=split)
+            prune_reference_outputs(root)
+        return root, json.loads((root/'receipt.json').read_text())
+
+    # ---- eval: score a checkpoint (or the unchanged base) without training ------------
+    def eval_job(self, spec):
+        import torch
+        from .metrics import trivial_baselines
+        from .model import inspect_model
+        from .ptq import FrozenPTQLinear
+        from .suffix import BonsaiSuffix
+        eval_id = spec['eval_id']
+        if not re.fullmatch(r'[a-z0-9-]{3,64}', eval_id):
+            raise AdmissionError('invalid eval id')
+        examples = [e for path in spec['datasets'] for e in json.loads(Path(path).read_text())['examples']]
+        dev = [e for e in examples if e['split'] == 'development']
+        model = inspect_model(Path(self.config.model_path), self.config.base_sha256)
+        targets = list(spec.get('targets', ['q', 'v']))
+        suffix = BonsaiSuffix(model, self.config, targets).cuda().make_resident('cuda')
+        if spec.get('checkpoint'):
+            state = torch.load(spec['checkpoint'], weights_only=True, map_location='cuda')['model']
+            if set(state) != {k for k in suffix.state_dict() if '_delta.' in k}:
+                raise AdmissionError('checkpoint tensors do not match the requested targets')
+            suffix.load_state_dict(state, strict=False)
+        else:
+            for name, p in suffix.named_parameters():
+                if name.endswith('.b'):
+                    p.data.zero_()              # B=0: the adapter is exactly off
+        head = FrozenPTQLinear(model, 'output.weight', self.config.row_chunk).make_resident('cuda')
+        result = {'format_version': 1, 'eval_id': eval_id, 'checkpoint': spec.get('checkpoint'),
+                  'targets': targets, 'datasets': spec['datasets'], 'base_sha256': model.sha256,
+                  'metrics': self.evaluate(suffix, head, dev, []),
+                  'trivial_baselines': trivial_baselines(dev), 'created_ms': now_ms(),
+                  'note': 'probe_* = prompt-only decision probe; unprefixed choice metrics are teacher-forced'}
+        out = self.root/'runs'/eval_id
+        out.mkdir(parents=True, exist_ok=True)
+        atomic_json(out/'eval.json', result)
+        return {'eval': str(out/'eval.json'), 'probe_family_all_correct': result['metrics'].get('probe_family_all_correct')}
 
     # ---- train -----------------------------------------------------------------------
     def train(self, spec):
@@ -342,7 +392,10 @@ class Worker:
     def better(metrics, best):
         if not metrics.get('dev_examples'):
             return best is None
-        key = lambda m: (m['family_all_correct'], m['choice_accuracy'], -m['dev_loss'])
+        # Prompt-only probe first when available: teacher-forced choice rows follow gold
+        # consequences and cannot show decision quality on their own.
+        p = 'probe_' if 'probe_family_all_correct' in metrics else ''
+        key = lambda m: (m.get(p+'family_all_correct', 0), m.get(p+'choice_accuracy', 0), -m['dev_loss'])
         return best is None or key(metrics) > key(best)
 
     def load_prefix(self, example):
@@ -366,9 +419,17 @@ class Worker:
         """Development metrics from the model's own distribution, not formatting alone."""
         import torch
         from .head_loss import full_vocab_cross_entropy
+        from .metrics import aggregate
         if not dev:
             return {'dev_examples': 0}
-        rows, by_family = [], {}
+        teacher, probe, losses = [], [], {}
+
+        def letter_choice(hidden_row, ids_by_letter, letters, like):
+            ids = [ids_by_letter[letter] for letter in letters]
+            weights = torch.cat([head.chunk(i, like, 1) for i in ids])
+            probs = torch.softmax((head.transform(hidden_row[None]) @ weights.T)[0].double(), -1)
+            return letters[int(probs.argmax())], probs
+
         with torch.no_grad():
             for example in dev:
                 tokens, prompt = example['tokens'], example['prompt_tokens']
@@ -376,38 +437,29 @@ class Worker:
                                       device='cuda', dtype=torch.int64)
                 hidden = suffix(self.load_prefix(example))
                 mask = labels != -100
-                loss = float(full_vocab_cross_entropy(hidden[mask], labels[mask], head, self.config.row_chunk))
-                record = {'variant': example['variant'], 'loss': loss, 'pred': None, 'p_correct': None}
+                losses.setdefault(example['variant'], []).append(
+                    float(full_vocab_cross_entropy(hidden[mask], labels[mask], head, self.config.row_chunk)))
+                base = {key: example[key] for key in ('family_id', 'variant', 'selected', 'shown_to_original',
+                                                     'counterfactual_changes')}
+                letters = list(example['option_letters'])
                 if example['choice_row'] is not None:
-                    letters = list(example['option_letters'])
-                    ids = [example['choice_token_ids'][letter] for letter in letters]
-                    weights = torch.cat([head.chunk(i, hidden, 1) for i in ids])
-                    logits = head.transform(hidden[example['choice_row']][None]) @ weights.T
-                    probs = torch.softmax(logits[0].double(), -1)
-                    pred = letters[int(probs.argmax())]
-                    mapping = dict(example['shown_to_original'])
-                    record.update(pred=pred, correct=pred == example['selected'],
-                                  p_correct=float(probs[letters.index(example['selected'])]),
-                                  original=mapping[pred], changes=example['counterfactual_changes'])
-                rows.append(record)
-                by_family.setdefault(example['family_id'], {})[example['variant']] = record
-        scored = [r for r in rows if r['pred'] is not None]
-        result = {'dev_examples': len(rows), 'dev_loss': sum(r['loss'] for r in rows)/len(rows),
-                  'choice_scored': len(scored),
-                  'choice_accuracy': sum(r['correct'] for r in scored)/max(1, len(scored)),
-                  'mean_p_correct': sum(r['p_correct'] for r in scored)/max(1, len(scored))}
-        for kind in ('clean', 'noise', 'cosmetic', 'counterfactual'):
-            subset = [r for r in rows if r['variant'] == kind]
-            scored_kind = [r for r in subset if r['pred'] is not None]
-            result[f'loss_{kind}'] = sum(r['loss'] for r in subset)/max(1, len(subset))
-            result[f'accuracy_{kind}'] = sum(r['correct'] for r in scored_kind)/max(1, len(scored_kind))
-        families = [f for f in by_family.values() if all(v in f and f[v]['pred'] for v in ('clean', 'noise', 'cosmetic', 'counterfactual'))]
-        n = max(1, len(families))
-        result['families_scored'] = len(families)
-        result['noise_invariance'] = sum(f['noise']['original'] == f['clean']['original'] for f in families)/n
-        result['cosmetic_invariance'] = sum(f['cosmetic']['original'] == f['clean']['original'] for f in families)/n
-        action = [f for f in families if f['counterfactual']['changes'] == 'action']
-        result['counterfactual_flip_rate'] = (sum(f['counterfactual']['original'] != f['clean']['original'] for f in action)
-                                              / max(1, len(action)))
-        result['family_all_correct'] = sum(all(f[v]['correct'] for v in f) for f in families)/n
+                    pred, probs = letter_choice(hidden[example['choice_row']], example['choice_token_ids'], letters, hidden)
+                    teacher.append({**base, 'pred': pred, 'p_correct': float(probs[letters.index(example['selected'])])})
+                if example.get('probe'):
+                    rows = len(example['probe']['tokens'])
+                    values = np.fromfile(Path(example['probe']['cache'])/'prefix.f32', dtype='<f4')
+                    if values.size != rows*4096:
+                        raise AdmissionError('probe prefix cache incomplete')
+                    probe_hidden = suffix(torch.from_numpy(values.reshape(rows, 4096)).cuda())
+                    pred, probs = letter_choice(probe_hidden[-1], example['probe']['choice_token_ids'], letters, probe_hidden)
+                    probe.append({**base, 'pred': pred, 'p_correct': float(probs[letters.index(example['selected'])])})
+        all_losses = [v for values in losses.values() for v in values]
+        result = {'dev_examples': len(dev), 'dev_loss': sum(all_losses)/len(all_losses)}
+        result.update({f'loss_{kind}': sum(v)/len(v) for kind, v in losses.items()})
+        if teacher:
+            result.update(aggregate(teacher))       # teacher-forced diagnostics (legacy keys)
+            result['mean_p_correct'] = sum(r['p_correct'] for r in teacher)/len(teacher)
+        if probe:
+            result.update(aggregate(probe, 'probe_'))
+            result['probe_mean_p_correct'] = sum(r['p_correct'] for r in probe)/len(probe)
         return result

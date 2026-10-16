@@ -260,6 +260,30 @@ def expand_compact(compact, objective, horizon, options):
     return analysis
 
 
+PROBE = '{"selected_option_id":"'
+
+
+def probe_text(example):
+    """Prompt-only decision probe: the chat prompt then the choice field, no gold text."""
+    return render(example)[0] + PROBE
+
+
+def tokenize_probe(example, tokenizer, max_tokens):
+    """Probe token ids and the single next-token id of each offered letter, or None."""
+    text = probe_text(example)
+    ids = tokenizer(text)
+    if len(ids) > max_tokens:
+        raise AdmissionError(f'{example.example_id}: probe exceeds {max_tokens} tokens')
+    candidates = {}
+    for letter in example.option_letters:
+        extended = tokenizer(text + letter)
+        if extended[:len(ids)] == ids and len(extended) == len(ids) + 1:
+            candidates[letter] = extended[-1]
+    if len(candidates) != len(example.option_letters) or len(set(candidates.values())) != len(candidates):
+        return None
+    return ids, candidates
+
+
 def build_examples(families, seed=17):
     return [variant(family, kind, seed) for family in families for kind in VARIANTS]
 
