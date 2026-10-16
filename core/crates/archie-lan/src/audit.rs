@@ -133,6 +133,10 @@ pub struct Device {
     /// Outside destinations it calls on a clock, by the same label as `sent_to`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub beacons: BTreeMap<String, Beacon>,
+    /// When its lease from the router's DHCP server ends, in seconds since the epoch, as
+    /// the last lease table read said (`Some(0)` for a lease that does not end).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leased_until_s: Option<u64>,
 }
 
 /// A clock-like rhythm of connections to one destination (`crate::beacon`).
@@ -734,6 +738,53 @@ impl Audit {
                 detail,
             });
         }
+    }
+
+    /// Takes one lease from the router's DHCP server into account, read at `at_ms`. A
+    /// device the router knows and the network has not shown yet is kept like one heard on
+    /// the wire, and told as new once the learning time is over.
+    pub fn leased(&mut self, lease: &crate::leases::Lease, at_ms: u64) -> Vec<Alert> {
+        let mut alerts = Vec::new();
+        if self.state.started_ms == 0 {
+            self.state.started_ms = at_ms.max(1);
+        }
+        let mac = lease.mac.as_str();
+        if !self.state.devices.contains_key(mac) {
+            if self.state.devices.len() >= MAX_DEVICES {
+                return alerts;
+            }
+            if at_ms.saturating_sub(self.state.started_ms) >= self.settings.learn_ms {
+                self.tell(
+                    &mut alerts,
+                    format!("new {mac}"),
+                    at_ms,
+                    Severity::Notice,
+                    "new-device",
+                    mac,
+                    format!(
+                        "first seen in the router's DHCP leases, at {}",
+                        lease.address
+                    ),
+                );
+            }
+        }
+        let device = self
+            .state
+            .devices
+            .entry(mac.to_string())
+            .or_insert_with(|| Device {
+                first_seen_ms: at_ms,
+                last_seen_ms: at_ms,
+                ..Device::default()
+            });
+        if device.addresses.len() < 16 {
+            device.addresses.insert(IpAddr::V4(lease.address));
+        }
+        if device.hostname.is_none() {
+            device.hostname = lease.hostname.clone();
+        }
+        device.leased_until_s = Some(lease.expires_s.unwrap_or(0));
+        alerts
     }
 
     /// Takes one frame into account and returns what it gives reason to tell.
@@ -1806,6 +1857,48 @@ mod tests {
             .flat_map(|i| audit.see(&sent(later + i * 1_000, 1_000_000)))
             .collect();
         assert_eq!(rules(&again), ["traffic-surge"]);
+    }
+
+    #[test]
+    fn the_router_s_leases_name_devices_the_wire_did_not_show() {
+        let mut audit = Audit::new(
+            State::default(),
+            Settings {
+                learn_ms: 60_000,
+                gateway: None,
+                gateway_v6: None,
+            },
+        );
+        let lease = |mac: &str, ip: &str, name: Option<&str>| crate::leases::Lease {
+            expires_s: Some(1_791_750_000),
+            mac: mac.into(),
+            address: ip.parse().unwrap(),
+            hostname: name.map(str::to_string),
+        };
+        // Seen on the wire first: the lease adds what the router knows, nothing is told.
+        audit.see(&from(TV, "192.168.1.84", 1_000));
+        assert!(audit
+            .leased(&lease(TV, "192.168.1.84", Some("living-room-tv")), 2_000)
+            .is_empty());
+        let tv = &audit.state.devices[TV];
+        assert_eq!(tv.hostname.as_deref(), Some("living-room-tv"));
+        assert_eq!(tv.leased_until_s, Some(1_791_750_000));
+        assert_eq!(tv.last_seen_ms, 1_000, "a lease is not a sighting");
+        // While learning, a device only the router knows is kept quietly.
+        assert!(audit
+            .leased(&lease("00:11:22:33:44:01", "192.168.1.20", None), 3_000)
+            .is_empty());
+        // Afterwards it is a new device, told once whether by lease or on the wire.
+        let camera = "00:12:12:00:00:02";
+        let told = audit.leased(&lease(camera, "192.168.1.61", Some("ipcam")), 120_000);
+        assert_eq!(rules(&told), ["new-device"]);
+        assert!(
+            told[0].detail.contains("router's DHCP leases"),
+            "{}",
+            told[0].detail
+        );
+        assert!(audit.see(&from(camera, "192.168.1.61", 130_000)).is_empty());
+        assert_eq!(audit.state.devices.len(), 3);
     }
 
     #[test]

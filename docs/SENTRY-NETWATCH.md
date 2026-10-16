@@ -9,6 +9,7 @@ archie-netwatch live --interface eth0 --state-dir /var/lib/archie/netwatch
 archie-netwatch live --interface eth0 --state-dir ./audit --learn 0 --seconds 30
 archie-netwatch read capture.pcapng --state-dir ./audit
 archie-netwatch report --state-dir /var/lib/archie/netwatch --alerts 50
+archie-netwatch leases dhcp.leases --state-dir /var/lib/archie/netwatch
 ```
 
 `live` runs until it is stopped, or until `--seconds 1..86400` ends the capture.
@@ -103,6 +104,25 @@ advertises itself as an IPv6 router; `tests/netwatch_tshark.rs` reads it through
 TShark (`--ignored`, it needs TShark on the PATH). With TShark 4.2.2 both rogues are told as
 high, and the Windows client's maker, DHCP fingerprint, vendor class, TTL, JA4, NetBIOS name
 and User-Agent are all kept.
+
+## What the router knows
+
+On a switched network Sentry hears a device only when it broadcasts. The router hands every
+device its address, so its DHCP lease table names them all. `leases` reads that table in
+dnsmasq's format (`<expiry> <mac> <ip> <hostname|*> <client-id|*>`), which OpenWrt
+(`/tmp/dhcp.leases`), Pi-hole, DD-WRT, Tomato and Asuswrt-Merlin all write:
+
+```bash
+scp root@192.168.1.1:/tmp/dhcp.leases . && archie-netwatch leases dhcp.leases --state-dir DIR
+```
+
+Each lease adds the device (if new), its address and the router's name for it, and records
+when the lease ends (`leased_until_s`; 0 for a lease that does not end). A lease is not a
+sighting: `last_seen_ms` is left as the wire last saw it. Once the learning time is over
+(`--learn`, 600 s from the first frame or lease the state holds), a device that only the
+router knows is told as `new-device`, once, whether its first appearance is a lease or a
+frame. Sentry does not log in to the router: the owner copies the file. IPv6 leases and
+lines of another shape are skipped; files over 1 MB are refused.
 
 ## Running it as a service
 

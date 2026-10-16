@@ -35,6 +35,7 @@ pub mod dns_sd;
 pub mod fingerprint;
 pub mod http;
 pub mod inventory;
+pub mod leases;
 pub mod mdns;
 pub mod neighbors;
 pub mod presence;

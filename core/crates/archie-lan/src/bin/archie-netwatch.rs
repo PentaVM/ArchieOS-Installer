@@ -5,14 +5,16 @@
 //! archie-netwatch live --interface eth0 --state-dir DIR [--learn 600] [--gateway 192.168.1.1] [--filter BPF] [--seconds 30]
 //! archie-netwatch read FILE.pcapng --state-dir DIR [--gateway 192.168.1.1]
 //! archie-netwatch report --state-dir DIR [--alerts 50]
+//! archie-netwatch leases DHCP.LEASES --state-dir DIR [--learn 600]
 //! ```
 //!
 //! `live` runs until stopped, or until its optional capture duration expires: TShark
 //! captures, each frame is audited, alerts are appended
 //! to `DIR/alerts.jsonl` as they are raised, what is known of each device is kept in
 //! `DIR/state.json`, and which alerts were already raised in `DIR/told.json`, so a
-//! restart does not repeat them. `read` audits a capture file the same way. `report`
-//! prints both. Everything is written for its owner only: which names a device asks for
+//! restart does not repeat them. `read` audits a capture file the same way. `leases`
+//! adds what the router's DHCP server knows, from a dnsmasq lease file the owner copied
+//! (see `archie_lan::leases`). `report` prints both. Everything is written for its owner only: which names a device asks for
 //! is private.
 
 use archie_lan::audit::{Alert, Audit, Settings, State, Told};
@@ -209,6 +211,51 @@ fn audit(source: &[String], directory: &Path, settings: Settings) -> Result<(), 
     }
 }
 
+/// The most of a lease file that is read: a home router's table is a few kilobytes.
+const MAX_LEASES_BYTES: u64 = 1024 * 1024;
+
+fn leases(file: &Path, directory: &Path, settings: Settings) -> Result<(), String> {
+    let size = std::fs::metadata(file)
+        .map_err(|e| format!("{}: {e}", file.display()))?
+        .len();
+    if size > MAX_LEASES_BYTES {
+        return Err(format!(
+            "{}: {size} bytes is not a lease file (at most {MAX_LEASES_BYTES})",
+            file.display()
+        ));
+    }
+    let text = std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?;
+    std::fs::create_dir_all(directory).map_err(|e| format!("{}: {e}", directory.display()))?;
+    let mut audit = Audit::new(load(directory)?, settings);
+    audit.told = load_told(directory);
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64);
+    let leases = archie_lan::leases::parse(&text);
+    let alerts: Vec<Alert> = leases
+        .iter()
+        .flat_map(|lease| audit.leased(lease, now_ms))
+        .collect();
+    if !alerts.is_empty() {
+        append(directory, &alerts).map_err(|e| e.to_string())?;
+        for alert in &alerts {
+            eprintln!(
+                "archie-netwatch: {:?} {} {}: {}",
+                alert.severity, alert.rule, alert.device, alert.detail
+            );
+        }
+    }
+    save(directory, "state.json", &audit.state).map_err(|e| e.to_string())?;
+    save(directory, "told.json", &audit.told).map_err(|e| e.to_string())?;
+    eprintln!(
+        "archie-netwatch: {} leases, {} alerts, {} devices known",
+        leases.len(),
+        alerts.len(),
+        audit.state.devices.len()
+    );
+    Ok(())
+}
+
 fn report(directory: &Path, last: usize) -> Result<(), String> {
     let state = load(directory)?;
     let text = std::fs::read_to_string(directory.join("alerts.jsonl")).unwrap_or_default();
@@ -281,6 +328,15 @@ fn main() -> ExitCode {
                 },
             )
         }
+        (Some("leases"), Some(directory)) if arguments.len() == 2 => leases(
+            Path::new(&arguments[1]),
+            &directory,
+            Settings {
+                learn_ms: learn.unwrap_or(600) * 1000,
+                gateway,
+                gateway_v6,
+            },
+        ),
         (Some("report"), Some(directory)) => report(
             &directory,
             take(&mut arguments, "--alerts")
@@ -289,7 +345,7 @@ fn main() -> ExitCode {
         ),
         _ => {
             eprintln!(
-                "usage: archie-netwatch interfaces\n       archie-netwatch live --interface NAME --state-dir DIR [--learn SECONDS] [--gateway IP] [--filter BPF] [--seconds 1..86400]\n       archie-netwatch read FILE --state-dir DIR [--gateway IP]\n       archie-netwatch report --state-dir DIR [--alerts N]"
+                "usage: archie-netwatch interfaces\n       archie-netwatch live --interface NAME --state-dir DIR [--learn SECONDS] [--gateway IP] [--filter BPF] [--seconds 1..86400]\n       archie-netwatch read FILE --state-dir DIR [--gateway IP]\n       archie-netwatch report --state-dir DIR [--alerts N]\n       archie-netwatch leases DHCP.LEASES --state-dir DIR [--learn SECONDS]"
             );
             return ExitCode::from(2);
         }

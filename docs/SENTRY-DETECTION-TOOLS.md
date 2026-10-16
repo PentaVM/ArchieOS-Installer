@@ -282,6 +282,28 @@ its basis.
   sends the same each time and is still told once.
 - **Measured.** The 300,000-SYN capture, own CPU: 2.44–2.53 s before, 2.46–2.52 s after.
 
+### 2026-10-16: the router's lease table (roadmap stage 2, first step)
+
+- **Compared.** OpenWrt's `ubus call luci-rpc getDHCPLeases` (JSON, needs a session login),
+  SNMP's `ipNetToMediaTable` (ARP cache, needs SNMP enabled, no names), UPnP IGD (no lease
+  table at all), ISC dhcpd's `dhcpd.leases` (rare on home routers), and dnsmasq's lease
+  file, written by OpenWrt, Pi-hole, DD-WRT, Tomato and Asuswrt-Merlin.
+- **Chosen.** The dnsmasq file first: one plain format covers most home routers, and
+  reading a file the owner copied needs no credential and changes nothing on the router.
+  The API readers come later, through Policy, when Sentry is given a credential.
+- **Done.** `archie_lan::leases` parses it (IPv4 only, hardware address and host name
+  validated, at most 4,096 lines, files over 1 MB refused); `Audit::leased` adds the device,
+  its address, the router's name for it and `leased_until_s`, without counting a lease as a
+  sighting; `archie-netwatch leases FILE --state-dir DIR` applies a file. A device only the
+  router knows is a `new-device` after learning, sharing the told key with the wire.
+- **Tested.** Parser: three IPv4 leases read; broadcast address, bad IP, an unsafe name,
+  the `duid` line, an IPv6 lease and garbage skipped. Audit: a lease for a device already
+  seen adds its name without moving `last_seen_ms`; while learning a new one is quiet;
+  afterwards it is told once, and the wire does not tell it again. CLI end to end on a
+  fixture file: three devices kept with names and lease ends, a second read is quiet, a
+  2 MB file is refused before anything is written.
+- **Measured.** Not on the capture path.
+
 ## How a tool is accepted
 
 A tool joins Sentry when, on a recorded pcap of the owner's network and on the fixtures in

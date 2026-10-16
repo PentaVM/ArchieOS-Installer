@@ -28,6 +28,9 @@ home, which device is awake), and Wanda never reaches back into the network thro
    leases, ARP/neighbour table, connection tracking and per-device byte counts, through
    the router's documented API (OpenWrt `ubus`/LuCI RPC, UPnP IGD, SNMP, a vendor API).
    This sees every device, including those a switch hides from the operator's machine.
+   First step done: `archie-netwatch leases` reads a dnsmasq lease table the owner copied
+   (OpenWrt, Pi-hole, DD-WRT, Tomato, Asuswrt-Merlin). Reading it over the router's API, on
+   a schedule and with the owner's approval of the credential, is next.
 3. **Many sites, one inventory (WAN).** Each site the owner runs has its own Sentry
    sensor (the operator PC, a gateway, a small always-on box). Sensors join over an
    encrypted overlay the owner controls (WireGuard; Headscale if they want a coordinator)

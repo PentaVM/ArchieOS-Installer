@@ -153,7 +153,7 @@ fn flag(text: &str) -> bool {
 }
 
 /// A hardware address of one device: not broadcast, not a multicast group.
-fn mac(text: &str) -> Option<String> {
+pub(crate) fn mac(text: &str) -> Option<String> {
     let text = text.to_ascii_lowercase();
     let bytes: Vec<u8> = text
         .split(':')
