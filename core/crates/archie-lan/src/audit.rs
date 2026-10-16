@@ -19,6 +19,7 @@
 //! | `rogue-dhcp-server` | a second device answers DHCP (an offer or acknowledgement) when another already does: it can hand out its own router and DNS |
 //! | `beacon-suspect` | a device learned for a day starts calling a new outside destination on a clock (a regular interval, scored as RITA does), the way malware checks in with its controller |
 //! | `rogue-dhcpv6-server` | a device that is not the router answers DHCPv6 (an advertise or reply), or, once servers are known, a new one does: mitm6 makes itself every Windows machine's IPv6 DNS server this way |
+//! | `icmp-redirect` | a device other than the router sends an ICMP Redirect (IPv4 or IPv6), telling a host to route through it: a way into the middle of its traffic without touching ARP |
 //! | `retired-tls` | a device's TLS client offers nothing newer than TLS 1.1 (RFC 8996 retired 1.0 and 1.1 in 2021): firmware that has not been updated in years, usually a camera or an appliance |
 //! | `name-poisoning` | a device answers LLMNR or NetBIOS name queries for three different names, or for `wpad`: Responder's way of taking other machines' traffic and password hashes. An honest Windows machine answers for its own name |
 //! | `mac-flood` | 20 or more hardware addresses not known as devices send within a minute, after the first minute: a tool filling the switch's address table so it repeats everyone's traffic to every port. While it lasts, unknown addresses are not kept as devices |
@@ -774,6 +775,9 @@ impl Audit {
         if packet.router_advertisement {
             self.advertised_router(&mut alerts, packet.at_ms, mac, source, learning);
         }
+        if packet.redirect {
+            self.redirected(&mut alerts, packet.at_ms, mac, source);
+        }
         if packet.dhcpv6_answer {
             self.answered_dhcpv6(&mut alerts, packet.at_ms, mac, source, learning);
         }
@@ -1026,6 +1030,56 @@ impl Audit {
                 ),
             );
         }
+    }
+
+    /// An ICMP Redirect from `mac`. The router may send one; anyone else is offering itself
+    /// as the way out. Told once per sender: high when it is not the router, a warning while
+    /// the router is not known.
+    fn redirected(&mut self, alerts: &mut Vec<Alert>, at_ms: u64, mac: &str, source: IpAddr) {
+        let router_v4 = self
+            .settings
+            .gateway
+            .and_then(|gateway| self.state.owners.get(&IpAddr::V4(gateway)));
+        let router_v6 = self
+            .settings
+            .gateway_v6
+            .and_then(|gateway| self.state.owners.get(&IpAddr::V6(gateway)));
+        let routers: Vec<&String> = router_v4.into_iter().chain(router_v6).collect();
+        if routers.iter().any(|router| *router == mac) {
+            return;
+        }
+        let (severity, detail) = if routers.is_empty() {
+            (
+                Severity::Warning,
+                format!(
+                    "sent an ICMP Redirect from {source}; the router's hardware address is not \
+                     known yet to say whether it is the router"
+                ),
+            )
+        } else {
+            (
+                Severity::High,
+                format!(
+                    "sent an ICMP Redirect from {source} and is not the router: it tells hosts \
+                     to send their traffic through it"
+                ),
+            )
+        };
+        // The warning has its own key, so the router becoming known can still raise it.
+        let key = if routers.is_empty() {
+            "redirect?"
+        } else {
+            "redirect"
+        };
+        self.tell(
+            alerts,
+            format!("{key} {mac}"),
+            at_ms,
+            severity,
+            "icmp-redirect",
+            mac,
+            detail,
+        );
     }
 
     /// A DHCPv6 advertise or reply from `mac`. Told like a router advertisement: when it
@@ -1650,6 +1704,52 @@ mod tests {
             .flat_map(|i| audit.see(&sent(later + i * 1_000, 1_000_000)))
             .collect();
         assert_eq!(rules(&again), ["traffic-surge"]);
+    }
+
+    #[test]
+    fn a_redirect_from_anyone_but_the_router_is_told() {
+        let gateway: Ipv4Addr = "192.168.1.1".parse().unwrap();
+        let settings = Settings {
+            learn_ms: u64::MAX,
+            gateway: Some(gateway),
+            gateway_v6: None,
+        };
+        let redirect = |mac: &str, ip: &str, at_ms: u64| Packet {
+            redirect: true,
+            ..from(mac, ip, at_ms)
+        };
+        // The router not known yet: a warning.
+        let mut early = Audit::new(State::default(), settings.clone());
+        let unsure = early.see(&redirect("02:00:5e:aa:bb:cc", "192.168.1.66", 1));
+        assert_eq!(rules(&unsure), ["icmp-redirect"]);
+        assert_eq!(unsure[0].severity, Severity::Warning);
+        // Once the router is known, the same sender is high.
+        early.see(&Packet {
+            at_ms: 2,
+            arp: Some((ROUTER.into(), gateway)),
+            ..Packet::default()
+        });
+        let sure = early.see(&redirect("02:00:5e:aa:bb:cc", "192.168.1.66", 3));
+        assert_eq!(sure[0].severity, Severity::High);
+        // Known: the router's own redirect is quiet, anyone else's is high, once.
+        let mut audit = Audit::new(State::default(), settings);
+        audit.see(&Packet {
+            at_ms: 1,
+            arp: Some((ROUTER.into(), gateway)),
+            ..Packet::default()
+        });
+        assert!(audit.see(&redirect(ROUTER, "192.168.1.1", 2)).is_empty());
+        let told: Vec<Alert> = (0..3)
+            .flat_map(|i| {
+                audit.see(&redirect(
+                    "02:00:5e:aa:bb:cc",
+                    "fe80::5eff:feaa:bbcc",
+                    3 + i,
+                ))
+            })
+            .collect();
+        assert_eq!(rules(&told), ["icmp-redirect"]);
+        assert_eq!(told[0].severity, Severity::High);
     }
 
     #[test]

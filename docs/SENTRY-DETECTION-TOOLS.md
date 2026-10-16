@@ -25,6 +25,7 @@ with only the broadcast view, and says more with a mirror.
 | Names a device gives | DHCP host name, LLDP system name, NetBIOS name, HTTP User-Agent | — |
 | `rogue-dhcp-server` | a second DHCP server answering after the learning window | — |
 | `rogue-router-advertisement` | an IPv6 RA from a host that is not the router | — |
+| `icmp-redirect` | an ICMP/ICMPv6 Redirect from anyone but the router | — |
 | `retired-tls` and `tls_versions` | a device whose TLS client stops at 1.1 or older, read from its JA4 | — |
 | `rogue-dhcpv6-server` | a device other than the router answering DHCPv6 (mitm6) | — |
 | `name-poisoning` | a device answering LLMNR/NetBIOS for 3+ names, or for `wpad` (Responder) | — |
@@ -205,6 +206,24 @@ its basis.
   JA4, nothing new asked of TShark.
 - **Not done.** The server side (a device's own web interface offering only old TLS) needs
   the ServerHello version, a new field; it waits for the camera stage.
+
+### 2026-10-16: ICMP redirects
+
+- **Compared.** Hosts can refuse redirects (`net.ipv4.conf.*.accept_redirects=0` on
+  Linux; `EnableICMPRedirect=0` on Windows), which protects one machine but says nothing.
+  Snort's classic rules alert on every redirect (GPL rule "ICMP redirect host"), noisy
+  where the router sends them; Zeek raises an `icmp_redirect` event without a verdict.
+- **Chosen.** Alert on who sends it: the router (the ARP owner of the gateway, IPv4 or
+  IPv6) is allowed; anyone else is high, once per sender; while the router is not known it
+  is a warning under its own key, so the high one still comes once the router is learned.
+  New TShark field `icmp.type`; ICMPv6 type 137 was already read.
+- **Tested.** Capture test: IPv4 type 5 and ICMPv6 type 137 are redirects, an echo is
+  not. Audit test: unknown router gives a warning, then high once the router is known; the
+  router's own redirect is quiet; repeated redirects from one sender are one alert. TShark
+  end to end: the rogue in the fixture now redirects the Windows client's DNS through
+  itself, told as `icmp-redirect`.
+- **Measured.** The 300,000-SYN capture, own CPU: 2.57 s before (one outlier run at
+  3.41 s), 2.44–2.58 s after: one more TShark column, no measurable cost.
 
 ## How a tool is accepted
 

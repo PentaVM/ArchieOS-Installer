@@ -2,11 +2,11 @@
 # second device that answers DHCP and advertises itself as an IPv6 router, and then a DHCP
 # starvation flood (one sender, 40 client addresses), a Responder answering LLMNR and
 # NetBIOS for other machines' names, mitm6 answering DHCPv6, a camera whose TLS client
-# stops at TLS 1.0, then a macof-style flood of 60 made-up hardware addresses. Nothing is
-# sent.
+# stops at TLS 1.0, the rogue sending an ICMP Redirect, then a macof-style flood of 60
+# made-up hardware addresses. Nothing is sent.
 #   python3 -I make_rogue_pcap.py rogue-dhcp-and-ra.pcap
 import sys
-from scapy.all import Ether, IP, UDP, TCP, BOOTP, DHCP, IPv6, ICMPv6ND_RA, ICMPv6NDOptSrcLLAddr, Raw, wrpcap, ARP, DNSQR, DNSRR, load_layer, load_contrib
+from scapy.all import Ether, IP, UDP, TCP, ICMP, BOOTP, DHCP, IPv6, ICMPv6ND_RA, ICMPv6NDOptSrcLLAddr, Raw, wrpcap, ARP, DNSQR, DNSRR, load_layer, load_contrib
 from scapy.layers.netbios import NBNSHeader, NBNSQueryRequest, NBNSQueryResponse
 from scapy.layers.llmnr import LLMNRResponse
 from scapy.layers.dhcp6 import DHCP6_Advertise, DHCP6OptServerId, DHCP6OptDNSServers, DUID_LL
@@ -76,6 +76,9 @@ camera = "00:12:12:00:00:01"
 old_hello = TLS(version=0x0301, msg=[TLSClientHello(version=0x0301, ciphers=[0x002f, 0x0035, 0x000a],
     ext=[TLS_Ext_ServerName(servernames=[ServerName(servername=b"cam.example.net")])])])
 at(Ether(src=camera, dst=router)/IP(src="192.168.1.60", dst="203.0.113.80", ttl=64)/TCP(sport=40000, dport=443, flags="PA", seq=1, ack=1)/old_hello, 170)
+# The rogue tells the Windows client to send its DNS traffic through it.
+at(Ether(src=rogue, dst=win)/IP(src="192.168.1.66", dst="192.168.1.50")/ICMP(type=5, code=1, gw="192.168.1.66")/
+   IP(src="192.168.1.50", dst="8.8.8.8")/UDP(sport=5000, dport=53), 175)
 # Then a table flood, as macof sends it: made-up source and destination hardware and IP
 # addresses, 60 frames in a second.
 for i in range(60):

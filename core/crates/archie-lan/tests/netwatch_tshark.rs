@@ -1,7 +1,7 @@
 //! archie-netwatch reading a real capture through a real TShark: the field names it asks
 //! for exist, and a rogue DHCP server, a rogue IPv6 router, a DHCP starvation flood, a
-//! Responder poisoning names, mitm6 answering DHCPv6 and a switch table flood are told, with
-//! what the devices said of themselves kept for them.
+//! Responder poisoning names, mitm6 answering DHCPv6, an ICMP Redirect and a switch table
+//! flood are told, with what the devices said of themselves kept for them.
 //!
 //! ```text
 //! cargo test -p archie-lan --test netwatch_tshark -- --ignored
@@ -53,6 +53,7 @@ fn a_rogue_dhcp_server_and_a_rogue_router_are_told_from_a_real_capture() {
             "dhcp-starvation",
             "name-poisoning",
             "rogue-dhcpv6-server",
+            "icmp-redirect",
             "mac-flood"
         ]
     );
