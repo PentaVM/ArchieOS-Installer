@@ -1,0 +1,44 @@
+{
+  "format_version": 1,
+  "status": "passed",
+  "scope": "real_suffix_full_vocabulary_backward",
+  "base_sha256": "3561df7ac7d26a71ffa991ac2db740b10841c3a350aa2676ccd3ff5d428b4e8b",
+  "parity_sha256": "3163a70c181329cb7d1964d77526f19f8629aaa8ce80d0897d25e0549da65913",
+  "tokens": 35,
+  "vocabulary": 248320,
+  "steps": [
+    {
+      "step": 1,
+      "loss": 5.404073715209961,
+      "gradient_norms": {
+        "q_delta.a": 0.0,
+        "q_delta.b": 0.023781849071383476,
+        "v_delta.a": 0.0,
+        "v_delta.b": 0.012355469167232513
+      }
+    },
+    {
+      "step": 2,
+      "loss": 5.4037628173828125,
+      "gradient_norms": {
+        "q_delta.a": 0.03987554833292961,
+        "q_delta.b": 0.02377762645483017,
+        "v_delta.a": 0.010133336298167706,
+        "v_delta.b": 0.012354303151369095
+      }
+    }
+  ],
+  "seconds": 2.867748529999517,
+  "peak_cuda_allocated_bytes": 730003456,
+  "resources_before": {
+    "total_gpu_mib": 8192,
+    "used_gpu_mib": 1140,
+    "free_gpu_mib": 6879,
+    "worker_budget_mib": 6028,
+    "available_ram_bytes": 7279841280,
+    "guest_free_disk_bytes": 1006197411840,
+    "host_free_disk_bytes": 223059533824
+  },
+  "semantic_training": false,
+  "note": "Mechanical public parity text; no candidate promotion."
+}

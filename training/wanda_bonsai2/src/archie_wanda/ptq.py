@@ -21,12 +21,27 @@ def decode_ptq1(raw: bytes, stages=(32, 16, 8)) -> np.ndarray:
     return (np.concatenate(parts, axis=1).astype(np.float32) * scales).reshape(-1)
 
 
+def decode_ptq1_torch(blocks):
+    """Device-side twin of decode_ptq1 for packed [N,28] uint8 blocks; same integer math."""
+    import torch
+    if blocks.dtype != torch.uint8 or blocks.ndim != 2 or blocks.shape[1] != 28:
+        raise AdmissionError('unsupported PTQ1_0 block/layout')
+    codes = blocks[:, :26].to(torch.int32)
+    parts = []
+    for first, last, powers in ((0, 16, 5), (16, 24, 5), (24, 26, 4)):
+        segment = codes[:, first:last]
+        for power in range(powers):
+            parts.append((((segment * 3**power) & 255) * 3 >> 8) - 1)
+    scales = blocks[:, 26:28].contiguous().view(torch.float16).to(torch.float32)
+    return torch.cat(parts, dim=1).to(torch.float32) * scales
+
+
 def __getattr__(name):
     if name != 'FrozenPTQLinear':
         raise AttributeError(name)
     # Parser/dequantization and native extraction must not load the Torch CUDA stack.
     import torch
-    from .model import read_tensor_rows
+    from .model import read_tensor_rows, read_tensor_bytes
 
     class Matmul(torch.autograd.Function):
         @staticmethod
@@ -57,6 +72,7 @@ def __getattr__(name):
                 raise AdmissionError('linear requires a matrix and bounded chunks')
             self.model, self.name, self.row_chunk = model, tensor_name, row_chunk
             self.columns, self.rows = tensor.shape
+            self.kind, self.packed = tensor.kind, None
             self.rotated = tensor_name in model.fields.get('prism.hadamard.weight_names', [])
             self.sign_values = None
             if self.rotated:
@@ -68,8 +84,20 @@ def __getattr__(name):
                 if len(self.sign_values) != self.columns or not all(v in (-1, 1) for v in self.sign_values):
                     raise AdmissionError('invalid explicit Hadamard signs')
 
-        def chunk(self, first, like):
-            values = read_tensor_rows(self.model, self.name, first, min(self.row_chunk, self.rows-first))
+        def make_resident(self, device):
+            """Keep the frozen packed bytes (not a dense copy) on the device for repeated passes."""
+            if self.kind != 143:
+                return self
+            raw = read_tensor_bytes(self.model, self.name)
+            self.packed = torch.frombuffer(bytearray(raw), dtype=torch.uint8).to(device).reshape(self.rows, -1)
+            return self
+
+        def chunk(self, first, like, count=None):
+            count = min(count or self.row_chunk, self.rows-first)
+            if self.packed is not None and self.packed.device == like.device:
+                blocks = self.packed[first:first+count].reshape(-1, 28)
+                return decode_ptq1_torch(blocks).reshape(count, self.columns).to(like.dtype)
+            values = read_tensor_rows(self.model, self.name, first, count)
             return torch.from_numpy(values).to(device=like.device, dtype=like.dtype)
 
         @staticmethod

@@ -2,6 +2,7 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 import shutil
 import subprocess
+import time
 from .contracts import ResourceError
 
 
@@ -40,3 +41,28 @@ def preflight(config, required_gpu_mib=0):
     if min(guest_free, host_free) < config.minimum_free_disk_bytes:
         raise ResourceError('insufficient physical system disk headroom')
     return snapshot
+
+
+def run_guarded(command, config, environment, log, timeout=180, poll_seconds=1):
+    """Monitor only a child we create; never terminate another app by a saved PID."""
+    preflight(config)
+    started=time.monotonic()
+    process=subprocess.Popen(command,env=environment,stdout=subprocess.PIPE,stderr=log,text=True)
+    try:
+        while process.poll() is None:
+            if time.monotonic()-started>timeout:
+                raise ResourceError('owned native process exceeded deadline')
+            preflight(config)
+            time.sleep(poll_seconds)
+        stdout,_=process.communicate(timeout=2)
+        if len(stdout.encode())>65536:
+            raise ResourceError('native stdout exceeded bound')
+        return subprocess.CompletedProcess(command,process.returncode,stdout)
+    except BaseException:
+        if process.poll() is None:
+            process.terminate()
+            try: process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                process.kill(); process.wait(timeout=3)
+        if process.stdout: process.stdout.close()
+        raise

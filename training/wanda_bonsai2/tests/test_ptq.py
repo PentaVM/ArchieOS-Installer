@@ -45,3 +45,14 @@ class LinearTests(unittest.TestCase):
             result.square().sum().backward(); expected.square().sum().backward()
             torch.testing.assert_close(x.grad, expected_x.grad)
             self.assertEqual(list(layer.parameters()), [])
+
+    def test_device_decoder_is_bit_identical_to_reference(self):
+        from archie_wanda.ptq import decode_ptq1_torch
+        rng = np.random.default_rng(17)
+        raw = rng.integers(0, 256, size=(64, 28), dtype=np.uint8)
+        raw[:, 26:28] = np.frombuffer(rng.normal(size=64).astype('<f2').tobytes(), dtype=np.uint8).reshape(64, 2)
+        raw[0, :26] = 0; raw[1, :26] = 255
+        expected = decode_ptq1(raw.tobytes())
+        actual = decode_ptq1_torch(torch.from_numpy(raw.copy())).reshape(-1).numpy()
+        np.testing.assert_array_equal(actual, expected)
+        with self.assertRaises(AdmissionError): decode_ptq1_torch(torch.zeros((2, 27), dtype=torch.uint8))

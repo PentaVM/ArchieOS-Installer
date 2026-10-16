@@ -115,6 +115,23 @@ def inspect_model(path: Path, expected_sha: str) -> ModelIdentity:
                          metadata, tensors, metadata_digest)
 
 
+def read_tensor_bytes(model: ModelIdentity, name: str) -> bytes:
+    """Whole packed tensor, bounded and re-checked against the verified file signature."""
+    if signature(model.path) != model.signature:
+        raise AdmissionError('base changed after verification')
+    if name not in model.tensors:
+        raise AdmissionError('unknown tensor')
+    tensor = model.tensors[name]
+    if tensor.nbytes > 512 * 1024 * 1024:
+        raise AdmissionError('packed tensor exceeds resident bound')
+    with model.path.open('rb') as stream:
+        stream.seek(model.data_offset + tensor.offset)
+        raw = stream.read(tensor.nbytes)
+    if len(raw) != tensor.nbytes or signature(model.path) != model.signature:
+        raise AdmissionError('base changed while reading tensor')
+    return raw
+
+
 def read_tensor_rows(model: ModelIdentity, name: str, first: int, count: int) -> np.ndarray:
     if signature(model.path) != model.signature:
         raise AdmissionError('base changed after verification')
