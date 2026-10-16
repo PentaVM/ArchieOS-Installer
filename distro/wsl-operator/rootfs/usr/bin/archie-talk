@@ -44,13 +44,13 @@ archie-session down >/dev/null 2>&1 || true
 
 export ASR_MODEL=/var/lib/archie/models/asr/nemotron-3.5-asr-streaming-0.6b.q8_0.gguf
 export PIPER=/usr/lib/archie/piper-json-bridge.py
-export PIPER_PYTHON=/opt/archie/iris-venv/bin/python
+export PIPER_PYTHON=/opt/archie/voice-venv/bin/python
 export PIPER_VOICES=/var/lib/archie/models/piper
 export POLICY=/usr/share/archie/stage/apps.toml
 export HOST_WAYLAND=/mnt/wslg/runtime-dir/wayland-0
 export RUN_DIR=$HOME/.archie/talk
 # Piper's adapter runs under the Python that has Piper; the Stage draws without a GPU,
 # since WSLg shares no buffers with a nested compositor.
-export PATH=/opt/archie/iris-venv/bin:$PATH
+export PATH=/opt/archie/voice-venv/bin:$PATH
 export LIBGL_ALWAYS_SOFTWARE=1
 exec /usr/lib/archie/run-archie.sh "$grade"

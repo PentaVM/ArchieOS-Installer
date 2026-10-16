@@ -196,7 +196,7 @@ impl Weights {
     }
 }
 
-pub(crate) fn file_sha256(path: &Path) -> Result<String, Error> {
+pub fn file_sha256(path: &Path) -> Result<String, Error> {
     let mut file = std::fs::File::open(path)?;
     let mut digest = Sha256::new();
     let mut buffer = vec![0u8; 16 * 1024 * 1024];

@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
 # Builds ArchieOS-Operator.wsl: the image a person imports into WSL to have Archie operate
-# a screen. In it: the Stage, a browser to work in, IRIS's code, the reasoning models'
-# manifests, and Sentry's network tools. Not in it: PyTorch and IRIS's weights (too large
-# for one release asset; archie-setup and the installer bring them) and any key.
+# a screen. In it: the Stage, a browser to work in, IRIS (the Rust runtime, its weights and
+# the text tower it reads phrases with), the reasoning models' manifests, and Sentry's
+# network tools. Not in it: Python for IRIS, PyTorch, or any key. IRIS starts without
+# downloading anything.
 #
-#   IRIS_SRC=/path/to/archie-iris VJEPA_SRC=/path/to/vjepa2 STAGE=/path/to/archie-stage \
-#     BIN=/path/to/target/release \
+#   IRIS_WEIGHTS=/path/to/iris-beta21-step132000.pt IRIS_LICENSE=/path/to/archie-iris/LICENSE \
+#   IRIS_TEXT=/path/to/siglip2-text      (archie-iris-text-pack's output) \
+#   IRIS_CUDA_BIN=/path/to/archie-iris-serve built with --features cuda   (optional) \
+#   STAGE=/path/to/archie-stage BIN=/path/to/target/release \
 #     scripts/wsl/build-operator.sh [OUT_DIR | -]
+#
+# The image is larger than one GitHub release asset (2 GiB), so OUT_DIR receives it in
+# parts (ArchieOS-Operator.wsl.001, .002 ...) with the SHA-256 of the whole; the installer
+# joins them.
 #
 # With `-` the image is written to standard output and nothing else is: for a builder
 # with no room to hold the image beside the tree it is made from.
@@ -15,10 +22,19 @@ set -euo pipefail
 repo_root=$(realpath "$(dirname "$0")/../..")
 out=${1:-$repo_root/dist}
 exec 3>&1 1>&2
-iris_src=${IRIS_SRC:?IRIS_SRC is the archie-iris checkout}
-# facebookresearch/vjepa2 at the revision IRIS pins (MIT): the code its encoder is built from.
-vjepa_src=${VJEPA_SRC:?VJEPA_SRC is facebookresearch/vjepa2 at the revision IRIS pins}
-vjepa_revision=204698b45b3712590f06245fbfba32d3be539812
+# IRIS Beta 2.1, step 132,000: the release's weights file, checked before it goes in.
+iris_weights=${IRIS_WEIGHTS:?IRIS_WEIGHTS is iris-beta21-step132000.pt}
+iris_weights_sha=c6cadb02f5a5bffc4ea3c3348d32b475ef7531f643675c06c65451037e4f3b97
+# SigLIP2's text tower (google/siglip2-base-patch16-384 at f775b65, Apache-2.0), cut by
+# archie-iris-text-pack from the repository's model.safetensors, whose digest this is.
+iris_text=${IRIS_TEXT:?IRIS_TEXT is archie-iris-text-pack output}
+iris_text_source_sha=ed72c0ace85020ae610fc817c2538b9cae5a477b012a50859c60af5b3ad30857
+# The licence and model card of IRIS's weights (from the archie-iris release): they travel
+# with the weights.
+iris_license=${IRIS_LICENSE:?IRIS_LICENSE is the LICENSE of the archie-iris release}
+iris_card=${IRIS_MODEL_CARD:-}
+# The CUDA build of archie-iris-serve. Without it the image carries the CPU build only.
+iris_cuda_bin=${IRIS_CUDA_BIN:-}
 stage=${STAGE:?STAGE is the built archie-stage}
 # NeMo-Speech.cpp's SDK (scripts/models/install-nemotron-speech.sh builds it). archie-voice
 # must have been built with NEMO_SPEECH_PREFIX=/opt/archie/nemo-speech, where it goes here.
@@ -95,23 +111,39 @@ install -Dm 0644 "$repo_root/bridges/video/bridge.toml" "$rootfs/usr/share/archi
 install -Dm 0644 "$repo_root/bridges/video/SKILL.md" "$rootfs/usr/share/archie/bridges/video/SKILL.md"
 install -Dm 0644 "$repo_root/docs/WSL-OPERATOR.md" "$rootfs/usr/share/doc/archie-os/WSL-OPERATOR.md"
 
-# IRIS's code. It is Python, the one part of Archie that is; its licence travels with it.
-install -d "$rootfs/opt/archie/iris"
-cp -a "$iris_src/src" "$rootfs/opt/archie/iris/src"
-find "$rootfs/opt/archie/iris/src" -name __pycache__ -type d -prune -exec rm -rf {} +
-install -m 0644 "$iris_src/requirements-iris.txt" "$iris_src/LICENSE" "$iris_src/MODEL_CARD.md" "$rootfs/opt/archie/iris/"
-
-# Where torch.hub looks first, so IRIS starts without fetching code from GitHub.
-hub="$rootfs/opt/archie/torch/hub/facebookresearch_vjepa2_$vjepa_revision"
-install -d "$hub"
-cp -a "$vjepa_src/." "$hub/"
-rm -rf "${hub:?}/.git" "${hub:?}/notebooks" "${hub:?}/assets" "${hub:?}/tests"
+# IRIS: the Rust runtime, its weights and its text tower. No Python, no download at start.
+[[ $(sha256sum "$iris_weights" | cut -d' ' -f1) == "$iris_weights_sha" ]] || {
+  echo "build-operator: $iris_weights is not IRIS Beta 2.1 step 132000" >&2; exit 65; }
+grep -qx "source sha256 $iris_text_source_sha" "$iris_text/SOURCE" || {
+  echo "build-operator: $iris_text was not cut from SigLIP2 base-patch16-384 at f775b65" >&2; exit 65; }
+models=$rootfs/var/lib/archie/models/iris
+install -Dm 0644 "$iris_weights" "$models/iris-beta21-step132000.pt"
+install -m 0644 "$iris_license" "$models/LICENSE"
+[[ -n $iris_card ]] && install -m 0644 "$iris_card" "$models/MODEL_CARD.md"
+install -m 0644 "$repo_root/docs/IRIS-LICENSES.md" "$models/LICENSES.md"
+install -d "$models/siglip2-text"
+install -m 0644 "$iris_text"/{model.safetensors,tokenizer.json,tokenizer_config.json,SOURCE} "$models/siglip2-text/"
+for optional in special_tokens_map.json config.json; do
+  [[ -f $iris_text/$optional ]] && install -m 0644 "$iris_text/$optional" "$models/siglip2-text/"
+done
+install -m 0755 "$bin/archie-iris-serve" "$rootfs/usr/bin/archie-iris-serve"
+if [[ -n $iris_cuda_bin ]]; then
+  install -m 0755 "$iris_cuda_bin" "$rootfs/usr/bin/archie-iris-serve-cuda"
+  # cuBLAS, cuBLASLt, cuRAND and NVRTC, as linked; libcuda comes from the Windows driver
+  # through /usr/lib/wsl/lib and is never copied.
+  install -d "$rootfs/opt/archie/cuda/lib"
+  ldd "$iris_cuda_bin" | awk '/=> \// {print $3}' | grep -E '/lib(cublas|cublasLt|curand|nvrtc)' | while read -r lib; do
+    cp -L "$lib" "$rootfs/opt/archie/cuda/lib/"
+    for builtin in "$(dirname "$lib")"/libnvrtc-builtins.so*; do
+      [[ -e $builtin ]] && cp -L "$builtin" "$rootfs/opt/archie/cuda/lib/"
+    done
+  done
+fi
 
 arch-chroot "$rootfs" useradd --uid 1000 --create-home --shell /bin/bash archie
 arch-chroot "$rootfs" passwd -l archie
-install -d -o 1000 -g 1000 "$rootfs/var/lib/archie/models/iris" "$rootfs/var/lib/archie/models/asr" \
-  "$rootfs/var/lib/archie/models/piper" "$rootfs/var/lib/archie/models/local" "$rootfs/opt/archie/iris-venv"
-chown -R 1000:1000 "$rootfs/opt/archie/torch"
+install -d -o 1000 -g 1000 "$rootfs/var/lib/archie/models/asr" \
+  "$rootfs/var/lib/archie/models/piper" "$rootfs/var/lib/archie/models/local" "$rootfs/opt/archie/voice-venv"
 printf '%s\n' 'ArchieOS Operator. First time: archie-setup. Then: archie-talk, archie-operate, archie-video, archie-design.' > "$rootfs/etc/motd"
 
 arch-chroot "$rootfs" pacman -Q > "$rootfs/package-versions.txt"
@@ -120,13 +152,20 @@ rm -rf "$rootfs/var/cache/pacman/pkg"/* "$rootfs/var/log"/* "$rootfs/usr/share/d
 
 # Every binary finds its libraries inside the image, or the image is not shipped.
 for binary in archie-stage archie-arena-live archie-stage-cli archie-ask archie-lan archie-netwatch archie-print \
-  archie-bridges archie-mcp-server archie-voice; do
+  archie-bridges archie-mcp-server archie-voice archie-iris-serve; do
   if arch-chroot "$rootfs" ldd "/usr/bin/$binary" | grep -q 'not found'; then
     echo "build-operator: $binary lacks a library in the image" >&2
     arch-chroot "$rootfs" ldd "/usr/bin/$binary" | grep 'not found' >&2
     exit 65
   fi
 done
+
+if [[ -n $iris_cuda_bin ]]; then
+  # Only the driver may be missing: WSL mounts it at /usr/lib/wsl/lib when it starts.
+  missing=$(arch-chroot "$rootfs" env LD_LIBRARY_PATH=/opt/archie/cuda/lib ldd /usr/bin/archie-iris-serve-cuda \
+    | grep 'not found' | grep -v 'libcuda\.so' || true)
+  [[ -z $missing ]] || { echo "build-operator: archie-iris-serve-cuda lacks: $missing" >&2; exit 65; }
+fi
 
 du -sh "$rootfs"
 if [[ $out == - ]]; then
@@ -135,7 +174,13 @@ if [[ $out == - ]]; then
 fi
 out_dir=$(realpath -m "$out")
 install -d "$out_dir"
+rm -f "$out_dir"/ArchieOS-Operator.wsl "$out_dir"/ArchieOS-Operator.wsl.[0-9][0-9][0-9]
 tar --numeric-owner --xattrs --acls -C "$rootfs" -cf - . | gzip -n -6 > "$out_dir/ArchieOS-Operator.wsl"
 ( cd "$out_dir" && sha256sum ArchieOS-Operator.wsl > SHA256SUMS )
+# GitHub takes release assets of at most 2 GiB: a larger image goes up in parts.
+if (( $(stat -c %s "$out_dir/ArchieOS-Operator.wsl") > 1900 * 1024 * 1024 )); then
+  split -b 1900M -d -a 3 --numeric-suffixes=1 "$out_dir/ArchieOS-Operator.wsl" "$out_dir/ArchieOS-Operator.wsl."
+  rm "$out_dir/ArchieOS-Operator.wsl"
+fi
 cp "$repo_root/scripts/wsl/install-operator.ps1" "$out_dir/install-archie-operator.ps1"
 du -sh "$out_dir/ArchieOS-Operator.wsl"

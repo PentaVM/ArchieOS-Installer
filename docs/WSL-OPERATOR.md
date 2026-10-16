@@ -22,11 +22,15 @@ work a screen, cut video with it, and look at the desktop design.
 
 ## Install
 
-Download the three files of the release into one folder:
+Download these files of the release into one folder:
 
-- `ArchieOS-Operator.wsl`
-- `iris-beta21-step132000.pt`
+- `ArchieOS-Operator.wsl`, or its parts `ArchieOS-Operator.wsl.001`, `.002` … (a release
+  asset holds at most 2 GiB; the installer joins them)
+- `SHA256SUMS`
 - `install-archie-operator.ps1`
+
+IRIS, its weights and the text tower it reads phrases with are inside the image; there is
+nothing else to download for it.
 
 In PowerShell, in that folder:
 
@@ -34,9 +38,9 @@ In PowerShell, in that folder:
 powershell -ExecutionPolicy Bypass -File .\install-archie-operator.ps1
 ```
 
-It imports the image as the distribution `ArchieOS-Operator`, copies IRIS's weights in,
-makes a folder named `ArchieOS` on your desktop, and runs the first-time setup: PyTorch
-(about 3 GB), the voice (about 1 GB) and the Nebius key. The key is typed once, is not
+It checks the image against `SHA256SUMS`, imports it as the distribution
+`ArchieOS-Operator`, makes a folder named `ArchieOS` on your desktop, and runs the
+first-time setup: the voice (about 1 GB) and the Nebius key. The key is typed once, is not
 shown, and is kept in the image at `~/.config/archie/nebius.key`, readable only by you.
 
 ## The shared folder
@@ -92,8 +96,9 @@ archie-operate "add the first clip of the bin to the timeline" --app kdenlive
 archie-operate "scroll down the page" --url https://en.wikipedia.org/wiki/Mona_Lisa
 ```
 
-The first run downloads IRIS's text encoder (about 1.5 GB) and waits for the application
-to load; nothing is timed until then. The plan is printed, then IRIS acts for the seconds
+The first run waits for IRIS to read its weights (on the GPU when Windows shares an
+NVIDIA driver with WSL, otherwise on the CPU; `ARCHIE_IRIS_DEVICE=cpu|cuda` chooses) and
+for the application to load; nothing is timed until then. The plan is printed, then IRIS acts for the seconds
 given (60 unless `--seconds` says otherwise). Each run is kept in
 `~/archie-runs/operate/<run>/`: `result.json`, the plan and every decision in
 `trajectory.jsonl`, and a frame a second in `frames/`.
@@ -134,7 +139,7 @@ at and judged, not used.
 
 | Command | What it does |
 |---|---|
-| `archie-setup status` | what is in place: Python, weights, voice, key, folder, GPU |
+| `archie-setup status` | what is in place: IRIS, voice, key, folder, GPU |
 | `archie-setup key` | replace the Nebius key |
 | `archie-session status` / `down` | the Stage, IRIS and the application: running or not; stop them |
 
@@ -146,14 +151,16 @@ Checked, in the image or with its own binaries:
   Windows folder, with no display in the environment.
 - The planner (Nemotron, 3.4 s), the Stage opening a browser in WSLg, input reaching the
   page and the run being recorded, with a stand-in answering for IRIS.
-- The first-time setup of Python 3.14 and PyTorch; that Piper installs under it.
+- IRIS's Rust runtime with the real weights and the real SigLIP2 text tower, on a CPU:
+  real detections on real photographs, and the text tower and tokenizer equal to
+  `transformers` (see `docs/IRIS-RUNTIME.md`).
 - The design prototype loading under Qt's own runner.
 
 **Not checked:**
 
-- **IRIS itself.** The machine this was built on has no NVIDIA GPU and 7 GB of memory;
-  loading IRIS on its CPU was killed for lack of memory. On a GPU this is its first run.
-  If it does not start, `~/.archie/run/iris.log` says why.
+- **IRIS on a GPU, and this image with IRIS inside it.** The CUDA build and the image
+  were not built where this was written (no CUDA toolkit, no Arch builder). If IRIS does
+  not start, `~/.archie/run/iris.log` says why.
 - **Xavi's shell bridge** (`archie-shell-bridge`) is in the image; `archie-design` does
   not feed the preview from it yet, so the preview's link chip reads "sin lectura".
 - **The voice, end to end.** `archie-voice` was built and starts; a conversation through
@@ -173,7 +180,9 @@ Checked, in the image or with its own binaries:
   sees only its own virtual network, and TShark is not installed.
 - An image built with `ARCHIE_OPERATOR_APPS=` has no Kdenlive; then, from Windows, once:
   `wsl -d ArchieOS-Operator -u root pacman -Sy --noconfirm kdenlive`.
-- IRIS's weights are under a non-commercial research licence (`/opt/archie/iris/LICENSE`).
+- IRIS's weights are under a non-commercial research licence
+  (`/var/lib/archie/models/iris/LICENSE`; what else the image carries, and under what
+  licence, is in `LICENSES.md` beside it).
 
 ## Remove
 

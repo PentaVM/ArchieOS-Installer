@@ -54,8 +54,32 @@ detections.
 
 The text tower was checked on its own (`tests/text_tower.rs`) against `transformers` on
 random weights and fixed token ids: relative error 1e-6 with and without an attention mask.
-Not checked: the real tower's weights, and the Gemma tokenizer's output on real text.
 `tests/reference/iris_reference.py` regenerates both references.
+
+**The real tower and tokenizer** (`google/siglip2-base-patch16-384` at `f775b65`) were
+checked on 2026-10-16 against `transformers` 4.56 on ten phrases, English and Spanish with
+accents, an empty one and one with an ellipsis (`tests/text_tower.rs`,
+`the_real_tower_and_tokenizer_match_transformers`; `tests/reference/tower_reference.py`
+writes the reference):
+
+| Check | Result |
+|---|---|
+| Token ids, all 64 positions, every phrase | identical |
+| Tower in float32 on those ids (PyTorch float32 is 2e-6 from float64) | pooled 2e-7, states 1.5e-6 |
+| What fusion receives (`TextTower::encode`) | the same numbers rounded through float16, as IRIS caches phrase features |
+
+The first real detections followed, on CPU, with the real weights and the real tower
+(`hf-internal-testing/fixtures_image_utils`, the COCO photograph of two cats on a sofa):
+`cat` 0.88 and 0.86, `couch` 0.84, `remote control` 0.66 and 0.63, each on the right
+object; in Spanish `gato`, `control remoto` and `sofá` find the same objects, with lower
+scores (0.50–0.73; `sofá` 0.33). On a photograph of two dogs on grass, `dog` 0.49 and
+0.44 and two patches of `grass`.
+
+`archie-iris-text-pack <repository dir> <out dir>` keeps only the tower's `text_model.*`
+tensors (1.13 of 1.5 GB) and the tokenizer files, with a `SOURCE` naming the file they
+were cut from; `--text-tower` reads that directory as it reads the whole repository, with
+the same results. The WSL Operator image carries it with the weights, so IRIS starts
+there with no download (`scripts/wsl/build-operator.sh`).
 
 ## Speed
 
@@ -98,5 +122,4 @@ here: there was no GPU and no CUDA toolkit.** No GPU latency is claimed.
   samples, as `iris_serve` does without `--rem-spool`.
 - **The mask, keypoint, reading and temporal heads.** Nothing served reads them.
 - **The browser demo page** of `iris_serve`.
-- **The WSL Operator image** still installs PyTorch for IRIS on first boot. Switching it to
-  this binary is Claude/Xavi's packaging work.
+

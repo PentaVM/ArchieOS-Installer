@@ -102,3 +102,103 @@ fn the_text_tower_matches_transformers() {
         assert!(relative < 1e-4, "{name}");
     }
 }
+
+/// The real tower (`google/siglip2-base-patch16-384` at `f775b65`) and its Gemma tokenizer
+/// against `transformers` on the same phrases (lowercased, padded to 64, no attention mask:
+/// the repository asks for none), including Spanish with accents and an empty phrase.
+///
+/// Two checks: the tokenizer gives the same 64 ids and the tower on them the same numbers
+/// (float32); and what `TextTower::encode` hands fusion is those numbers rounded through
+/// float16, as IRIS caches phrase features.
+///
+/// ```text
+/// IRIS_TEXT_TOWER=<the repository's files> IRIS_TEXT_TOWER_REFERENCE=<real_tower.*> \
+///   cargo test --release -p archie-iris-runtime --test text_tower -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "needs the real SigLIP2 text tower and reference outputs written by transformers"]
+fn the_real_tower_and_tokenizer_match_transformers() {
+    use archie_iris_runtime::phrases::{PhraseSource, TextTower};
+    let (Some(tower), Some(reference)) = (
+        std::env::var_os("IRIS_TEXT_TOWER").map(std::path::PathBuf::from),
+        std::env::var_os("IRIS_TEXT_TOWER_REFERENCE").map(std::path::PathBuf::from),
+    ) else {
+        return;
+    };
+    let device = Device::Cpu;
+    let mut text = TextTower::load(&tower, 64, 32, &device, DType::F32).unwrap();
+    let meta: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(reference.join("real_tower.json")).unwrap()).unwrap();
+    let phrases: Vec<String> = meta["phrases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p.as_str().unwrap().to_owned())
+        .collect();
+    let stored =
+        candle_core::safetensors::load(reference.join("real_tower.safetensors"), &device).unwrap();
+    let ids: Vec<Vec<u32>> = stored["ids"]
+        .to_vec2::<i64>()
+        .unwrap()
+        .into_iter()
+        .map(|row| row.into_iter().map(|id| id as u32).collect())
+        .collect();
+
+    // 1. The tokenizer, configured as the runtime configures it.
+    let mut tokenizer = tokenizers::Tokenizer::from_file(tower.join("tokenizer.json")).unwrap();
+    tokenizer
+        .with_truncation(Some(tokenizers::TruncationParams {
+            max_length: 64,
+            ..Default::default()
+        }))
+        .unwrap();
+    tokenizer.with_padding(Some(tokenizers::PaddingParams {
+        strategy: tokenizers::PaddingStrategy::Fixed(64),
+        pad_id: 0,
+        pad_token: "<pad>".into(),
+        ..Default::default()
+    }));
+    let lowered: Vec<String> = phrases.iter().map(|p| p.to_lowercase()).collect();
+    for (row, got) in tokenizer
+        .encode_batch(lowered, true)
+        .unwrap()
+        .iter()
+        .enumerate()
+    {
+        assert_eq!(
+            got.get_ids(),
+            ids[row].as_slice(),
+            "{:?}: token ids",
+            phrases[row]
+        );
+    }
+
+    // 2. The tower on those ids, in float32.
+    let (pooled, states) = text.run_ids(&ids).unwrap();
+    let pooled_error = max_relative(&pooled, &stored["pooled"]);
+    let states_error = max_relative(&states, &stored["states"]);
+    println!("real tower, float32: pooled {pooled_error:e}, states {states_error:e}");
+    assert!(pooled_error < 1e-5 && states_error < 1e-5);
+
+    // 3. What fusion receives: the real tokens only, rounded through float16.
+    let f16 = |v: f32| half::f16::from_f32(v).to_f32();
+    let features = text.encode(&phrases).unwrap();
+    for (row, feature) in features.iter().enumerate() {
+        let count = ids[row].iter().filter(|&&id| id != 0).count().clamp(1, 32);
+        assert_eq!(
+            feature.states.len(),
+            count,
+            "{:?}: token count",
+            phrases[row]
+        );
+        let theirs: Vec<f32> = stored["pooled"].get(row).unwrap().to_vec1().unwrap();
+        let worst = feature
+            .pooled
+            .iter()
+            .zip(&theirs)
+            .map(|(ours, theirs)| (ours - f16(*theirs)).abs() / theirs.abs().max(1e-3))
+            .fold(0f32, f32::max);
+        // One float16 step either way, where float32 noise lands next to a rounding edge.
+        assert!(worst <= 1e-3, "{:?}: pooled off by {worst:e}", phrases[row]);
+    }
+}
