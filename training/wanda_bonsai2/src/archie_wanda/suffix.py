@@ -36,9 +36,16 @@ class LowRankDelta(nn.Module):
         return ((original_activation @ self.a.T) @ self.b.T)*self.scale
 
 
+TARGETS = {'q': ('attn_q', 4096, 8192), 'k': ('attn_k', 4096, 1024),
+           'v': ('attn_v', 4096, 1024), 'o': ('attn_output', 4096, 4096)}
+
+
 class BonsaiSuffix(nn.Module):
-    def __init__(self, model, config):
+    def __init__(self, model, config, targets=('q', 'v')):
         super().__init__()
+        if not targets or set(targets)-set(TARGETS) or len(set(targets))!=len(targets):
+            raise AdmissionError('unsupported LoRA target set')
+        self.targets=tuple(sorted(targets,key='qkvo'.index))
         if model.sha256!=BASE_SHA:
             raise AdmissionError('suffix requires the exact approved base')
         self.model,self.config=model,config
@@ -57,8 +64,13 @@ class BonsaiSuffix(nn.Module):
                          ('q_norm','blk.31.attn_q_norm.weight'),('k_norm','blk.31.attn_k_norm.weight'),
                          ('post_norm','blk.31.post_attention_norm.weight'),('output_norm','output_norm.weight')]:
             self.register_buffer(key,torch.from_numpy(read_tensor_rows(model,name,0,1).reshape(-1)))
-        self.q_delta=LowRankDelta(4096,8192,config.rank,config.alpha)
-        self.v_delta=LowRankDelta(4096,1024,config.rank,config.alpha)
+        for target in self.targets:
+            _, columns, rows = TARGETS[target]
+            setattr(self, target+'_delta', LowRankDelta(columns,rows,config.rank,config.alpha))
+
+    def delta(self, target, activation):
+        layer=getattr(self, target+'_delta', None)
+        return 0. if layer is None else layer(activation)
 
     def make_resident(self, device):
         for layer in self.linear.values(): layer.make_resident(device)
@@ -74,9 +86,9 @@ class BonsaiSuffix(nn.Module):
         if sequence_layout is not None and (sequence_layout.shape!=(count,) or torch.any(sequence_layout!=0).item()):
             raise AdmissionError('initial suffix supports one fresh sequence only')
         normalized=rms_norm(hidden,self.input_norm,self.epsilon)
-        query,gate=split_query_gate(self.linear['attn_q'](normalized)+self.q_delta(normalized),16,256)
-        key=self.linear['attn_k'](normalized).reshape(count,4,256)
-        value=(self.linear['attn_v'](normalized)+self.v_delta(normalized)).reshape(count,4,256)
+        query,gate=split_query_gate(self.linear['attn_q'](normalized)+self.delta('q',normalized),16,256)
+        key=(self.linear['attn_k'](normalized)+self.delta('k',normalized)).reshape(count,4,256)
+        value=(self.linear['attn_v'](normalized)+self.delta('v',normalized)).reshape(count,4,256)
         query=rms_norm(query,self.q_norm,self.epsilon)
         key=rms_norm(key,self.k_norm,self.epsilon)
         query=text_rope(query,positions,self.rope_dimensions,self.rope_base).transpose(0,1)
@@ -87,7 +99,7 @@ class BonsaiSuffix(nn.Module):
         scores=scores.masked_fill(causal,float('-inf'))
         attended=(torch.softmax(scores,dim=-1) @ value).transpose(0,1).reshape(count,4096)
         attended=attended*torch.sigmoid(gate.reshape(count,4096))
-        residual=hidden+self.linear['attn_output'](attended)
+        residual=hidden+self.linear['attn_output'](attended)+self.delta('o',attended)
         post=rms_norm(residual,self.post_norm,self.epsilon)
         feedforward=torch.nn.functional.silu(self.linear['ffn_gate'](post))*self.linear['ffn_up'](post)
         result=residual+self.linear['ffn_down'](feedforward)

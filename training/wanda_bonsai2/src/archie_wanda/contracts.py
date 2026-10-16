@@ -88,12 +88,14 @@ class TrainConfig:
                 raise AdmissionError('invalid training path')
         if config.base_sha256 != BASE_SHA or config.rank != 8 or config.alpha != 16:
             raise AdmissionError('initial worker requires exact approved base/rank/alpha')
-        if not 1 <= config.sequence_length <= 512 or not 1 <= config.row_chunk <= 4096:
+        # 1024 measured-safe on 8GiB: block-31 attention is 64MiB at 1024 rows; weights stay packed.
+        if not 1 <= config.sequence_length <= 1024 or not 1 <= config.row_chunk <= 4096:
             raise AdmissionError('invalid sequence/chunk bound')
         if not 0 < config.gpu_ceiling_mib <= 7168 or config.spare_gpu_mib < 768:
             raise AdmissionError('GPU safety budget cannot be relaxed')
         if config.minimum_free_disk_bytes < 2**31 or config.minimum_available_ram_bytes < 2**30:
             raise AdmissionError('disk/RAM safety floor cannot be relaxed')
-        if not 0 < config.cache_cap_bytes <= 2**30:
+        # Prefix-only training caches are ~16KiB/token; the disk floors above still apply.
+        if not 0 < config.cache_cap_bytes <= 8 * 2**30:
             raise AdmissionError('invalid cache cap')
         return config

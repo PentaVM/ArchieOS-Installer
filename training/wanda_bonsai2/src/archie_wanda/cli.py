@@ -19,7 +19,27 @@ def main():
         verify.add_argument('--config',required=True)
         verify.add_argument('--'+gate,required=True)
         verify.add_argument('--out',required=True)
+    worker = commands.add_parser('worker', help='queue-driven local trainer; runs until --cutoff')
+    worker.add_argument('--config', required=True)
+    worker.add_argument('--headers', required=True)
+    worker.add_argument('--cutoff', required=True, help='ISO-8601 local time with offset')
+    status = commands.add_parser('status', help='read-only summary; allocates no GPU memory')
+    status.add_argument('--root', required=True)
     args = parser.parse_args()
+    if args.command == 'worker':
+        from datetime import datetime
+        from .contracts import TrainConfig
+        from .worker import Worker
+        config = TrainConfig.load(args.config)
+        cutoff = datetime.fromisoformat(args.cutoff)
+        if cutoff.tzinfo is None:
+            parser.error('--cutoff needs an explicit UTC offset')
+        Worker(config, config.run_dir, args.headers, cutoff.timestamp()).run_forever()
+        return
+    if args.command == 'status':
+        from .worker_status import summarize
+        print(json.dumps(summarize(args.root), indent=2, ensure_ascii=False))
+        return
     if args.command == 'inspect':
         model = inspect_model(args.model, BASE_SHA)
         print(json.dumps({'format_version': 1, 'base_sha256': model.sha256, 'bytes': model.size,

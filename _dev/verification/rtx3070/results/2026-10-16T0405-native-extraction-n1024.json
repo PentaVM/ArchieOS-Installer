@@ -1,0 +1,166 @@
+{
+  "format_version": 1,
+  "scope": "real_native_full_row_capture_microbatch_reset",
+  "base_sha256": "3561df7ac7d26a71ffa991ac2db740b10841c3a350aa2676ccd3ff5d428b4e8b",
+  "runtime_commit": "e3de715222b2667c54a267441159a5729f11155e",
+  "shim_sha256": "0c820bd7ea71a4fecb731245520d715e3bf588d927da5357f4011ab3533a5c61",
+  "cases": [
+    {
+      "id": "saludo",
+      "tokens": 10,
+      "paths": [
+        "/home/archie/wanda/run/cache/84d3c3eeb58147ab990553f3e1482f93/saludo-0",
+        "/home/archie/wanda/run/cache/84d3c3eeb58147ab990553f3e1482f93/saludo-1",
+        "/home/archie/wanda/run/cache/84d3c3eeb58147ab990553f3e1482f93/saludo-2"
+      ],
+      "comparisons": {
+        "microbatch": {
+          "prefix.f32": {
+            "relative_rms": 0.007993714020540721,
+            "max_abs": 0.29534912109375
+          },
+          "norm.f32": {
+            "relative_rms": 0.010268585993042294,
+            "max_abs": 0.2881050109863281
+          },
+          "logits.f32": {
+            "relative_rms": 0.006045971428785196,
+            "max_abs": 0.16002154350280762
+          },
+          "distribution": {
+            "max_token_kl": 0.00037350140320722253,
+            "mean_token_kl": 0.00010677061315853725,
+            "greedy_agreement": 1.0
+          }
+        },
+        "fresh_reset": {
+          "prefix.f32": {
+            "relative_rms": 0.0,
+            "max_abs": 0.0
+          },
+          "norm.f32": {
+            "relative_rms": 0.0,
+            "max_abs": 0.0
+          },
+          "logits.f32": {
+            "relative_rms": 0.0,
+            "max_abs": 0.0
+          },
+          "distribution": {
+            "max_token_kl": 0.0,
+            "mean_token_kl": 0.0,
+            "greedy_agreement": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "plazo",
+      "tokens": 19,
+      "paths": [
+        "/home/archie/wanda/run/cache/84d3c3eeb58147ab990553f3e1482f93/plazo-0",
+        "/home/archie/wanda/run/cache/84d3c3eeb58147ab990553f3e1482f93/plazo-1",
+        "/home/archie/wanda/run/cache/84d3c3eeb58147ab990553f3e1482f93/plazo-2"
+      ],
+      "comparisons": {
+        "microbatch": {
+          "prefix.f32": {
+            "relative_rms": 0.008565321133351959,
+            "max_abs": 0.4939117431640625
+          },
+          "norm.f32": {
+            "relative_rms": 0.009574557468428363,
+            "max_abs": 0.1747136116027832
+          },
+          "logits.f32": {
+            "relative_rms": 0.006114371937723208,
+            "max_abs": 0.1775839887559414
+          },
+          "distribution": {
+            "max_token_kl": 0.0005903796272318763,
+            "mean_token_kl": 0.00023217518671752297,
+            "greedy_agreement": 1.0
+          }
+        },
+        "fresh_reset": {
+          "prefix.f32": {
+            "relative_rms": 0.0,
+            "max_abs": 0.0
+          },
+          "norm.f32": {
+            "relative_rms": 0.0,
+            "max_abs": 0.0
+          },
+          "logits.f32": {
+            "relative_rms": 0.0,
+            "max_abs": 0.0
+          },
+          "distribution": {
+            "max_token_kl": 0.0,
+            "mean_token_kl": 0.0,
+            "greedy_agreement": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "ruido",
+      "tokens": 35,
+      "paths": [
+        "/home/archie/wanda/run/cache/84d3c3eeb58147ab990553f3e1482f93/ruido-0",
+        "/home/archie/wanda/run/cache/84d3c3eeb58147ab990553f3e1482f93/ruido-1",
+        "/home/archie/wanda/run/cache/84d3c3eeb58147ab990553f3e1482f93/ruido-2"
+      ],
+      "comparisons": {
+        "microbatch": {
+          "prefix.f32": {
+            "relative_rms": 0.0097934918197504,
+            "max_abs": 0.38649749755859375
+          },
+          "norm.f32": {
+            "relative_rms": 0.010358960104065503,
+            "max_abs": 0.19102191925048828
+          },
+          "logits.f32": {
+            "relative_rms": 0.006282430116206229,
+            "max_abs": 0.19695520401000977
+          },
+          "distribution": {
+            "max_token_kl": 0.0006541701145383223,
+            "mean_token_kl": 0.00018806280164291325,
+            "greedy_agreement": 0.9714285714285714
+          }
+        },
+        "fresh_reset": {
+          "prefix.f32": {
+            "relative_rms": 0.0,
+            "max_abs": 0.0
+          },
+          "norm.f32": {
+            "relative_rms": 0.0,
+            "max_abs": 0.0
+          },
+          "logits.f32": {
+            "relative_rms": 0.0,
+            "max_abs": 0.0
+          },
+          "distribution": {
+            "max_token_kl": 0.0,
+            "mean_token_kl": 0.0,
+            "greedy_agreement": 1.0
+          }
+        }
+      }
+    }
+  ],
+  "native_layout_noise_floor": {
+    "norm_relative_rms": 0.010358960104065503,
+    "max_token_kl": 0.0006541701145383223
+  },
+  "gates": {
+    "reset_relative_rms": 0.0005,
+    "layout_max_token_kl": 0.001,
+    "revision": "microbatch rms 5e-4 gate replaced after measured native layout noise; see native.py comment and ledger"
+  },
+  "full_model_backward": false
+}

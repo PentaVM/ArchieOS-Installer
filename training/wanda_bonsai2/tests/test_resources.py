@@ -17,7 +17,7 @@ class ConfigTests(unittest.TestCase):
 
     def test_unknown_keys_and_lowered_safety_bounds_refuse(self):
         for item in ['unexpected=1', 'minimum_free_disk_bytes=10', 'spare_gpu_mib=0',
-                     'cache_cap_bytes=2147483648', 'rank=16']:
+                     'cache_cap_bytes=9663676416', 'sequence_length=1025', 'rank=16']:
             with self.subTest(item=item), self.assertRaises(AdmissionError): self.load(item)
 
     def test_minimal_config_uses_exact_approved_base(self):
