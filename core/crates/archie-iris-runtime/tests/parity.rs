@@ -201,10 +201,7 @@ fn rust_matches_the_python_iris() {
     );
 
     // 3. What callers see.
-    let mut detector = Detector {
-        model,
-        phrases: Box::new(table),
-    };
+    let mut detector = Detector::new(model, Box::new(table));
     let t = std::time::Instant::now();
     let hits = detector
         .detect(&image, &phrases, 0.05, 20, 0.5, true)

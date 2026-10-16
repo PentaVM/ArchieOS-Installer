@@ -67,6 +67,25 @@ Measured on CPU only, 4 cores with AVX-512, float32, 512×512 canvas:
 | `detect`, end to end | 5.7 s | — |
 | `detect_everything` (17 batch rows) | 31 s | 10.7 s |
 
+Open mode (`mode=all`, what the live voice used on every frame) reads the 256-phrase
+everyday vocabulary 16 phrases to a batch row: 17 rows of MoE fusion and decoding for one
+frame. A focused read (`mode=phrases`, at most 16 phrases) is one row. Same machine, same
+release build, a 1280×720 JPEG:
+
+| | per frame |
+|---|---:|
+| open (`mode=all`), vocabulary encoding cached | 30.6 s |
+| focused, 16 phrases | 5.9 s |
+
+So the live voice now looks openly every `--iris-sweep-ms` (2000 by default; 0 restores an
+open look on every frame) and, in between, reads each frame only for the phrases the last
+open look found (`Sweep` in `archie-voice/src/live/eyes.rs`). Something new in view is
+noticed at the next open look. This works the same against the Python `iris_serve`. The
+detector also keeps the last encoded phrase batch, so open mode no longer re-projects the
+whole vocabulary on every frame (identical tensors; the text features were already cached).
+Scores in a focused read can differ slightly from the same phrase in open mode, because the
+phrases sharing a batch row attend to each other.
+
 The CPU path is a fallback. The CUDA build (bf16 on Ampere and later, float32 earlier,
 `IRIS_PRECISION` to force) compiles candle's CUDA kernels. **It has not been built or run
 here: there was no GPU and no CUDA toolkit.** No GPU latency is claimed.

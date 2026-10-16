@@ -29,7 +29,7 @@
 //! archie-voice live --grade public --asr-model … --voice-engine magpie --tts-model …
 //!              --codec-model … --tts-tokenizer … [--listen-language auto]
 //!              [--tts-language es-US] [--tts-english en-US] [--port 8770]
-//!              [--iris http://127.0.0.1:8765] [--curiosity 40] [--always] [--headphones]
+//!              [--iris http://127.0.0.1:8765] [--iris-sweep-ms 2000] [--curiosity 40] [--always] [--headphones]
 //! ```
 //!
 //! Built with `--features live`. Finding out what an object is uses a vision model on
@@ -639,6 +639,8 @@ fn speech_flags(args: &mut Vec<String>) -> Result<SpeechFlags, String> {
 struct LiveFlags {
     port: u16,
     iris: String,
+    /// Milliseconds between IRIS's open looks; frames in between follow what it found.
+    iris_sweep_ms: u64,
     tts_english: String,
     curiosity: u32,
     /// An offline ASR model (Parakeet TDT) that hears each finished utterance again, whole.
@@ -661,6 +663,13 @@ fn live_flags(args: &mut Vec<String>) -> Result<LiveFlags, String> {
             .transpose()?
             .unwrap_or(8770),
         iris: take(args, "--iris").unwrap_or_else(|| "http://127.0.0.1:8765".into()),
+        iris_sweep_ms: take(args, "--iris-sweep-ms")
+            .map(|n| {
+                n.parse::<u64>()
+                    .map_err(|_| "--iris-sweep-ms is milliseconds (0: open every frame)")
+            })
+            .transpose()?
+            .unwrap_or(2000),
         tts_english: take(args, "--tts-english").unwrap_or_else(|| "en-US".into()),
         // Looks closer that curiosity may take on its own in one session: each is a
         // paid call to a vision model on Nebius.
@@ -850,11 +859,12 @@ fn live(asking: Asking, speech: SpeechFlags, flags: LiveFlags) -> Result<ExitCod
     );
     let senses = live::Senses::new(audio_in, identifier, researcher, rate, flags.curiosity);
     let eyes = eyes::IrisEyes::new(&flags.iris, 0.35)?;
+    let sweep = eyes::Sweep::new(std::time::Duration::from_millis(flags.iris_sweep_ms));
     {
         let senses = senses.clone();
         let port = flags.port;
         asking.runtime.spawn(async move {
-            if let Err(error) = live::serve(senses, eyes, port).await {
+            if let Err(error) = live::serve(senses, eyes, sweep, port).await {
                 eprintln!("live page: {error}");
             }
         });

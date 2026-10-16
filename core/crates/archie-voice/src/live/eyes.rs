@@ -53,6 +53,80 @@ struct IrisAnswer {
     step: Option<u64>,
 }
 
+/// How one frame is put to IRIS.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Look {
+    /// The whole everyday vocabulary: 256 phrases, read 16 to a batch row, so 17 rows of
+    /// fusion and decoding for the one frame. It finds what is new.
+    Open,
+    /// Only these phrases (at most [`Sweep::MAX_TRACKED`], one batch row): it follows what
+    /// the last open look found, at a fraction of the cost.
+    Focused(Vec<String>),
+}
+
+impl Look {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Look::Open => "open",
+            Look::Focused(_) => "focused",
+        }
+    }
+}
+
+/// When to look openly and when to follow. An open look every `every`; in between, the
+/// frames are read for what that look found. Something that enters the frame between two
+/// open looks is noticed at the next one, at most `every` later. `every` zero is an open
+/// look on every frame, as before.
+#[derive(Debug, Clone)]
+pub struct Sweep {
+    every: Duration,
+    last_open: Option<Instant>,
+    tracked: Vec<String>,
+}
+
+impl Sweep {
+    /// One batch row of IRIS (`max_phrases` in its configuration).
+    pub const MAX_TRACKED: usize = 16;
+
+    pub fn new(every: Duration) -> Self {
+        Self {
+            every,
+            last_open: None,
+            tracked: Vec::new(),
+        }
+    }
+
+    pub fn next(&self, now: Instant) -> Look {
+        let due = self
+            .last_open
+            .is_none_or(|at| now.saturating_duration_since(at) >= self.every);
+        if self.every.is_zero() || due || self.tracked.is_empty() {
+            Look::Open
+        } else {
+            Look::Focused(self.tracked.clone())
+        }
+    }
+
+    /// Learns what to follow from an open look: its phrases, surest first.
+    pub fn observe(&mut self, look: &Look, scene: &Scene, now: Instant) {
+        if *look != Look::Open {
+            return;
+        }
+        self.last_open = Some(now);
+        let mut seen: Vec<&Seen> = scene.seen.iter().collect();
+        seen.sort_by(|a, b| b.score.total_cmp(&a.score));
+        self.tracked.clear();
+        for item in seen {
+            if self.tracked.len() == Self::MAX_TRACKED {
+                break;
+            }
+            if !self.tracked.contains(&item.phrase) {
+                self.tracked.push(item.phrase.clone());
+            }
+        }
+    }
+}
+
 /// A client for the IRIS service.
 #[derive(Clone)]
 pub struct IrisEyes {
@@ -75,18 +149,25 @@ impl IrisEyes {
         })
     }
 
-    /// Reads one JPEG frame in IRIS's open mode (its whole everyday vocabulary).
-    pub async fn look(&self, jpeg: Arc<Vec<u8>>) -> Result<Scene, String> {
+    /// Reads one JPEG frame, openly or for the phrases being followed.
+    pub async fn look(&self, jpeg: Arc<Vec<u8>>, look: &Look) -> Result<Scene, String> {
         let observed_at_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|duration| duration.as_millis().min(i64::MAX as u128) as i64)
             .unwrap_or(0);
+        let threshold = self.threshold.to_string();
+        let mut query = vec![("embed", "1".to_string()), ("threshold", threshold)];
+        match look {
+            Look::Open => query.push(("mode", "all".into())),
+            Look::Focused(phrases) => {
+                query.push(("mode", "phrases".into()));
+                query.push(("phrases", phrases.join(",")));
+            }
+        }
         let answer: IrisAnswer = self
             .http
-            .post(format!(
-                "{}/detect?mode=all&embed=1&threshold={}",
-                self.url, self.threshold
-            ))
+            .post(format!("{}/detect", self.url))
+            .query(&query)
             .body(jpeg.as_ref().clone())
             .send()
             .await
@@ -307,5 +388,53 @@ mod tests {
         // A 32x32 white JPEG is awkward to make without an encoder, so the crop is
         // checked through its refusal of a box too small to be an object.
         assert!(crop_png(&[], [0.0, 0.0, 1.0, 1.0], &[]).is_err());
+    }
+
+    #[test]
+    fn open_looks_find_and_focused_looks_follow() {
+        let start = Instant::now();
+        let mut sweep = Sweep::new(Duration::from_millis(2000));
+        assert_eq!(sweep.next(start), Look::Open);
+        let found = scene(&[
+            ("cup", 0.5, [0.0, 0.0, 10.0, 10.0]),
+            ("laptop", 0.9, [0.0, 0.0, 10.0, 10.0]),
+            ("cup", 0.8, [20.0, 20.0, 30.0, 30.0]),
+        ]);
+        sweep.observe(&Look::Open, &found, start);
+        let later = start + Duration::from_millis(500);
+        assert_eq!(
+            sweep.next(later),
+            Look::Focused(vec!["laptop".into(), "cup".into()])
+        );
+        // What a focused look sees does not change what is followed.
+        sweep.observe(&sweep.next(later), &scene(&[]), later);
+        assert_eq!(sweep.next(later).name(), "focused");
+        assert_eq!(sweep.next(start + Duration::from_millis(2000)), Look::Open);
+        // Nothing found: every look stays open. Zero interval: always open.
+        let mut empty = Sweep::new(Duration::from_millis(2000));
+        empty.observe(&Look::Open, &scene(&[]), start);
+        assert_eq!(empty.next(later), Look::Open);
+        let mut always = Sweep::new(Duration::ZERO);
+        always.observe(&Look::Open, &found, start);
+        assert_eq!(always.next(later), Look::Open);
+    }
+
+    #[test]
+    fn at_most_one_batch_row_is_followed() {
+        let many: Vec<(String, f32)> = (0..40)
+            .map(|i| (format!("thing{i}"), i as f32 / 40.0))
+            .collect();
+        let items: Vec<(&str, f32, [f32; 4])> = many
+            .iter()
+            .map(|(p, s)| (p.as_str(), *s, [0.0; 4]))
+            .collect();
+        let mut sweep = Sweep::new(Duration::from_secs(2));
+        let now = Instant::now();
+        sweep.observe(&Look::Open, &scene(&items), now);
+        let Look::Focused(phrases) = sweep.next(now) else {
+            panic!("expected a focused look")
+        };
+        assert_eq!(phrases.len(), Sweep::MAX_TRACKED);
+        assert_eq!(phrases[0], "thing39");
     }
 }

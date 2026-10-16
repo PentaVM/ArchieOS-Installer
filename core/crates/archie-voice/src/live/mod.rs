@@ -33,7 +33,7 @@ use axum::response::{Html, IntoResponse};
 use axum::routing::get;
 use axum::Router;
 use curiosity::{Buffer, Identifier, Researcher};
-use eyes::{IrisEyes, Scene};
+use eyes::{IrisEyes, Scene, Sweep};
 use futures_util::{SinkExt, StreamExt};
 use memory::Memory;
 use persistent::PersistentMemory;
@@ -552,8 +552,13 @@ pub fn forward_voice(
 }
 
 /// Serves the page and its socket on `127.0.0.1:port`, and runs the eyes and curiosity.
-pub async fn serve(senses: Arc<Senses>, eyes: IrisEyes, port: u16) -> Result<(), String> {
-    tokio::spawn(see(senses.clone(), eyes));
+pub async fn serve(
+    senses: Arc<Senses>,
+    eyes: IrisEyes,
+    sweep: Sweep,
+    port: u16,
+) -> Result<(), String> {
+    tokio::spawn(see(senses.clone(), eyes, sweep));
     tokio::spawn(wonder(senses.clone()));
     tokio::spawn(compact_memory(senses.clone()));
     let app = Router::new()
@@ -663,16 +668,20 @@ async fn session(socket: WebSocket, senses: Arc<Senses>) {
     writer.abort();
 }
 
-/// Reads each new frame with IRIS, one at a time, and publishes the scene.
-async fn see(senses: Arc<Senses>, eyes: IrisEyes) {
+/// Reads each new frame with IRIS, one at a time (a frame that arrives while IRIS is busy
+/// replaces the one waiting), and publishes the scene. Open looks and focused ones
+/// alternate as [`Sweep`] decides.
+async fn see(senses: Arc<Senses>, eyes: IrisEyes, mut sweep: Sweep) {
     loop {
         senses.frame_ready.notified().await;
         let Some(frame) = senses.frame.lock().expect("frame lock").take() else {
             continue;
         };
         let asked = Instant::now();
-        match eyes.look(frame).await {
+        let look = sweep.next(asked);
+        match eyes.look(frame, &look).await {
             Ok(scene) => {
+                sweep.observe(&look, &scene, asked);
                 let clip_scenes = senses.cache_scene(&scene);
                 let (seen, recalled, held_events) = {
                     let mut memory = senses.memory.lock().expect("memory lock");
@@ -707,7 +716,8 @@ async fn see(senses: Arc<Senses>, eyes: IrisEyes) {
                 senses.publish(json!({
                     "type": "scene", "seen": seen, "width": scene.width,
                     "height": scene.height, "step": scene.step,
-                    "iris_ms": asked.elapsed().as_millis() as u64, "memory": recalled,
+                    "iris_ms": asked.elapsed().as_millis() as u64, "iris_look": look.name(),
+                    "memory": recalled,
                 }));
                 *senses.scene.lock().expect("scene lock") = scene;
             }

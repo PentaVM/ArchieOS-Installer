@@ -333,6 +333,7 @@ impl BoxHead {
 }
 
 /// Phrases ready for fusion: one row per image of the batch.
+#[derive(Clone)]
 pub struct EncodedPhrases {
     /// `[B, P, D]`.
     pub vectors: Tensor,

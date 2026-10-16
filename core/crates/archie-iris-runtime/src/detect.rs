@@ -77,21 +77,41 @@ fn detection(
 pub struct Detector {
     pub model: IrisModel,
     pub phrases: Box<dyn PhraseSource>,
+    /// The last phrase batch encoded, for the next frame that asks the same: open mode
+    /// asks the whole everyday vocabulary (17 rows) on every frame.
+    encoded: Option<(Vec<Vec<String>>, EncodedPhrases)>,
 }
 
 impl Detector {
+    pub fn new(model: IrisModel, phrases: Box<dyn PhraseSource>) -> Self {
+        Self {
+            model,
+            phrases,
+            encoded: None,
+        }
+    }
+
     pub fn canvas(&self, image: &Rgb) -> Result<Tensor> {
         let (canvas, _) = letterbox(image, self.model.config.image_size);
         to_tensor(&canvas, &self.model.device)
     }
 
     /// Encoded phrases for one batch row per entry of `chunks`.
+    /// The same phrases give the same tensors (the text features are cached by phrase and
+    /// the projections are fixed weights), so a repeated batch is not encoded again.
     pub fn encode_chunks(&mut self, chunks: &[Vec<String>]) -> Result<EncodedPhrases> {
+        if let Some((asked, encoded)) = &self.encoded {
+            if asked.as_slice() == chunks {
+                return Ok(encoded.clone());
+            }
+        }
         let features = chunks
             .iter()
             .map(|chunk| self.phrases.encode(chunk))
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        self.model.encode_phrases(&features)
+        let encoded = self.model.encode_phrases(&features)?;
+        self.encoded = Some((chunks.to_vec(), encoded.clone()));
+        Ok(encoded)
     }
 
     /// `detect`: the phrases asked for, each with its own boxes.

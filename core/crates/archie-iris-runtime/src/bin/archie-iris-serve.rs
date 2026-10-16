@@ -83,7 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "rem_recording": false,
     });
     drop(loaded);
-    let service = Service::new(Detector { model, phrases }, actor, info);
+    let service = Service::new(Detector::new(model, phrases), actor, info);
     let health = service.health();
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     println!(
