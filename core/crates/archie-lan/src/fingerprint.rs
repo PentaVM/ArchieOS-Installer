@@ -73,6 +73,36 @@ pub fn tls_version(ja4: &str) -> Option<&'static str> {
     })
 }
 
+/// Whether the first label of a DNS name looks generated rather than chosen: 10 or more
+/// characters, spread over many symbols (Shannon entropy of 3 bits or more) and few vowels
+/// (under 30 % of its letters). Words, brands and tracker names rarely pass both; random
+/// strings mostly do. A hint for counting, not a verdict on one name.
+pub fn random_label(name: &str) -> bool {
+    let label = name.split('.').next().unwrap_or("");
+    if label.len() < 10 || label.len() > 63 {
+        return false;
+    }
+    let mut counts = [0u32; 256];
+    for byte in label.bytes() {
+        counts[usize::from(byte.to_ascii_lowercase())] += 1;
+    }
+    let length = label.len() as f64;
+    let entropy: f64 = counts
+        .iter()
+        .filter(|&&c| c > 0)
+        .map(|&c| {
+            let p = f64::from(c) / length;
+            -p * p.log2()
+        })
+        .sum();
+    let letters = label.bytes().filter(u8::is_ascii_alphabetic).count();
+    let vowels = label
+        .bytes()
+        .filter(|b| matches!(b.to_ascii_lowercase(), b'a' | b'e' | b'i' | b'o' | b'u'))
+        .count();
+    letters > 0 && entropy >= 3.0 && (vowels as f64) < 0.3 * letters as f64
+}
+
 /// Versions RFC 8996 (2021) retired: a client that offers nothing newer runs a stack
 /// that has not been updated in years.
 pub fn retired_tls(version: &str) -> bool {
@@ -150,6 +180,23 @@ pub fn profile(mac: &str, device: &Device) -> Profile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generated_labels_look_random_and_chosen_ones_do_not() {
+        for name in ["kqzvtrwbxlmp.com", "x7k2qz9vbwtp.net", "PMXWQHZJTCRB.org"] {
+            assert!(random_label(name), "{name}");
+        }
+        for name in [
+            "securepubads.g.doubleclick.net",
+            "googletagmanager.com",
+            "scorecardresearch.com",
+            "clientservices.googleapis.com",
+            "kqzvtrwb.com",
+            "",
+        ] {
+            assert!(!random_label(name), "{name}");
+        }
+    }
 
     #[test]
     fn a_random_address_names_no_maker() {

@@ -27,6 +27,7 @@
 //! | `name-poisoning` | a device answers LLMNR or NetBIOS name queries for three different names, or for `wpad`: Responder's way of taking other machines' traffic and password hashes. An honest Windows machine answers for its own name |
 //! | `mac-flood` | 20 or more hardware addresses not known as devices send within a minute, after the first minute: a tool filling the switch's address table so it repeats everyone's traffic to every port. While it lasts, unknown addresses are not kept as devices |
 //! | `dhcp-starvation` | 30 or more hardware addresses not known as devices ask DHCP for an address within a minute: a tool exhausting the router's pool, so that a rogue server can answer instead |
+//! | `dga-suspect` | a device's DNS questions come back "no such name" (NXDOMAIN) for 25 or more different random-looking names within a minute: malware with a domain generation algorithm trying names until it finds its controller's |
 //! | `rogue-router-advertisement` | a device not seen before offers itself as an IPv6 router on the link, or one other than the known router does |
 //!
 //! Alongside the rules it keeps what each device says about itself in the clear (DHCP
@@ -84,6 +85,9 @@ const DAY_MS: u64 = 24 * 60 * 60 * 1000;
 const ARP_SWEEP_TARGETS: usize = 50;
 /// Devices whose ARP questions are counted at once.
 const MAX_ARP_ASKERS: usize = 256;
+/// Different random-looking names a device is told do not exist, within a minute, before
+/// `dga-suspect`.
+const DGA_NAMES: usize = 25;
 /// Different LLMNR or NetBIOS names one device may answer for before it is told.
 const POISONING_NAMES: usize = 3;
 /// Unknown hardware addresses sending within the window that make a flood.
@@ -617,6 +621,9 @@ pub struct Audit {
     answering: HashMap<String, BTreeSet<String>>,
     /// The addresses each device asked ARP about in the last minute, for `arp-sweep`.
     arp_asking: HashMap<String, Burst>,
+    /// The random-looking names each device was told do not exist in the last minute, for
+    /// `dga-suspect`.
+    unanswered: HashMap<String, Burst>,
 }
 
 /// What happened in the last minute, by key (a DHCP client's hardware address, or a
@@ -744,6 +751,7 @@ impl Audit {
             arriving: Burst::default(),
             answering: HashMap::new(),
             arp_asking: HashMap::new(),
+            unanswered: HashMap::new(),
         }
     }
 
@@ -907,6 +915,9 @@ impl Audit {
         }
         if let Some((mac, asked)) = packet.source_mac.as_deref().zip(packet.arp_asked) {
             self.asked_arp(&mut alerts, packet.at_ms, mac, asked);
+        }
+        if let Some((device, name)) = &packet.nxdomain {
+            self.no_such_name(&mut alerts, packet.at_ms, device, name);
         }
         // A client's own DHCP messages (discover, request, inform) describe its stack, and an
         // LLDP frame names its sender. Neither needs the device to have an address yet.
@@ -1280,6 +1291,36 @@ impl Audit {
                 detail: format!(
                     "asked ARP for {asked_for} addresses of the network within a minute: a scan \
                      of the LAN (nmap -sn, arp-scan, netdiscover), or a network app on a phone"
+                ),
+            });
+        }
+    }
+
+    /// `mac` was told `name` does not exist. A device mistypes or probes a few; one told so
+    /// for many names nobody would type is generating them.
+    fn no_such_name(&mut self, alerts: &mut Vec<Alert>, at_ms: u64, mac: &str, name: &str) {
+        if !crate::fingerprint::random_label(name) {
+            return;
+        }
+        if !self.unanswered.contains_key(mac) && self.unanswered.len() >= MAX_ARP_ASKERS {
+            return;
+        }
+        let burst = self.unanswered.entry(mac.to_string()).or_default();
+        burst.add(at_ms, name.to_string(), mac.to_string());
+        let names = burst.per_client.len();
+        if names >= DGA_NAMES
+            && self
+                .told
+                .cooled(&format!("dga {mac}"), at_ms, SURGE_COOLDOWN_MS)
+        {
+            alerts.push(Alert {
+                at_ms,
+                severity: Severity::Warning,
+                rule: "dga-suspect".into(),
+                device: mac.into(),
+                detail: format!(
+                    "was told within a minute that {names} random-looking names do not exist \
+                     (such as {name}): malware generating names to find its controller"
                 ),
             });
         }
@@ -2206,6 +2247,52 @@ mod tests {
             "{}",
             told[0].detail
         );
+    }
+
+    #[test]
+    fn many_random_names_that_do_not_exist_are_a_dga() {
+        let mut audit = Audit::new(State::default(), learned());
+        let nx = |device: &str, name: String, at_ms: u64| Packet {
+            at_ms,
+            source_mac: Some(ROUTER.into()),
+            nxdomain: Some((device.into(), name)),
+            ..Packet::default()
+        };
+        // A Pi-hole blocking trackers, and Chrome's three probes, over and over: quiet.
+        let usual: Vec<Alert> = (0..300u64)
+            .flat_map(|i| {
+                let name = [
+                    "securepubads.g.doubleclick.net",
+                    "connectivitycheck.gstatic.com",
+                    "kqzvtrwbxl",
+                    "pmxwqhzjtc",
+                    "zbvnrtqwlx",
+                ][i as usize % 5];
+                audit.see(&nx(TV, name.into(), i * 200))
+            })
+            .collect();
+        assert!(usual.is_empty(), "{usual:?}");
+        // A bot trying a generated name every half second: told once.
+        let mut seed = 0x9e37_79b9_u64;
+        let told: Vec<Alert> = (0..120u64)
+            .flat_map(|i| {
+                let name: String = (0..13)
+                    .map(|_| {
+                        seed ^= seed << 13;
+                        seed ^= seed >> 7;
+                        seed ^= seed << 17;
+                        char::from(b'a' + (seed % 26) as u8)
+                    })
+                    .collect();
+                audit.see(&nx(
+                    "de:ad:be:ef:00:07",
+                    format!("{name}.com"),
+                    100_000 + i * 500,
+                ))
+            })
+            .collect();
+        assert_eq!(rules(&told), ["dga-suspect"]);
+        assert_eq!(told[0].device, "de:ad:be:ef:00:07");
     }
 
     #[test]

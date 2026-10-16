@@ -3,7 +3,8 @@
 # starvation flood (one sender, 40 client addresses), a Responder answering LLMNR and
 # NetBIOS for other machines' names, mitm6 answering DHCPv6, a camera whose TLS client
 # stops at TLS 1.0, the rogue sending an ICMP Redirect and answering DNS, an ARP sweep of
-# the network, then a macof-style flood of 60 made-up hardware addresses. Nothing is sent.
+# the network, the NXDOMAIN answers a domain generation algorithm draws, then a macof-style
+# flood of 60 made-up hardware addresses. Nothing is sent.
 #   python3 -I make_rogue_pcap.py rogue-dhcp-and-ra.pcap
 import sys
 from scapy.all import Ether, IP, UDP, TCP, ICMP, DNS, BOOTP, DHCP, IPv6, ICMPv6ND_RA, ICMPv6NDOptSrcLLAddr, Raw, wrpcap, ARP, DNSQR, DNSRR, load_layer, load_contrib
@@ -86,6 +87,14 @@ at(Ether(src=rogue, dst=win)/IP(src="192.168.1.66", dst="192.168.1.50")/UDP(spor
 scanner = "02:00:5e:12:34:56"
 for i in range(60):
     at(Ether(src=scanner, dst="ff:ff:ff:ff:ff:ff")/ARP(op=1, hwsrc=scanner, psrc="192.168.1.77", pdst="192.168.1.%d" % (100 + i)), 180 + i * 0.02)
+# The router tells the Windows client that 40 generated names do not exist, one every
+# half second: a domain generation algorithm looking for its controller.
+import random
+rng = random.Random(7)
+for i in range(40):
+    name = "".join(rng.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(15)) + ".com"
+    at(Ether(src=router, dst=win)/IP(src="192.168.1.1", dst="192.168.1.50")/UDP(sport=53, dport=5001 + i)/
+       DNS(id=100 + i, qr=1, rcode=3, qd=DNSQR(qname=name)), 250 + i * 0.5)
 # Then a table flood, as macof sends it: made-up source and destination hardware and IP
 # addresses, 60 frames in a second.
 for i in range(60):

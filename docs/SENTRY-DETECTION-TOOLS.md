@@ -32,6 +32,7 @@ with only the broadcast view, and says more with a mirror.
 | `retired-tls` and `tls_versions` | a device whose TLS client stops at 1.1 or older, read from its JA4 | — |
 | `rogue-dhcpv6-server` | a device other than the router answering DHCPv6 (mitm6) | — |
 | `name-poisoning` | a device answering LLMNR/NetBIOS for 3+ names, or for `wpad` (Responder) | — |
+| `dga-suspect` | 25+ different random-looking names answered NXDOMAIN to one device in a minute (a domain generation algorithm) | — |
 | `mac-flood` | 20+ unknown hardware addresses sending in a minute; the flood is kept out of the inventory | — |
 | `dhcp-starvation` | 30+ unknown DHCP clients in a minute, by the DHCP client address (`chaddr`) | — |
 | `beacon-suspect` and `beacons` | a clock-like rhythm of connections to one outside destination, scored as RITA does; told only for a destination taken up after the device was learned | — (method reimplemented) |
@@ -407,6 +408,36 @@ its basis.
   the name asked for is the one the device meant, which is what a beacon is grouped by.
 - **Limit.** Sentry sees answers only to the machine it runs on, unless it sits on the
   gateway or behind a mirror port.
+
+### 2026-10-16: domain generation algorithms (NXDOMAIN bursts)
+
+- **Compared.** Pleiades (Antonakakis et al., USENIX Security 2012) clusters the NXDOMAIN
+  answers a host gets by the shape of the names: accurate, but a trained model. The usual
+  SIEM rule (Splunk's `ut_shannon` above 3 bits on queried names) flags single names and is
+  noisy: `crashlyticsreports` scores 3.42. A plain NXDOMAIN count (Zeek scripts, Security
+  Onion) fires on a Pi-hole set to answer NXDOMAIN for blocked trackers.
+- **Chosen.** Count, per device, the different names it is told do not exist within a
+  minute, keeping only names whose first label looks generated: 10+ characters, entropy of
+  3 bits or more and under 30 % vowels. Tried on 26 common tracker and service labels, 3
+  pass (`connectivitycheck`, `crashlyticsreports`, `ingest-sentry`); 72 to 75 % of random
+  10 to 18 character labels pass. A blocked tracker repeats the same few names, so it
+  cannot reach 25 different ones; a DGA tries new ones each time. The device is the
+  answer's Ethernet destination, so no ARP needs to have been heard. A warning, told at
+  most once an hour per device.
+- **Tested.** `random_label` on generated and chosen labels; NXDOMAIN parsing (rcode 3 from
+  port 53, by Ethernet destination); a Pi-hole and Chrome's three intranet probes repeated
+  300 times stay quiet; a bot trying a name every half second is told once. The real
+  TShark test reads a fixture where the router answers NXDOMAIN to the Windows client for
+  40 generated names (29 pass the filter) and finds `dga-suspect` for it.
+- **Measured.** TShark over the fixture repeated 50 times (10,900 frames), best of five,
+  two rounds: 429/409 ms with the 39 fields before DNS answers were read, 400/387 ms with
+  41, 395/393 ms with all 42: within noise. In the audit, one label check per NXDOMAIN
+  answer and nothing else.
+- **Not adopted.** A model (Pleiades, a character n-gram classifier): more to ship and
+  explain for a home network. Entropy alone: it flags real tracker names.
+- **Limit.** Sentry sees only the answers to the machine it runs on, unless it sits on the
+  gateway or behind a mirror port. A DGA built from dictionary words passes as chosen
+  names.
 
 ## How a tool is accepted
 

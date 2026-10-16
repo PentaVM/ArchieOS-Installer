@@ -13,7 +13,7 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 /// The fields, in the order they are printed, one frame to a line, tab between.
-pub const FIELDS: [&str; 41] = [
+pub const FIELDS: [&str; 42] = [
     "frame.time_epoch",
     "frame.len",
     "eth.src",
@@ -55,6 +55,7 @@ pub const FIELDS: [&str; 41] = [
     "arp.dst.proto_ipv4",
     "dns.a",
     "dns.aaaa",
+    "dns.flags.rcode",
 ];
 
 /// Enough of each frame for the names above; the rest is never copied off the interface.
@@ -151,6 +152,9 @@ pub struct Packet {
     /// What that answer resolved: the name asked for and the addresses (A and AAAA) it
     /// gave, at most `MAX_RESOLVED` of them.
     pub resolved: Option<(String, Vec<IpAddr>)>,
+    /// A DNS answer saying a name does not exist (NXDOMAIN): the device it went to (by
+    /// the frame's Ethernet destination) and the name it had asked for.
+    pub nxdomain: Option<(String, String)>,
 }
 
 /// Addresses kept from one DNS answer: a CDN answers with a handful.
@@ -303,6 +307,11 @@ pub fn parse(line: &str) -> Option<Packet> {
             .filter(|asked| fields[9].parse::<Ipv4Addr>().ok() != Some(*asked)),
         dns_answer: flag(fields[16]) && ports(fields[14], fields[15]).is_some_and(|(s, _)| s == 53),
         resolved: resolved(&all, &fields),
+        nxdomain: (fields[41] == "3"
+            && flag(fields[16])
+            && ports(fields[14], fields[15]).is_some_and(|(s, _)| s == 53))
+        .then(|| mac(fields[3]).zip(name(fields[17])))
+        .flatten(),
     })
 }
 
@@ -554,6 +563,24 @@ pub(crate) mod tests {
             None,
             "only a DNS server's answers name addresses"
         );
+        let nxdomain = |rcode: &str| {
+            parse(&line(&[
+                ("frame.time_epoch", "1"),
+                ("eth.dst", "54:4E:F0:07:3D:E8"),
+                ("udp.srcport", "53"),
+                ("udp.dstport", "50000"),
+                ("dns.flags.response", "True"),
+                ("dns.qry.name", "Kq7vx2pzm9wd.com"),
+                ("dns.flags.rcode", rcode),
+            ]))
+            .unwrap()
+            .nxdomain
+        };
+        assert_eq!(
+            nxdomain("3"),
+            Some(("54:4e:f0:07:3d:e8".into(), "kq7vx2pzm9wd.com".into()))
+        );
+        assert_eq!(nxdomain("0"), None, "an answer that resolved");
         assert!(!advertise("546"), "only a server's port answers");
         // A second occurrence of an address field is not the frame's own (ICMP errors).
         fields.push(("ip.dst", "192.168.1.1,10.0.0.1"));
