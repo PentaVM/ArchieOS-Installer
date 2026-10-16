@@ -18,6 +18,7 @@
 //! | `traffic-surge` | a device that has been learned for a day sends far more in ten minutes than it usually does |
 //! | `rogue-dhcp-server` | a second device answers DHCP (an offer or acknowledgement) when another already does: it can hand out its own router and DNS |
 //! | `beacon-suspect` | a device learned for a day starts calling a new outside destination on a clock (a regular interval, scored as RITA does), the way malware checks in with its controller |
+//! | `rogue-dhcpv6-server` | a device that is not the router answers DHCPv6 (an advertise or reply), or, once servers are known, a new one does: mitm6 makes itself every Windows machine's IPv6 DNS server this way |
 //! | `name-poisoning` | a device answers LLMNR or NetBIOS name queries for three different names, or for `wpad`: Responder's way of taking other machines' traffic and password hashes. An honest Windows machine answers for its own name |
 //! | `mac-flood` | 20 or more hardware addresses not known as devices send within a minute, after the first minute: a tool filling the switch's address table so it repeats everyone's traffic to every port. While it lasts, unknown addresses are not kept as devices |
 //! | `dhcp-starvation` | 30 or more hardware addresses not known as devices ask DHCP for an address within a minute: a tool exhausting the router's pool, so that a rogue server can answer instead |
@@ -220,6 +221,9 @@ pub struct State {
     /// The devices that have offered themselves as IPv6 routers.
     #[serde(default)]
     pub router_advertisers: BTreeSet<String>,
+    /// The devices that have answered DHCPv6.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub dhcpv6_servers: BTreeSet<String>,
 }
 
 /// The most a file on disk may hold: the same caps the audit applies as it learns, plus
@@ -334,6 +338,7 @@ impl State {
             self.router_advertisers.len(),
             "IPv6 routers",
         )?;
+        over(limits.devices, self.dhcpv6_servers.len(), "DHCPv6 servers")?;
         for device in self.devices.values() {
             over(
                 limits.addresses,
@@ -768,6 +773,9 @@ impl Audit {
         if packet.router_advertisement {
             self.advertised_router(&mut alerts, packet.at_ms, mac, source, learning);
         }
+        if packet.dhcpv6_answer {
+            self.answered_dhcpv6(&mut alerts, packet.at_ms, mac, source, learning);
+        }
         if !self.state.devices.contains_key(mac) {
             if self.state.devices.len() >= MAX_DEVICES {
                 return alerts;
@@ -994,6 +1002,60 @@ impl Audit {
                 ),
             );
         }
+    }
+
+    /// A DHCPv6 advertise or reply from `mac`. Told like a router advertisement: when it
+    /// is not the router, or, once servers are known, when it is a new one. Windows prefers
+    /// IPv6 and asks DHCPv6 even where the network uses none, which is how mitm6 makes
+    /// itself every Windows machine's DNS server.
+    fn answered_dhcpv6(
+        &mut self,
+        alerts: &mut Vec<Alert>,
+        at_ms: u64,
+        mac: &str,
+        source: IpAddr,
+        learning: bool,
+    ) {
+        if self.state.dhcpv6_servers.contains(mac) || self.state.dhcpv6_servers.len() >= MAX_DEVICES
+        {
+            return;
+        }
+        let known: Vec<String> = self.state.dhcpv6_servers.iter().cloned().collect();
+        self.state.dhcpv6_servers.insert(mac.to_string());
+        let not_the_router = self
+            .settings
+            .gateway
+            .and_then(|gateway| self.state.owners.get(&IpAddr::V4(gateway)))
+            .is_some_and(|router| router != mac);
+        if learning || (known.is_empty() && !not_the_router) {
+            return;
+        }
+        let (severity, detail) = if not_the_router {
+            (
+                Severity::High,
+                format!(
+                    "answers DHCPv6 from {source} and is not the router: it can hand IPv6 \
+                     clients its own DNS server, which Windows then prefers (mitm6)"
+                ),
+            )
+        } else {
+            (
+                Severity::Warning,
+                format!(
+                    "answers DHCPv6 from {source}; until now only {} did",
+                    known.join(", ")
+                ),
+            )
+        };
+        self.tell(
+            alerts,
+            format!("dhcpv6-server {mac}"),
+            at_ms,
+            severity,
+            "rogue-dhcpv6-server",
+            mac,
+            detail,
+        );
     }
 
     /// `mac` answered an LLMNR or NetBIOS name query for `name`. A machine answers for its
@@ -1564,6 +1626,47 @@ mod tests {
             .flat_map(|i| audit.see(&sent(later + i * 1_000, 1_000_000)))
             .collect();
         assert_eq!(rules(&again), ["traffic-surge"]);
+    }
+
+    #[test]
+    fn a_dhcpv6_server_that_is_not_the_router_is_told() {
+        let gateway: Ipv4Addr = "192.168.1.1".parse().unwrap();
+        let mut audit = Audit::new(
+            State::default(),
+            Settings {
+                learn_ms: 60_000,
+                gateway: Some(gateway),
+                gateway_v6: None,
+            },
+        );
+        let arp = Packet {
+            at_ms: 1_000,
+            arp: Some((ROUTER.into(), gateway)),
+            ..Packet::default()
+        };
+        audit.see(&arp);
+        let answer = |mac: &str, ip: &str, at_ms: u64| Packet {
+            dhcpv6_answer: true,
+            ..from(mac, ip, at_ms)
+        };
+        // The router serving DHCPv6, while learning and after: quiet.
+        assert!(audit.see(&answer(ROUTER, "fe80::1", 2_000)).is_empty());
+        assert!(audit.see(&answer(ROUTER, "fe80::1", 90_000)).is_empty());
+        // mitm6 on a laptop, after learning: told once.
+        let mitm6 = "02:00:5e:77:88:99";
+        let told: Vec<Alert> = audit
+            .see(&answer(mitm6, "fe80::77:8899", 100_000))
+            .into_iter()
+            .filter(|a| a.rule != "new-device")
+            .collect();
+        assert_eq!(rules(&told), ["rogue-dhcpv6-server"]);
+        assert_eq!(told[0].severity, Severity::High);
+        assert!(audit
+            .see(&answer(mitm6, "fe80::77:8899", 101_000))
+            .is_empty());
+        // Kept in the state, and the state still loads.
+        let saved = serde_json::to_vec(&audit.state).unwrap();
+        assert_eq!(State::parse(&saved).unwrap().dhcpv6_servers.len(), 2);
     }
 
     #[test]

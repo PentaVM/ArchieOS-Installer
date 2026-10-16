@@ -13,7 +13,7 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 /// The fields, in the order they are printed, one frame to a line, tab between.
-pub const FIELDS: [&str; 35] = [
+pub const FIELDS: [&str; 36] = [
     "frame.time_epoch",
     "frame.len",
     "eth.src",
@@ -49,6 +49,7 @@ pub const FIELDS: [&str; 35] = [
     "nbns.name",
     "dhcp.hw.mac_addr",
     "nbns.flags.response",
+    "dhcpv6.msgtype",
 ];
 
 /// Enough of each frame for the names above; the rest is never copied off the interface.
@@ -131,6 +132,9 @@ pub struct Packet {
     /// Windows asks the whole link when DNS does not know them, and which Responder
     /// answers to all.
     pub answered_name: Option<String>,
+    /// A DHCPv6 advertise or reply: the sender serves addresses, and DNS servers, to IPv6
+    /// clients.
+    pub dhcpv6_answer: bool,
 }
 
 fn flag(text: &str) -> bool {
@@ -255,6 +259,8 @@ pub fn parse(line: &str) -> Option<Packet> {
         } else {
             None
         },
+        dhcpv6_answer: matches!(fields[35], "2" | "7")
+            && ports(fields[14], fields[15]).is_some_and(|(s, _)| s == 547),
     })
 }
 
@@ -439,6 +445,18 @@ pub(crate) mod tests {
         ]))
         .unwrap();
         assert_eq!(nbns.answered_name.as_deref(), Some("wpad"));
+        let advertise = |source_port: &str| {
+            parse(&line(&[
+                ("frame.time_epoch", "1"),
+                ("udp.srcport", source_port),
+                ("udp.dstport", "546"),
+                ("dhcpv6.msgtype", "2"),
+            ]))
+            .unwrap()
+            .dhcpv6_answer
+        };
+        assert!(advertise("547"));
+        assert!(!advertise("546"), "only a server's port answers");
         // A second occurrence of an address field is not the frame's own (ICMP errors).
         fields.push(("ip.dst", "192.168.1.1,10.0.0.1"));
         assert_eq!(

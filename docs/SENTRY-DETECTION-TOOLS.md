@@ -25,6 +25,7 @@ with only the broadcast view, and says more with a mirror.
 | Names a device gives | DHCP host name, LLDP system name, NetBIOS name, HTTP User-Agent | — |
 | `rogue-dhcp-server` | a second DHCP server answering after the learning window | — |
 | `rogue-router-advertisement` | an IPv6 RA from a host that is not the router | — |
+| `rogue-dhcpv6-server` | a device other than the router answering DHCPv6 (mitm6) | — |
 | `name-poisoning` | a device answering LLMNR/NetBIOS for 3+ names, or for `wpad` (Responder) | — |
 | `mac-flood` | 20+ unknown hardware addresses sending in a minute; the flood is kept out of the inventory | — |
 | `dhcp-starvation` | 30+ unknown DHCP clients in a minute, by the DHCP client address (`chaddr`) | — |
@@ -163,6 +164,25 @@ its basis.
   (noise); the only per-frame cost is one more TShark column.
 - **Limit.** Answers are unicast; on a switched network only those to the sensor's own
   machine are seen. The bait mode above would cover the rest.
+
+### 2026-10-16: rogue DHCPv6 (mitm6)
+
+- **Compared.** Fox-IT, who wrote mitm6, recommend blocking DHCPv6 at the host firewall
+  or using DHCPv6 Guard / RA Guard on managed switches (RFC 6105 for RA Guard; DHCPv6-Shield,
+  RFC 7610): both active, both need equipment or Windows policy the home rarely has.
+  Zeek logs DHCPv6 but has no stock alert; Suricata ET has signatures for some mitm6
+  versions only.
+- **Chosen.** The passive counterpart of DHCPv6-Shield, written like the existing rogue
+  router advertisement rule: a DHCPv6 advertise or reply (new TShark field
+  `dhcpv6.msgtype`, from UDP 547) from a device that is not the IPv4 router's owner is
+  high; a new server once others are known is a warning. Servers are kept in the state.
+- **Tested.** Unit test: the router serving DHCPv6 while learning and after is quiet; mitm6
+  on a laptop after learning is told once, high; the state keeps both and loads. Capture
+  test: an advertise from port 547 is an answer, from 546 it is not. TShark end to end: the
+  fixture now has mitm6 answering the Windows client's solicit with itself as DNS server.
+- **Measured.** The 300,000-SYN capture, own CPU: 2.48–2.49 s before, 2.47 s after.
+- **Proposal, not done.** Blocking DHCPv6 from anything but the router is a router or
+  switch change: a proposal through Policy with the owner's approval.
 
 ## How a tool is accepted
 

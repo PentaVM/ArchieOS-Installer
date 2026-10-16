@@ -1,13 +1,14 @@
 # Writes rogue-dhcp-and-ra.pcap (scapy): a Windows client, the router, an LLDP switch, a
 # second device that answers DHCP and advertises itself as an IPv6 router, and then a DHCP
 # starvation flood (one sender, 40 client addresses), a Responder answering LLMNR and
-# NetBIOS for other machines' names, then a macof-style flood of 60 made-up hardware
-# addresses. Nothing is sent.
+# NetBIOS for other machines' names, mitm6 answering DHCPv6, then a macof-style flood of
+# 60 made-up hardware addresses. Nothing is sent.
 #   python3 -I make_rogue_pcap.py rogue-dhcp-and-ra.pcap
 import sys
 from scapy.all import Ether, IP, UDP, TCP, BOOTP, DHCP, IPv6, ICMPv6ND_RA, ICMPv6NDOptSrcLLAddr, Raw, wrpcap, ARP, DNSQR, DNSRR, load_layer, load_contrib
 from scapy.layers.netbios import NBNSHeader, NBNSQueryRequest, NBNSQueryResponse
 from scapy.layers.llmnr import LLMNRResponse
+from scapy.layers.dhcp6 import DHCP6_Advertise, DHCP6OptServerId, DHCP6OptDNSServers, DUID_LL
 load_layer("tls")
 from scapy.layers.tls.all import TLS, TLSClientHello, TLS_Ext_ServerName, ServerName, TLS_Ext_SupportedGroups, TLS_Ext_SignatureAlgorithms
 load_contrib("lldp")
@@ -65,6 +66,10 @@ for i, asked in enumerate(["fileserv", "printer01"]):
        LLMNRResponse(id=i, qd=DNSQR(qname=asked), an=DNSRR(rrname=asked, rdata="192.168.1.99")), 150 + i)
 at(Ether(src=responder, dst=win)/IP(src="192.168.1.99", dst="192.168.1.50")/UDP(sport=137, dport=137)/
    NBNSHeader(RESPONSE=1, NM_FLAGS=0x50, ANCOUNT=1, QDCOUNT=0)/NBNSQueryResponse(RR_NAME="WPAD"), 152)
+# mitm6 answers the Windows client's DHCPv6 solicit, offering itself as its DNS server.
+mitm6 = "02:00:5e:77:88:99"
+at(Ether(src=mitm6, dst=win)/IPv6(src="fe80::77:8899", dst="fe80::250:56ff:fe12:3456")/UDP(sport=547, dport=546)/
+   DHCP6_Advertise(trid=1)/DHCP6OptServerId(duid=DUID_LL(lladdr=mitm6))/DHCP6OptDNSServers(dnsservers=["fe80::77:8899"]), 160)
 # Then a table flood, as macof sends it: made-up source and destination hardware and IP
 # addresses, 60 frames in a second.
 for i in range(60):
