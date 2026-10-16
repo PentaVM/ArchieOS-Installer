@@ -37,6 +37,17 @@ PowerShell quoting breaks inline Python/bash: write a script file and run
 - Measured: ~0.85 s per ~470-token example, ~1 GB GPU peak. Compute is not the
   bottleneck; **data quality and diversity are**.
 
+## Known incident: GPU dropped off the bus (2026-10-16 04:30)
+
+At 04:30 the RTX 3070 disappeared from Windows (`Get-PnpDevice -Class Display` →
+`CM_PROB_PHANTOM`; dwm.exe and NVIDIA Overlay crashed; NVML "GPU access blocked by the
+operating system" in WSL; `torch.cuda.is_available()` False). The worker is correctly in
+`waiting_resources` and retries every 2 minutes. This needs the owner (normally a reboot);
+do **not** reboot, reset devices or change drivers. While the device is phantom, a tick is:
+confirm the state in one command, change nothing, end. After a reboot the owner restarts
+with the command in `_dev/verification/rtx3070/results/overnight/INCIDENT-gpu-lost.md`;
+the queue resumes from caches/checkpoints by itself.
+
 ## Each tick
 
 1. **Health.** `worker_alive`, `heartbeat_age_s` (< 600 unless paused), `queue.failed`.
