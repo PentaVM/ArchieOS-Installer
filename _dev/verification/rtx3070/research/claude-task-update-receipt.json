@@ -1,0 +1,12 @@
+{
+  "format_version": 1,
+  "timestamp_utc": "2026-10-16T12:43:00.067484+00:00",
+  "task_path": "C:\\Users\\Penta\\.claude\\scheduled-tasks\\wanda-overnight-steering\\SKILL.md",
+  "previous_sha256": "7ca83e99664600df8e81b87e9035be5f254c4178f1f99b8f78c2b2e6556c5a0a",
+  "updated_sha256": "d1c093a45a42d6dd6cd161be0bf512113fcbe08e8e5215759f310978dc827569",
+  "previous_instructions_preserved_normalizing_line_endings_and_final_newline": true,
+  "schedule_interval_changed": false,
+  "worker_control_changed_in_this_task": false,
+  "gpu_used": false,
+  "next_scheduler_tick_consumption_verified": false
+}

@@ -1,0 +1,116 @@
+{
+  "format_version": 1,
+  "timestamp_utc": "2026-10-16T12:41:53.403264+00:00",
+  "scope": "CPU data/metric audit, no model inference or training",
+  "files": [
+    {
+      "path": "training\\wanda_bonsai2\\data\\social\\tranche-001.json",
+      "sha256": "e214c54896ce9f0b0f71a5d106a695e97a6af9b7cc1fac7a5c54f10b5a41010b"
+    },
+    {
+      "path": "training\\wanda_bonsai2\\data\\social\\tranche-002.json",
+      "sha256": "8c78038a34ababfefd76a0bcbe0221ca0a794a19d28fec77a7bec1009627091f"
+    }
+  ],
+  "families": 40,
+  "strata": {
+    "workplace": 7,
+    "sales": 7,
+    "persuasion": 4,
+    "friendship": 2,
+    "family": 3,
+    "groups": 4,
+    "romantic": 4,
+    "reputation": 2,
+    "information": 4,
+    "influence": 3
+  },
+  "provenance_review": {
+    "pending-human": 40
+  },
+  "counterfactual_change_kinds": {
+    "action": 25,
+    "confidence": 9,
+    "rationale": 6
+  },
+  "split_counts": {
+    "train": {
+      "families": 32,
+      "examples": 128,
+      "domains": {
+        "work": 68,
+        "personal": 60
+      },
+      "selected_shown_letter": {
+        "B": 46,
+        "A": 39,
+        "C": 36,
+        "D": 7
+      },
+      "selected_author_original_letter": {
+        "B": 97,
+        "A": 22,
+        "C": 8,
+        "D": 1
+      },
+      "random_option_expected_accuracy": 0.3255208333333333,
+      "always_author_original_B_accuracy": 0.7578125,
+      "original_B_is_an_oracle_audit_not_a_deployable_baseline": true,
+      "prompt_only_longest_option_accuracy": 0.796875,
+      "prompt_only_shortest_option_accuracy": 0.125,
+      "prompt_only_always_A_accuracy": 0.3046875,
+      "variants": {
+        "clean": 32,
+        "noise": 32,
+        "cosmetic": 32,
+        "counterfactual": 32
+      },
+      "reference_answer_character_lengths": {
+        "min": 728,
+        "max": 1041
+      }
+    },
+    "development": {
+      "families": 8,
+      "examples": 32,
+      "domains": {
+        "work": 20,
+        "personal": 12
+      },
+      "selected_shown_letter": {
+        "B": 11,
+        "A": 15,
+        "C": 6
+      },
+      "selected_author_original_letter": {
+        "B": 25,
+        "A": 5,
+        "C": 2
+      },
+      "random_option_expected_accuracy": 0.3333333333333333,
+      "always_author_original_B_accuracy": 0.78125,
+      "original_B_is_an_oracle_audit_not_a_deployable_baseline": true,
+      "prompt_only_longest_option_accuracy": 0.78125,
+      "prompt_only_shortest_option_accuracy": 0.03125,
+      "prompt_only_always_A_accuracy": 0.46875,
+      "variants": {
+        "clean": 8,
+        "noise": 8,
+        "cosmetic": 8,
+        "counterfactual": 8
+      },
+      "reference_answer_character_lengths": {
+        "min": 736,
+        "max": 904
+      }
+    }
+  },
+  "variant_key_invariance_failures": [],
+  "exact_situation_cross_split_pairs": [],
+  "gold_consequences_before_selected_key": 160,
+  "total_rendered_examples": 160,
+  "teacher_forced_choice_is_blind_decision_evaluation": false,
+  "contamination_from_pretraining_ruled_out": false,
+  "model_benchmark_executed": false,
+  "cuda_used": false
+}
