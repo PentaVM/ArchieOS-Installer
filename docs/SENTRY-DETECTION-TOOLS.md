@@ -51,9 +51,8 @@ its basis.
    `hickory-proto` + `oui-data`, all MIT/Apache). The broadcast view above needs no
    dissector: parsing ARP, DHCP, mDNS and RA directly removes the TShark start-up and the
    CSV round trip for the always-on part, and keeps TShark for full captures.
-3. **Beacon scoring**: first part done (see the log below). Still to do: the data-size
-   half of RITA's score (constant request sizes) and UDP contacts, which need per-flow
-   byte counts the capture does not keep yet.
+3. **Beacon scoring**: intervals and sizes done (see the log below). Still to do: UDP
+   contacts (QUIC, DNS-over-UDP check-ins), which have no SYN to mark a contact.
 4. **Aya eBPF** (Rust, MIT/Apache; the kernel part GPL-2). On the gateway or the
    operator's own machine: per-process flow accounting with no packet copies, cheaper than
    pcap for "which program is talking". Needs a recent kernel and CAP_BPF.
@@ -264,6 +263,24 @@ its basis.
   `bank.example` with its own address, told as `rogue-dns-server`.
 - **Measured.** Not on the capture path: no new TShark field, one check on frames that
   already carry a DNS flag.
+
+### 2026-10-16: beacon sizes (RITA's second half)
+
+- **Compared.** RITA scores data sizes the same way as intervals (Bowley skewness, MAD
+  against the median) plus a "smallness" term; Flare and AC-Hunter weigh size regularity
+  too. Per-flow byte counts would need a new flow table; Sentry already keeps, per device,
+  the running bytes sent to each outside destination (`sent_to`).
+- **Chosen.** The size of a contact is the difference of that running total between one
+  contact and the next: no new state on the hot path, only one number per contact. Sizes
+  get the same two terms as intervals, and the score is the mean of both halves (the
+  intervals alone while fewer than 11 sizes are known, or after a restart sends the total
+  backwards). "Smallness" is left out: a large constant upload is as clock-like as a small
+  one. The median size is kept on the device (`beacons[…].bytes`) and named in the alert.
+- **Tested.** A one-minute clock sending about 420 bytes each time scores 87 (still told);
+  the same clock with exponential sizes scores under 85 (not told); intervals alone as
+  before; a total that goes backwards starts the sizes again. The audit test's new clock
+  sends the same each time and is still told once.
+- **Measured.** The 300,000-SYN capture, own CPU: 2.44–2.53 s before, 2.46–2.52 s after.
 
 ## How a tool is accepted
 

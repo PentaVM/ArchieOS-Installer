@@ -142,6 +142,9 @@ pub struct Beacon {
     pub every_s: u64,
     /// 0..=100: how clock-like, as last scored.
     pub score: u8,
+    /// The median bytes it sends from one contact to the next, when counted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<u64>,
     pub first_ms: u64,
     pub last_ms: u64,
 }
@@ -568,7 +571,7 @@ pub struct Audit {
     pending: HashMap<String, Introduced>,
     /// When each device last contacted each outside destination, by hardware address and
     /// label, for `crate::beacon`. In memory only: a restart starts the count again.
-    contacts: HashMap<(String, String), VecDeque<u64>>,
+    contacts: HashMap<(String, String), crate::beacon::Contacts>,
     /// When `contacts` was last pruned, so a full map is not swept on every frame.
     pruned_ms: u64,
     /// DHCP clients asking for an address in the last minute, for `dhcp-starvation`.
@@ -996,18 +999,25 @@ impl Audit {
             self.pruned_ms = at_ms;
             self.contacts.retain(|_, contacts| {
                 contacts
-                    .back()
-                    .is_some_and(|&last| at_ms.saturating_sub(last) < DAY_MS)
+                    .last()
+                    .is_some_and(|last| at_ms.saturating_sub(last) < DAY_MS)
             });
             if self.contacts.len() >= MAX_CONTACTED {
                 return;
             }
         }
+        // What the device has sent to the destination so far, for the sizes of its contacts.
+        let total = self
+            .state
+            .devices
+            .get(mac)
+            .and_then(|device| device.sent_to.get(&key.1))
+            .copied();
         let contacts = self.contacts.entry(key.clone()).or_default();
-        if !crate::beacon::note(contacts, at_ms) {
+        if !contacts.note(at_ms, total) {
             return;
         }
-        let Some(rhythm) = crate::beacon::rhythm(contacts) else {
+        let Some(rhythm) = contacts.rhythm() else {
             return;
         };
         let Some(device) = self.state.devices.get_mut(mac) else {
@@ -1027,6 +1037,7 @@ impl Audit {
             Beacon {
                 every_s: rhythm.every_ms / 1000,
                 score: rhythm.score,
+                bytes: rhythm.bytes,
                 first_ms,
                 last_ms: at_ms,
             },
@@ -1042,9 +1053,12 @@ impl Audit {
                 "beacon-suspect",
                 &mac,
                 format!(
-                    "calls {label}, which it took up recently, about every {} s, as regularly \
+                    "calls {label}, which it took up recently, about every {} s{}, as regularly \
                      as a clock ({} of 100)",
                     rhythm.every_ms / 1000,
+                    rhythm
+                        .bytes
+                        .map_or_else(String::new, |bytes| format!(" sending about {bytes} bytes")),
                     rhythm.score
                 ),
             );
