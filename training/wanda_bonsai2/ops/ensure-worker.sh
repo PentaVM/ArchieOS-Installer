@@ -12,6 +12,13 @@ mkdir -p "$ROOT"
 if [ "$(date +%s)" -ge "$(date -d "$CUTOFF" +%s)" ]; then
   echo "$(date -Is) cutoff reached; not starting" >> "$ROOT/watchdog.log"; exit 0
 fi
+# The thermal guard always runs before the worker (it holds its own lock, so this is a
+# no-op when it is already running).
+if flock -n "$ROOT/thermal.lock" -c true 2>/dev/null; then
+  echo "$(date -Is) thermal guard not running; starting" >> "$ROOT/watchdog.log"
+  setsid nohup bash "$PKG/ops/thermal-guard.sh" "$CUTOFF" > /dev/null 2>&1 < /dev/null &
+  sleep 5
+fi
 if flock -n "$ROOT/worker.lock" -c true 2>/dev/null; then
   echo "$(date -Is) worker not running; starting" >> "$ROOT/watchdog.log"
   cd "$PKG"
