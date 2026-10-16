@@ -158,9 +158,10 @@ Checked, in the image or with its own binaries:
 
 **Not checked:**
 
-- **IRIS on a GPU, and this image with IRIS inside it.** The CUDA build and the image
-  were not built where this was written (no CUDA toolkit, no Arch builder). If IRIS does
-  not start, `~/.archie/run/iris.log` says why.
+- **IRIS on a GPU, and this image with IRIS inside it.** The CUDA build of
+  `archie-iris-serve` compiles and links (CUDA 12.0, `CUDA_COMPUTE_CAP=86`) but was not
+  run on a GPU, and the image was not built here (no Arch builder). If IRIS does not
+  start, `~/.archie/run/iris.log` says why.
 - **Xavi's shell bridge** (`archie-shell-bridge`) is in the image; `archie-design` does
   not feed the preview from it yet, so the preview's link chip reads "sin lectura".
 - **The voice, end to end.** `archie-voice` was built and starts; a conversation through

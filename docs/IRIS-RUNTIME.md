@@ -7,7 +7,7 @@ the released weights file as PyTorch wrote it (`iris-beta21-step132000.pt`, SHA-
 
 ```bash
 cargo build --release -p archie-iris-runtime            # CPU
-cargo build --release -p archie-iris-runtime --features cuda   # NVIDIA, needs the CUDA toolkit
+CUDA_COMPUTE_CAP=86 cargo build --release -p archie-iris-runtime --features cuda   # NVIDIA, needs the CUDA toolkit
 archie-iris-serve --weights iris-beta21-step132000.pt \
   --sha256 c6cadb02f5a5bffc4ea3c3348d32b475ef7531f643675c06c65451037e4f3b97 \
   --text-tower <dir with SigLIP2 model.safetensors, tokenizer.json, tokenizer_config.json>
@@ -111,8 +111,29 @@ Scores in a focused read can differ slightly from the same phrase in open mode, 
 phrases sharing a batch row attend to each other.
 
 The CPU path is a fallback. The CUDA build (bf16 on Ampere and later, float32 earlier,
-`IRIS_PRECISION` to force) compiles candle's CUDA kernels. **It has not been built or run
-here: there was no GPU and no CUDA toolkit.** No GPU latency is claimed.
+`IRIS_PRECISION` to force) compiles candle's CUDA kernels. `CUDA_COMPUTE_CAP` names the
+card when the build machine has none: 86 for an RTX 30xx, 89 for 40xx. Where CUDA 12.0's
+`nvcc` refuses the system compiler (GCC 13 and later), `NVCC_CCBIN=/usr/bin/gcc-12` gives
+it one it accepts.
+
+**Built, not run on a GPU.** With CUDA 12.0 and `CUDA_COMPUTE_CAP=86` the release build
+compiles and links against `libcuda`, cuBLAS, cuBLASLt and cuRAND. On a machine without a
+GPU, `--device cuda` stops at start-up with `CUDA_ERROR_NO_DEVICE`, and `archie-session`
+picks the CPU build there. No GPU latency is claimed: the first frames per second on the
+RTX 3070 are the owner's to measure (`docs/IRIS-BENCHMARKS.md`). Every `/detect` answer
+carries its own `latency_ms`, so on the card:
+
+```bash
+archie-iris-serve --device cuda --weights … --sha256 … --text-tower … &
+for mode in all 'phrases&phrases=person,cup,phone,screen'; do
+  for i in 1 2 3 4 5 6; do   # the first answer includes CUDA warm-up
+    curl -s --data-binary @frame.jpg "http://127.0.0.1:8765/detect?mode=$mode" | jq .latency_ms
+  done
+done
+```
+
+Frames per second in the live voice are about `1000 / focused latency`, with one open
+look every `--iris-sweep-ms`.
 
 ## Not ported yet
 
