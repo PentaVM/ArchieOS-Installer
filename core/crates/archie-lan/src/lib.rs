@@ -31,6 +31,7 @@ pub mod autonomy;
 pub mod capture;
 pub mod classify;
 pub mod dns_sd;
+pub mod fingerprint;
 pub mod http;
 pub mod inventory;
 pub mod mdns;

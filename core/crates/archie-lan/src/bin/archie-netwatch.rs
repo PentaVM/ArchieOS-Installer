@@ -217,10 +217,19 @@ fn report(directory: &Path, last: usize) -> Result<(), String> {
         .filter_map(|line| serde_json::from_str(line).ok())
         .collect();
     let recent = &alerts[alerts.len().saturating_sub(last)..];
+    // What each device's own traffic says it is: maker, random address, hints with the
+    // evidence they rest on.
+    let profiles: Vec<_> = state
+        .devices
+        .iter()
+        .map(|(mac, device)| archie_lan::fingerprint::profile(mac, device))
+        .collect();
     println!(
         "{}",
-        serde_json::to_string_pretty(&serde_json::json!({ "state": state, "alerts": recent }))
-            .expect("a report serializes")
+        serde_json::to_string_pretty(
+            &serde_json::json!({ "state": state, "profiles": profiles, "alerts": recent })
+        )
+        .expect("a report serializes")
     );
     Ok(())
 }

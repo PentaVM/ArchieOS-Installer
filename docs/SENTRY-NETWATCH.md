@@ -59,10 +59,41 @@ ACLs; Unix mode bits are not a Windows privacy guarantee.
 | `dns-tunnel-suspect` | warning | a DNS question is over 180 characters, or has a label of 40 or more near-random characters |
 | `unusual-destination` | warning | a device learned for a day sends over 25 MB to an outside destination (server name, else address) first used after it was learned; told once per device and destination. Which destinations are new is kept in memory, so a restart can only make it quieter; past the 64 destinations a device keeps, a new one is not tracked and cannot be told |
 | `traffic-surge` | warning | a device learned for a day (144 ten-minute buckets) sends, in one bucket, more than all of: 50 MB, 4× its usual, and its usual plus 6 deviations; told at most once an hour per device. The usual is an exponentially weighted mean and variance kept in `state.json` (`baseline`), so a restart keeps it. Thresholds are a criterion, not a measurement: a nightly backup will trip it until the false-positive rate is measured on a real capture |
+| `rogue-dhcp-server` | high | a second device answers DHCP (an offer or acknowledgement) once one is known, after the learning time: it can hand clients its own router and DNS. Every server seen is kept in `state.json` (`dhcp_servers`) |
+| `rogue-router-advertisement` | high when it is not the router (not `--gateway`'s IPv6 address, or not the device that holds the IPv4 router's address over ARP), else warning | a device offers itself as an IPv6 router (ICMPv6 type 134). On a network whose router offers no IPv6, the first advertisement is how a device makes itself everyone's router |
 
 An alert is a reason to look, with what was seen. It is not a verdict, and nothing here
 acts on a device or on the network. Each is told once for its subject, and the telling
 survives a restart.
+
+## What devices say about themselves
+
+Beside the rules, each device keeps what its own frames say in the clear, and `report`
+lists it under `profiles`, read by `archie_lan::fingerprint`:
+
+- **Maker**, from the IEEE OUI registry (`oui-data`, embedded at build time), unless the
+  hardware address is locally administered (random, as phones and laptops use per network),
+  which is reported as such.
+- **DHCP**: the options its client asks for, in order (equal strings mean the same DHCP
+  stack), and its vendor class (`MSFT 5.0`, `android-dhcp-14`, `dhcpcd-…`, `udhcp…`). A
+  client's discover and request come from 0.0.0.0, so they are kept for its hardware
+  address until the device is first seen with an address; LLDP announcements likewise.
+- **TCP**: the TTL its connection openings most likely started from (64, 128, 255) and the
+  window it advertised.
+- **TLS JA4** of its ClientHellos (computed by TShark), **HTTP User-Agents**, its **LLDP**
+  system name and **NetBIOS** names.
+
+From these, `hints` say what the device may be, each with the evidence it rests on ("Windows"
+because of the vendor class `MSFT 5.0`; "Windows" because its connections start with a TTL of
+128). They are hints, never verdicts: a vendor class can be set by hand and a random address
+hides the maker on purpose. Nothing is sent to any device to learn them.
+
+`tests/fixtures/rogue-dhcp-and-ra.pcap` (written by `make_rogue_pcap.py` with scapy) holds a
+Windows client, the router, an LLDP switch, and a second device that answers DHCP and
+advertises itself as an IPv6 router; `tests/netwatch_tshark.rs` reads it through a real
+TShark (`--ignored`, it needs TShark on the PATH). With TShark 4.2.2 both rogues are told as
+high, and the Windows client's maker, DHCP fingerprint, vendor class, TTL, JA4, NetBIOS name
+and User-Agent are all kept.
 
 ## Running it as a service
 

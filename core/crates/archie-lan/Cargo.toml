@@ -16,6 +16,8 @@ path = "src/bin/archie-netwatch.rs"
 
 [dependencies]
 archie-types.workspace = true
+# The IEEE OUI registry, embedded at build time (MIT): who made a network card.
+oui-data = "0.2.3"
 serde.workspace = true
 serde_json.workspace = true
 socket2 = { version = "0.6", features = ["all"] }

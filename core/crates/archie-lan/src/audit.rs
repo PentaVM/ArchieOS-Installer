@@ -16,6 +16,12 @@
 //! | `dns-tunnel-suspect` | a DNS question is long and random enough to be carrying data |
 //! | `unusual-destination` | a device learned for a day sends over 25 MB to an outside destination it had not used before |
 //! | `traffic-surge` | a device that has been learned for a day sends far more in ten minutes than it usually does |
+//! | `rogue-dhcp-server` | a second device answers DHCP (an offer or acknowledgement) when another already does: it can hand out its own router and DNS |
+//! | `rogue-router-advertisement` | a device not seen before offers itself as an IPv6 router on the link, or one other than the known router does |
+//!
+//! Alongside the rules it keeps what each device says about itself in the clear (DHCP
+//! options and vendor class, the TTL and window of the connections it opens, TLS JA4,
+//! HTTP User-Agents, LLDP and NetBIOS names), which `crate::fingerprint` reads as hints.
 //!
 //! Time is the frames' own, so a capture file is audited exactly as the live network is.
 
@@ -29,6 +35,8 @@ const MAX_DEVICES: usize = 4096;
 const MAX_NAMES: usize = 512;
 const MAX_PEERS: usize = 64;
 const MAX_ADDRESSES: usize = 16;
+/// TLS fingerprints, User-Agents and NetBIOS names kept per device.
+const MAX_FINGERPRINTS: usize = 16;
 const MAX_REMEMBERED: usize = 16_384;
 const MAX_NAME_CHARS: usize = 1024;
 /// A state file larger than this is not a state this program wrote. A real one is
@@ -75,6 +83,24 @@ pub struct Device {
     /// How much it usually sends. Absent in files written before it existed.
     #[serde(default)]
     pub baseline: Baseline,
+    /// The DHCP options it asks for, in its order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dhcp_requested: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dhcp_vendor: Option<String>,
+    /// The TTL the connections it opens most likely start from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hops: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<u16>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub ja4: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub user_agents: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lldp_name: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub nbns_names: BTreeSet<String>,
 }
 
 /// A device's usual sending, learned per ten-minute bucket as an exponentially
@@ -154,6 +180,12 @@ pub struct State {
     /// Which device last claimed each address: IPv4 over ARP, IPv6 by Neighbor
     /// Advertisement. Older files hold only IPv4 keys, and load as they are.
     pub owners: BTreeMap<IpAddr, String>,
+    /// The devices that answer DHCP, by hardware address, with the server they speak for.
+    #[serde(default)]
+    pub dhcp_servers: BTreeMap<String, Option<Ipv4Addr>>,
+    /// The devices that have offered themselves as IPv6 routers.
+    #[serde(default)]
+    pub router_advertisers: BTreeSet<String>,
 }
 
 /// The most a file on disk may hold: the same caps the audit applies as it learns, plus
@@ -262,6 +294,12 @@ impl State {
         }
         over(limits.devices, self.devices.len(), "devices")?;
         over(limits.devices, self.owners.len(), "addresses with an owner")?;
+        over(limits.devices, self.dhcp_servers.len(), "DHCP servers")?;
+        over(
+            limits.devices,
+            self.router_advertisers.len(),
+            "IPv6 routers",
+        )?;
         for device in self.devices.values() {
             over(
                 limits.addresses,
@@ -278,11 +316,24 @@ impl State {
                 device.sent_to.len(),
                 "outside peers of one device",
             )?;
+            for (count, what) in [
+                (device.ja4.len(), "TLS fingerprints of one device"),
+                (device.user_agents.len(), "User-Agents of one device"),
+                (device.nbns_names.len(), "NetBIOS names of one device"),
+            ] {
+                over(MAX_FINGERPRINTS, count, what)?;
+            }
             for name in device
                 .asked
                 .iter()
                 .chain(device.sent_to.keys())
                 .chain(device.hostname.iter())
+                .chain(device.dhcp_requested.iter())
+                .chain(device.dhcp_vendor.iter())
+                .chain(device.ja4.iter())
+                .chain(device.user_agents.iter())
+                .chain(device.lldp_name.iter())
+                .chain(device.nbns_names.iter())
             {
                 over(limits.name_chars, name.len(), "characters in one name")?;
             }
@@ -458,6 +509,49 @@ pub struct Audit {
     fresh: HashSet<(String, String)>,
     /// The alerts already raised, kept on disk so a restart does not repeat them.
     pub told: Told,
+    /// What a device said of itself in frames without an address of its own (a DHCP
+    /// client's discover and request come from 0.0.0.0; LLDP has no IP at all), by
+    /// hardware address, until the device is first seen with one.
+    pending: HashMap<String, Introduced>,
+}
+
+/// What a device says of itself outside IP: its DHCP client and its LLDP announcement.
+#[derive(Debug, Clone, Default, PartialEq)]
+struct Introduced {
+    dhcp_requested: Option<String>,
+    dhcp_vendor: Option<String>,
+    lldp_name: Option<String>,
+}
+
+impl Introduced {
+    fn from(packet: &Packet) -> Self {
+        let client = matches!(packet.dhcp_message, Some(1 | 3 | 8));
+        Self {
+            dhcp_requested: packet.dhcp_requested.clone().filter(|_| client),
+            dhcp_vendor: packet.dhcp_vendor.clone().filter(|_| client),
+            lldp_name: packet.lldp_name.clone(),
+        }
+    }
+
+    fn merge(self, newer: Introduced) -> Introduced {
+        Introduced {
+            dhcp_requested: newer.dhcp_requested.or(self.dhcp_requested),
+            dhcp_vendor: newer.dhcp_vendor.or(self.dhcp_vendor),
+            lldp_name: newer.lldp_name.or(self.lldp_name),
+        }
+    }
+
+    fn apply(self, device: &mut Device) {
+        if self.dhcp_requested.is_some() {
+            device.dhcp_requested = self.dhcp_requested;
+        }
+        if self.dhcp_vendor.is_some() {
+            device.dhcp_vendor = self.dhcp_vendor;
+        }
+        if self.lldp_name.is_some() {
+            device.lldp_name = self.lldp_name;
+        }
+    }
 }
 
 /// Shannon entropy of a label, in bits per character.
@@ -494,6 +588,7 @@ impl Audit {
             named: HashMap::new(),
             fresh: HashSet::new(),
             told: Told::default(),
+            pending: HashMap::new(),
         }
     }
 
@@ -531,6 +626,20 @@ impl Audit {
         if let Some((mac, address)) = &packet.neighbor {
             self.claim(&mut alerts, packet.at_ms, mac, IpAddr::V6(*address));
         }
+        // A client's own DHCP messages (discover, request, inform) describe its stack, and an
+        // LLDP frame names its sender. Neither needs the device to have an address yet.
+        let introduced = Introduced::from(packet);
+        if let Some(mac) = packet.source_mac.as_deref() {
+            if introduced != Introduced::default() {
+                if let Some(device) = self.state.devices.get_mut(mac) {
+                    introduced.apply(device);
+                } else if self.pending.len() < MAX_REMEMBERED || self.pending.contains_key(mac) {
+                    let earlier = self.pending.remove(mac).unwrap_or_default();
+                    self.pending
+                        .insert(mac.to_string(), earlier.merge(introduced));
+                }
+            }
+        }
         // A frame from outside the LAN was put on the wire by the router: its hardware
         // address is the router's, and the traffic is not the router's own.
         let Some((mac, source)) = packet
@@ -541,6 +650,13 @@ impl Audit {
         else {
             return alerts;
         };
+        let learning = packet.at_ms.saturating_sub(self.state.started_ms) < self.settings.learn_ms;
+        if matches!(packet.dhcp_message, Some(2 | 5)) {
+            self.answered_dhcp(&mut alerts, packet, mac, source, learning);
+        }
+        if packet.router_advertisement {
+            self.advertised_router(&mut alerts, packet.at_ms, mac, source, learning);
+        }
         if !self.state.devices.contains_key(mac) {
             if self.state.devices.len() >= MAX_DEVICES {
                 return alerts;
@@ -591,6 +707,29 @@ impl Audit {
         if let Some(hostname) = &packet.dhcp_hostname {
             device.hostname = Some(hostname.clone());
         }
+        if let Some(introduced) = self.pending.remove(mac) {
+            introduced.apply(device);
+        }
+        if packet.opening {
+            if let Some(hops) = packet.hops {
+                device.hops = Some(crate::fingerprint::initial_hops(hops));
+            }
+            if let Some(window) = packet.window {
+                device.window = Some(window);
+            }
+        }
+        for (seen, kept) in [
+            (&packet.ja4, &mut device.ja4),
+            (&packet.user_agent, &mut device.user_agents),
+            (&packet.nbns_name, &mut device.nbns_names),
+        ] {
+            if let Some(seen) = seen {
+                if kept.len() < MAX_FINGERPRINTS {
+                    kept.insert(seen.clone());
+                }
+            }
+        }
+
         if let Some(peer) = outside {
             let label = self
                 .named
@@ -669,6 +808,101 @@ impl Audit {
             }
         }
         alerts
+    }
+
+    /// A DHCP offer or acknowledgement from `mac`. The first server is learned; another
+    /// one after it is told, since it can hand clients its own router and DNS.
+    fn answered_dhcp(
+        &mut self,
+        alerts: &mut Vec<Alert>,
+        packet: &Packet,
+        mac: &str,
+        source: IpAddr,
+        learning: bool,
+    ) {
+        if self.state.dhcp_servers.contains_key(mac) || self.state.dhcp_servers.len() >= MAX_DEVICES
+        {
+            return;
+        }
+        let server = packet.dhcp_server.or(match source {
+            IpAddr::V4(v4) => Some(v4),
+            IpAddr::V6(_) => None,
+        });
+        let known: Vec<String> = self.state.dhcp_servers.keys().cloned().collect();
+        self.state.dhcp_servers.insert(mac.to_string(), server);
+        if known.is_empty() || learning {
+            return;
+        }
+        let speaks = server.map_or_else(|| "itself".to_string(), |s| s.to_string());
+        self.tell(
+            alerts,
+            format!("dhcp-server {mac}"),
+            packet.at_ms,
+            Severity::High,
+            "rogue-dhcp-server",
+            mac,
+            format!(
+                "answers DHCP as {speaks}; until now only {} did. A second DHCP server can give \
+                 clients its own router and DNS",
+                known.join(", ")
+            ),
+        );
+    }
+
+    /// An IPv6 Router Advertisement from `mac`. Told when it is not the known router, or,
+    /// once routers are known, when it is a new one.
+    fn advertised_router(
+        &mut self,
+        alerts: &mut Vec<Alert>,
+        at_ms: u64,
+        mac: &str,
+        source: IpAddr,
+        learning: bool,
+    ) {
+        if self.state.router_advertisers.contains(mac)
+            || self.state.router_advertisers.len() >= MAX_DEVICES
+        {
+            return;
+        }
+        let known: Vec<String> = self.state.router_advertisers.iter().cloned().collect();
+        self.state.router_advertisers.insert(mac.to_string());
+        // Not the router: not the IPv6 router given, or not the device that holds the IPv4
+        // router's address. On a network whose router offers no IPv6, the first
+        // advertisement is the classic way to become everyone's router.
+        let router_mac = self
+            .settings
+            .gateway
+            .and_then(|gateway| self.state.owners.get(&IpAddr::V4(gateway)));
+        let not_the_router = match (self.settings.gateway_v6, source) {
+            (Some(gateway), IpAddr::V6(v6)) => gateway != v6,
+            _ => router_mac.is_some_and(|router| router != mac),
+        };
+        if learning || (known.is_empty() && !not_the_router) {
+            return;
+        }
+        let (severity, detail) = if not_the_router {
+            (
+                Severity::High,
+                format!("offers itself as an IPv6 router from {source}, which is not the router"),
+            )
+        } else {
+            (
+                Severity::Warning,
+                format!(
+                    "offers itself as an IPv6 router from {source}; until now only {} did",
+                    known.join(", ")
+                ),
+            )
+        };
+        self.tell(
+            alerts,
+            format!("router-advertisement {mac}"),
+            at_ms,
+            severity,
+            "rogue-router-advertisement",
+            mac,
+            detail,
+        );
     }
 
     fn claim(&mut self, alerts: &mut Vec<Alert>, at_ms: u64, mac: &str, address: IpAddr) {
@@ -1386,5 +1620,115 @@ mod tests {
             Told::parse(b"{ not json"),
             Err(LoadError::Malformed(_))
         ));
+    }
+
+    fn dhcp(mac: &str, source: &str, message: u8, at_ms: u64) -> Packet {
+        Packet {
+            dhcp_message: Some(message),
+            dhcp_server: source.parse().ok(),
+            ..from(mac, source, at_ms)
+        }
+    }
+
+    #[test]
+    fn a_second_dhcp_server_is_told_and_the_first_is_learned() {
+        let mut audit = Audit::new(
+            State::default(),
+            Settings {
+                learn_ms: 60_000,
+                ..learned()
+            },
+        );
+        // The router answers while the network is being learned: nothing to tell.
+        assert!(audit.see(&dhcp(ROUTER, "192.168.1.1", 2, 1_000)).is_empty());
+        assert!(audit
+            .see(&dhcp(ROUTER, "192.168.1.1", 5, 90_000))
+            .is_empty());
+        let rogue = audit.see(&dhcp("02:00:5e:aa:bb:cc", "192.168.1.66", 2, 95_000));
+        assert!(rules(&rogue).contains(&"rogue-dhcp-server"));
+        let alert = rogue
+            .iter()
+            .find(|a| a.rule == "rogue-dhcp-server")
+            .unwrap();
+        assert_eq!(alert.severity, Severity::High);
+        assert!(alert.detail.contains(ROUTER));
+        // Told once, and a client's own DHCP request is never a server.
+        assert!(
+            !rules(&audit.see(&dhcp("02:00:5e:aa:bb:cc", "192.168.1.66", 5, 96_000)))
+                .contains(&"rogue-dhcp-server")
+        );
+        assert!(
+            !rules(&audit.see(&dhcp(TV, "192.168.1.84", 3, 97_000))).contains(&"rogue-dhcp-server")
+        );
+        assert_eq!(audit.state.dhcp_servers.len(), 2);
+    }
+
+    #[test]
+    fn a_router_advertisement_from_anyone_but_the_router_is_told() {
+        let settings = Settings {
+            gateway: Some("192.168.1.1".parse().unwrap()),
+            ..learned()
+        };
+        let mut audit = Audit::new(State::default(), settings);
+        audit.settings.learn_ms = 0;
+        let arp = Packet {
+            arp: Some((ROUTER.into(), "192.168.1.1".parse().unwrap())),
+            ..Packet::default()
+        };
+        audit.see(&arp);
+        let advert = |mac: &str, at_ms| Packet {
+            router_advertisement: true,
+            ..from(mac, "fe80::1", at_ms)
+        };
+        // The router itself offering IPv6 is the router.
+        assert!(!rules(&audit.see(&advert(ROUTER, 1_000))).contains(&"rogue-router-advertisement"));
+        let rogue = audit.see(&advert("02:00:5e:aa:bb:cc", 2_000));
+        let alert = rogue
+            .iter()
+            .find(|a| a.rule == "rogue-router-advertisement")
+            .expect("told");
+        assert_eq!(alert.severity, Severity::High);
+    }
+
+    #[test]
+    fn what_a_device_says_before_it_has_an_address_is_kept_for_it() {
+        let mut audit = Audit::new(State::default(), learned());
+        // A DHCP discover from 0.0.0.0 and an LLDP announcement carry no LAN address.
+        audit.see(&Packet {
+            source_mac: Some(TV.into()),
+            source: Some("0.0.0.0".parse().unwrap()),
+            dhcp_message: Some(1),
+            dhcp_requested: Some("1,3,6,15,119,252".into()),
+            dhcp_vendor: Some("android-dhcp-14".into()),
+            ..Packet::default()
+        });
+        audit.see(&Packet {
+            source_mac: Some(TV.into()),
+            lldp_name: Some("living-room".into()),
+            ..Packet::default()
+        });
+        assert!(audit.state.devices.is_empty());
+        audit.see(&Packet {
+            opening: true,
+            tcp: Some((50_000, 443)),
+            destination: Some("93.184.216.34".parse().unwrap()),
+            hops: Some(63),
+            ja4: Some("t13d1516h2_8daaf6152771_02713d6af862".into()),
+            ..from(TV, "192.168.1.84", 5_000)
+        });
+        let device = &audit.state.devices[TV];
+        assert_eq!(device.dhcp_requested.as_deref(), Some("1,3,6,15,119,252"));
+        assert_eq!(device.dhcp_vendor.as_deref(), Some("android-dhcp-14"));
+        assert_eq!(device.lldp_name.as_deref(), Some("living-room"));
+        assert_eq!(device.hops, Some(64));
+        assert_eq!(device.ja4.len(), 1);
+        let profile = crate::fingerprint::profile(TV, device);
+        assert!(profile.hints.iter().any(|hint| hint.says == "Android"));
+        // It survives a restart, and a file written before these fields still loads.
+        let saved = serde_json::to_vec(&audit.state).unwrap();
+        assert_eq!(State::parse(&saved).unwrap().devices[TV], *device);
+        let old = serde_json::json!({"format": "archie-netwatch-state-v1", "started_ms": 1,
+            "devices": {}, "owners": {}});
+        assert!(State::parse(&serde_json::to_vec(&old).unwrap()).is_ok());
     }
 }
