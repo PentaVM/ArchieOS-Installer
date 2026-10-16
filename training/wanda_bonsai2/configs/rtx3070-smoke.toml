@@ -1,0 +1,9 @@
+model_path = "/mnt/d/ArchieLocal/models/Ternary-Bonsai-2-9B-PTQ1_0.gguf"
+runtime_dir = "/opt/archie/llama-cuda"
+run_dir = "/mnt/d/ArchieLocal/wanda-training"
+host_system_path = "/mnt/c"
+sequence_length = 128
+row_chunk = 2048
+rank = 8
+alpha = 16.0
+seed = 17

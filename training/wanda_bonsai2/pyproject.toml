@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "archie-wanda-bonsai2"
+version = "0.1.0"
+description = "Exact-checkpoint Bonsai2 native-quantized-base LoRA worker"
+requires-python = ">=3.11"
+dependencies = ["numpy>=2"]
+
+[project.optional-dependencies]
+training = ["torch==2.11.0"]
+
+[project.scripts]
+archie-wanda-train = "archie_wanda.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
