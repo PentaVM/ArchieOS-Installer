@@ -1,64 +1,26 @@
 //! Allowlisted local presentation controls. No Core operations or model authority.
-use serde_json::json;
-use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use archie_orb::control::{self, ControlError};
 
+/// The display's names, checked here and again by the display.
 pub(crate) fn valid_command(action: &str, value: &str, enabled: Option<bool>) -> bool {
-    match action {
-        "scene" => matches!(value, "orb" | "forge" | "world"),
-        "cinematic" => matches!(value, "field" | "crown" | "atlas" | "dense"),
-        "preset" => matches!(value, "field" | "sphere" | "orb" | "neural"),
-        "panel" => matches!(
-            value,
-            "forge" | "inspector" | "settings" | "sentry" | "activity" | "notifications" | "search"
-        ),
-        "overlay" => {
-            enabled.is_some()
-                && matches!(
-                    value,
-                    "hud" | "shell" | "ambient" | "guides" | "links" | "pulses" | "bloom"
-                )
-        }
-        _ => false,
-    }
+    control::valid(action, value, enabled)
 }
 
 pub(crate) async fn visual_command(action: &str, value: &str, enabled: Option<bool>) -> String {
-    let valid = valid_command(action, value, enabled);
-    if !valid {
-        return "No cambié el Observatory: la opción visual no es válida.".into();
-    }
-    let mut command = json!({"action": action, "value": value});
-    if let Some(enabled) = enabled {
-        command["enabled"] = json!(enabled);
-    }
-    let request = format!("{command}\n");
-    let sent = tokio::time::timeout(Duration::from_millis(750), async {
-        let mut stream = TcpStream::connect("127.0.0.1:7668")
-            .await
-            .map_err(|e| e.to_string())?;
-        stream
-            .write_all(request.as_bytes())
-            .await
-            .map_err(|e| e.to_string())?;
-        let mut reply = [0u8; 3];
-        stream
-            .read_exact(&mut reply)
-            .await
-            .map_err(|e| e.to_string())?;
-        Ok::<bool, String>(&reply == b"ok\n")
-    })
-    .await;
-    match sent {
-        Ok(Ok(true)) => format!(
+    match control::send(action, value, enabled).await {
+        Ok(()) => format!(
             "Observatory actualizado: {action} {value}{}.",
             enabled
                 .map(|on| if on { " on" } else { " off" })
                 .unwrap_or("")
         ),
-        Ok(Ok(false)) => "El Observatory rechazó ese cambio visual.".into(),
-        Ok(Err(_)) | Err(_) => {
+        Err(ControlError::Invalid { .. }) => {
+            "No cambié el Observatory: la opción visual no es válida.".into()
+        }
+        Err(ControlError::Refused(_) | ControlError::Malformed(_)) => {
+            "El Observatory rechazó ese cambio visual.".into()
+        }
+        Err(ControlError::Unreachable(_) | ControlError::Timeout) => {
             "No pude cambiar el Observatory: la ventana local no responde.".into()
         }
     }

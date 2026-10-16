@@ -216,6 +216,11 @@ private:
     void updateCategoryRows();
     void setStatus(const QString &status, const QString &error = {});
     void scheduleRequest(int delayMs = 0);
+    /// What makes a reply the wrong field rather than an older one: lens, what is open,
+    /// the focus and the layout.
+    QString structureKey() const;
+    /// Restarts a frame timer that stopped itself (paused, reduced motion) for one frame.
+    void wake();
     int indexOf(const QString &id) const;
     bool drawn(int index) const;
     float orbScale(int index) const;

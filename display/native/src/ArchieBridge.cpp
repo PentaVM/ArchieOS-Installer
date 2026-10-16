@@ -437,11 +437,10 @@ void ArchieBridge::setPresented(bool presented)
 {
     if (m_presented == presented) return;
     m_presented = presented;
-    const auto object = QJsonObject::fromVariantMap(m_kernel);
-    const auto now = QDateTime::currentMSecsSinceEpoch();
-    const auto elapsed = m_kernelReceivedAt == 0 ? 0 : std::max<qint64>(0, now - m_kernelReceivedAt);
-    m_observatory.ingest_kernel_payload(archie::native::fromJson(object),
-        ageOf(object, QStringLiteral("staleness_ms")) + elapsed, m_presented, now);
+    // Visibility is not a kernel reading: re-ingesting the last payload here would stamp
+    // it as just received, and before the first /api/kernel reply it would invent an
+    // empty, current one.
+    m_observatory.set_display_present(m_presented, QDateTime::currentMSecsSinceEpoch());
     tick();
     emit presentedChanged();
 }

@@ -7,7 +7,9 @@ Panel {
     property string st:Demo.state
     readonly property var records: bridge && bridge.jobs && bridge.jobs.jobs ? bridge.jobs.jobs : []
     property var dismissed: []
-    function key(record) { return JSON.stringify([record.workspace,record.id,record.updated_ms]) }
+    // A dismissal lasts until the job's state changes (running -> done/failed), not until
+    // its next progress write: updated_ms moves every few seconds while a job runs.
+    function key(record) { return JSON.stringify([record.workspace,record.id,record.state]) }
     readonly property var visibleRecords: records.filter(function(record) { return nc.dismissed.indexOf(nc.key(record))<0 })
     function dismiss(record) { var id=key(record); if (dismissed.indexOf(id)<0) dismissed=dismissed.concat([id]).slice(-256) }
     function dismissAll() { dismissed=records.map(function(record) { return nc.key(record) }) }

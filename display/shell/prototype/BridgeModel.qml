@@ -137,7 +137,8 @@ QtObject {
     }
     function projectionHeader(v, states) { return source(v) && states.indexOf(v.state) >= 0 && number(v.generated_at_ms) && nullableString(v.reason) && (v.source !== "unavailable" || v.state === "unavailable") }
     function validInspector(v) {
-        return projectionHeader(v,["ready","unavailable","stale"]) && Array.isArray(v.providers) && v.providers.every(function(p) { return fields(p,["id","title","capability","status"]) && strings(p.records) && strings(p.known_gaps) })
+        const half = function(state, reason) { return (state === undefined || ["ready","unavailable","stale"].indexOf(state) >= 0) && (reason === undefined || reason === null || typeof reason === "string") }
+        return projectionHeader(v,["ready","unavailable","stale"]) && half(v.providers_state, v.providers_reason) && half(v.trajectories_state, v.trajectories_reason) && Array.isArray(v.providers) && v.providers.every(function(p) { return fields(p,["id","title","capability","status"]) && strings(p.records) && strings(p.known_gaps) })
             && Array.isArray(v.cortex_trajectories) && v.cortex_trajectories.every(function(c) { return fields(c,["trajectory_id","correction_kind","source_graph_snapshot_id","resulting_graph_snapshot_id","model_id","payload_sha256_fingerprint"]) && numbers(c,["selected_context_count","omitted_candidate_count","captured_at"]) })
     }
     function validWorkflows(v) {

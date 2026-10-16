@@ -24,7 +24,7 @@ Item {
     Component.onDestruction: controller.releaseView(viewport)
     Binding { target: controller; property: "active"; value: viewport.presented; when: viewport.ownsController }
     Binding { target: controller; property: "renderBudget"; value: bridge.frame; when: viewport.ownsController }
-    Binding { target: controller; property: "frameIntervalMs"; value: viewport.frameIntervalMs; when: viewport.ownsController }
+    // renderBudget carries frameIntervalMs; the controller takes it from there alone.
     Binding { target: controller; property: "reducedMotion"; value: viewport.reducedMotion; when: viewport.ownsController }
 
     View3D {

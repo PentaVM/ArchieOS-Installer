@@ -13,7 +13,9 @@ QtObject {
     property bool bare: true
     // Graph viewer (the desktop sphere): Settings > Visor gráfico.
     property bool orbShow: true
-    property int orbProfile: 0          // 0 Sphere (the main one), 1 Orb, 2 Field
+    // The orb's profiles, by index: the one list the shell, Settings and LiveOrb use.
+    readonly property var orbProfiles: ["sphere", "orb", "field", "neural", "crown", "atlas", "dense"]
+    property int orbProfile: 0          // index into orbProfiles; 0 Sphere (the main one)
     property int orbBrightI: 1
     property int orbActI: 2
     property bool orbSpin: true

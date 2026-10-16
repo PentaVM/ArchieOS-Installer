@@ -254,6 +254,10 @@ public:
     void ingest_kernel_payload(const Value& kernel, std::int64_t age_ms, bool display_present,
                                std::int64_t now_ms);
 
+    /// Whether anything is on screen. Only the budget changes: no kernel reading is
+    /// received by this, so freshness still says "none yet" until one arrives.
+    void set_display_present(bool display_present, std::int64_t now_ms);
+
     /// Operator input. Nothing else changes the mode or the camera's intent.
     void request_mode(SceneMode mode);
     void focus(const std::string& node_id);

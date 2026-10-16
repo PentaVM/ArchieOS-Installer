@@ -29,7 +29,7 @@ Item {
     }
     function applyProfile() {
         if (!nativeAvailable) return
-        const profiles = ["sphere", "orb", "field", "neural", "crown", "atlas", "dense"]
+        const profiles = Demo.orbProfiles
         nativeController.applyProfile(profiles[Math.max(0, Math.min(profiles.length - 1, Demo.orbProfile))])
         originalGrade={}
         applyLook()

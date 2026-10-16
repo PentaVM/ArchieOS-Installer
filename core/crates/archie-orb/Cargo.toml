@@ -11,4 +11,7 @@ archie-types.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["net", "sync"] }
+tokio = { workspace = true, features = ["net", "sync", "time", "io-util"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

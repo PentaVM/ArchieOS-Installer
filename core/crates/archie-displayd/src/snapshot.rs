@@ -32,8 +32,11 @@ pub enum ProjectionState {
 }
 
 /// Manifest metadata only. Diagnostics and credentials never enter this DTO.
+///
+/// These projections ride inside [`DisplaySnapshot`], which accepts fields it does not
+/// know so an older reader survives a newer server. They do too: a new optional field
+/// here must not make the whole snapshot unreadable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ProviderSummary {
     pub id: String,
     pub title: String,
@@ -57,8 +60,11 @@ impl From<ProviderView> for ProviderSummary {
 }
 
 /// Cached, bounded replay metadata; no context, references, endpoints or leases.
+///
+/// Providers and Cortex trajectories are asked for separately and each half answers for
+/// itself (`providers_state`, `trajectories_state`): one failing never hides the other's
+/// data or labels it unavailable. `state` is the whole: ready only when both are.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct InspectorSnapshot {
     pub source: ProjectionSource,
     pub state: ProjectionState,
@@ -66,6 +72,15 @@ pub struct InspectorSnapshot {
     pub generated_at_ms: i64,
     pub providers: Vec<ProviderSummary>,
     pub cortex_trajectories: Vec<CortexTrajectoryView>,
+    /// Absent from older servers; read as `state` then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub providers_state: Option<ProjectionState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub providers_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trajectories_state: Option<ProjectionState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trajectories_reason: Option<String>,
 }
 
 impl InspectorSnapshot {
@@ -77,6 +92,32 @@ impl InspectorSnapshot {
             generated_at_ms: 0,
             providers: Vec::new(),
             cortex_trajectories: Vec::new(),
+            providers_state: None,
+            providers_reason: None,
+            trajectories_state: None,
+            trajectories_reason: None,
+        }
+    }
+
+    /// The whole from its halves: ready when both are, otherwise the reason of the first
+    /// half that is not.
+    pub fn settle(&mut self) {
+        let halves = [
+            (self.providers_state, &self.providers_reason),
+            (self.trajectories_state, &self.trajectories_reason),
+        ];
+        match halves
+            .iter()
+            .find(|(state, _)| *state != Some(ProjectionState::Ready))
+        {
+            None => {
+                self.state = ProjectionState::Ready;
+                self.reason = None;
+            }
+            Some((state, reason)) => {
+                self.state = state.unwrap_or(ProjectionState::Unavailable);
+                self.reason.clone_from(reason);
+            }
         }
     }
 
@@ -87,7 +128,6 @@ impl InspectorSnapshot {
 
 /// The observation lanes of the existing Orb, without its geometry or private content.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct WorkflowSnapshot {
     pub source: ProjectionSource,
     pub state: ProjectionState,
@@ -256,8 +296,23 @@ impl DisplaySnapshot {
             SnapshotSource::Fixture => ProjectionSource::Fixture,
         };
         if !self.daemon_reachable {
-            view.state = ProjectionState::Stale;
-            view.reason = Some("archied unreachable; showing the last inspector projection".into());
+            // Only a half that held data becomes stale; one that never answered keeps
+            // saying why, rather than claiming a cached projection exists.
+            const STALE: &str = "archied unreachable; showing the last inspector projection";
+            let whole = view.state;
+            for (state, reason) in [
+                (&mut view.providers_state, &mut view.providers_reason),
+                (&mut view.trajectories_state, &mut view.trajectories_reason),
+            ] {
+                if state.unwrap_or(whole) == ProjectionState::Ready {
+                    *state = Some(ProjectionState::Stale);
+                    *reason = Some(STALE.into());
+                }
+            }
+            if whole == ProjectionState::Ready {
+                view.state = ProjectionState::Stale;
+                view.reason = Some(STALE.into());
+            }
         }
         view
     }

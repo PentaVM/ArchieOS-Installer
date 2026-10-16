@@ -263,6 +263,11 @@ void Observatory::ingest_kernel_payload(const Value& kernel, std::int64_t age_ms
     m_budget.observe(m_kernel, now_ms);
 }
 
+void Observatory::set_display_present(bool display_present, std::int64_t now_ms) {
+    m_kernel.display_present = display_present;
+    m_budget.observe(m_kernel, now_ms);
+}
+
 void Observatory::request_mode(SceneMode mode) {
     if (mode != m_modes.target() && m_camera.manual_navigation()) m_camera.release_focus();
     m_modes.request(mode);

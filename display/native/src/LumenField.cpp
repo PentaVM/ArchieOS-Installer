@@ -669,11 +669,14 @@ void LumenField::hover(const QString &id)
     updateHoveredInfo();
     updateHighlight();
     m_positionsDirty = true;
+    // A frame timer stopped under reduced motion or pause must still draw the highlight.
+    wake();
 }
 
 void LumenField::togglePause()
 {
     m_paused = !m_paused;
+    wake();
     emit pausedChanged();
 }
 
@@ -689,9 +692,28 @@ QVector3D LumenField::positionOf(const QString &id) const
 
 void LumenField::scheduleRequest(int delayMs)
 {
-    ++m_queryGeneration;
+    // Debounced: a burst of changes (a slider dragged, a look applied key by key) becomes
+    // one request when it settles. The reply already in flight is not thrown away; if the
+    // view's structure changed meanwhile it is not accepted, and the debounced request
+    // brings the current one.
     if (!m_active || m_frameIntervalMs == 0) return;
     m_requestDelay.start(std::max(0, delayMs));
+}
+
+QString LumenField::structureKey() const
+{
+    QStringList expanded(m_expanded.cbegin(), m_expanded.cend());
+    expanded.sort();
+    return m_lens + QLatin1Char('|') + expanded.join(QLatin1Char(',')) + QLatin1Char('|') + m_focus
+           + QLatin1Char('|') + m_settings.value(QStringLiteral("layoutMode")).toString();
+}
+
+void LumenField::wake()
+{
+    if (m_active && m_frameIntervalMs > 0 && !m_frameTimer.isActive()) {
+        m_clock.restart();
+        m_frameTimer.start(m_frameIntervalMs);
+    }
 }
 
 void LumenField::request()
@@ -727,20 +749,21 @@ void LumenField::request()
     QNetworkReply *reply = m_network.get(get);
     m_reply = reply;
     const quint64 generation = m_queryGeneration;
+    const QString structure = structureKey();
     auto body = std::make_shared<QByteArray>();
     connect(reply, &QNetworkReply::readyRead, this, [reply, body] {
         if (reply->isOpen()) body->append(reply->read(maximumSceneBytes + 1 - body->size()));
         if (body->size() > maximumSceneBytes) reply->abort();
     });
-    connect(reply, &QNetworkReply::finished, this, [this, reply, body, generation] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, body, generation, structure] {
         reply->deleteLater();
         m_requestPending = false;
         m_reply.clear();
+        // The generation changes only when the field stops drawing; a reply from before
+        // that is dropped, and a field drawing again asks afresh.
         if (!m_active || m_frameIntervalMs == 0 || generation != m_queryGeneration) {
-            if (m_requestAgain || (m_active && generation != m_queryGeneration)) {
-                m_requestAgain = false;
-                request();
-            }
+            m_requestAgain = false;
+            if (m_active && m_frameIntervalMs > 0) request();
             return;
         }
         if (reply->isOpen()) body->append(reply->read(maximumSceneBytes + 1 - body->size()));
@@ -749,12 +772,15 @@ void LumenField::request()
         } else
         if (reply->error() != QNetworkReply::NoError) {
             setStatus(QStringLiteral("SIN CAMPO"), QStringLiteral("archie-displayd no responde: ") + reply->errorString());
-        } else {
+        } else if (structure == structureKey()) {
+            // Shape and look settings only move what is drawn; a reply for slightly older
+            // values is still the right field, so continuous changes never freeze it.
             accept(*body);
         }
         if (m_requestAgain) {
             m_requestAgain = false;
-            this->request();
+            // A debounce still running sends it when the burst settles.
+            if (!m_requestDelay.isActive()) this->request();
         }
     });
 }

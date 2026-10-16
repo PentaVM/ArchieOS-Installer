@@ -1,24 +1,14 @@
 //! `archie visual` — the Observatory's look is controlled from here, never from an overlay.
 //!
 //! Every visual parameter lives in a named preset; a scene is one of the Observatory views.
-//! The CLI sends one JSON line to the native display's loopback control channel
-//! (`127.0.0.1:7668`), which accepts only the allowlisted names below. Nothing here can
-//! run commands, reach Stage or write to displayd.
+//! The CLI is a thin client of [`archie_orb::control`], the same one the voice uses: one
+//! client and one list of names for both. Nothing here can run commands, reach Stage or
+//! write to displayd.
 
+use archie_orb::control::{self, PRESETS, SCENES};
 use clap::Subcommand;
-use serde_json::{json, Value};
-use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
-
-/// Where the native display listens (loopback only).
-pub const CONTROL_ADDRESS: &str = "127.0.0.1:7668";
-
-/// Observatory views.
-pub const SCENES: &[&str] = &["orb", "forge", "world"];
-
-/// Look presets. `field` ("Regiones vivas") is the original look and the default.
-pub const PRESETS: &[&str] = &["field", "sphere", "orb", "neural"];
+#[cfg(test)]
+use serde_json::Value;
 
 #[derive(Debug, Subcommand)]
 pub enum VisualCommand {
@@ -30,46 +20,21 @@ pub enum VisualCommand {
     List,
 }
 
-/// The JSON object sent to the display for a command, or why it is not valid.
-pub fn request_for(command: &VisualCommand) -> Result<Option<Value>, String> {
-    match command {
-        VisualCommand::Scene { name } if SCENES.contains(&name.as_str()) => {
-            Ok(Some(json!({"action": "scene", "value": name})))
-        }
-        VisualCommand::Scene { name } => Err(format!(
-            "unknown scene `{name}` (expected one of: {})",
-            SCENES.join(", ")
-        )),
-        VisualCommand::Preset { name } if PRESETS.contains(&name.as_str()) => {
-            Ok(Some(json!({"action": "preset", "value": name})))
-        }
-        VisualCommand::Preset { name } => Err(format!(
-            "unknown preset `{name}` (expected one of: {})",
-            PRESETS.join(", ")
-        )),
-        VisualCommand::List => Ok(None),
+/// The `(action, value)` sent to the display for a command, or why it is not valid.
+fn request_for(command: &VisualCommand) -> Result<Option<(&'static str, &str)>, String> {
+    let (action, name, names): (_, &str, &[&str]) = match command {
+        VisualCommand::Scene { name } => ("scene", name, &SCENES),
+        VisualCommand::Preset { name } => ("preset", name, &PRESETS),
+        VisualCommand::List => return Ok(None),
+    };
+    if control::valid(action, name, None) {
+        Ok(Some((action, name)))
+    } else {
+        Err(format!(
+            "unknown {action} `{name}` (expected one of: {})",
+            names.join(", ")
+        ))
     }
-}
-
-async fn send(request: &Value) -> Result<String, String> {
-    let line = format!("{request}\n");
-    tokio::time::timeout(Duration::from_millis(1500), async {
-        let mut stream = TcpStream::connect(CONTROL_ADDRESS).await.map_err(|error| {
-            format!("the Observatory is not listening on {CONTROL_ADDRESS}: {error}")
-        })?;
-        stream
-            .write_all(line.as_bytes())
-            .await
-            .map_err(|error| error.to_string())?;
-        let mut reply = String::new();
-        stream
-            .read_to_string(&mut reply)
-            .await
-            .map_err(|error| error.to_string())?;
-        Ok(reply.trim().to_owned())
-    })
-    .await
-    .map_err(|_| "the Observatory did not answer".to_owned())?
 }
 
 pub async fn run(command: &VisualCommand) -> std::process::ExitCode {
@@ -83,17 +48,13 @@ pub async fn run(command: &VisualCommand) -> std::process::ExitCode {
             println!("presets: {}", PRESETS.join(" "));
             std::process::ExitCode::SUCCESS
         }
-        Ok(Some(request)) => match send(&request).await {
-            Ok(reply) if reply == "ok" => {
+        Ok(Some((action, value))) => match control::send(action, value, None).await {
+            Ok(()) => {
                 println!("ok");
                 std::process::ExitCode::SUCCESS
             }
-            Ok(reply) => {
-                eprintln!("archie: {reply}");
-                std::process::ExitCode::FAILURE
-            }
-            Err(message) => {
-                eprintln!("archie: {message}");
+            Err(error) => {
+                eprintln!("archie: {error}");
                 std::process::ExitCode::FAILURE
             }
         },
@@ -109,17 +70,11 @@ mod tests {
         let preset = VisualCommand::Preset {
             name: "sphere".into(),
         };
-        assert_eq!(
-            request_for(&preset).unwrap(),
-            Some(json!({"action": "preset", "value": "sphere"}))
-        );
+        assert_eq!(request_for(&preset).unwrap(), Some(("preset", "sphere")));
         let scene = VisualCommand::Scene {
             name: "world".into(),
         };
-        assert_eq!(
-            request_for(&scene).unwrap(),
-            Some(json!({"action": "scene", "value": "world"}))
-        );
+        assert_eq!(request_for(&scene).unwrap(), Some(("scene", "world")));
         assert!(request_for(&VisualCommand::List).unwrap().is_none());
     }
 

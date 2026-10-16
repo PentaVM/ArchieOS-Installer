@@ -22,7 +22,7 @@ AppWindow {
     Column { visible:sw.section===0; width:parent.width; spacing:8
         Eyebrow { text:"Proveedores declarados por Core" }
         VoidBox { visible:sw.providers.length===0; icon:"key"; title:"Sin proveedores en la proyección"
-            text:sw.inspection && sw.inspection.reason ? sw.inspection.reason : "El visor no solicita ni muestra valores de claves." }
+            text:sw.inspection && (sw.inspection.providers_reason || sw.inspection.reason) ? (sw.inspection.providers_reason || sw.inspection.reason) : "El visor no solicita ni muestra valores de claves." }
         Repeater { model:sw.providers
             delegate:ListRow { glyph:"key"; title:modelData.title || modelData.id; sub:modelData.id + " · " + modelData.capability
                 Chip { small:true; text:modelData.status; tone:modelData.status==="available" ? "neutral" : "unk" }
@@ -52,7 +52,7 @@ AppWindow {
     }
     Column { visible:sw.section===4; width:parent.width; spacing:8
         OrbOpt { label:"Mostrar en escritorio"; options:["Sí","No"]; index:Demo.orbShow ? 0 : 1; onPicked:function(i) { Demo.orbShow=(i===0) } }
-        OrbOpt { label:"Representación"; options:["Esfera","Orbe","Campo","Neural","Crown","Atlas","Dense"]; index:typeof lumen!=="undefined" ? ["sphere","orb","field","neural","crown","atlas","dense"].indexOf(lumen.profile) : Demo.orbProfile; onPicked:function(i) { Demo.orbProfile=i } }
+        OrbOpt { label:"Representación"; options:["Esfera","Orbe","Campo","Neural","Crown","Atlas","Dense"]; index:typeof lumen!=="undefined" ? Demo.orbProfiles.indexOf(lumen.profile) : Demo.orbProfile; onPicked:function(i) { Demo.orbProfile=i } }
         OrbOpt { label:"Nodos visibles (máximo nativo)"; options:["60","120","220","360","420"]; index:Demo.orbNodesI; onPicked:function(i) { Demo.orbNodesI=i } }
         OrbOpt { label:"Color de la esfera"; options:["Original","Holograma frío","Vivo"]; index:Demo.orbGradeI; onPicked:function(i) { Demo.orbGradeI=i } }
         OrbOpt { label:"Polvo de luz"; options:["No","Sí"]; index:Demo.orbDust ? 1 : 0; onPicked:function(i) { Demo.orbDust=i===1 } }

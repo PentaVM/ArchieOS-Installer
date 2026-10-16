@@ -12,6 +12,10 @@ Panel {
     readonly property var inspection: bridge && bridge.inspector ? bridge.inspector : null
     readonly property var flow: bridge && bridge.workflows ? bridge.workflows : null
     readonly property var trajectories: inspection && inspection.cortex_trajectories ? inspection.cortex_trajectories : []
+    // The trajectories half answers for itself; older servers send only the whole.
+    readonly property var half: !inspection ? ({ state: "unavailable", reason: "" })
+        : { state: inspection.trajectories_state || inspection.state,
+            reason: inspection.trajectories_reason || inspection.reason || "" }
     readonly property var observations: flow && flow.workflows ? flow.workflows : []
     Flickable {
         objectName:"projectionScroll"; anchors.fill:parent
@@ -27,8 +31,8 @@ Panel {
         NoteBox { text:"Proyección de lectura. No expone contenido de contexto, pensamiento interno ni credenciales." }
         Eyebrow { text:"Trayectorias de Cortex" }
         VoidBox { visible:ip.trajectories.length===0; icon:"trace"
-            title:ip.inspection && ip.inspection.state==="ready" ? "Sin trayectorias registradas" : "Trayectorias sin lectura"
-            text:ip.inspection && ip.inspection.reason ? ip.inspection.reason : "Sólo aparecen registros emitidos por Core." }
+            title:ip.half.state==="ready" ? "Sin trayectorias registradas" : "Trayectorias sin lectura"
+            text:ip.half.reason || "Sólo aparecen registros emitidos por Core." }
         Repeater { model:ip.trajectories
             delegate: ListRow { glyph:"trace"; mono:true; title:String(modelData.trajectory_id)
                 sub:String(modelData.correction_kind) + " · modelo " + modelData.model_id

@@ -91,6 +91,10 @@ impl Bridge {
                 generated_at_ms: Timestamp::now().as_millis(),
                 providers: Vec::new(),
                 cortex_trajectories: Vec::new(),
+                providers_state: None,
+                providers_reason: None,
+                trajectories_state: None,
+                trajectories_reason: None,
             }),
         };
 
@@ -108,24 +112,32 @@ impl Bridge {
                     request_over(&mut stream, &request),
                 )
                 .await;
+                let inspector = snapshot.inspector.as_mut().unwrap();
                 match answer {
                     Ok(Ok(ControlResponse::Providers { providers, .. })) if name == "providers" => {
-                        snapshot.inspector.as_mut().unwrap().providers = providers
+                        inspector.providers = providers
                             .into_iter()
                             .take(MAX_PROVIDERS)
                             .map(Into::into)
                             .collect();
+                        inspector.providers_state = Some(ProjectionState::Ready);
                     }
                     Ok(Ok(ControlResponse::CortexTrajectories { trajectories }))
                         if name == "cortex-trajectories" =>
                     {
-                        snapshot.inspector.as_mut().unwrap().cortex_trajectories =
+                        inspector.cortex_trajectories =
                             trajectories.into_iter().take(MAX_TRAJECTORIES).collect();
+                        inspector.trajectories_state = Some(ProjectionState::Ready);
                     }
                     other => {
-                        let inspector = snapshot.inspector.as_mut().unwrap();
-                        inspector.state = ProjectionState::Unavailable;
-                        inspector.reason = Some(format!("{name} projection unavailable"));
+                        let reason = Some(format!("{name} projection unavailable"));
+                        if name == "providers" {
+                            inspector.providers_state = Some(ProjectionState::Unavailable);
+                            inspector.providers_reason = reason;
+                        } else {
+                            inspector.trajectories_state = Some(ProjectionState::Unavailable);
+                            inspector.trajectories_reason = reason;
+                        }
                         // I/O failure/timeout makes the stream unusable; do not read a
                         // response from another request or block the base projection.
                         if !matches!(other, Ok(Ok(_))) {
@@ -144,6 +156,25 @@ impl Bridge {
             }
         }
 
+        if let Some(inspector) = snapshot.inspector.as_mut() {
+            // A half never asked (the stream broke first) is unavailable, and says so.
+            for (state, reason) in [
+                (
+                    &mut inspector.providers_state,
+                    &mut inspector.providers_reason,
+                ),
+                (
+                    &mut inspector.trajectories_state,
+                    &mut inspector.trajectories_reason,
+                ),
+            ] {
+                if state.is_none() {
+                    *state = Some(ProjectionState::Unavailable);
+                    *reason = Some("not asked: an earlier control request failed".into());
+                }
+            }
+            inspector.settle();
+        }
         snapshot
     }
 

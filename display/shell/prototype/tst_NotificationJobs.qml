@@ -14,6 +14,9 @@ Item {
             center.dismiss(original)
             compare(center.visibleRecords.length,0)
             compare(source.jobs.jobs.length,1)
+            // Progress on the same running job does not bring a dismissed entry back.
+            source.jobs={state:"ok",jobs:[Object.assign({},original,{updated_ms:5})]}
+            compare(center.visibleRecords.length,0)
             source.jobs={state:"ok",jobs:[Object.assign({},original,{state:"done",updated_ms:2})]}
             compare(center.visibleRecords.length,1)
             center.dismissAll()

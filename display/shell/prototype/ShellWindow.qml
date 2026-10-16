@@ -11,11 +11,14 @@ Window {
     readonly property string orbDiagnostics:desktop.orbDiagnostics
     Component.onCompleted: if (typeof shellColorMode !== "undefined") Theme.colorMode=shellColorMode
     Main { id:desktop; anchors.fill:parent }
+    // The profile goes through LiveOrb, which applies the preset and then the look chosen in
+    // Settings (grade, brightness, nodes...). Applying it to lumen directly here as well
+    // reset those settings to the preset's defaults after the look had been applied.
     function applyVisualProfile(value) {
-        var index=["sphere","orb","field","neural","crown","atlas","dense"].indexOf(value)
+        var index=Demo.orbProfiles.indexOf(value)
         if (index<0) return false
-        Demo.orbProfile=index
-        if (typeof lumen!=="undefined") lumen.applyProfile(value)
+        if (Demo.orbProfile===index) Demo.orbProfileChanged()
+        else Demo.orbProfile=index
         Demo.orbShow=true; Demo.bare=true
         return true
     }
