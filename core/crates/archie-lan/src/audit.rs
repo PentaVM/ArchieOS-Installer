@@ -19,6 +19,7 @@
 //! | `rogue-dhcp-server` | a second device answers DHCP (an offer or acknowledgement) when another already does: it can hand out its own router and DNS |
 //! | `beacon-suspect` | a device learned for a day starts calling a new outside destination on a clock (a regular interval, scored as RITA does), the way malware checks in with its controller |
 //! | `rogue-dhcpv6-server` | a device that is not the router answers DHCPv6 (an advertise or reply), or, once servers are known, a new one does: mitm6 makes itself every Windows machine's IPv6 DNS server this way |
+//! | `rogue-dns-server` | after the learning time, a device on the LAN that is not the router starts answering DNS to other devices: someone handing out its own DNS can send them anywhere. Servers learned while learning (a Pi-hole) stay quiet |
 //! | `arp-sweep` | one device asks ARP for 50 or more different addresses within a minute: a scan of the network (nmap -sn, arp-scan, netdiscover, or a network app on a phone). ARP requests are broadcast, so a switched network shows them all |
 //! | `icmp-redirect` | a device other than the router sends an ICMP Redirect (IPv4 or IPv6), telling a host to route through it: a way into the middle of its traffic without touching ARP |
 //! | `retired-tls` | a device's TLS client offers nothing newer than TLS 1.1 (RFC 8996 retired 1.0 and 1.1 in 2021): firmware that has not been updated in years, usually a camera or an appliance |
@@ -228,6 +229,9 @@ pub struct State {
     /// The devices that have offered themselves as IPv6 routers.
     #[serde(default)]
     pub router_advertisers: BTreeSet<String>,
+    /// The devices on the LAN that have answered DNS.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub dns_servers: BTreeSet<String>,
     /// The devices that have answered DHCPv6.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub dhcpv6_servers: BTreeSet<String>,
@@ -346,6 +350,7 @@ impl State {
             "IPv6 routers",
         )?;
         over(limits.devices, self.dhcpv6_servers.len(), "DHCPv6 servers")?;
+        over(limits.devices, self.dns_servers.len(), "DNS servers")?;
         for device in self.devices.values() {
             over(
                 limits.addresses,
@@ -789,6 +794,9 @@ impl Audit {
         if packet.redirect {
             self.redirected(&mut alerts, packet.at_ms, mac, source);
         }
+        if packet.dns_answer && packet.destination.is_some_and(is_lan) {
+            self.answered_dns(&mut alerts, packet.at_ms, mac, source, learning);
+        }
         if packet.dhcpv6_answer {
             self.answered_dhcpv6(&mut alerts, packet.at_ms, mac, source, learning);
         }
@@ -1068,6 +1076,48 @@ impl Audit {
                 ),
             });
         }
+    }
+
+    /// A DNS answer from `mac` to a device on the LAN. The router and the servers seen
+    /// while learning (a Pi-hole, a NAS) are the network's own; a new one afterwards is told.
+    fn answered_dns(
+        &mut self,
+        alerts: &mut Vec<Alert>,
+        at_ms: u64,
+        mac: &str,
+        source: IpAddr,
+        learning: bool,
+    ) {
+        if self.state.dns_servers.contains(mac) || self.state.dns_servers.len() >= MAX_DEVICES {
+            return;
+        }
+        let known: Vec<String> = self.state.dns_servers.iter().cloned().collect();
+        self.state.dns_servers.insert(mac.to_string());
+        let router = self
+            .settings
+            .gateway
+            .and_then(|gateway| self.state.owners.get(&IpAddr::V4(gateway)))
+            .is_some_and(|router| router == mac);
+        if learning || router {
+            return;
+        }
+        let before = if known.is_empty() {
+            "no device on the network did before".to_string()
+        } else {
+            format!("until now only {} did", known.join(", "))
+        };
+        self.tell(
+            alerts,
+            format!("dns-server {mac}"),
+            at_ms,
+            Severity::Warning,
+            "rogue-dns-server",
+            mac,
+            format!(
+                "answers DNS from {source} to devices on the network; {before}. A DNS server \
+                 that is not the network's own can send them to any address it likes"
+            ),
+        );
     }
 
     /// An ICMP Redirect from `mac`. The router may send one; anyone else is offering itself
@@ -1742,6 +1792,56 @@ mod tests {
             .flat_map(|i| audit.see(&sent(later + i * 1_000, 1_000_000)))
             .collect();
         assert_eq!(rules(&again), ["traffic-surge"]);
+    }
+
+    #[test]
+    fn a_new_dns_server_on_the_lan_is_told() {
+        let gateway: Ipv4Addr = "192.168.1.1".parse().unwrap();
+        let mut audit = Audit::new(
+            State::default(),
+            Settings {
+                learn_ms: 60_000,
+                gateway: Some(gateway),
+                gateway_v6: None,
+            },
+        );
+        audit.see(&Packet {
+            at_ms: 1,
+            arp: Some((ROUTER.into(), gateway)),
+            ..Packet::default()
+        });
+        let answer = |mac: &str, ip: &str, to: &str, at_ms: u64| Packet {
+            dns_answer: true,
+            destination: Some(to.parse().unwrap()),
+            ..from(mac, ip, at_ms)
+        };
+        let pihole = "b8:27:eb:00:00:53";
+        // A Pi-hole answering while learning, and the router afterwards: quiet.
+        assert!(audit
+            .see(&answer(pihole, "192.168.1.53", "192.168.1.84", 2_000))
+            .is_empty());
+        assert!(audit
+            .see(&answer(ROUTER, "192.168.1.1", "192.168.1.84", 90_000))
+            .into_iter()
+            .all(|a| a.rule != "rogue-dns-server"));
+        // A laptop starts answering DNS: told once, naming the ones before it.
+        let rogue = "02:00:5e:aa:bb:cc";
+        let told: Vec<Alert> = (0..3)
+            .flat_map(|i| audit.see(&answer(rogue, "192.168.1.66", "192.168.1.84", 100_000 + i)))
+            .filter(|a| a.rule != "new-device")
+            .collect();
+        assert_eq!(rules(&told), ["rogue-dns-server"]);
+        assert!(told[0].detail.contains(pihole), "{}", told[0].detail);
+        // A DNS answer to the internet (the router's own forwarding) is not this.
+        assert!(audit
+            .see(&answer(
+                "02:00:5e:00:00:99",
+                "192.168.1.70",
+                "8.8.8.8",
+                110_000
+            ))
+            .into_iter()
+            .all(|a| a.rule != "rogue-dns-server"));
     }
 
     #[test]

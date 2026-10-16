@@ -144,6 +144,8 @@ pub struct Packet {
     /// The address an ARP request asks about ("who has …"), when it is not the sender's
     /// own (a gratuitous announcement).
     pub arp_asked: Option<Ipv4Addr>,
+    /// A DNS answer sent from port 53: the sender serves DNS.
+    pub dns_answer: bool,
 }
 
 fn flag(text: &str) -> bool {
@@ -275,6 +277,7 @@ pub fn parse(line: &str) -> Option<Packet> {
             .then(|| fields[38].parse::<Ipv4Addr>().ok())
             .flatten()
             .filter(|asked| fields[9].parse::<Ipv4Addr>().ok() != Some(*asked)),
+        dns_answer: flag(fields[16]) && ports(fields[14], fields[15]).is_some_and(|(s, _)| s == 53),
     })
 }
 
@@ -489,6 +492,19 @@ pub(crate) mod tests {
         };
         assert_eq!(who_has("192.168.1.9"), Some("192.168.1.9".parse().unwrap()));
         assert_eq!(who_has("192.168.1.77"), None, "a gratuitous announcement");
+        let answer = |port: &str| {
+            parse(&line(&[
+                ("frame.time_epoch", "1"),
+                ("udp.srcport", port),
+                ("udp.dstport", "50000"),
+                ("dns.flags.response", "True"),
+                ("dns.qry.name", "example.com"),
+            ]))
+            .unwrap()
+            .dns_answer
+        };
+        assert!(answer("53"));
+        assert!(!answer("5353"), "mDNS is not a DNS server");
         assert!(!advertise("546"), "only a server's port answers");
         // A second occurrence of an address field is not the frame's own (ICMP errors).
         fields.push(("ip.dst", "192.168.1.1,10.0.0.1"));

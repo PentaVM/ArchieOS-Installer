@@ -25,6 +25,7 @@ with only the broadcast view, and says more with a mirror.
 | Names a device gives | DHCP host name, LLDP system name, NetBIOS name, HTTP User-Agent | — |
 | `rogue-dhcp-server` | a second DHCP server answering after the learning window | — |
 | `rogue-router-advertisement` | an IPv6 RA from a host that is not the router | — |
+| `rogue-dns-server` | a new LAN device answering DNS after learning (not the router, not a learned Pi-hole) | — |
 | `arp-sweep` | one device asking ARP for 50+ addresses in a minute (a LAN scan) | — |
 | `icmp-redirect` | an ICMP/ICMPv6 Redirect from anyone but the router | — |
 | `retired-tls` and `tls_versions` | a device whose TLS client stops at 1.1 or older, read from its JA4 | — |
@@ -244,6 +245,25 @@ its basis.
 - **Measured.** 100,000 ARP requests from one scanner: one alert; own CPU 0.55–0.60 s before,
   0.76–0.82 s after (about 2 µs a request, the window's strings). The 300,000-SYN capture
   is within noise (2.38–2.73 s before, 2.65–2.72 s after).
+
+### 2026-10-16: rogue DNS servers on the LAN
+
+- **Compared.** Suricata/Snort have no generic rule for "a new DNS server"; Zeek's
+  `dns.log` lists responders and leaves the baseline to the analyst. Home tools (Fing,
+  routers' own security features) do not look at who answers DNS at all. The attack it
+  follows is usually a rogue DHCP server handing itself out as DNS, or a dns.spoof module
+  answering first.
+- **Chosen.** The same learn-then-tell shape as the DHCP and router rules: every LAN device
+  that answers DNS (from port 53, flag already read, no new TShark field) to another LAN
+  device is recorded; the router and anything seen while learning (a Pi-hole, a NAS) are
+  quiet; a new one afterwards is a warning naming the ones before it.
+- **Tested.** Capture test: a DNS answer from 53 is read, an mDNS answer is not. Audit test:
+  a Pi-hole while learning and the router afterwards are quiet; a laptop answering three
+  times is one alert naming the Pi-hole; an answer going to the internet is not counted.
+  TShark end to end: the fixture's rogue answers the Windows client's question for
+  `bank.example` with its own address, told as `rogue-dns-server`.
+- **Measured.** Not on the capture path: no new TShark field, one check on frames that
+  already carry a DNS flag.
 
 ## How a tool is accepted
 
