@@ -1,0 +1,26 @@
+{
+  "format_version": 1,
+  "scope": "CPU review of Claude worker receipts, no independent model execution",
+  "receipts": [
+    {
+      "file": "w1-qkvo-s17.json",
+      "sha256": "63cc099768bd352242f167cb12b1910dcfd0e66cfc7a6e02d8c2ffccc2893f26",
+      "bytes": 2948
+    },
+    {
+      "file": "w1-qv-lr2e4-s17.json",
+      "sha256": "66e96a18a77f2a793886821413cc268f4cad6f3f407ef23cb586a7174dcfcff3",
+      "bytes": 2922
+    },
+    {
+      "file": "w1-qv-s17.json",
+      "sha256": "4c8df066178fbc8eda0401c602b5370c6db348fedc6ee3e20463b03801ab1adf",
+      "bytes": 2918
+    },
+    {
+      "file": "w1-qv-s29.json",
+      "sha256": "2ff37248291f1d45c90bdadba6d5ccd2858f1cc515b0f8c17177499bac727ed0",
+      "bytes": 2924
+    }
+  ]
+}
