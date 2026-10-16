@@ -21,5 +21,10 @@ is not paused: two GPU jobs on this card overheat it (85–87 °C seen at ~130 W
   prompt-only evaluation plus trivial baselines; the 8-family anchor stays frozen.
 - Pending audit before adoption: `research/round2/curriculum-003-candidate.json`
   (16 families, sha256 98c9929a…5461).
+- 17:10 — **Owner decisions.** Weekly target: ≥ 20 % (relative) above the best AI on
+  FANToM and on OpenToM, reported separately, with an s1-style recipe (arXiv:2501.19393:
+  ~1,000 curated problems with reasoning traces, short SFT, budget forcing). Adapter
+  widened by owner authorization to LoRA r8/α16 on attention + MLP of blocks 28–31.
+  FANToM/OpenToM are evaluation-only. Order of work in `STEERING.md`.
 - Thermal guard now also pauses on a lost power-limit profile (> 140 W) and on the
   `hold` file; `ensure-worker.sh` starts it before the worker.
