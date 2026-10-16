@@ -13,7 +13,7 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 /// The fields, in the order they are printed, one frame to a line, tab between.
-pub const FIELDS: [&str; 39] = [
+pub const FIELDS: [&str; 41] = [
     "frame.time_epoch",
     "frame.len",
     "eth.src",
@@ -53,6 +53,8 @@ pub const FIELDS: [&str; 39] = [
     "icmp.type",
     "arp.opcode",
     "arp.dst.proto_ipv4",
+    "dns.a",
+    "dns.aaaa",
 ];
 
 /// Enough of each frame for the names above; the rest is never copied off the interface.
@@ -146,7 +148,13 @@ pub struct Packet {
     pub arp_asked: Option<Ipv4Addr>,
     /// A DNS answer sent from port 53: the sender serves DNS.
     pub dns_answer: bool,
+    /// What that answer resolved: the name asked for and the addresses (A and AAAA) it
+    /// gave, at most `MAX_RESOLVED` of them.
+    pub resolved: Option<(String, Vec<IpAddr>)>,
 }
+
+/// Addresses kept from one DNS answer: a CDN answers with a handful.
+pub const MAX_RESOLVED: usize = 16;
 
 fn flag(text: &str) -> bool {
     matches!(text, "1" | "True" | "true")
@@ -202,6 +210,22 @@ fn ja4(text: &str) -> Option<String> {
 
 fn ports(source: &str, destination: &str) -> Option<(u16, u16)> {
     Some((source.parse().ok()?, destination.parse().ok()?))
+}
+
+/// The addresses a DNS answer from port 53 gave for the name asked.
+fn resolved(all: &[&str], fields: &[&str]) -> Option<(String, Vec<IpAddr>)> {
+    let answer = flag(fields[16]) && ports(fields[14], fields[15]).is_some_and(|(s, _)| s == 53);
+    if !answer {
+        return None;
+    }
+    let asked = name(fields[17])?;
+    let addresses: Vec<IpAddr> = all[39]
+        .split(',')
+        .chain(all[40].split(','))
+        .filter_map(|a| a.parse().ok())
+        .take(MAX_RESOLVED)
+        .collect();
+    (!addresses.is_empty()).then_some((asked, addresses))
 }
 
 /// Reads one line TShark printed. A line of another shape is not a frame.
@@ -278,6 +302,7 @@ pub fn parse(line: &str) -> Option<Packet> {
             .flatten()
             .filter(|asked| fields[9].parse::<Ipv4Addr>().ok() != Some(*asked)),
         dns_answer: flag(fields[16]) && ports(fields[14], fields[15]).is_some_and(|(s, _)| s == 53),
+        resolved: resolved(&all, &fields),
     })
 }
 
@@ -505,6 +530,30 @@ pub(crate) mod tests {
         };
         assert!(answer("53"));
         assert!(!answer("5353"), "mDNS is not a DNS server");
+        let resolved = |port: &str| {
+            parse(&line(&[
+                ("frame.time_epoch", "1"),
+                ("udp.srcport", port),
+                ("udp.dstport", "50000"),
+                ("dns.flags.response", "True"),
+                ("dns.qry.name", "Telemetry.Example.com."),
+                ("dns.a", "203.0.113.7,203.0.113.8,not-an-address"),
+                ("dns.aaaa", "2001:db8::7"),
+            ]))
+            .unwrap()
+            .resolved
+        };
+        let (asked, addresses) = resolved("53").unwrap();
+        assert_eq!(asked, "telemetry.example.com");
+        assert_eq!(
+            addresses,
+            ["203.0.113.7", "203.0.113.8", "2001:db8::7"].map(|a| a.parse::<IpAddr>().unwrap())
+        );
+        assert_eq!(
+            resolved("5353"),
+            None,
+            "only a DNS server's answers name addresses"
+        );
         assert!(!advertise("546"), "only a server's port answers");
         // A second occurrence of an address field is not the frame's own (ICMP errors).
         fields.push(("ip.dst", "192.168.1.1,10.0.0.1"));

@@ -52,8 +52,8 @@ its basis.
    `hickory-proto` + `oui-data`, all MIT/Apache). The broadcast view above needs no
    dissector: parsing ARP, DHCP, mDNS and RA directly removes the TShark start-up and the
    CSV round trip for the always-on part, and keeps TShark for full captures.
-3. **Beacon scoring**: intervals, sizes and UDP contacts done (see the log below). Still
-   to do: scoring by destination name across the addresses a CDN rotates through.
+3. **Beacon scoring**: intervals, sizes, UDP contacts and destinations named by DNS done
+   (see the log below).
 4. **Aya eBPF** (Rust, MIT/Apache; the kernel part GPL-2). On the gateway or the
    operator's own machine: per-process flow accounting with no packet copies, cheaper than
    pcap for "which program is talking". Needs a recent kernel and CAP_BPF.
@@ -383,6 +383,30 @@ its basis.
   device-destination pair already tracked.
 - **Not adopted.** Zeek's 1 min timeout (hides check-ins faster than a minute), per-datagram
   contacts (streams look like clocks).
+
+### 2026-10-16: destinations named by the DNS answers (passive DNS)
+
+- **Compared.** RITA v5 groups beacons by FQDN, joining Zeek's `dns.log` answers to its
+  connections; Sentry named an address only by the TLS SNI of a connection to it, which
+  misses plain HTTP, encrypted ClientHellos (ECH) and the first contact to each new address
+  of a CDN. A reverse lookup (PTR) of each address was the third option: active, slow, and
+  a CDN's PTR names the CDN, not the service.
+- **Chosen.** Passive DNS: TShark now prints `dns.a` and `dns.aaaa`; an answer from port 53
+  names each outside address it gives with the name asked for (lowercased, without the
+  trailing dot), at most 16 addresses an answer. SNI still names an address when it is
+  seen. A malware controller that changes address every call then adds up to one
+  destination, scored and told by its name. LAN addresses in answers are not named.
+- **Tested.** Parsing (A and AAAA, invalid entries dropped, mDNS answers ignored); a device
+  that resolves `c2.example.net` each minute and gets another address each time is told as
+  `beacon-suspect` for `c2.example.net`, and no per-address destination is kept; the real
+  TShark test reads the fixture with the two new fields.
+- **Measured.** TShark over the 178-frame fixture, 20 runs each, alternated: 143/149 ms with
+  the old fields, 148/141 ms with the new ones, within noise. In the audit, one map insert
+  per address of a DNS answer; nothing for other frames.
+- **Not adopted.** PTR lookups (active, and they name the CDN). Following CNAME chains:
+  the name asked for is the one the device meant, which is what a beacon is grouped by.
+- **Limit.** Sentry sees answers only to the machine it runs on, unless it sits on the
+  gateway or behind a mirror port.
 
 ## How a tool is accepted
 

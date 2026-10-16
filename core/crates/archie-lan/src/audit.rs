@@ -979,11 +979,23 @@ impl Audit {
         let outside = packet
             .destination
             .filter(|ip| !is_lan(*ip) && !ip.is_multicast() && !ip.is_loopback());
-        if let Some((peer, name)) = outside.zip(packet.server_name.clone()) {
-            if self.named.len() >= MAX_REMEMBERED {
+        // Names for outside addresses: the one a TLS client asked for (SNI), and those a
+        // DNS answer gave, so a CDN's rotating addresses add up to one destination.
+        let resolved = packet.resolved.iter().flat_map(|(name, addresses)| {
+            addresses
+                .iter()
+                .filter(|ip| !is_lan(**ip) && !ip.is_multicast() && !ip.is_loopback())
+                .map(move |ip| (*ip, name))
+        });
+        for (peer, name) in outside
+            .zip(packet.server_name.as_ref())
+            .into_iter()
+            .chain(resolved)
+        {
+            if self.named.len() >= MAX_REMEMBERED && !self.named.contains_key(&peer) {
                 self.named.clear();
             }
-            self.named.insert(peer, name);
+            self.named.insert(peer, name.clone());
         }
         let device = self
             .state
@@ -2519,6 +2531,65 @@ mod tests {
         assert_eq!(rules(&told), ["beacon-suspect"]);
         let beacon = &audit.state.devices[TV].beacons["203.0.113.9"];
         assert!((116..=128).contains(&beacon.every_s), "{beacon:?}");
+    }
+
+    #[test]
+    fn a_cdn_s_rotating_addresses_add_up_to_the_name_the_device_resolved() {
+        let mut audit = Audit::new(State::default(), learned());
+        let day = u64::from(BASELINE_BUCKETS) + 1;
+        for bucket in 1..=day {
+            audit.see(&Packet {
+                destination: Some("198.51.100.20".parse().unwrap()),
+                tcp: Some((50_000, 443)),
+                opening: true,
+                ..from(TV, "192.168.1.84", bucket * BUCKET_MS)
+            });
+        }
+        let now = (day + 1) * BUCKET_MS;
+        // Each minute it resolves its controller's name and gets another address for it.
+        let told: Vec<Alert> = (0..40u64)
+            .flat_map(|i| {
+                let at = now + i * 60_000 + ((i * 2_654_435_761) >> 7) % 6_000;
+                let address: IpAddr = format!("203.0.113.{}", 10 + i % 30).parse().unwrap();
+                let answer = Packet {
+                    destination: Some("192.168.1.84".parse().unwrap()),
+                    udp: Some((53, 50_000)),
+                    dns_answer: true,
+                    resolved: Some(("c2.example.net".into(), vec![address])),
+                    ..from(ROUTER, "192.168.1.1", at)
+                };
+                let call = Packet {
+                    destination: Some(address),
+                    tcp: Some((50_000, 443)),
+                    opening: true,
+                    ..from(TV, "192.168.1.84", at + 20)
+                };
+                [answer, call]
+            })
+            .flat_map(|packet| audit.see(&packet))
+            .collect();
+        assert_eq!(rules(&told), ["beacon-suspect"]);
+        assert!(
+            told[0].detail.contains("c2.example.net"),
+            "{}",
+            told[0].detail
+        );
+        assert!(!audit.state.devices[TV].sent_to.contains_key("203.0.113.10"));
+        // An answer naming a LAN address does not name it.
+        let lan = Packet {
+            destination: Some("192.168.1.84".parse().unwrap()),
+            udp: Some((53, 50_000)),
+            dns_answer: true,
+            resolved: Some((
+                "nas.example.net".into(),
+                vec!["192.168.1.5".parse().unwrap()],
+            )),
+            ..from(ROUTER, "192.168.1.1", now + 50 * 60_000)
+        };
+        audit.see(&lan);
+        assert!(!audit
+            .named
+            .contains_key(&"192.168.1.5".parse::<IpAddr>().unwrap()));
     }
 
     #[test]
