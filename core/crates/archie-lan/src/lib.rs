@@ -40,6 +40,7 @@ pub mod mdns;
 pub mod neighbors;
 pub mod presence;
 pub mod roku;
+pub mod router;
 pub mod spotify;
 pub mod ssdp;
 pub mod upnp;

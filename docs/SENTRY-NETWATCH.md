@@ -129,8 +129,39 @@ when the lease ends (`leased_until_s`; 0 for a lease that does not end). A lease
 sighting: `last_seen_ms` is left as the wire last saw it. Once the learning time is over
 (`--learn`, 600 s from the first frame or lease the state holds), a device that only the
 router knows is told as `new-device`, once, whether its first appearance is a lease or a
-frame. Sentry does not log in to the router: the owner copies the file. IPv6 leases and
-lines of another shape are skipped; files over 1 MB are refused.
+frame. IPv6 leases and lines of another shape are skipped; files over 1 MB are refused.
+
+### Enrolling the router (read over SSH)
+
+Copying the file by hand is the fallback. `router` enrols the owner's router once and from
+then on `live` reads it every 5 minutes, on its own thread so a slow SSH never holds up the
+capture:
+
+```bash
+archie-netwatch router detect                      # what the gateway runs (SSH banner, web title)
+archie-netwatch router enroll --state-dir DIR --install   # owner types the router password once
+archie-netwatch router pull --state-dir DIR        # one read now
+```
+
+- `detect` reads the gateway's SSH banner and web page title and names the kind: OpenWrt,
+  Asuswrt, a BSD firewall (pfSense, OPNsense) or plain Linux.
+- `enroll` makes an ed25519 key in the state directory (`router_ed25519`, private to the owner as `ssh-keygen` writes it), writes
+  `router.json` and prints the `authorized_keys` line. The key is pinned to one read command
+  (`command="…",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty`): the
+  lease table, then the neighbour (ARP) table. Whatever else is asked of the key, the router
+  runs only that.
+- `--install` adds the line over `ssh` itself; `ssh` asks the owner for the router's
+  password once, on the terminal, and Sentry never sees it. Asuswrt and pfSense/OPNsense
+  keep keys in their own settings page; for them `enroll` says where to paste the line.
+- The router's host key is pinned on first contact (`router_known_hosts`); a later change
+  fails the read instead of trusting the new key.
+- Reads use the enrolled key only (`BatchMode`, `IdentitiesOnly`, no agent), time out after
+  20 s, and feed the audit like a lease file, plus the router's neighbour table: every device
+  the router has talked to, including those a switch hides from this machine. Neighbours go
+  through the same address checks as ARP heard on the wire (`address-moved`,
+  `lease-conflict`).
+
+Nothing is changed on the router: the key can only read.
 
 ## Running it as a service
 

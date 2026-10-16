@@ -338,6 +338,31 @@ its basis.
   read after a conflicting claim is told; the lease table survives a save and a load.
 - **Measured.** One map lookup per IPv4 ARP claim; nothing else on the capture path.
 
+### 2026-10-16: reading the router over SSH (roadmap stage 2, second step)
+
+- **Compared.** OpenWrt's `ubus`/LuCI RPC over HTTP (needs `rpcd` ACLs and a session
+  password kept by Sentry), SNMP (`ipNetToMediaTable`; v2c sends a community string in the
+  clear, v3 is rarely on in home routers), UPnP IGD (no lease or ARP table at all) and SSH
+  with a key pinned to one command (`authorized_keys` `command=`), the way backup tools
+  such as rsnapshot are given narrow access.
+- **Chosen.** SSH with a pinned command: it works on OpenWrt, Asuswrt-Merlin, pfSense,
+  OPNsense and any Linux router, Sentry keeps no password (the owner types it once, to
+  `ssh`), and the router itself enforces that the key only reads. The host key is pinned on
+  first contact. Neighbours read from the router go through the same address checks as ARP
+  from the wire (`Audit::router_saw`).
+- **Tested.** Kind detection from SSH banners and web titles; the key line and that no read
+  command writes, deletes, reboots or kills; the `ssh` arguments (key only, no agent, pinned
+  known hosts, no `BatchMode` only for the interactive install); parsing of the combined
+  output (dnsmasq and ISC leases, Linux `/proc/net/arp` with incomplete entries skipped, BSD
+  `arp -an`); a device only the router's neighbour table shows is told as `new-device` after
+  learning, and that table showing another device on the router's address is `address-moved`
+  (high).
+- **Not tested here.** No real router: this cloud container is not on the owner's network.
+  Enrolment and the periodic read must be tried on the owner's machine against their router
+  before they are called working.
+- **Measured.** Nothing on the capture path: the read runs on its own thread every 5 minutes
+  and the capture loop only checks a channel.
+
 ## How a tool is accepted
 
 A tool joins Sentry when, on a recorded pcap of the owner's network and on the fixtures in

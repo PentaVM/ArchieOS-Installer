@@ -774,41 +774,12 @@ impl Audit {
     /// the wire, and told as new once the learning time is over.
     pub fn leased(&mut self, lease: &crate::leases::Lease, at_ms: u64) -> Vec<Alert> {
         let mut alerts = Vec::new();
-        if self.state.started_ms == 0 {
-            self.state.started_ms = at_ms.max(1);
-        }
         let mac = lease.mac.as_str();
-        if !self.state.devices.contains_key(mac) {
-            if self.state.devices.len() >= MAX_DEVICES {
-                return alerts;
-            }
-            if at_ms.saturating_sub(self.state.started_ms) >= self.settings.learn_ms {
-                self.tell(
-                    &mut alerts,
-                    format!("new {mac}"),
-                    at_ms,
-                    Severity::Notice,
-                    "new-device",
-                    mac,
-                    format!(
-                        "first seen in the router's DHCP leases, at {}",
-                        lease.address
-                    ),
-                );
-            }
-        }
-        let device = self
-            .state
-            .devices
-            .entry(mac.to_string())
-            .or_insert_with(|| Device {
-                first_seen_ms: at_ms,
-                last_seen_ms: at_ms,
-                ..Device::default()
-            });
-        if device.addresses.len() < 16 {
-            device.addresses.insert(IpAddr::V4(lease.address));
-        }
+        let Some(device) =
+            self.known_through_router(&mut alerts, at_ms, mac, lease.address, "DHCP leases")
+        else {
+            return alerts;
+        };
         if device.hostname.is_none() {
             device.hostname = lease.hostname.clone();
         }
@@ -832,6 +803,64 @@ impl Audit {
             self.state.leased_to.insert(lease.address, holder);
         }
         alerts
+    }
+
+    /// One complete entry of the router's neighbour (ARP) table: the router reached `mac` at
+    /// `address`. Counted as an ARP claim (so `address-moved` and `lease-conflict` hold for
+    /// what the router sees too) and, for a device the wire has not shown, kept like a
+    /// lease. Not a sighting: `last_seen_ms` stays the wire's.
+    pub fn router_saw(&mut self, mac: &str, address: Ipv4Addr, at_ms: u64) -> Vec<Alert> {
+        let mut alerts = Vec::new();
+        if self.state.started_ms == 0 {
+            self.state.started_ms = at_ms.max(1);
+        }
+        self.claim(&mut alerts, at_ms, mac, IpAddr::V4(address));
+        self.known_through_router(&mut alerts, at_ms, mac, address, "neighbour table");
+        alerts
+    }
+
+    /// The device the router knows as `mac` at `address`, made if the audit has not met it
+    /// (and told as new once the learning time is over); `None` past the device cap.
+    fn known_through_router(
+        &mut self,
+        alerts: &mut Vec<Alert>,
+        at_ms: u64,
+        mac: &str,
+        address: Ipv4Addr,
+        table: &str,
+    ) -> Option<&mut Device> {
+        if self.state.started_ms == 0 {
+            self.state.started_ms = at_ms.max(1);
+        }
+        if !self.state.devices.contains_key(mac) {
+            if self.state.devices.len() >= MAX_DEVICES {
+                return None;
+            }
+            if at_ms.saturating_sub(self.state.started_ms) >= self.settings.learn_ms {
+                self.tell(
+                    alerts,
+                    format!("new {mac}"),
+                    at_ms,
+                    Severity::Notice,
+                    "new-device",
+                    mac,
+                    format!("first seen in the router's {table}, at {address}"),
+                );
+            }
+        }
+        let device = self
+            .state
+            .devices
+            .entry(mac.to_string())
+            .or_insert_with(|| Device {
+                first_seen_ms: at_ms,
+                last_seen_ms: at_ms,
+                ..Device::default()
+            });
+        if device.addresses.len() < 16 {
+            device.addresses.insert(IpAddr::V4(address));
+        }
+        Some(device)
     }
 
     /// `claimant` claims `address`, which the router leased to another device.
@@ -1987,6 +2016,39 @@ mod tests {
         );
         assert!(audit.see(&from(camera, "192.168.1.61", 130_000)).is_empty());
         assert_eq!(audit.state.devices.len(), 3);
+    }
+
+    #[test]
+    fn the_router_s_neighbour_table_counts_as_what_it_saw() {
+        let gateway: Ipv4Addr = "192.168.1.1".parse().unwrap();
+        let mut audit = Audit::new(
+            State::default(),
+            Settings {
+                learn_ms: 60_000,
+                gateway: Some(gateway),
+                gateway_v6: None,
+            },
+        );
+        // While learning: devices are kept quietly, with the router's view of their address.
+        assert!(audit
+            .router_saw(TV, "192.168.1.84".parse().unwrap(), 1_000)
+            .is_empty());
+        assert!(audit.router_saw(ROUTER, gateway, 1_000).is_empty());
+        assert_eq!(audit.state.owners[&IpAddr::V4(gateway)], ROUTER);
+        assert_eq!(audit.state.devices[TV].last_seen_ms, 1_000);
+        // Afterwards a device only the router reached is new, said where it was seen.
+        let told = audit.router_saw("00:12:12:00:00:03", "192.168.1.62".parse().unwrap(), 90_000);
+        assert_eq!(rules(&told), ["new-device"]);
+        assert!(
+            told[0].detail.contains("neighbour table"),
+            "{}",
+            told[0].detail
+        );
+        // The router's own table showing another device on the router's address is high.
+        let spoof = audit.router_saw("de:ad:be:ef:00:01", gateway, 95_000);
+        assert!(spoof
+            .iter()
+            .any(|a| a.rule == "address-moved" && a.severity == Severity::High));
     }
 
     #[test]

@@ -6,6 +6,9 @@
 //! archie-netwatch read FILE.pcapng --state-dir DIR [--gateway 192.168.1.1]
 //! archie-netwatch report --state-dir DIR [--alerts 50]
 //! archie-netwatch leases DHCP.LEASES --state-dir DIR [--learn 600]
+//! archie-netwatch router detect [--gateway 192.168.1.1]
+//! archie-netwatch router enroll --state-dir DIR [--gateway IP] [--kind openwrt|asuswrt|bsd-firewall|linux] [--user root] [--port 22] [--install]
+//! archie-netwatch router pull --state-dir DIR
 //! ```
 //!
 //! `live` runs until stopped, or until its optional capture duration expires: TShark
@@ -14,11 +17,14 @@
 //! `DIR/state.json`, and which alerts were already raised in `DIR/told.json`, so a
 //! restart does not repeat them. `read` audits a capture file the same way. `leases`
 //! adds what the router's DHCP server knows, from a dnsmasq lease file the owner copied
-//! (see `archie_lan::leases`). `report` prints both. Everything is written for its owner only: which names a device asks for
+//! (see `archie_lan::leases`). `router` enrols the owner's router once and reads its
+//! leases and neighbour table over SSH with a read-only key (see `archie_lan::router`);
+//! once enrolled, `live` reads it every five minutes by itself. `report` prints both. Everything is written for its owner only: which names a device asks for
 //! is private.
 
 use archie_lan::audit::{Alert, Audit, Settings, State, Told};
 use archie_lan::capture::{field_arguments, parse, SNAPLEN};
+use archie_lan::router;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
@@ -27,6 +33,8 @@ use std::time::{Duration, Instant};
 
 const MAX_ALERTS_BYTES: u64 = 4 * 1024 * 1024;
 const SAVE_EVERY: Duration = Duration::from_secs(30);
+/// How often `live` reads an enrolled router.
+const ROUTER_EVERY: Duration = Duration::from_secs(300);
 
 fn take(arguments: &mut Vec<String>, flag: &str) -> Option<String> {
     let at = arguments.iter().position(|a| a == flag)?;
@@ -159,10 +167,67 @@ fn parse_ipv6_default_route(line: &str) -> Option<Ipv6Addr> {
     hex(fields[4]).filter(|hop| !hop.is_unspecified())
 }
 
-fn audit(source: &[String], directory: &Path, settings: Settings) -> Result<(), String> {
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
+}
+
+/// Writes alerts as they are raised, with what was told, and says them.
+fn record(directory: &Path, audit: &Audit, alerts: &[Alert]) -> Result<(), String> {
+    if alerts.is_empty() {
+        return Ok(());
+    }
+    append(directory, alerts).map_err(|e| e.to_string())?;
+    // What was told is written with the alerts themselves, so even a crash between saves
+    // does not repeat them.
+    save(directory, "told.json", &audit.told).map_err(|e| e.to_string())?;
+    for alert in alerts {
+        eprintln!(
+            "archie-netwatch: {:?} {} {}: {}",
+            alert.severity, alert.rule, alert.device, alert.detail
+        );
+    }
+    Ok(())
+}
+
+/// Feeds one read of the router to the audit.
+fn apply_router(audit: &mut Audit, tables: &router::Tables, at_ms: u64) -> Vec<Alert> {
+    let mut alerts = Vec::new();
+    for lease in &tables.leases {
+        alerts.extend(audit.leased(lease, at_ms));
+    }
+    for (mac, address) in &tables.neighbours {
+        alerts.extend(audit.router_saw(mac, *address, at_ms));
+    }
+    alerts
+}
+
+/// The enrolled router, if there is one in the state directory.
+fn enrolled(directory: &Path) -> Option<router::Config> {
+    let bytes = std::fs::read(directory.join(router::CONFIG)).ok()?;
+    match serde_json::from_slice(&bytes) {
+        Ok(config) => Some(config),
+        Err(error) => {
+            eprintln!("archie-netwatch: {} is set aside ({error})", router::CONFIG);
+            None
+        }
+    }
+}
+
+fn audit(
+    source: &[String],
+    directory: &Path,
+    settings: Settings,
+    router: Option<router::Config>,
+) -> Result<(), String> {
     std::fs::create_dir_all(directory).map_err(|e| format!("{}: {e}", directory.display()))?;
     let mut audit = Audit::new(load(directory)?, settings);
     audit.told = load_told(directory);
+    // The router is read on its own thread, so a slow SSH never holds up the capture.
+    let (sender, received) = std::sync::mpsc::channel();
+    let mut router_asked: Option<Instant> = None;
+    let mut router_reading = false;
     let mut tshark = Command::new("tshark")
         .args(source)
         .args(field_arguments())
@@ -178,17 +243,30 @@ fn audit(source: &[String], directory: &Path, settings: Settings) -> Result<(), 
         let Some(packet) = parse(&line) else { continue };
         frames += 1;
         let alerts = audit.see(&packet);
-        if !alerts.is_empty() {
-            raised += alerts.len() as u64;
-            append(directory, &alerts).map_err(|e| e.to_string())?;
-            // What was told is written with the alerts themselves, so even a crash
-            // between saves does not repeat them.
-            save(directory, "told.json", &audit.told).map_err(|e| e.to_string())?;
-            for alert in &alerts {
-                eprintln!(
-                    "archie-netwatch: {:?} {} {}: {}",
-                    alert.severity, alert.rule, alert.device, alert.detail
-                );
+        raised += alerts.len() as u64;
+        record(directory, &audit, &alerts)?;
+        if let Some(config) = &router {
+            let due = router_asked.is_none_or(|asked| asked.elapsed() >= ROUTER_EVERY);
+            if due && !router_reading {
+                let (config, folder, sender) =
+                    (config.clone(), directory.to_path_buf(), sender.clone());
+                std::thread::spawn(move || {
+                    let at_ms = now_ms();
+                    let _ = sender.send((at_ms, router::pull(&config, &folder, at_ms / 1000)));
+                });
+                router_asked = Some(Instant::now());
+                router_reading = true;
+            }
+        }
+        while let Ok((at_ms, result)) = received.try_recv() {
+            router_reading = false;
+            match result {
+                Ok(tables) => {
+                    let alerts = apply_router(&mut audit, &tables, at_ms);
+                    raised += alerts.len() as u64;
+                    record(directory, &audit, &alerts)?;
+                }
+                Err(error) => eprintln!("archie-netwatch: router: {error}"),
             }
         }
         if saved.elapsed() >= SAVE_EVERY {
@@ -256,6 +334,132 @@ fn leases(file: &Path, directory: &Path, settings: Settings) -> Result<(), Strin
     Ok(())
 }
 
+fn router_command(
+    arguments: &mut Vec<String>,
+    directory: Option<PathBuf>,
+    gateway: Option<IpAddr>,
+    learn: Option<u64>,
+) -> Result<(), String> {
+    let install = arguments
+        .iter()
+        .position(|a| a == "--install")
+        .map(|at| arguments.remove(at))
+        .is_some();
+    let kind = take(arguments, "--kind");
+    let user = take(arguments, "--user");
+    let port = take(arguments, "--port");
+    let action = arguments.get(1).cloned();
+    if arguments.len() != 2 {
+        return Err(format!(
+            "unknown router options: {}",
+            arguments[1..].join(" ")
+        ));
+    }
+    let address = gateway
+        .or_else(|| default_gateway().map(IpAddr::V4))
+        .ok_or("no default gateway; name the router with --gateway")?;
+    match (action.as_deref(), directory) {
+        (Some("detect"), _) => {
+            let detected = router::detect(address);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&detected).expect("it serializes")
+            );
+            Ok(())
+        }
+        (Some("enroll"), Some(directory)) => {
+            let kind = match kind {
+                Some(kind) => router::Kind::parse(&kind)
+                    .ok_or("--kind is one of openwrt, asuswrt, bsd-firewall, linux")?,
+                None => router::detect(address).kind.ok_or(
+                    "the router did not say what it runs; name it with --kind openwrt|asuswrt|bsd-firewall|linux",
+                )?,
+            };
+            let user = user.unwrap_or_else(|| {
+                match kind {
+                    router::Kind::Asuswrt | router::Kind::BsdFirewall => "admin",
+                    _ => "root",
+                }
+                .to_string()
+            });
+            let port = match port {
+                Some(port) => port.parse().map_err(|_| "--port is a port number")?,
+                None => 22,
+            };
+            std::fs::create_dir_all(&directory)
+                .map_err(|e| format!("{}: {e}", directory.display()))?;
+            let public = router::ensure_key(&directory)?;
+            let config = router::Config {
+                address,
+                port,
+                user,
+                kind,
+            };
+            save(&directory, router::CONFIG, &config).map_err(|e| e.to_string())?;
+            let line = router::authorized_line(kind, &public);
+            println!("{line}");
+            if install {
+                if !kind.installs_over_ssh() {
+                    return Err(format!(
+                        "this router keeps its keys in its own settings; {}",
+                        kind.where_the_key_goes()
+                    ));
+                }
+                eprintln!(
+                    "archie-netwatch: adding Sentry's read-only key on {}@{address}; ssh asks for the router's password once",
+                    config.user
+                );
+                router::install(&config, &directory, &line)?;
+                let tables = router::pull(&config, &directory, now_ms() / 1000)?;
+                eprintln!(
+                    "archie-netwatch: router enrolled: {} leases and {} neighbours read; `live` reads it every {} minutes",
+                    tables.leases.len(),
+                    tables.neighbours.len(),
+                    ROUTER_EVERY.as_secs() / 60
+                );
+            } else {
+                eprintln!(
+                    "archie-netwatch: add the line above on the router. {}. It lets Sentry read the lease and neighbour tables and nothing else. Then `archie-netwatch router pull --state-dir {}` checks it.",
+                    kind.where_the_key_goes(),
+                    directory.display()
+                );
+            }
+            Ok(())
+        }
+        (Some("pull"), Some(directory)) => {
+            let config = enrolled(&directory)
+                .ok_or("no router enrolled here; run `archie-netwatch router enroll` first")?;
+            let mut audit = Audit::new(
+                load(&directory)?,
+                Settings {
+                    learn_ms: learn.unwrap_or(600) * 1000,
+                    gateway: match config.address {
+                        IpAddr::V4(v4) => Some(v4),
+                        IpAddr::V6(_) => None,
+                    },
+                    gateway_v6: None,
+                },
+            );
+            audit.told = load_told(&directory);
+            let at_ms = now_ms();
+            let tables = router::pull(&config, &directory, at_ms / 1000)?;
+            let alerts = apply_router(&mut audit, &tables, at_ms);
+            record(&directory, &audit, &alerts)?;
+            save(&directory, "state.json", &audit.state).map_err(|e| e.to_string())?;
+            save(&directory, "told.json", &audit.told).map_err(|e| e.to_string())?;
+            eprintln!(
+                "archie-netwatch: router: {} leases, {} neighbours, {} alerts, {} devices known",
+                tables.leases.len(),
+                tables.neighbours.len(),
+                alerts.len(),
+                audit.state.devices.len()
+            );
+            Ok(())
+        }
+        _ => Err("router detect | enroll --state-dir DIR | pull --state-dir DIR".into()),
+    }
+}
+
 fn report(directory: &Path, last: usize) -> Result<(), String> {
     let state = load(directory)?;
     let text = std::fs::read_to_string(directory.join("alerts.jsonl")).unwrap_or_default();
@@ -314,7 +518,8 @@ fn main() -> ExitCode {
                 gateway: gateway.or_else(default_gateway),
                 gateway_v6: gateway_v6.or_else(default_gateway_v6),
             };
-            audit(&source, &directory, settings)
+            let router = enrolled(&directory);
+            audit(&source, &directory, settings, router)
         }
         (Some("read"), Some(directory)) if arguments.len() == 2 => {
             // A file is audited from its first frame: nothing in it is news to be learned first.
@@ -326,8 +531,10 @@ fn main() -> ExitCode {
                     gateway,
                     gateway_v6,
                 },
+                None,
             )
         }
+        (Some("router"), directory) => router_command(&mut arguments, directory, gateway_ip, learn),
         (Some("leases"), Some(directory)) if arguments.len() == 2 => leases(
             Path::new(&arguments[1]),
             &directory,
@@ -345,7 +552,7 @@ fn main() -> ExitCode {
         ),
         _ => {
             eprintln!(
-                "usage: archie-netwatch interfaces\n       archie-netwatch live --interface NAME --state-dir DIR [--learn SECONDS] [--gateway IP] [--filter BPF] [--seconds 1..86400]\n       archie-netwatch read FILE --state-dir DIR [--gateway IP]\n       archie-netwatch report --state-dir DIR [--alerts N]\n       archie-netwatch leases DHCP.LEASES --state-dir DIR [--learn SECONDS]"
+                "usage: archie-netwatch interfaces\n       archie-netwatch live --interface NAME --state-dir DIR [--learn SECONDS] [--gateway IP] [--filter BPF] [--seconds 1..86400]\n       archie-netwatch read FILE --state-dir DIR [--gateway IP]\n       archie-netwatch report --state-dir DIR [--alerts N]\n       archie-netwatch leases DHCP.LEASES --state-dir DIR [--learn SECONDS]\n       archie-netwatch router detect [--gateway IP]\n       archie-netwatch router enroll --state-dir DIR [--gateway IP] [--kind openwrt|asuswrt|bsd-firewall|linux] [--user NAME] [--port N] [--install]\n       archie-netwatch router pull --state-dir DIR"
             );
             return ExitCode::from(2);
         }
