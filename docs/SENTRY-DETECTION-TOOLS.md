@@ -439,6 +439,25 @@ its basis.
   gateway or behind a mirror port. A DGA built from dictionary words passes as chosen
   names.
 
+### 2026-10-16: tunnels grouped by the registered domain (Public Suffix List)
+
+- **Problem.** `dns-tunnel-suspect` is told once per zone, and the zone was the last two
+  labels: every tunnel under `co.uk`, `com.br` or `github.io` was one zone, so a second
+  tunnel there went untold.
+- **Compared.** In a scratch crate, release build, 1,000,000 lookups: `psl` 2.1.241
+  (MIT/Apache, the list compiled to match code, one types crate) builds in 18 s, answers in
+  34 ns and adds about 0.9 MB; `psl2` 0.1.32 builds in 9 s but pulls the ICU crates by
+  default, answers in 97 ns and needs lowercase input; a hand list of second-level
+  suffixes (`co`, `com`, `org`…) misses private suffixes such as `github.io`. Both crates
+  gave `example.co.uk`, `evil.com.br` (`psl2` only once lowercased) and `foo.github.io`.
+- **Chosen.** `psl`: no ICU, fastest, correct on the cases above. The registered domain
+  falls back to the whole name when the list has none.
+- **Tested.** `registered` on ICANN and private suffixes and a single label; two tunnels
+  under `co.uk` are now two alerts.
+- **Measured.** The lookup runs only for a question already judged to carry data, so
+  nothing on the common path. The list is as current as the crate version; it is updated
+  with the crate.
+
 ## How a tool is accepted
 
 A tool joins Sentry when, on a recorded pcap of the owner's network and on the fixtures in

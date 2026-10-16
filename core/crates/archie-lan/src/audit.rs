@@ -727,6 +727,12 @@ fn entropy(label: &str) -> f64 {
 
 /// Whether a DNS question looks like data in disguise: very long, or one long label of
 /// near-random characters. A CDN's hashed host name is long; it is not this random.
+/// The domain someone registered that `name` is under (`example.co.uk` for
+/// `a.b.example.co.uk`), by the Public Suffix List; the name itself when it has none.
+fn registered(name: &str) -> &str {
+    psl::domain_str(name).unwrap_or(name)
+}
+
 fn carries_data(question: &str) -> bool {
     question.len() > 180
         || question
@@ -1087,8 +1093,7 @@ impl Audit {
             }
             if carries_data(question) {
                 // By the zone, so one tunnel is one alert and not one per question.
-                let labels: Vec<&str> = question.split('.').collect();
-                let zone = labels[labels.len().saturating_sub(2)..].join(".");
+                let zone = registered(question);
                 let shown: String = question.chars().take(80).collect();
                 self.tell(
                     &mut alerts,
@@ -1975,6 +1980,25 @@ mod tests {
             "one alert for the zone"
         );
         assert_eq!(audit.state.devices[TV].asked.len(), 4);
+        // Two tunnels under the same public suffix are two zones, each told.
+        for (at_ms, zone) in [(3_000, "one.co.uk"), (3_100, "two.co.uk")] {
+            let told = audit.see(&ask(&format!("{label}.t.{zone}"), at_ms));
+            assert_eq!(rules(&told), ["dns-tunnel-suspect"]);
+            assert!(
+                told[0].detail.ends_with(&format!("under {zone}")),
+                "{}",
+                told[0].detail
+            );
+        }
+    }
+
+    #[test]
+    fn the_registered_domain_follows_the_public_suffix_list() {
+        assert_eq!(registered("a.b.example.co.uk"), "example.co.uk");
+        assert_eq!(registered("x.t.evil.com.br"), "evil.com.br");
+        assert_eq!(registered("someone.github.io"), "someone.github.io");
+        assert_eq!(registered("api.example.com"), "example.com");
+        assert_eq!(registered("localhost"), "localhost");
     }
 
     #[test]
