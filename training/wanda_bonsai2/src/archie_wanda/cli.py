@@ -25,7 +25,31 @@ def main():
     worker.add_argument('--cutoff', required=True, help='ISO-8601 local time with offset')
     status = commands.add_parser('status', help='read-only summary; allocates no GPU memory')
     status.add_argument('--root', required=True)
+    export = commands.add_parser('export', help='write an unpromoted native GGUF LoRA candidate')
+    export.add_argument('--checkpoint', required=True)
+    export.add_argument('--out', required=True)
+    native = commands.add_parser('verify-native', help='native LoRA candidate vs trained suffix')
+    native.add_argument('--config', required=True)
+    native.add_argument('--headers', required=True)
+    native.add_argument('--candidate', required=True)
+    native.add_argument('--checkpoint', required=True)
+    native.add_argument('--cases', required=True)
+    native.add_argument('--out', required=True)
+    native.add_argument('--pause-root', help='pause the owned worker in this run root while verifying')
     args = parser.parse_args()
+    if args.command == 'export':
+        from .export import export_candidate
+        print(json.dumps(export_candidate(args.checkpoint, args.out)))
+        return
+    if args.command == 'verify-native':
+        from .contracts import TrainConfig
+        from .verification import verify_native
+        from .worker_status import paused_worker
+        config = TrainConfig.load(args.config)
+        with paused_worker(args.pause_root):
+            print(json.dumps(verify_native(config, args.headers, args.candidate, args.checkpoint,
+                                           args.cases, args.out)))
+        return
     if args.command == 'worker':
         from datetime import datetime
         from .contracts import TrainConfig

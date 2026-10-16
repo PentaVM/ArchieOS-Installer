@@ -69,7 +69,7 @@ def native_environment(config):
     return env
 
 
-def build_native(config, headers):
+def build_native(config, headers, source_name='prefix_export.cpp', binary_name='archie-wanda-prefix'):
     preflight(config)
     headers = Path(headers)
     for name, expected in HEADER_SHA.items():
@@ -81,8 +81,8 @@ def build_native(config, headers):
     if PRISM_COMMIT[:9] not in version.stdout+version.stderr:
         raise AdmissionError('native runtime version mismatch')
     out = Path(config.run_dir)/'bin'; out.mkdir(parents=True,exist_ok=True)
-    source = Path(__file__).resolve().parents[2]/'native/prefix_export.cpp'
-    binary = out/'archie-wanda-prefix'
+    source = Path(__file__).resolve().parents[2]/'native'/source_name
+    binary = out/binary_name
     command = ['g++','-std=c++17','-O2',str(source),'-I'+str(headers/'include'),
                '-I'+str(headers/'ggml/include'),'-L'+config.runtime_dir,'-lllama','-lggml','-lggml-base',
                '-Wl,-rpath,'+config.runtime_dir,'-o',str(binary)]

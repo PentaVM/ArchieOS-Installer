@@ -93,6 +93,90 @@ def verify_suffix(config, extraction, output):
     atomic_json(output,result); return result
 
 
+def _native_run(binary, model, text, root, config, lora=None):
+    import struct
+    from .native import native_environment
+    from .resources import run_guarded
+    root=Path(root); root.mkdir(parents=True,exist_ok=False)
+    raw=text.encode('utf-8')
+    (root/'request.bin').write_bytes(b'ARWPRE01'+struct.pack('<IIII',1,0,config.sequence_length,len(raw))+raw)
+    command=[str(binary),'--model',str(model.path),'--request',str(root/'request.bin'),
+             '--out',str(root),'--runtime',config.runtime_dir]+(['--lora',str(lora)] if lora else [])
+    with (root/'native.log').open('w') as log:
+        process=run_guarded(command,config,native_environment(config),log,timeout=180)
+    if process.returncode:
+        raise ParityError('native adapter run failed; see '+str(root/'native.log'))
+    return json.loads(process.stdout)
+
+
+def _kl_rows(p_logits, q_logits):
+    import torch
+    log_p=torch.log_softmax(p_logits.double(),-1); log_q=torch.log_softmax(q_logits.double(),-1)
+    return (log_p.exp()*(log_p-log_q)).sum(-1)
+
+
+def verify_native(config, headers, candidate, checkpoint, cases, output):
+    """Native Prism with the exported LoRA versus the Torch suffix with the same LoRA.
+
+    Passes only if (1) the layer-30 capture is unchanged by a block-31 adapter, (2) native
+    and Torch agree with the adapter on within native noise, and (3) the adapter moves the
+    native distribution clearly more than that parity error (otherwise inconclusive).
+    """
+    import torch, uuid
+    from .native import build_native, sha_file
+    from .ptq import FrozenPTQLinear
+    from .suffix import BonsaiSuffix
+    from .native import LAYOUT_MAX_TOKEN_KL
+    model=inspect_model(Path(config.model_path),config.base_sha256)
+    binary=build_native(config,headers,'adapter_logits.cpp','archie-wanda-adapter')
+    saved=torch.load(checkpoint,weights_only=True,map_location='cuda')
+    targets=sorted({k.split('_delta.')[0] for k in saved['model']},key='qkvo'.index)
+    suffix=BonsaiSuffix(model,config,targets).cuda().make_resident('cuda')
+    suffix.load_state_dict(saved['model'],strict=False)
+    head=FrozenPTQLinear(model,'output.weight',config.row_chunk).make_resident('cuda')
+    texts=[]
+    for line in Path(cases).read_text(encoding='utf-8').splitlines():
+        case=json.loads(line); texts.append((case['id'],case['text']))
+    work=Path(config.run_dir)/'verify'/uuid.uuid4().hex
+    records=[]
+    for case_id,text in texts:
+        base=_native_run(binary,model,text,work/(case_id+'-base'),config)
+        tuned=_native_run(binary,model,text,work/(case_id+'-lora'),config,candidate)
+        if base['tokens']!=tuned['tokens']:
+            raise ParityError('adapter changed tokenization')
+        count=len(base['tokens'])
+        load=lambda name,root,cols: torch.from_numpy(np.fromfile(root/name,dtype='<f4').reshape(count,cols))
+        prefix_base,prefix_lora=load('prefix.f32',work/(case_id+'-base'),4096),load('prefix.f32',work/(case_id+'-lora'),4096)
+        native_base=load('logits.f32',work/(case_id+'-base'),248320)
+        native_lora=load('logits.f32',work/(case_id+'-lora'),248320)
+        with torch.no_grad():
+            torch_lora=head(suffix(prefix_base.cuda())).cpu()
+        parity=_kl_rows(native_lora,torch_lora); effect=_kl_rows(native_base,native_lora)
+        records.append({'id':case_id,'tokens':count,
+                        'prefix_unchanged':bool(torch.equal(prefix_base,prefix_lora)),
+                        'parity_max_kl':float(parity.max()),'parity_mean_kl':float(parity.mean()),
+                        'adapter_effect_mean_kl':float(effect.mean()),'adapter_effect_max_kl':float(effect.max()),
+                        'greedy_agreement_native_vs_torch':float((native_lora.argmax(-1)==torch_lora.argmax(-1)).double().mean())})
+        shutil_rm(work/(case_id+'-base')); shutil_rm(work/(case_id+'-lora'))
+    parity_ok=all(r['prefix_unchanged'] and r['parity_max_kl']<=max(1e-3,LAYOUT_MAX_TOKEN_KL) for r in records)
+    effect=sum(r['adapter_effect_mean_kl'] for r in records)/len(records)
+    error=sum(r['parity_mean_kl'] for r in records)/len(records)
+    status='passed' if parity_ok and effect>=10*error else ('inconclusive_small_adapter_effect' if parity_ok else 'failed')
+    result={'format_version':1,'status':status,'scope':'native_lora_candidate_vs_torch_suffix',
+            'base_sha256':model.sha256,'candidate':str(candidate),'candidate_sha256':sha_file(candidate),
+            'checkpoint':str(checkpoint),'targets':targets,'adapter_binary_sha256':sha_file(binary),
+            'cases':records,'mean_adapter_effect_kl':effect,'mean_parity_kl':error,'promoted':False}
+    atomic_json(output,result)
+    if status=='failed':
+        raise ParityError('native LoRA candidate does not match the trained suffix: '+json.dumps(records))
+    return result
+
+
+def shutil_rm(path):
+    import shutil
+    shutil.rmtree(path,ignore_errors=True)
+
+
 def verify_loss(config, parity, output):
     import torch
     from .suffix import BonsaiSuffix

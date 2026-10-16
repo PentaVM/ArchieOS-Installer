@@ -159,6 +159,11 @@ class Worker:
         for number, example in enumerate(examples):
             if self.stopping():
                 raise Interrupted()
+            while self.control() == 'pause':
+                self.state = 'paused'; self.heartbeat(progress=f'prepare {number}/{len(examples)}'); time.sleep(20)
+                if self.stopping():
+                    raise Interrupted()
+            self.state = 'running'
             self.heartbeat(progress=f'prepare {number}/{len(examples)}')
             try:
                 tokens = tokenize_example(example, tokenizer, self.config.sequence_length)
