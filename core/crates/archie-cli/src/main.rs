@@ -667,6 +667,7 @@ impl Command {
             | Self::WandaIngest { .. }
             | Self::WandaWatch { .. }
             | Self::VaultDocs { .. }
+            // Answered by the display in `main`, before any daemon request is built.
             | Self::Visual { .. } => return None,
         })
     }
@@ -1120,7 +1121,7 @@ async fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
 
     if let Command::Visual { command } = &cli.command {
-        return visual::run(command).await;
+        return visual::run(command, cli.json).await;
     }
 
     let paths = match &cli.root {

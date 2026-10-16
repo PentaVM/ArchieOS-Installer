@@ -40,6 +40,8 @@ class LumenField final : public QObject
     /// Linear colours and light levels the shaders read, derived from the settings.
     Q_PROPERTY(QVariantMap look READ look NOTIFY settingsChanged)
     Q_PROPERTY(QString profile READ profile NOTIFY settingsChanged)
+    /// The look presets embedded in the display, by name.
+    Q_PROPERTY(QStringList presets READ presets CONSTANT)
     Q_PROPERTY(QString lens READ lens NOTIFY lensChanged)
     Q_PROPERTY(QVariantMap scene READ scene NOTIFY sceneChanged)
     Q_PROPERTY(QVariantList modules READ modules NOTIFY sceneChanged)
@@ -71,6 +73,7 @@ public:
     QVariantMap settings() const { return m_settings; }
     QVariantMap look() const { return m_look; }
     QString profile() const { return m_profile; }
+    QStringList presets() const;
     QString lens() const { return m_lens; }
     QVariantMap scene() const { return m_sceneInfo; }
     QVariantList modules() const { return m_modules; }
@@ -98,7 +101,9 @@ public:
     /// "guides" take a LumenGeometry.
     Q_INVOKABLE void bindLayer(const QString &name, QObject *target);
     Q_INVOKABLE void setSetting(const QString &key, const QVariant &value);
-    Q_INVOKABLE void applyProfile(const QString &name);
+    /// Applies a preset whole, or changes nothing; returns why not, or "" once applied.
+    QString loadProfile(const QString &name);
+    Q_INVOKABLE bool applyProfile(const QString &name);
     Q_INVOKABLE void resetProfile();
     Q_INVOKABLE void setLens(const QString &lens);
     Q_INVOKABLE void toggleModule(const QString &id);
@@ -226,7 +231,7 @@ private:
 
     QVariantMap m_settings;
     QVariantMap m_look;
-    QString m_profile = QStringLiteral("field");
+    QString m_profile;
     QString m_lens = QStringLiteral("architecture");
     QSet<QString> m_expanded;
     QSet<QString> m_hiddenCategories;

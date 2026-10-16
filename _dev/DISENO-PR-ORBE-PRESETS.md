@@ -3,16 +3,21 @@
 Un solo PR de diseño abierto a la vez; las siguientes tandas de diseño se suman a este PR.
 
 ## Hecho
-- `archie visual scene|preset|list` (archie-cli) y herramienta de voz `orb_preset`: mismo canal
-  loopback `127.0.0.1:7668`, lista blanca de nombres.
-- El protocolo del display acepta `scene` y `preset` (`field|sphere|orb|neural`). Se retiran las
-  acciones `cinematic` (crown/atlas/dense) y `overlay` (hud/shell/ambient/guides/links/pulses/bloom):
-  los parámetros visuales ya no se conmutan por capas, viven en presets.
+- `archie visual scene|preset|list` (archie-cli) y herramienta de voz `orb_preset`: un solo cliente,
+  `archie_orb::control`, sobre el canal loopback `127.0.0.1:7668`.
+- El protocolo del display acepta `list`, `scene` y `preset`. Se retiran las acciones `cinematic`
+  (crown/atlas/dense) y `overlay` (hud/shell/ambient/guides/links/pulses/bloom): los parámetros
+  visuales ya no se conmutan por capas, viven en presets.
 - `field` = «Regiones vivas», sin sobrescrituras: se dibuja exactamente igual que antes.
 - `sphere`, `orb`, `neural` solo cambian parámetros que este renderizador ya tiene.
-- Los presets son archivos: `display/native/presets/<nombre>.json` (embebidos en `:/archie/presets`).
-  Solo pueden fijar claves que existan en `defaults()`; una prueba de `archie-cli` exige que haya
-  un archivo por cada preset que acepta la CLI y ninguno de más.
+- Los presets son archivos: `display/native/presets/<nombre>.json` (CMake los embebe todos en
+  `:/archie/presets`). Nadie más guarda la lista: la CLI y la voz la piden con `list`.
+- Revisión (segundo filtro): el display valida cada preset entero con la misma regla que el panel
+  (clave conocida, tipo, color `#rrggbb`, layout conocido, número dentro de rango sin recortar);
+  si algo falla no cambia nada y responde `error: <motivo>`. El preset se aplica en C++ antes de
+  responder, así que `ok` significa aplicado. Las etiquetas del HUD son el ajuste `labels`.
+  Probado sin GPU: `archie visual list|preset|scene` contra `LumenField` + `DisplayControl`
+  reales (Qt 6.4, offscreen), incluido un preset roto, uno desconocido y peticiones malformadas.
 - Se retiró el botón «Antes» (`toggleCompare`, aspecto V2) del orbe nativo.
 
 ## No verificado (honesto)

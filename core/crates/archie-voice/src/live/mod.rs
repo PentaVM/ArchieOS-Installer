@@ -42,8 +42,6 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
 use tokio::sync::{broadcast, Notify};
 
 /// Who Archie is in a live session.
@@ -62,8 +60,19 @@ web_search. Lo que ya averiguaste no lo digas si nadie lo pregunta ni responde l
 preguntaron. Nunca digas quién es una persona por su cara ni la busques: eso necesita su \
 permiso. Puedes cambiar la vista del Observatory con observatory_scene, el aspecto del orbe con orb_preset cuando la persona lo pida. No inventes datos que no tienes. Si lo que oíste es un fragmento sin sentido o solo tu nombre, no lo repitas: pregunta en pocas palabras qué necesita, o quédate callado.";
 
-/// The tools a live session adds: looking closer, and reading the web.
-pub fn tools() -> Vec<ToolDefinition> {
+/// A string parameter limited to the names the running display reported. When the display
+/// was not reachable at start-up the names are not known here, so the parameter is free and
+/// the display itself refuses an unknown one.
+fn display_names(names: Option<&[String]>) -> serde_json::Value {
+    match names {
+        Some(names) if !names.is_empty() => json!({"type": "string", "enum": names}),
+        _ => json!({"type": "string"}),
+    }
+}
+
+/// The tools a live session adds: looking closer, reading the web, remembering, and the
+/// Observatory's views and presets as the running display lists them (`catalog`).
+pub fn tools(catalog: Option<&archie_orb::control::Catalog>) -> Vec<ToolDefinition> {
     vec![
         ToolDefinition {
             name: "identify".into(),
@@ -103,19 +112,19 @@ pub fn tools() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "observatory_scene".into(),
-            description: "Cambia la vista principal del Observatory cuando la persona lo pide: Orb, Forge o World.".into(),
+            description: "Cambia la vista principal del Observatory cuando la persona lo pide.".into(),
             parameters: json!({
                 "type": "object",
-                "properties": {"scene": {"type": "string", "enum": ["orb", "forge", "world"]}},
+                "properties": {"scene": display_names(catalog.map(|c| c.scenes.as_slice()))},
                 "required": ["scene"]
             }),
         },
         ToolDefinition {
             name: "orb_preset".into(),
-            description: "Cambia el aspecto del orbe con un preset y abre Orb. field es la vista original (Regiones vivas); sphere, orb y neural son las esferas neuronales.".into(),
+            description: "Cambia el aspecto del orbe con uno de los presets del Observatory y abre Orb. field es la vista original (Regiones vivas).".into(),
             parameters: json!({
                 "type": "object",
-                "properties": {"preset": {"type": "string", "enum": ["field", "sphere", "orb", "neural"]}},
+                "properties": {"preset": display_names(catalog.map(|c| c.presets.as_slice()))},
                 "required": ["preset"]
             }),
         },
@@ -123,43 +132,18 @@ pub fn tools() -> Vec<ToolDefinition> {
 }
 
 async fn visual_command(action: &str, value: &str) -> String {
-    let valid = match action {
-        "scene" => matches!(value, "orb" | "forge" | "world"),
-        "preset" => matches!(value, "field" | "sphere" | "orb" | "neural"),
-        _ => false,
+    use archie_orb::control::{self, ControlError};
+    let applied = match action {
+        "scene" => control::scene(value).await,
+        "preset" => control::preset(value).await,
+        _ => Err(ControlError::Refused(format!("unknown action {action}"))),
     };
-    if !valid {
-        return "No cambié el Observatory: la opción visual no es válida.".into();
-    }
-    let command = json!({"action": action, "value": value});
-    let request = format!("{command}\n");
-    let sent = tokio::time::timeout(Duration::from_millis(750), async {
-        let mut stream = TcpStream::connect("127.0.0.1:7668")
-            .await
-            .map_err(|e| e.to_string())?;
-        stream
-            .write_all(request.as_bytes())
-            .await
-            .map_err(|e| e.to_string())?;
-        let mut reply = [0u8; 3];
-        stream
-            .read_exact(&mut reply)
-            .await
-            .map_err(|e| e.to_string())?;
-        Ok::<bool, String>(&reply == b"ok\n")
-    })
-    .await;
-    match sent {
-        Ok(Ok(true)) => format!(
-            "Observatory actualizado: {action} {value}{}.",
-            enabled
-                .map(|on| if on { " on" } else { " off" })
-                .unwrap_or("")
-        ),
-        Ok(Ok(false)) => "El Observatory rechazó ese cambio visual.".into(),
-        Ok(Err(_)) | Err(_) => {
-            "No pude cambiar el Observatory: la ventana local no responde.".into()
+    match applied {
+        Ok(()) => format!("Observatory actualizado: {action} {value}."),
+        Err(ControlError::Refused(reason)) => {
+            format!("El Observatory rechazó ese cambio visual: {reason}.")
         }
+        Err(_) => "No pude cambiar el Observatory: la ventana local no responde.".into(),
     }
 }
 

@@ -3,6 +3,7 @@
 #include "LumenGeometry.h"
 
 #include <QColor>
+#include <QDir>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -17,6 +18,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <optional>
 
 namespace lumen = archie::visual::lumen;
 using archie::visual::Vec3;
@@ -95,29 +97,11 @@ QVariantMap defaults()
         {QStringLiteral("guides"), false}, {QStringLiteral("links"), true},
         {QStringLiteral("pulses"), true}, {QStringLiteral("bloom"), true},
         {QStringLiteral("physics"), true}, {QStringLiteral("rotate"), true},
-        {QStringLiteral("pauseOnInspect"), true},
+        {QStringLiteral("pauseOnInspect"), true}, {QStringLiteral("labels"), true},
     };
     for (const auto &c : categoryTable)
         s.insert(QStringLiteral("color") + QLatin1String(c.key), QString::fromLatin1(c.colour));
     return s;
-}
-
-/// Look presets live in presets/<name>.json (embedded as :/archie/presets), selected from the
-/// CLI (`archie visual preset <name>`); there are no per-layer overlay switches. `field` is the
-/// design's original "Regiones vivas" and has no overrides, so it renders exactly as before.
-/// A preset can only set keys that exist in defaults(); anything else in the file is ignored.
-const QStringList presetNames{QStringLiteral("field"), QStringLiteral("sphere"), QStringLiteral("orb"),
-                              QStringLiteral("neural")};
-
-QVariantMap profileOverrides(const QString &name)
-{
-    if (!presetNames.contains(name))
-        return {};
-    QFile file(QStringLiteral(":/archie/presets/") + name + QStringLiteral(".json"));
-    if (!file.open(QIODevice::ReadOnly))
-        return {};
-    const QJsonObject root = QJsonDocument::fromJson(file.readAll()).object();
-    return root.value(QStringLiteral("settings")).toObject().toVariantMap();
 }
 
 struct Range {
@@ -139,6 +123,126 @@ constexpr Range ranges[] = {
     {"bloomRadius", 0, 1}, {"bloomThreshold", 0, 1}, {"exposure", 0.4, 2.5},
     {"ambientLight", 0, 2}, {"warmLight", 0, 40000}, {"coolLight", 0, 30000},
 };
+
+const QStringList layoutModes{QStringLiteral("regions"), QStringLiteral("legacy")};
+
+/// How a value outside its range is treated: the panel's sliders are clamped to it, a
+/// preset file that leaves it is wrong and is refused.
+enum class Bounds { Clamp, Strict };
+
+/// The one check every setting passes, whoever sets it: the key must be one defaults()
+/// has, the value of its type, a colour a `#rrggbb`, a layout one the model knows and a
+/// number finite and in range. Returns the value to store, or an invalid QVariant with
+/// `reason` saying why not.
+QVariant validated(const QString &key, const QVariant &current, const QVariant &value, Bounds bounds,
+                   QString &reason)
+{
+    const auto refuse = [&](const QString &why) {
+        reason = key + QStringLiteral(": ") + why;
+        return QVariant();
+    };
+    const bool strict = bounds == Bounds::Strict;
+    if (!current.isValid())
+        return refuse(QStringLiteral("not a setting"));
+    if (current.typeId() == QMetaType::Bool) {
+        if (strict && value.typeId() != QMetaType::Bool)
+            return refuse(QStringLiteral("expected true or false"));
+        return value.toBool();
+    }
+    if (current.typeId() == QMetaType::QString) {
+        if (strict && value.typeId() != QMetaType::QString)
+            return refuse(QStringLiteral("expected text"));
+        const QString text = value.toString().trimmed().toLower();
+        if (key == QLatin1String("layoutMode")) {
+            if (!layoutModes.contains(text))
+                return refuse(QStringLiteral("expected ") + layoutModes.join(QStringLiteral(" or ")));
+        } else if (!lumen::parse_hex(text.toStdString())) {
+            return refuse(QStringLiteral("expected a #rrggbb colour"));
+        }
+        return text;
+    }
+    const int type = value.typeId();
+    if (strict && type != QMetaType::Double && type != QMetaType::Int && type != QMetaType::LongLong)
+        return refuse(QStringLiteral("expected a number"));
+    bool ok = false;
+    double number = value.toDouble(&ok);
+    if (!ok || !std::isfinite(number))
+        return refuse(QStringLiteral("expected a finite number"));
+    const bool whole = current.typeId() == QMetaType::Int;
+    if (strict && whole && number != std::floor(number))
+        return refuse(QStringLiteral("expected a whole number"));
+    for (const auto &range : ranges) {
+        if (key != QLatin1String(range.key))
+            continue;
+        if (strict && (number < range.low || number > range.high))
+            return refuse(QStringLiteral("outside %1..%2").arg(range.low).arg(range.high));
+        number = std::clamp(number, range.low, range.high);
+    }
+    return whole ? QVariant(static_cast<int>(std::lround(number))) : QVariant(number);
+}
+
+/// Look presets are the JSON files embedded under :/archie/presets (presets/*.json in the
+/// source tree): a file is a preset, and its name is the file's. They are selected from the
+/// CLI or the voice (`archie visual preset <name>`); there are no per-layer overlay
+/// switches. `field` is the design's original "Regiones vivas", with no overrides.
+const QString presetDirectory = QStringLiteral(":/archie/presets");
+const QString basePreset = QStringLiteral("field");
+
+QStringList presetNames()
+{
+    static const QStringList names = [] {
+        QStringList out;
+        const auto files = QDir(presetDirectory).entryList({QStringLiteral("*.json")}, QDir::Files, QDir::Name);
+        for (const QString &file : files)
+            out.append(file.chopped(5));
+        return out;
+    }();
+    return names;
+}
+
+/// The settings a preset gives: defaults() with the file's overrides on top. The file is
+/// read whole and checked before anything is used; one bad key or value refuses all of it.
+std::optional<QVariantMap> readPreset(const QString &name, QString &reason)
+{
+    if (!presetNames().contains(name)) {
+        reason = QStringLiteral("unknown preset ") + name;
+        return std::nullopt;
+    }
+    QFile file(presetDirectory + QLatin1Char('/') + name + QStringLiteral(".json"));
+    if (!file.open(QIODevice::ReadOnly)) {
+        reason = QStringLiteral("preset ") + name + QStringLiteral(" is unreadable");
+        return std::nullopt;
+    }
+    QJsonParseError parse{};
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parse);
+    if (parse.error != QJsonParseError::NoError || !document.isObject()) {
+        reason = QStringLiteral("preset ") + name + QStringLiteral(" is not a JSON object");
+        return std::nullopt;
+    }
+    const QJsonObject root = document.object();
+    if (root.contains(QStringLiteral("name")) && root.value(QStringLiteral("name")).toString() != name) {
+        reason = QStringLiteral("preset ") + name + QStringLiteral(" calls itself ")
+                 + root.value(QStringLiteral("name")).toString();
+        return std::nullopt;
+    }
+    if (!root.value(QStringLiteral("settings")).isObject()) {
+        reason = QStringLiteral("preset ") + name + QStringLiteral(" has no settings object");
+        return std::nullopt;
+    }
+    QVariantMap settings = defaults();
+    const QJsonObject overrides = root.value(QStringLiteral("settings")).toObject();
+    for (auto it = overrides.begin(); it != overrides.end(); ++it) {
+        QString why;
+        const QVariant next =
+            validated(it.key(), settings.value(it.key()), it.value().toVariant(), Bounds::Strict, why);
+        if (!next.isValid()) {
+            reason = QStringLiteral("preset ") + name + QStringLiteral(": ") + why;
+            return std::nullopt;
+        }
+        settings.insert(it.key(), next);
+    }
+    return settings;
+}
 
 QVector3D toQ(const Vec3 &v) { return QVector3D(v.x, v.y, v.z); }
 Vec3 toV(const QVector3D &v) { return Vec3{v.x(), v.y(), v.z()}; }
@@ -224,6 +328,15 @@ LumenField::LumenField(QObject *parent) : QObject(parent), m_settings(defaults()
     connect(&m_pollTimer, &QTimer::timeout, this, &LumenField::request);
     m_requestDelay.setSingleShot(true);
     connect(&m_requestDelay, &QTimer::timeout, this, &LumenField::request);
+    // A broken preset file is found when the display starts, not when someone asks for it.
+    for (const QString &name : presetNames()) {
+        QString reason;
+        if (!readPreset(name, reason))
+            qWarning("archie-display: %s", qPrintable(reason));
+    }
+    if (!presetNames().contains(basePreset))
+        qWarning("archie-display: the base preset %s is not embedded", qPrintable(basePreset));
+    m_profile = basePreset;
     updateLook();
     updateCategoryRows();
     setStatus(QStringLiteral("ESPERANDO EL CAMPO"));
@@ -287,31 +400,9 @@ bool LumenField::flag(const char *key) const
 void LumenField::setSetting(const QString &key, const QVariant &value)
 {
     const QVariant current = m_settings.value(key);
-    if (!current.isValid())
-        return;
-    QVariant next;
-    if (current.typeId() == QMetaType::Bool) {
-        next = value.toBool();
-    } else if (current.typeId() == QMetaType::QString) {
-        const QString text = value.toString().trimmed();
-        if (key == QLatin1String("layoutMode")) {
-            if (text != QLatin1String("regions") && text != QLatin1String("legacy"))
-                return;
-        } else if (!lumen::parse_hex(text.toStdString())) {
-            return;
-        }
-        next = text.toLower();
-    } else {
-        bool ok = false;
-        double number = value.toDouble(&ok);
-        if (!ok || !std::isfinite(number))
-            return;
-        for (const auto &range : ranges)
-            if (key == QLatin1String(range.key))
-                number = std::clamp(number, range.low, range.high);
-        next = current.typeId() == QMetaType::Int ? QVariant(static_cast<int>(std::lround(number))) : QVariant(number);
-    }
-    if (next == current)
+    QString reason;
+    const QVariant next = validated(key, current, value, Bounds::Clamp, reason);
+    if (!next.isValid() || next == current)
         return;
     m_settings.insert(key, next);
     updateLook();
@@ -336,22 +427,19 @@ void LumenField::setSetting(const QString &key, const QVariant &value)
     emit settingsChanged();
 }
 
-void LumenField::applyProfile(const QString &name)
+QStringList LumenField::presets() const
 {
-    m_profile = presetNames.contains(name) ? name : QStringLiteral("field");
-    m_settings = defaults();
-    const QVariantMap overrides = profileOverrides(m_profile);
-    for (auto it = overrides.begin(); it != overrides.end(); ++it) {
-        const QVariant current = m_settings.value(it.key());
-        if (!current.isValid())
-            continue;
-        if (current.typeId() == QMetaType::Int)
-            m_settings.insert(it.key(), it.value().toInt());
-        else if (current.typeId() == QMetaType::Double)
-            m_settings.insert(it.key(), it.value().toDouble());
-        else if (current.typeId() == it.value().typeId())
-            m_settings.insert(it.key(), it.value());
-    }
+    return presetNames();
+}
+
+QString LumenField::loadProfile(const QString &name)
+{
+    QString reason;
+    const std::optional<QVariantMap> settings = readPreset(name, reason);
+    if (!settings)
+        return reason;
+    m_profile = name;
+    m_settings = *settings;
     updateLook();
     updateCategoryRows();
     rebuildMembrane();
@@ -360,6 +448,15 @@ void LumenField::applyProfile(const QString &name)
     m_positionsDirty = true;
     scheduleRequest(0);
     emit settingsChanged();
+    return {};
+}
+
+bool LumenField::applyProfile(const QString &name)
+{
+    const QString reason = loadProfile(name);
+    if (!reason.isEmpty())
+        qWarning("archie-display: %s", qPrintable(reason));
+    return reason.isEmpty();
 }
 
 void LumenField::resetProfile()
