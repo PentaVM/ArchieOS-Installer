@@ -4,6 +4,7 @@
 //! request the normalized contract from `archie-worldd` on a fixed loopback address.
 
 use archie_types::Timestamp;
+pub use archie_worldd::lan::{LanDeviceEntity, LanEntityOrigin, LanSource, LanSourceProvenance};
 pub use archie_worldd::{
     EarthquakeSeverity, GeoPosition, ObservationDetails, ObservationProvenance, ProviderCondition,
     ProviderRetryState, WorldDataSource, WorldObservation, WorldProviderId, WorldProviderStatus,
@@ -17,7 +18,10 @@ use tokio::net::TcpStream;
 use tokio::sync::RwLock;
 
 const WORLD_ENDPOINT: &str = "127.0.0.1:7667";
-const MAX_NORMALIZED_RESPONSE_BYTES: usize = 512 * 1024;
+/// The snapshot also carries the LAN device graph (bounded at
+/// `archie_worldd::lan::MAX_VIEW_BYTES` on the ingestion side), so the
+/// transport bound mirrors it rather than the smaller observation-only one.
+const MAX_NORMALIZED_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 const LOCAL_REQUEST_TIMEOUT: Duration = Duration::from_millis(1_500);
 
 #[derive(Clone)]
@@ -79,6 +83,12 @@ impl WorldService {
     pub async fn current(&self) -> WorldSnapshot {
         self.state.read().await.clone()
     }
+
+    /// The LAN devices the world graph currently holds, from the graph — never
+    /// from a file the display read itself.
+    pub async fn lan_devices(&self) -> Vec<LanDeviceEntity> {
+        self.current().await.lan_devices
+    }
 }
 
 async fn fetch_normalized(endpoint: SocketAddr) -> Result<WorldSnapshot, &'static str> {
@@ -128,10 +138,13 @@ async fn fetch_normalized(endpoint: SocketAddr) -> Result<WorldSnapshot, &'stati
 }
 
 fn validate_contract(snapshot: &WorldSnapshot) -> Result<(), &'static str> {
+    use archie_worldd::lan::{MAX_CLASSES, MAX_FIELD_CHARS, MAX_IPS, MAX_LAN_DEVICES, MAX_NAMES};
+
     if snapshot.schema_version != 1
         || snapshot.source != WorldDataSource::LiveProvider
         || snapshot.providers.len() > 8
         || snapshot.observations.len() > 200
+        || snapshot.lan_devices.len() > MAX_LAN_DEVICES
     {
         return Err("unsupported world contract");
     }
@@ -146,6 +159,22 @@ fn validate_contract(snapshot: &WorldSnapshot) -> Result<(), &'static str> {
             || !p.depth_km.is_finite()
         {
             return Err("invalid normalized observation");
+        }
+    }
+    for device in &snapshot.lan_devices {
+        if device.identity.len() > 64
+            || device.kind.chars().count() > MAX_FIELD_CHARS
+            || device.mac.as_deref().is_some_and(|mac| mac.len() != 17)
+            || device.names.len() > MAX_NAMES
+            || device.classes.len() > MAX_CLASSES
+            || device.ips.len() > MAX_IPS
+            || device
+                .names
+                .iter()
+                .chain(device.classes.iter())
+                .any(|field| field.chars().count() > MAX_FIELD_CHARS)
+        {
+            return Err("invalid normalized lan device");
         }
     }
     Ok(())
@@ -207,5 +236,65 @@ mod tests {
     #[should_panic(expected = "loopback-only")]
     fn refuses_a_routable_adapter() {
         let _ = WorldService::at_loopback("192.0.2.1:7667".parse().unwrap());
+    }
+
+    fn snapshot_with_lan_devices() -> WorldSnapshot {
+        let mut snapshot = WorldSnapshot::service_unavailable(
+            WorldDataSource::LiveProvider,
+            Timestamp::from_millis(1),
+        );
+        // The same entities `archie-worldd`'s graph produces for the fixture view.
+        let mut graph = archie_worldd::lan::LanGraph::new();
+        graph
+            .ingest(
+                include_bytes!("../../archie-worldd/tests/fixtures/unified_view_small_lan.json"),
+                Timestamp::from_millis(1_790_000_200_000),
+            )
+            .unwrap();
+        snapshot.lan_devices = graph.entities().cloned().collect();
+        snapshot
+    }
+
+    #[tokio::test]
+    async fn lan_devices_reach_the_display_from_the_graph() {
+        let expected = snapshot_with_lan_devices();
+        let address = serve_once(serde_json::to_vec(&expected).unwrap()).await;
+        let service = WorldService::at_loopback(address);
+        service.refresh().await;
+
+        let devices = service.lan_devices().await;
+        assert_eq!(devices.len(), 3);
+        let tv = &devices[0];
+        assert_eq!(tv.identity, "54:4e:f0:07:3d:e8");
+        assert_eq!(tv.kind, "mdns-roku");
+        assert_eq!(tv.origin, LanEntityOrigin::Measurement);
+        assert_eq!(
+            tv.sources.keys().copied().collect::<Vec<_>>(),
+            [
+                LanSource::LanScan,
+                LanSource::Netwatch,
+                LanSource::PassiveImport
+            ]
+        );
+        assert_eq!(tv.ingested_at, Timestamp::from_millis(1_790_000_200_000));
+        // The weak identity is visibly weak on the display side too.
+        assert_eq!(devices[2].identity, "ip:192.168.1.77");
+        assert_eq!(devices[2].mac, None);
+    }
+
+    #[tokio::test]
+    async fn an_oversized_lan_section_fails_the_whole_contract() {
+        let mut snapshot = snapshot_with_lan_devices();
+        let device = snapshot.lan_devices[0].clone();
+        while snapshot.lan_devices.len() <= archie_worldd::lan::MAX_LAN_DEVICES {
+            snapshot.lan_devices.push(device.clone());
+        }
+        let address = serve_once(serde_json::to_vec(&snapshot).unwrap()).await;
+        let service = WorldService::at_loopback(address);
+        service.refresh().await;
+
+        let current = service.current().await;
+        assert!(current.lan_devices.is_empty(), "never a partial graph");
+        assert_eq!(current.providers[0].condition, ProviderCondition::Degraded);
     }
 }

@@ -699,6 +699,12 @@ impl Runtime {
                 node_id: self.node_id().to_string(),
                 version: ARCHIEOS_VERSION.to_string(),
             },
+            ControlRequest::SentryPrepare { .. }
+            | ControlRequest::SentryApprove { .. }
+            | ControlRequest::SentryCancel
+            | ControlRequest::SentryReceipt { .. } => {
+                ControlResponse::error("authenticated local operator session required")
+            }
             ControlRequest::Status => ControlResponse::Status(Box::new(self.status_view().await)),
             ControlRequest::Boot => ControlResponse::Boot(Box::new(self.boot_report.clone())),
             ControlRequest::Metrics => ControlResponse::Metrics(Box::new(self.metrics.snapshot())),
@@ -744,6 +750,15 @@ impl Runtime {
                 },
                 Err(e) => ControlResponse::error(e.to_string()),
             },
+            ControlRequest::SentryPrinter { resource_id } => {
+                self.sentry_printer(&resource_id).await
+            }
+            ControlRequest::SentryHomeStatus { resource_id } => {
+                self.sentry_home_status(&resource_id).await
+            }
+            ControlRequest::SentryPrinterDoctor { resource_id } => {
+                self.sentry_printer_doctor(&resource_id).await
+            }
             ControlRequest::DeviceOperations { limit } => {
                 match self.state.recent_device_operations(limit.min(1000)) {
                     Ok(operations) => ControlResponse::DeviceOperations {

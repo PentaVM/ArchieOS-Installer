@@ -28,6 +28,9 @@ const DEFAULT_MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_MESSAGES: usize = 128;
 const MAX_CONTENT_BYTES: usize = 2 * 1024 * 1024;
 const MAX_VISION_IMAGE_BYTES: usize = 8 * 1024 * 1024;
+const DEFAULT_MAX_RETRIES: usize = 3;
+const BASE_RETRY_BACKOFF: Duration = Duration::from_millis(250);
+const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProviderFamily {
@@ -511,7 +514,10 @@ impl InferenceClient {
             return Err(RuntimeError::ProviderMismatch);
         }
         let response = self
-            .send(self.endpoint.url("chat/completions")?, Some(&request.body()))
+            .send(
+                self.endpoint.url("chat/completions")?,
+                Some(&request.body()),
+            )
             .await?;
         let status = response.status();
         if !status.is_success() {
@@ -564,14 +570,55 @@ impl InferenceClient {
         url: Url,
         body: Option<&T>,
     ) -> Result<reqwest::Response, RuntimeError> {
-        let mut request = match body {
-            Some(body) => self.client.post(url).json(body),
-            None => self.client.get(url),
-        };
-        if let Some(credential) = self.endpoint.credential()? {
-            request = request.bearer_auth(credential);
+        let mut attempt = 0;
+        loop {
+            let mut request = match body {
+                Some(body) => self.client.post(url.clone()).json(body),
+                None => self.client.get(url.clone()),
+            };
+            if let Some(credential) = self.endpoint.credential()? {
+                request = request.bearer_auth(credential);
+            }
+            let response = request.send().await?;
+
+            let status = response.status();
+            // Resilient retry for rate limiting (429) or transient provider outage (502, 503, 504)
+            if (status == StatusCode::TOO_MANY_REQUESTS
+                || status == StatusCode::SERVICE_UNAVAILABLE
+                || status == StatusCode::BAD_GATEWAY
+                || status == StatusCode::GATEWAY_TIMEOUT)
+                && attempt < DEFAULT_MAX_RETRIES
+            {
+                attempt += 1;
+                // Honor Retry-After header if provided by the upstream provider
+                let retry_after_secs = response
+                    .headers()
+                    .get(reqwest::header::RETRY_AFTER)
+                    .and_then(|h| h.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok());
+
+                let delay = if let Some(secs) = retry_after_secs {
+                    Duration::from_secs(secs.min(10))
+                } else {
+                    // Exponential backoff: base * 2^(attempt - 1) + jitter
+                    let mult = 1_u32.checked_shl(attempt as u32 - 1).unwrap_or(8);
+                    let exp_ms =
+                        (BASE_RETRY_BACKOFF.as_millis() as u64).saturating_mul(mult as u64);
+                    let jitter_ms = (std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .subsec_millis()
+                        % 100) as u64;
+                    let total_ms = exp_ms.saturating_add(jitter_ms);
+                    Duration::from_millis(total_ms).min(MAX_RETRY_BACKOFF)
+                };
+
+                tokio::time::sleep(delay).await;
+                continue;
+            }
+
+            return Ok(response);
         }
-        Ok(request.send().await?)
     }
 
     async fn bounded_body(&self, response: reqwest::Response) -> Result<Vec<u8>, RuntimeError> {
@@ -917,5 +964,42 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn transient_rate_limit_429_is_retried_automatically() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            // First attempt returns 429 Too Many Requests
+            if let Ok((mut socket, _)) = listener.accept().await {
+                let mut buf = [0; 1024];
+                let _ = socket.read(&mut buf).await;
+                let _ = socket
+                    .write_all(
+                        b"HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    )
+                    .await;
+            }
+            // Second attempt succeeds with 200 OK
+            if let Ok((mut socket, _)) = listener.accept().await {
+                let mut buf = [0; 1024];
+                let _ = socket.read(&mut buf).await;
+                let body = r#"{"data":[{"id":"test.model"}]}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = socket.write_all(response.as_bytes()).await;
+            }
+        });
+
+        let endpoint = ProviderEndpoint::nvidia_nim(&base_url, Locality::Local).unwrap();
+        let client = InferenceClient::new(endpoint).unwrap();
+        let models = client
+            .models()
+            .await
+            .expect("retry should recover on second attempt");
+        assert_eq!(models.data.len(), 1);
     }
 }

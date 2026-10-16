@@ -31,3 +31,4 @@ virtualbox-guest-utils-nox
 qt6-multimedia
 curl
 rsync
+wireshark-cli

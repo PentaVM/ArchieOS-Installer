@@ -22,11 +22,13 @@
 //!   is dropped, the turn is cancelled as an interruption, and what was not said stays in
 //!   the commit log, unsaid.
 
+use crate::asr::SpeechRecognizer;
+use crate::audio::{loudness, AudioError, VoiceActivity};
 #[cfg(feature = "pulse")]
 use crate::audio::{Microphone, Speaker};
-use crate::audio::{loudness, AudioError, VoiceActivity};
-use crate::listen::{after_utterance_within, names_archie, over_archie, Utterance};
-use crate::native::Ears;
+use crate::listen::{
+    after_utterance_within, is_acknowledgement, names_archie, over_archie, Utterance,
+};
 use crate::nemotron::{NemotronCognitive, TurnSource};
 use crate::voice::Speaks;
 use crate::wav::{read_wav, write_wav};
@@ -86,7 +88,9 @@ impl Hearing {
             // turn moving while no sound arrives, and advances no audio time.
             Self::Stream(frames) => match frames.recv_timeout(Duration::from_millis(40)) {
                 Ok(frame) => Ok(Some((frame, crate::audio::CAPTURE_RATE))),
-                Err(mpsc::RecvTimeoutError::Timeout) => Ok(Some((Vec::new(), crate::audio::CAPTURE_RATE))),
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    Ok(Some((Vec::new(), crate::audio::CAPTURE_RATE)))
+                }
                 Err(mpsc::RecvTimeoutError::Disconnected) => Ok(None),
             },
             Self::Recording {
@@ -164,10 +168,17 @@ impl StreamedVoice {
         Ok(())
     }
 
-    fn settle(&mut self) {
-        std::thread::sleep(self.ahead());
+    fn settle(&mut self, current: &AtomicU64, generation: u64) -> bool {
+        while self.ahead() > Duration::ZERO {
+            if current.load(Ordering::SeqCst) != generation {
+                self.hush();
+                return false;
+            }
+            std::thread::sleep(self.ahead().min(Duration::from_millis(20)));
+        }
         self.since = None;
         self.sent = 0;
+        true
     }
 
     fn hush(&mut self) {
@@ -202,21 +213,27 @@ impl Saying {
         }
     }
 
-    fn settle(&mut self) {
+    fn settle(&mut self, current: &AtomicU64, generation: u64) -> Result<bool, AudioError> {
+        if current.load(Ordering::SeqCst) != generation {
+            self.hush();
+            return Ok(false);
+        }
         match self {
             #[cfg(feature = "pulse")]
             Self::Speaker(speaker) => {
-                let _ = speaker.drain();
+                speaker.drain()?;
             }
-            Self::Stream(voice) => voice.settle(),
+            Self::Stream(voice) => return Ok(voice.settle(current, generation)),
             Self::Recording {
                 path,
                 samples,
                 rate,
             } => {
-                let _ = write_wav(path, samples, *rate);
+                write_wav(path, samples, *rate)
+                    .map_err(|error| AudioError::new("saving the voice", error.to_string()))?;
             }
         }
+        Ok(current.load(Ordering::SeqCst) == generation)
     }
 
     fn hush(&mut self) {
@@ -310,6 +327,7 @@ enum ToVoice {
     /// Said only while `generation` is still current.
     Say {
         generation: u64,
+        turn_id: String,
         sequence: u32,
         text: String,
         semantic_features: Vec<f32>,
@@ -324,6 +342,7 @@ enum FromVoice {
         text: String,
     },
     Spoke {
+        turn_id: String,
         sequence: u32,
         text: String,
         first_audio_ms: f64,
@@ -344,8 +363,8 @@ enum FromVoice {
 #[allow(clippy::too_many_arguments)]
 pub fn converse<S: TurnSource>(
     setup: &Setup,
-    ears: &Ears,
-    rehear: Option<&Ears>,
+    ears: &dyn SpeechRecognizer,
+    rehear: Option<&dyn SpeechRecognizer>,
     voice: Box<dyn Speaks>,
     mut hearing: Hearing,
     saying: Saying,
@@ -356,6 +375,10 @@ pub fn converse<S: TurnSource>(
     report: &mut dyn FnMut(Moment),
 ) -> Result<(), String> {
     let started = Instant::now();
+    let phrases: Vec<&str> = setup.phrases.iter().map(String::as_str).collect();
+    let mut listening = ears
+        .listen(&setup.listen_language, &phrases, setup.phrase_boost)
+        .map_err(|e| e.to_string())?;
     // Bumped on every interruption: audio of an older generation is never played.
     let generation = Arc::new(AtomicU64::new(0));
     let (to_voice, voice_inbox) = mpsc::channel::<ToVoice>();
@@ -368,10 +391,6 @@ pub fn converse<S: TurnSource>(
             .map_err(|error| error.to_string())?
     };
 
-    let phrases: Vec<&str> = setup.phrases.iter().map(String::as_str).collect();
-    let mut listening = ears
-        .listen(&setup.listen_language, &phrases, setup.phrase_boost)
-        .map_err(|e| e.to_string())?;
     publish(&signal(SignalKind::Listen {
         active: true,
         audio_envelope: 0.0,
@@ -384,9 +403,14 @@ pub fn converse<S: TurnSource>(
     let mut last_spoke: Option<Instant> = None;
     let mut turn_number = 0u32;
     let mut turn: Option<Answering> = None;
+    let mut deferred: Option<PendingUtterance> = None;
     let mut forced = false;
     let mut frames = 0u64;
     let mut was_busy = false;
+    let mut overlap_ms = 0u32;
+    let mut overlap_detected = false;
+    let mut yielded = false;
+    let mut overlap_words = String::new();
     let trace = std::env::var_os("ARCHIE_VOICE_TRACE").is_some();
     // Audio goes to the ears a model step at a time: asking after every 20 ms frame made
     // the same recogniser three times slower than the runtime's own benchmark.
@@ -400,7 +424,21 @@ pub fn converse<S: TurnSource>(
             let Some((frame, rate)) = hearing.frame().map_err(|e| e.to_string())? else {
                 // A recording ran out: let what is under way finish, then stop.
                 if turn.is_none() && speaking == 0 {
-                    break;
+                    if partial.is_empty() {
+                        turn = begin_pending(
+                            &mut deferred,
+                            setup,
+                            session,
+                            activity.quiet_ms(),
+                            last_spoke,
+                            &mut turn_number,
+                            context,
+                            report,
+                        )?;
+                    }
+                    if turn.is_none() {
+                        break;
+                    }
                 }
                 std::thread::sleep(Duration::from_millis(20));
                 pump_voice(&from_voice, session, &mut speaking, &mut last_spoke, report)?;
@@ -415,6 +453,18 @@ pub fn converse<S: TurnSource>(
                     &mut speaking,
                     report,
                 )?;
+                if turn.is_none() && speaking == 0 && partial.is_empty() {
+                    turn = begin_pending(
+                        &mut deferred,
+                        setup,
+                        session,
+                        activity.quiet_ms(),
+                        last_spoke,
+                        &mut turn_number,
+                        context,
+                        report,
+                    )?;
+                }
                 continue;
             };
             audio_ms += (frame.len() as u64 * 1000) / rate.max(1) as u64;
@@ -427,19 +477,8 @@ pub fn converse<S: TurnSource>(
             }
 
             let archie_talking = speaking > 0;
-            if archie_talking && setup.headphones && voiced {
-                let decision = session.floor_moved(&over_archie(&partial));
-                if decision.action == FloorAction::Yield {
-                    generation.fetch_add(1, Ordering::SeqCst);
-                    let _ = to_voice.send(ToVoice::Hush);
-                    report(Moment::Interrupted);
-                    publish(&signal(SignalKind::Think {
-                        active: false,
-                        trace_id: format!("voz-{turn_number}"),
-                        working_set: BTreeMap::new(),
-                    }));
-                    turn = None;
-                }
+            if !archie_talking || activity.quiet_ms() >= 300 {
+                overlap_words.clear();
             }
             // Closed ears while the voice plays through a speaker: otherwise it hears itself.
             if !archie_talking || setup.headphones {
@@ -473,22 +512,32 @@ pub fn converse<S: TurnSource>(
                     );
                 }
                 let text = heard.text.trim().to_string();
+                if archie_talking && !text.is_empty() {
+                    overlap_words = text.clone();
+                }
+                if text.len() > 16 * 1024 {
+                    partial.clear();
+                    deferred = None;
+                    report(Moment::Alert(
+                        "ASR transcript exceeds the conversation limit".into(),
+                    ));
+                    continue;
+                }
                 if !text.is_empty() && text != partial {
                     partial = text.clone();
                     last_words_ms = audio_ms;
                 }
                 if heard.is_final && !partial.is_empty() {
-                    let silence_ms = audio_ms.saturating_sub(last_words_ms) as u32;
                     let streamed = tidy(&std::mem::take(&mut partial));
                     let sound = std::mem::take(&mut utterance);
                     let said = match rehear {
                         Some(rehear) if sound.len() >= rate as usize / 4 => {
-                            match rehear.recognize(&sound, rate, None) {
-                                Ok(again) if !again.text.trim().is_empty() => {
+                            match rehear.recognize(&sound, rate) {
+                                Ok(again) if !again.trim().is_empty() => {
                                     if trace {
-                                        eprintln!("[rehear] {:?} (streamed {streamed:?})", again.text);
+                                        eprintln!("[rehear] {again:?} (streamed {streamed:?})");
                                     }
-                                    tidy(&again.text)
+                                    tidy(&again)
                                 }
                                 Ok(_) => streamed.clone(),
                                 Err(error) => {
@@ -504,53 +553,64 @@ pub fn converse<S: TurnSource>(
                         at_ms: started.elapsed().as_millis(),
                     });
                     forced = false;
-                    if turn.is_some() || speaking > 0 {
-                        // Busy answering the last thing: this one is heard, not answered.
+                    // Each completed acknowledgement stands alone, even while playback
+                    // prevents another utterance from being admitted to the floor.
+                    if is_acknowledgement(&said) {
                         continue;
                     }
-                    let mut state = after_utterance_within(
-                        &Utterance {
-                            text: said.clone(),
-                            final_by_recogniser: true,
-                            silence_ms: silence_ms.max(setup.end_after.as_millis() as u32),
-                        },
-                        last_spoke.map(|at| at.elapsed()),
-                        setup.follow_up,
-                    );
-                    if !names_archie(&said) && names_archie(&streamed) {
-                        // Either hearing of the name is enough: each misses it sometimes.
-                        state.response_utility = archie_speech::Probability::new(0.9);
-                        state.evidence.push(format!("the streaming ears heard the name: «{streamed}»"));
-                    }
-                    if setup.always {
-                        state.response_utility = archie_speech::Probability::new(0.9);
-                        state.evidence.push("answering everything: --always".into());
-                    }
-                    session.cognitive_mut().set_context(context());
-                    turn_number += 1;
-                    let id = format!("voz-{turn_number}");
-                    let decision = session
-                        .heard(&id, &said, &state)
-                        .map_err(|e| e.to_string())?;
-                    report(Moment::Floor {
-                        action: format!("{:?}", decision.action),
-                        reason: decision.reason.clone(),
-                        evidence: state.evidence.clone(),
-                    });
-                    if matches!(decision.budget, SpeechBudget::Sentence | SpeechBudget::Full) {
-                        publish(&signal(SignalKind::Think {
-                            active: true,
-                            trace_id: id.clone(),
-                            working_set: BTreeMap::new(),
-                        }));
-                        turn = Some(Answering {
-                            id,
-                            heard: said,
-                            budget: decision.budget,
-                            steps: 1,
-                            results: Vec::new(),
+                    let previous = deferred.take();
+                    let named = names_archie(&streamed)
+                        || previous.as_ref().is_some_and(|utterance| utterance.named);
+                    let joined = match previous {
+                        Some(previous) => format!("{} {said}", previous.text),
+                        None => said,
+                    };
+                    if joined.len() <= 16 * 1024 {
+                        deferred = Some(PendingUtterance {
+                            text: joined,
+                            named,
+                            last_action: None,
                         });
+                    } else {
+                        report(Moment::Alert(
+                            "unfinished utterance exceeds the conversation limit".into(),
+                        ));
                     }
+                }
+            }
+            // Give streaming ASR one bounded interval to distinguish a listening noise
+            // from a correction. Never repeatedly cancel the same playback generation.
+            if archie_talking && setup.headphones && voiced {
+                overlap_detected = true;
+                overlap_ms = overlap_ms
+                    .saturating_add((frame.len() as u64 * 1000 / rate.max(1) as u64) as u32);
+            } else {
+                overlap_ms = 0;
+            }
+            if !archie_talking {
+                overlap_detected = false;
+                yielded = false;
+            }
+            // ASR may finish after the overlapping sound has ended. The acoustic
+            // evidence belongs to this playback, not only to the current frame.
+            if archie_talking
+                && setup.headphones
+                && overlap_detected
+                && !yielded
+                && (!overlap_words.trim().is_empty() || overlap_ms >= 320)
+            {
+                let decision = session.floor_moved(&over_archie(&overlap_words));
+                if decision.action == FloorAction::Yield {
+                    yielded = true;
+                    generation.fetch_add(1, Ordering::SeqCst);
+                    let _ = to_voice.send(ToVoice::Hush);
+                    report(Moment::Interrupted);
+                    publish(&signal(SignalKind::Think {
+                        active: false,
+                        trace_id: format!("voz-{turn_number}"),
+                        working_set: BTreeMap::new(),
+                    }));
+                    turn = None;
                 }
             }
             // The ears did not call it, but the person has plainly stopped.
@@ -564,6 +624,18 @@ pub fn converse<S: TurnSource>(
             }
 
             pump_voice(&from_voice, session, &mut speaking, &mut last_spoke, report)?;
+            if turn.is_none() && speaking == 0 && partial.is_empty() {
+                turn = begin_pending(
+                    &mut deferred,
+                    setup,
+                    session,
+                    activity.quiet_ms(),
+                    last_spoke,
+                    &mut turn_number,
+                    context,
+                    report,
+                )?;
+            }
             advance(
                 session,
                 &mut turn,
@@ -590,8 +662,13 @@ pub fn converse<S: TurnSource>(
         Ok(())
     })();
 
+    if stop.load(Ordering::Relaxed) || result.is_err() {
+        generation.fetch_add(1, Ordering::SeqCst);
+        session.cancel(archie_speech::CancelReason::Shutdown);
+        let _ = to_voice.send(ToVoice::Hush);
+    }
     let _ = to_voice.send(ToVoice::Finish);
-    let _ = voice_thread.join();
+    let joined = voice_thread.join();
     publish(&signal(SignalKind::Listen {
         active: false,
         audio_envelope: 0.0,
@@ -601,6 +678,9 @@ pub fn converse<S: TurnSource>(
         trace_id: format!("voz-{turn_number}"),
         working_set: BTreeMap::new(),
     }));
+    if joined.is_err() {
+        return Err("the voice worker panicked".into());
+    }
     result
 }
 
@@ -611,6 +691,91 @@ struct Answering {
     budget: SpeechBudget,
     steps: usize,
     results: Vec<(String, String)>,
+    finished: bool,
+}
+
+struct PendingUtterance {
+    text: String,
+    named: bool,
+    last_action: Option<FloorAction>,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn begin_pending<S: TurnSource>(
+    pending: &mut Option<PendingUtterance>,
+    setup: &Setup,
+    session: &mut SpeechSession<NemotronCognitive<S>>,
+    quiet_ms: u32,
+    last_spoke: Option<Instant>,
+    turn_number: &mut u32,
+    context: &mut dyn FnMut() -> String,
+    report: &mut dyn FnMut(Moment),
+) -> Result<Option<Answering>, String> {
+    let Some(utterance) = pending.as_mut() else {
+        return Ok(None);
+    };
+    let mut state = after_utterance_within(
+        &Utterance {
+            text: utterance.text.clone(),
+            final_by_recogniser: true,
+            silence_ms: quiet_ms,
+        },
+        last_spoke.map(|at| at.elapsed()),
+        setup.follow_up,
+    );
+    if utterance.named || setup.always {
+        state.response_utility = archie_speech::Probability::new(0.9);
+        state.evidence.push(
+            if setup.always {
+                "answering everything: --always"
+            } else {
+                "the streaming ears heard the name"
+            }
+            .into(),
+        );
+    }
+    let decision = session.floor_decision(&state);
+    let id = format!("voz-{}", *turn_number + 1);
+    let decision = if matches!(decision.budget, SpeechBudget::Sentence | SpeechBudget::Full) {
+        session.cognitive_mut().set_context(context());
+        session
+            .heard(&id, &utterance.text, &state)
+            .map_err(|error| error.to_string())?
+    } else {
+        decision
+    };
+    if utterance.last_action != Some(decision.action) {
+        report(Moment::Floor {
+            action: format!("{:?}", decision.action),
+            reason: decision.reason.clone(),
+            evidence: state.evidence.clone(),
+        });
+        utterance.last_action = Some(decision.action);
+    }
+    if !matches!(decision.budget, SpeechBudget::Sentence | SpeechBudget::Full) {
+        if quiet_ms >= 300
+            && state.speaker_hold.get() < 0.5
+            && state.thought_completion.get() >= 0.5
+        {
+            *pending = None;
+        }
+        return Ok(None);
+    }
+    let utterance = pending.take().expect("pending utterance");
+    *turn_number += 1;
+    publish(&signal(SignalKind::Think {
+        active: true,
+        trace_id: id.clone(),
+        working_set: BTreeMap::new(),
+    }));
+    Ok(Some(Answering {
+        id,
+        heard: utterance.text,
+        budget: decision.budget,
+        steps: 1,
+        results: Vec::new(),
+        finished: false,
+    }))
 }
 
 /// Moves the answer along: what the model says goes to the voice, what it proposes is
@@ -630,6 +795,15 @@ fn advance<S: TurnSource>(
     let Some(answering) = turn.as_mut() else {
         return Ok(());
     };
+    if answering.finished {
+        if *speaking == 0 {
+            let heard_from_archie = session.heard_text();
+            let heard = answering.heard.clone();
+            session.cognitive_mut().remember(&heard, &heard_from_archie);
+            *turn = None;
+        }
+        return Ok(());
+    }
     for event in session.pump() {
         match event {
             SessionEvent::Speak(segment) => {
@@ -637,6 +811,7 @@ fn advance<S: TurnSource>(
                 let features = semantic_features(&segment.text);
                 let _ = to_voice.send(ToVoice::Say {
                     generation: generation.load(Ordering::SeqCst),
+                    turn_id: segment.turn_id,
                     sequence: segment.sequence,
                     text: segment.text,
                     semantic_features: features,
@@ -670,17 +845,13 @@ fn advance<S: TurnSource>(
                         .follow_up(id, &results, budget)
                         .map_err(|error| error.to_string())?;
                 } else {
-                    // Remembered as written for the voice; an interrupted turn ends before
-                    // this and is not remembered at all.
-                    let heard_from_archie = session.written_text();
-                    let heard = answering.heard.clone();
-                    session.cognitive_mut().remember(&heard, &heard_from_archie);
+                    // The model is done; history is committed only after playback receipts.
                     archie_orb::publish(&archie_orb::signal(SignalKind::Think {
                         active: false,
                         trace_id: answering.id.clone(),
                         working_set: BTreeMap::new(),
                     }));
-                    *turn = None;
+                    answering.finished = true;
                     return Ok(());
                 }
             }
@@ -689,9 +860,9 @@ fn advance<S: TurnSource>(
     Ok(())
 }
 
-fn pump_voice<S: TurnSource>(
+fn pump_voice<C: archie_speech::CognitiveModelAdapter>(
     from_voice: &Receiver<FromVoice>,
-    session: &mut SpeechSession<NemotronCognitive<S>>,
+    session: &mut SpeechSession<C>,
     speaking: &mut usize,
     last_spoke: &mut Option<Instant>,
     report: &mut dyn FnMut(Moment),
@@ -699,6 +870,7 @@ fn pump_voice<S: TurnSource>(
     loop {
         match from_voice.try_recv() {
             Ok(FromVoice::Spoke {
+                turn_id,
                 sequence,
                 text,
                 first_audio_ms,
@@ -707,7 +879,11 @@ fn pump_voice<S: TurnSource>(
             }) => {
                 *speaking = speaking.saturating_sub(1);
                 *last_spoke = Some(Instant::now());
-                if !stopped {
+                if !stopped
+                    && session
+                        .commit_log()
+                        .is_some_and(|log| log.turn_id() == turn_id)
+                {
                     // Only what was said to the end counts as heard.
                     let _ = session.spoke(sequence);
                 }
@@ -724,7 +900,8 @@ fn pump_voice<S: TurnSource>(
             }
             Ok(FromVoice::Failed(message)) => {
                 *speaking = speaking.saturating_sub(1);
-                report(Moment::Alert(message));
+                report(Moment::Alert(message.clone()));
+                return Err(message);
             }
             Err(TryRecvError::Empty) => return Ok(()),
             Err(TryRecvError::Disconnected) => return Err("the voice stopped".into()),
@@ -744,12 +921,14 @@ fn speak(
         match message {
             ToVoice::Say {
                 generation,
+                turn_id,
                 sequence,
                 text,
                 semantic_features,
             } => {
                 if current.load(Ordering::SeqCst) != generation {
                     let _ = outbox.send(FromVoice::Spoke {
+                        turn_id,
                         sequence,
                         text,
                         first_audio_ms: 0.0,
@@ -760,7 +939,7 @@ fn speak(
                 }
                 let _ = outbox.send(FromVoice::Began { text: text.clone() });
                 let mut failed = None;
-                let turn_id = format!("voz-{generation}-{sequence}");
+                let signal_turn_id = format!("{turn_id}-{sequence}");
                 let mut last_signal = Instant::now() - Duration::from_secs(1);
                 let mut published_active = false;
                 let result = voice.say(&text, &mut |pcm| {
@@ -787,7 +966,7 @@ fn speak(
                         };
                         publish(&signal(SignalKind::Speak {
                             active: true,
-                            turn_id: turn_id.clone(),
+                            turn_id: signal_turn_id.clone(),
                             semantic_features: semantic_features.clone(),
                             audio_envelope: envelope,
                         }));
@@ -799,29 +978,50 @@ fn speak(
                 if published_active {
                     publish(&signal(SignalKind::Speak {
                         active: false,
-                        turn_id,
+                        turn_id: signal_turn_id,
                         semantic_features: Vec::new(),
                         audio_envelope: 0.0,
                     }));
                 }
                 match (result, failed) {
                     (_, Some(error)) => {
+                        current.fetch_add(1, Ordering::SeqCst);
+                        saying.hush();
                         let _ = outbox.send(FromVoice::Failed(error));
+                        break;
                     }
                     (Ok(said), None) => {
-                        if said.stopped {
+                        let played = if said.stopped {
+                            Ok(false)
+                        } else {
+                            saying.settle(&current, generation)
+                        };
+                        let played = match played {
+                            Ok(played) => played,
+                            Err(error) => {
+                                current.fetch_add(1, Ordering::SeqCst);
+                                saying.hush();
+                                let _ = outbox.send(FromVoice::Failed(error.to_string()));
+                                break;
+                            }
+                        };
+                        if !played {
                             saying.hush();
                         }
                         let _ = outbox.send(FromVoice::Spoke {
+                            turn_id,
                             sequence,
                             text,
                             first_audio_ms: said.first_audio_ms,
                             audio_s: said.audio_s,
-                            stopped: said.stopped,
+                            stopped: !played,
                         });
                     }
                     (Err(error), None) => {
+                        current.fetch_add(1, Ordering::SeqCst);
+                        saying.hush();
                         let _ = outbox.send(FromVoice::Failed(error.to_string()));
+                        break;
                     }
                 }
             }
@@ -832,7 +1032,7 @@ fn speak(
             ToVoice::Finish => break,
         }
     }
-    saying.settle();
+    let _ = saying.settle(&current, current.load(Ordering::SeqCst));
 }
 
 /// What the ears wrote, as a sentence: a run of punctuation — the recogniser adds full
@@ -849,6 +1049,180 @@ pub fn tidy(text: &str) -> String {
         out.push(c);
     }
     out
+}
+
+#[cfg(test)]
+mod receipt_tests {
+    use super::*;
+    use archie_speech::{
+        FloorPolicy, ScriptedCognitiveModel, ScriptedReply, SessionPlan, SpeechCapabilities,
+    };
+
+    struct FirstFailure(Arc<AtomicU64>);
+    impl Speaks for FirstFailure {
+        fn sample_rate(&self) -> u32 {
+            16_000
+        }
+        fn say(
+            &mut self,
+            _: &str,
+            hear: &mut dyn FnMut(&[i16]) -> bool,
+        ) -> Result<crate::voice::Said, String> {
+            if self.0.fetch_add(1, Ordering::SeqCst) == 0 {
+                return Err("first segment failed".into());
+            }
+            ShortVoice.say("queued", hear)
+        }
+    }
+
+    #[test]
+    fn synthesis_failure_stops_prequeued_segments_without_waiting_for_main() {
+        let calls = Arc::new(AtomicU64::new(0));
+        let (send, inbox) = mpsc::channel();
+        for sequence in 0..2 {
+            send.send(ToVoice::Say {
+                generation: 0,
+                turn_id: "test".into(),
+                sequence,
+                text: "queued".into(),
+                semantic_features: Vec::new(),
+            })
+            .unwrap();
+        }
+        send.send(ToVoice::Finish).unwrap();
+        let (outbox, events) = mpsc::channel();
+        let (audio, playback) = mpsc::channel();
+        speak(
+            Box::new(FirstFailure(calls.clone())),
+            Saying::Stream(StreamedVoice::new(audio, 16_000)),
+            inbox,
+            outbox,
+            Arc::new(AtomicU64::new(0)),
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "the voice must fence the queue before notifying main"
+        );
+        assert!(events
+            .try_iter()
+            .any(|event| matches!(event, FromVoice::Failed(_))));
+        assert!(!playback
+            .try_iter()
+            .any(|event| matches!(event, VoiceOut::Audio(_))));
+    }
+
+    #[test]
+    fn stale_receipt_cannot_mark_the_new_turn_as_heard() {
+        let plan = SessionPlan {
+            language: "es".into(),
+            listener: SpeechCapabilities {
+                partial_transcript: true,
+                languages: vec!["es".into()],
+                ..Default::default()
+            },
+            voice: SpeechCapabilities {
+                accepts_external_response_text: true,
+                renders_external_response_verbatim: true,
+                languages: vec!["es".into()],
+                ..Default::default()
+            },
+        };
+        let mut session = SpeechSession::new(
+            plan,
+            FloorPolicy::default(),
+            ScriptedCognitiveModel::new(&["es"])
+                .answering("Archie, hola.", ScriptedReply::saying(&["Hola."])),
+        )
+        .unwrap();
+        let state = after_utterance_within(
+            &Utterance {
+                text: "Archie, hola.".into(),
+                final_by_recogniser: true,
+                silence_ms: 800,
+            },
+            None,
+            Duration::from_secs(10),
+        );
+        session.heard("old", "Archie, hola.", &state).unwrap();
+        session.pump();
+        session.heard("new", "Archie, hola.", &state).unwrap();
+        session.pump();
+        let (send, recv) = mpsc::channel();
+        send.send(FromVoice::Spoke {
+            turn_id: "old".into(),
+            sequence: 0,
+            text: "Hola.".into(),
+            first_audio_ms: 0.0,
+            audio_s: 0.1,
+            stopped: false,
+        })
+        .unwrap();
+        pump_voice(&recv, &mut session, &mut 1, &mut None, &mut |_| {}).unwrap();
+        assert!(
+            session.heard_text().is_empty(),
+            "sequence zero belongs to a different turn"
+        );
+    }
+
+    struct ShortVoice;
+    impl Speaks for ShortVoice {
+        fn sample_rate(&self) -> u32 {
+            16_000
+        }
+        fn say(
+            &mut self,
+            _: &str,
+            hear: &mut dyn FnMut(&[i16]) -> bool,
+        ) -> Result<crate::voice::Said, String> {
+            Ok(crate::voice::Said {
+                sample_rate: 16_000,
+                audio_s: 0.04,
+                elapsed_s: 0.0,
+                first_audio_ms: 0.0,
+                stopped: !hear(&[100; 640]),
+            })
+        }
+    }
+
+    #[test]
+    fn playback_receipt_waits_for_the_sink_not_only_synthesis() {
+        let (input, inbox) = mpsc::channel();
+        let (output, events) = mpsc::channel();
+        let (audio, _played) = mpsc::channel();
+        input
+            .send(ToVoice::Say {
+                generation: 0,
+                turn_id: "t".into(),
+                sequence: 0,
+                text: "Hola.".into(),
+                semantic_features: vec![],
+            })
+            .unwrap();
+        input.send(ToVoice::Finish).unwrap();
+        let at = Instant::now();
+        let worker = std::thread::spawn(move || {
+            speak(
+                Box::new(ShortVoice),
+                Saying::Stream(StreamedVoice::new(audio, 16_000)),
+                inbox,
+                output,
+                Arc::new(AtomicU64::new(0)),
+            )
+        });
+        let mut receipt = None;
+        while let Ok(event) = events.recv_timeout(Duration::from_secs(2)) {
+            if matches!(event, FromVoice::Spoke { .. }) {
+                receipt = Some(at.elapsed());
+                break;
+            }
+        }
+        worker.join().unwrap();
+        assert!(
+            receipt.unwrap() >= Duration::from_millis(30),
+            "the queued tail was not played yet"
+        );
+    }
 }
 
 #[cfg(test)]

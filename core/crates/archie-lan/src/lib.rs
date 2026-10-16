@@ -25,6 +25,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod audit;
+pub mod capture;
 pub mod classify;
 pub mod http;
 pub mod inventory;
@@ -42,7 +44,9 @@ use std::net::{IpAddr, Ipv4Addr};
 pub fn is_lan(address: IpAddr) -> bool {
     match address {
         IpAddr::V4(v4) => is_lan_v4(v4),
-        IpAddr::V6(v6) => (v6.segments()[0] & 0xffc0) == 0xfe80 || (v6.segments()[0] & 0xfe00) == 0xfc00,
+        IpAddr::V6(v6) => {
+            (v6.segments()[0] & 0xffc0) == 0xfe80 || (v6.segments()[0] & 0xfe00) == 0xfc00
+        }
     }
 }
 
@@ -62,7 +66,9 @@ pub fn lan_address() -> std::io::Result<Ipv4Addr> {
     socket.connect((Ipv4Addr::new(192, 0, 2, 1), 9))?;
     match socket.local_addr()?.ip() {
         IpAddr::V4(address) if is_lan_v4(address) => Ok(address),
-        other => Err(std::io::Error::other(format!("this machine's route out is {other}, which is not a local network"))),
+        other => Err(std::io::Error::other(format!(
+            "this machine's route out is {other}, which is not a local network"
+        ))),
     }
 }
 
@@ -72,10 +78,24 @@ mod tests {
 
     #[test]
     fn only_the_owners_own_network_counts_as_the_lan() {
-        for inside in ["192.168.1.20", "10.0.0.7", "172.16.4.1", "169.254.10.2", "fe80::1", "fd12:3456::9"] {
+        for inside in [
+            "192.168.1.20",
+            "10.0.0.7",
+            "172.16.4.1",
+            "169.254.10.2",
+            "fe80::1",
+            "fd12:3456::9",
+        ] {
             assert!(is_lan(inside.parse().unwrap()), "{inside}");
         }
-        for outside in ["8.8.8.8", "172.32.0.1", "127.0.0.1", "100.64.0.1", "2001:4860::8888", "::1"] {
+        for outside in [
+            "8.8.8.8",
+            "172.32.0.1",
+            "127.0.0.1",
+            "100.64.0.1",
+            "2001:4860::8888",
+            "::1",
+        ] {
             assert!(!is_lan(outside.parse().unwrap()), "{outside}");
         }
     }

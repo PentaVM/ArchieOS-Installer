@@ -75,7 +75,10 @@ impl Config {
         let window = NightWindow::parse(&self.night_start, &self.night_end)
             .ok_or("night_start and night_end are times of day, such as \"02:00\"")?;
         Ok(Plan {
-            gate: Gate { window, idle_seconds: self.idle_minutes * 60 },
+            gate: Gate {
+                window,
+                idle_seconds: self.idle_minutes * 60,
+            },
             jobs_dir: self.jobs_dir.clone(),
             resume_list: self.state_dir.join("resume.json"),
             marker: self.state_dir.join("cycle"),
@@ -124,7 +127,13 @@ impl Machine {
 /// (busy, total) from the first line of /proc/stat.
 fn cpu_jiffies() -> Option<(u64, u64)> {
     let stat = std::fs::read_to_string("/proc/stat").ok()?;
-    let fields: Vec<u64> = stat.lines().next()?.split_whitespace().skip(1).filter_map(|f| f.parse().ok()).collect();
+    let fields: Vec<u64> = stat
+        .lines()
+        .next()?
+        .split_whitespace()
+        .skip(1)
+        .filter_map(|f| f.parse().ok())
+        .collect();
     let total: u64 = fields.iter().sum();
     // idle and iowait are the fourth and fifth fields.
     let idle = fields.get(3)? + fields.get(4).copied().unwrap_or(0);
@@ -132,7 +141,9 @@ fn cpu_jiffies() -> Option<(u64, u64)> {
 }
 
 fn ram_used_bytes() -> u64 {
-    let Ok(meminfo) = std::fs::read_to_string("/proc/meminfo") else { return 0 };
+    let Ok(meminfo) = std::fs::read_to_string("/proc/meminfo") else {
+        return 0;
+    };
     let kilobytes = |name: &str| {
         meminfo
             .lines()
@@ -147,22 +158,33 @@ fn ram_used_bytes() -> u64 {
 /// (percent busy, bytes of memory used) of the first NVIDIA GPU; zeros without one.
 fn gpu() -> (u8, u64) {
     let output = Command::new("nvidia-smi")
-        .args(["--query-gpu=utilization.gpu,memory.used", "--format=csv,noheader,nounits"])
+        .args([
+            "--query-gpu=utilization.gpu,memory.used",
+            "--format=csv,noheader,nounits",
+        ])
         .stderr(Stdio::null())
         .output();
     let Ok(output) = output else { return (0, 0) };
     let text = String::from_utf8_lossy(&output.stdout);
-    let mut fields = text.lines().next().unwrap_or("").split(',').map(|f| f.trim().parse::<u64>().unwrap_or(0));
+    let mut fields = text
+        .lines()
+        .next()
+        .unwrap_or("")
+        .split(',')
+        .map(|f| f.trim().parse::<u64>().unwrap_or(0));
     let percent = fields.next().unwrap_or(0).min(100) as u8;
     (percent, fields.next().unwrap_or(0) * 1024 * 1024)
 }
 
 /// Whether the machine runs from the wall. A machine with no battery does.
 fn on_mains() -> bool {
-    let Ok(supplies) = std::fs::read_dir("/sys/class/power_supply") else { return true };
+    let Ok(supplies) = std::fs::read_dir("/sys/class/power_supply") else {
+        return true;
+    };
     let mut battery = false;
     for supply in supplies.flatten() {
-        let read = |name: &str| std::fs::read_to_string(supply.path().join(name)).unwrap_or_default();
+        let read =
+            |name: &str| std::fs::read_to_string(supply.path().join(name)).unwrap_or_default();
         match read("type").trim() {
             "Mains" | "USB" if read("online").trim() == "1" => return true,
             "Battery" => battery = true,
@@ -215,7 +237,9 @@ impl World for Machine {
     fn activity(&mut self, idle_seconds: u64) -> Activity {
         let (gpu_percent, vram_bytes) = gpu();
         Activity {
-            updated_unix: SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs()),
+            updated_unix: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs()),
             cpu_percent: self.cpu_percent(),
             ram_bytes: ram_used_bytes(),
             vram_bytes,
@@ -226,12 +250,16 @@ impl World for Machine {
     }
 
     fn run(&mut self, words: &[String]) -> Result<i32, String> {
-        let status = command(words)?.status().map_err(|e| format!("{}: {e}", words[0]))?;
+        let status = command(words)?
+            .status()
+            .map_err(|e| format!("{}: {e}", words[0]))?;
         Ok(status.code().unwrap_or(-1))
     }
 
     fn start(&mut self, words: &[String]) -> Result<Box<dyn Running>, String> {
-        let child = command(words)?.spawn().map_err(|e| format!("{}: {e}", words[0]))?;
+        let child = command(words)?
+            .spawn()
+            .map_err(|e| format!("{}: {e}", words[0]))?;
         Ok(Box::new(Process(child)))
     }
 
@@ -275,7 +303,10 @@ fn attempt(plan: &Plan, machine: &mut Machine, say_waiting: bool) -> bool {
             in_order &= report.stuck.is_empty() && report.windows_deleted;
             print("rem_cycle", &report);
         }
-        Err(wait) if say_waiting => println!("{}", serde_json::json!({"event": "rem_waiting", "why": wait.to_string()})),
+        Err(wait) if say_waiting => println!(
+            "{}",
+            serde_json::json!({"event": "rem_waiting", "why": wait.to_string()})
+        ),
         Err(_) => {}
     }
     in_order
@@ -290,7 +321,8 @@ fn main() -> ExitCode {
         }
         _ => PathBuf::from(DEFAULT_CONFIG),
     };
-    let prepared = Config::load(&config_path).and_then(|config| config.plan().map(|plan| (config, plan)));
+    let prepared =
+        Config::load(&config_path).and_then(|config| config.plan().map(|plan| (config, plan)));
     let (config, plan) = match prepared {
         Ok(prepared) => prepared,
         Err(error) => {

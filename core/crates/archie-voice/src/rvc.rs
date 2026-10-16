@@ -54,7 +54,10 @@ pub struct Tuning {
 
 impl Default for Tuning {
     fn default() -> Self {
-        Self { key: 0.0, index_rate: 0.0 }
+        Self {
+            key: 0.0,
+            index_rate: 0.0,
+        }
     }
 }
 
@@ -94,7 +97,8 @@ impl RvcVoice {
     pub fn load(manifest: &Path, tuning: Tuning, threads: usize) -> Result<Self, String> {
         let folder: PathBuf = manifest.parent().map(Path::to_path_buf).unwrap_or_default();
         let described: Manifest = serde_json::from_str(
-            &std::fs::read_to_string(manifest).map_err(|e| format!("{}: {e}", manifest.display()))?,
+            &std::fs::read_to_string(manifest)
+                .map_err(|e| format!("{}: {e}", manifest.display()))?,
         )
         .map_err(|e| format!("{}: {e}", manifest.display()))?;
         let index_path = folder.join(format!("{}_index.onnx", described.name));
@@ -131,7 +135,12 @@ impl RvcVoice {
         }
 
         // Pitch: RMVPE's mel, padded to a multiple of 32 frames, then its salience.
-        let mel = run1(&mut self.mel, "audio", vec![1, padded.len() as i64], padded.clone())?;
+        let mel = run1(
+            &mut self.mel,
+            "audio",
+            vec![1, padded.len() as i64],
+            padded.clone(),
+        )?;
         let (mel_shape, mel_data) = mel;
         let (bins, mel_frames) = (mel_shape[1] as usize, mel_shape[2] as usize);
         let padded_frames = 32 * ((mel_frames - 1) / 32 + 1);
@@ -149,21 +158,37 @@ impl RvcVoice {
         )?;
         let columns = salience_shape[2] as usize;
         let mut f0: Vec<f32> = (0..mel_frames.min(frames))
-            .map(|frame| decode_salience(&salience[frame * columns..(frame + 1) * columns], m.rmvpe_threshold))
+            .map(|frame| {
+                decode_salience(
+                    &salience[frame * columns..(frame + 1) * columns],
+                    m.rmvpe_threshold,
+                )
+            })
             .collect();
         f0.resize(frames, 0.0);
         fill_unvoiced(&mut f0);
         let shift = 2f32.powf(self.tuning.key / 12.0);
         f0.iter_mut().for_each(|hz| *hz *= shift);
-        let pitch: Vec<i64> = f0.iter().map(|hz| coarse_pitch(*hz, m.f0_min, m.f0_max)).collect();
+        let pitch: Vec<i64> = f0
+            .iter()
+            .map(|hz| coarse_pitch(*hz, m.f0_min, m.f0_max))
+            .collect();
 
         // Content: ContentVec at 50 frames a second, drawn toward the voice's own features.
-        let (feature_shape, mut features) =
-            run1(&mut self.content, "audio", vec![1, padded.len() as i64], padded)?;
+        let (feature_shape, mut features) = run1(
+            &mut self.content,
+            "audio",
+            vec![1, padded.len() as i64],
+            padded,
+        )?;
         let (content_frames, width) = (feature_shape[1] as usize, feature_shape[2] as usize);
         if let Some(index) = &mut self.index {
-            let (_, retrieved) =
-                run1(index, "features", vec![content_frames as i64, width as i64], features.clone())?;
+            let (_, retrieved) = run1(
+                index,
+                "features",
+                vec![content_frames as i64, width as i64],
+                features.clone(),
+            )?;
             let rate = self.tuning.index_rate;
             for (feature, near) in features.iter_mut().zip(retrieved) {
                 *feature = rate * near + (1.0 - rate) * *feature;
@@ -176,7 +201,9 @@ impl RvcVoice {
             phone.extend_from_slice(&features[source * width..(source + 1) * width]);
         }
 
-        let noise: Vec<f32> = (0..m.inter_channels * length).map(|_| self.noise.normal()).collect();
+        let noise: Vec<f32> = (0..m.inter_channels * length)
+            .map(|_| self.noise.normal())
+            .collect();
         let inputs = ort::inputs![
             "phone" => Tensor::from_array((vec![1i64, length as i64, width as i64], phone)).map_err(|e| e.to_string())?,
             "phone_lengths" => Tensor::from_array((vec![1i64], vec![length as i64])).map_err(|e| e.to_string())?,
@@ -185,10 +212,19 @@ impl RvcVoice {
             "sid" => Tensor::from_array((vec![1i64], vec![0i64])).map_err(|e| e.to_string())?,
             "noise" => Tensor::from_array((vec![1i64, m.inter_channels as i64, length as i64], noise)).map_err(|e| e.to_string())?,
         ];
-        let outputs = self.synthesizer.run(inputs).map_err(|e| format!("synthesizer: {e}"))?;
-        let (_, voice) = outputs["audio"].try_extract_tensor::<f32>().map_err(|e| e.to_string())?;
+        let outputs = self
+            .synthesizer
+            .run(inputs)
+            .map_err(|e| format!("synthesizer: {e}"))?;
+        let (_, voice) = outputs["audio"]
+            .try_extract_tensor::<f32>()
+            .map_err(|e| e.to_string())?;
         let trim = m.sample_rate as usize;
-        let mut voice = if voice.len() > 2 * trim { voice[trim..voice.len() - trim].to_vec() } else { Vec::new() };
+        let mut voice = if voice.len() > 2 * trim {
+            voice[trim..voice.len() - trim].to_vec()
+        } else {
+            Vec::new()
+        };
         let peak = voice.iter().fold(0.0f32, |p, s| p.max(s.abs()));
         if peak > 0.99 {
             voice.iter_mut().for_each(|s| *s *= 0.99 / peak);
@@ -198,10 +234,19 @@ impl RvcVoice {
 }
 
 /// Runs a model of one input and takes its first output.
-fn run1(session: &mut Session, name: &str, shape: Vec<i64>, data: Vec<f32>) -> Result<(Vec<i64>, Vec<f32>), String> {
+fn run1(
+    session: &mut Session,
+    name: &str,
+    shape: Vec<i64>,
+    data: Vec<f32>,
+) -> Result<(Vec<i64>, Vec<f32>), String> {
     let tensor = Tensor::from_array((shape, data)).map_err(|e| e.to_string())?;
-    let outputs = session.run(ort::inputs![name => tensor]).map_err(|e| e.to_string())?;
-    let (shape, data) = outputs[0].try_extract_tensor::<f32>().map_err(|e| e.to_string())?;
+    let outputs = session
+        .run(ort::inputs![name => tensor])
+        .map_err(|e| e.to_string())?;
+    let (shape, data) = outputs[0]
+        .try_extract_tensor::<f32>()
+        .map_err(|e| e.to_string())?;
     Ok((shape.iter().copied().collect(), data.to_vec()))
 }
 
@@ -234,7 +279,11 @@ pub fn resample(input: &[f32], from: u32, to: u32) -> Vec<f32> {
                 sum += *sample as f64 * tap;
                 weight += tap;
             }
-            (if weight.abs() > 1e-9 { sum / weight } else { 0.0 }) as f32
+            (if weight.abs() > 1e-9 {
+                sum / weight
+            } else {
+                0.0
+            }) as f32
         })
         .collect()
 }
@@ -248,7 +297,11 @@ pub fn high_pass(audio: &mut [f32], cutoff: f32, rate: u32) {
         let alpha = w.sin() / (2.0 * q);
         let cos = w.cos();
         let a0 = 1.0 + alpha;
-        let b = [(1.0 + cos) / 2.0 / a0, -(1.0 + cos) / a0, (1.0 + cos) / 2.0 / a0];
+        let b = [
+            (1.0 + cos) / 2.0 / a0,
+            -(1.0 + cos) / a0,
+            (1.0 + cos) / 2.0 / a0,
+        ];
         let a = [-2.0 * cos / a0, (1.0 - alpha) / a0];
         for pass in 0..2 {
             let (mut x1, mut x2, mut y1, mut y2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
@@ -293,7 +346,10 @@ pub fn decode_salience(salience: &[f32], threshold: f32) -> f32 {
     let (peak, max) = salience
         .iter()
         .enumerate()
-        .fold((0usize, f32::MIN), |best, (i, v)| if *v > best.1 { (i, *v) } else { best });
+        .fold(
+            (0usize, f32::MIN),
+            |best, (i, v)| if *v > best.1 { (i, *v) } else { best },
+        );
     if max <= threshold {
         return 0.0;
     }
@@ -401,7 +457,10 @@ impl<V: Speaks> Speaks for ConvertedVoice<V> {
             // than not at all.
             Err(_) => sentence,
         };
-        let pcm: Vec<i16> = converted.iter().map(|s| (s * 32767.0).clamp(-32768.0, 32767.0) as i16).collect();
+        let pcm: Vec<i16> = converted
+            .iter()
+            .map(|s| (s * 32767.0).clamp(-32768.0, 32767.0) as i16)
+            .collect();
         let first_audio_ms = started.elapsed().as_secs_f64() * 1000.0;
         let mut stopped = false;
         for piece in pcm.chunks((rate / 10).max(1) as usize) {
@@ -438,9 +497,16 @@ mod tests {
     fn resampling_keeps_what_fits_and_drops_what_would_fold_back() {
         let kept = resample(&tone(440.0, 1.0, 22050), 22050, 16000);
         assert_eq!(kept.len(), 16000);
-        assert!((rms(&kept[1000..15000]) - 0.3536).abs() < 0.01, "{}", rms(&kept));
+        assert!(
+            (rms(&kept[1000..15000]) - 0.3536).abs() < 0.01,
+            "{}",
+            rms(&kept)
+        );
         let folded = resample(&tone(10_000.0, 1.0, 22050), 22050, 16000);
-        assert!(rms(&folded[1000..15000]) < 0.02, "10 kHz must not alias to 6 kHz");
+        assert!(
+            rms(&folded[1000..15000]) < 0.02,
+            "10 kHz must not alias to 6 kHz"
+        );
     }
 
     #[test]
@@ -459,22 +525,30 @@ mod tests {
     fn a_recording_is_converted_into_the_voice() {
         let env = |name: &str| std::env::var(name).unwrap_or_else(|_| panic!("{name} is not set"));
         init_runtime(Path::new(&env("ORT_DYLIB_PATH"))).unwrap();
-        let mut voice = RvcVoice::load(Path::new(&env("ARCHIE_RVC_VOICE")), Tuning::default(), 4).unwrap();
+        let mut voice =
+            RvcVoice::load(Path::new(&env("ARCHIE_RVC_VOICE")), Tuning::default(), 4).unwrap();
         let (audio, rate) = crate::wav::read_wav(Path::new(&env("ARCHIE_RVC_WAV"))).unwrap();
         let started = Instant::now();
         let converted = voice.convert(&audio, rate).unwrap();
         let seconds_in = audio.len() as f32 / rate as f32;
         let seconds_out = converted.len() as f32 / voice.sample_rate() as f32;
-        eprintln!("{seconds_in:.2} s in, {seconds_out:.2} s out, in {:.2} s", started.elapsed().as_secs_f32());
+        eprintln!(
+            "{seconds_in:.2} s in, {seconds_out:.2} s out, in {:.2} s",
+            started.elapsed().as_secs_f32()
+        );
         assert!((seconds_in - seconds_out).abs() < 0.05);
         assert!(converted.iter().all(|s| s.is_finite()) && rms(&converted) > 0.01);
         let pcm: Vec<i16> = converted.iter().map(|s| (s * 32767.0) as i16).collect();
-        crate::wav::write_wav(Path::new(&env("ARCHIE_RVC_OUT")), &pcm, voice.sample_rate()).unwrap();
+        crate::wav::write_wav(Path::new(&env("ARCHIE_RVC_OUT")), &pcm, voice.sample_rate())
+            .unwrap();
     }
 
     #[test]
     fn reflect_padding_mirrors_like_numpy() {
-        assert_eq!(reflect_pad(&[1.0, 2.0, 3.0], 2), vec![3.0, 2.0, 1.0, 2.0, 3.0, 2.0, 1.0]);
+        assert_eq!(
+            reflect_pad(&[1.0, 2.0, 3.0], 2),
+            vec![3.0, 2.0, 1.0, 2.0, 3.0, 2.0, 1.0]
+        );
     }
 
     #[test]
@@ -511,6 +585,9 @@ mod tests {
         let draws: Vec<f32> = (0..20000).map(|_| noise.normal()).collect();
         let mean = draws.iter().sum::<f32>() / draws.len() as f32;
         let variance = draws.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / draws.len() as f32;
-        assert!(mean.abs() < 0.03 && (variance - 1.0).abs() < 0.05, "{mean} {variance}");
+        assert!(
+            mean.abs() < 0.03 && (variance - 1.0).abs() < 0.05,
+            "{mean} {variance}"
+        );
     }
 }

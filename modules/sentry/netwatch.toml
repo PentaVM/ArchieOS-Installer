@@ -1,0 +1,25 @@
+# Sentry's continuous audit of the traffic on the owner's network: which devices are on
+# it, what names they ask for, whom they talk to outside, and the few things in that worth
+# telling the owner (a new device, another device claiming the router's address, a scan,
+# a clear-text login, a DNS question that carries data).
+#
+# It listens. It reads addresses, ports and names from each frame and no payload, and it
+# changes nothing on the network or on any device. It runs as the system unit
+# archie-netwatch.service, which holds the capture privilege, once the owner has named
+# the interface in /etc/archie/netwatch.env.
+id = "sentry.netwatch"
+version = "0.1.0"
+description = "Continuous network audit: per-device traffic record and alerts from live capture"
+priority = 120
+
+required_capabilities = ["compute.cpu", "network.lan"]
+dependencies = ["core.archie"]
+permissions = ["network-lan", "read-telemetry"]
+
+[worker]
+kind = "process"
+command = "/usr/bin/archie-netwatch"
+args = ["report", "--state-dir", "/var/lib/archie/netwatch"]
+
+[health_check]
+kind = "none"

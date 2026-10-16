@@ -19,13 +19,19 @@ const TXT: u16 = 16;
 const SRV: u16 = 33;
 /// The most kinds of service one browse follows: a device may not make it ask forever.
 const MAX_KINDS: usize = 64;
+/// More hosts than a home or office network holds; past it, new ones are not learned.
+const MAX_HOSTS: usize = 1024;
+const MAX_SERVICES: usize = 64;
 
 /// What one record says.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Data {
     /// `name` points at this: a kind of service, or one instance of a kind.
     Pointer(String),
-    Service { target: String, port: u16 },
+    Service {
+        target: String,
+        port: u16,
+    },
     Text(Vec<String>),
     Other,
 }
@@ -64,7 +70,12 @@ fn name_at(packet: &[u8], mut at: usize) -> Option<(String, usize)> {
             continue;
         }
         let label = packet.get(at + 1..at + 1 + length)?;
-        labels.push(String::from_utf8_lossy(label).chars().filter(|c| !c.is_control()).collect());
+        labels.push(
+            String::from_utf8_lossy(label)
+                .chars()
+                .filter(|c| !c.is_control())
+                .collect(),
+        );
         if labels.iter().map(String::len).sum::<usize>() > 255 {
             return None;
         }
@@ -75,36 +86,58 @@ fn name_at(packet: &[u8], mut at: usize) -> Option<(String, usize)> {
 /// Every record in a response, as (the name it is about, what it says). A packet that is
 /// cut short or malformed gives what was read before the damage.
 pub fn records(packet: &[u8]) -> Vec<(String, Data)> {
-    let count = |at: usize| packet.get(at..at + 2).map_or(0, |b| u16::from_be_bytes([b[0], b[1]]) as usize);
+    let count = |at: usize| {
+        packet
+            .get(at..at + 2)
+            .map_or(0, |b| u16::from_be_bytes([b[0], b[1]]) as usize)
+    };
     let mut out = Vec::new();
     if packet.len() < 12 || packet[2] & 0x80 == 0 {
         return out; // too short, or a question rather than an answer
     }
     let mut at = 12;
     for _ in 0..count(4) {
-        let Some((_, next)) = name_at(packet, at) else { return out };
+        let Some((_, next)) = name_at(packet, at) else {
+            return out;
+        };
         at = next + 4;
     }
     for _ in 0..(count(6) + count(8) + count(10)).min(512) {
-        let Some((name, next)) = name_at(packet, at) else { return out };
-        let Some(head) = packet.get(next..next + 10) else { return out };
+        let Some((name, next)) = name_at(packet, at) else {
+            return out;
+        };
+        let Some(head) = packet.get(next..next + 10) else {
+            return out;
+        };
         let kind = u16::from_be_bytes([head[0], head[1]]);
         let length = u16::from_be_bytes([head[8], head[9]]) as usize;
         let start = next + 10;
-        let Some(data) = packet.get(start..start + length) else { return out };
+        let Some(data) = packet.get(start..start + length) else {
+            return out;
+        };
         let said = match kind {
             PTR => name_at(packet, start).map_or(Data::Other, |(target, _)| Data::Pointer(target)),
-            SRV if length > 6 => name_at(packet, start + 6).map_or(Data::Other, |(target, _)| Data::Service {
-                target,
-                port: u16::from_be_bytes([data[4], data[5]]),
-            }),
+            SRV if length > 6 => {
+                name_at(packet, start + 6).map_or(Data::Other, |(target, _)| Data::Service {
+                    target,
+                    port: u16::from_be_bytes([data[4], data[5]]),
+                })
+            }
             TXT => {
                 let mut strings = Vec::new();
                 let mut cursor = 0;
                 while let Some(&size) = data.get(cursor) {
-                    let Some(text) = data.get(cursor + 1..cursor + 1 + size as usize) else { break };
+                    let Some(text) = data.get(cursor + 1..cursor + 1 + size as usize) else {
+                        break;
+                    };
                     if !text.is_empty() {
-                        strings.push(String::from_utf8_lossy(text).chars().filter(|c| !c.is_control()).take(200).collect());
+                        strings.push(
+                            String::from_utf8_lossy(text)
+                                .chars()
+                                .filter(|c| !c.is_control())
+                                .take(200)
+                                .collect(),
+                        );
                     }
                     cursor += 1 + size as usize;
                 }
@@ -134,7 +167,8 @@ fn instance_of(name: &str) -> Option<(String, String)> {
     let name = name.strip_suffix(".local").unwrap_or(name);
     let at = name.find("._")?;
     let (instance, kind) = (&name[..at], &name[at + 1..]);
-    (!instance.is_empty() && !instance.starts_with('_')).then(|| (instance.to_string(), kind.to_string()))
+    (!instance.is_empty() && !instance.starts_with('_'))
+        .then(|| (instance.to_string(), kind.to_string()))
 }
 
 /// Folds one host's records into what is known of it, and returns the kinds of service
@@ -146,19 +180,27 @@ pub fn learn(host: &mut Host, packet: &[u8]) -> Vec<String> {
             Data::Pointer(target) if name == META => kinds.push(target),
             Data::Pointer(target) => {
                 if let Some((instance, kind)) = instance_of(&target) {
-                    host.services.insert(kind);
+                    if host.services.len() < MAX_SERVICES {
+                        host.services.insert(kind);
+                    }
                     host.name.get_or_insert(instance);
                 }
             }
             Data::Service { .. } => {
                 if let Some((_, kind)) = instance_of(&name) {
-                    host.services.insert(kind);
+                    if host.services.len() < MAX_SERVICES {
+                        host.services.insert(kind);
+                    }
                 }
             }
             Data::Text(strings) => {
                 for (key, value) in strings.iter().filter_map(|s| s.split_once('=')) {
-                    if matches!(key, "md" | "fn" | "ty" | "model" | "am" | "manufacturer") && !value.is_empty() {
-                        host.facts.entry(key.to_string()).or_insert_with(|| value.to_string());
+                    if matches!(key, "md" | "fn" | "ty" | "model" | "am" | "manufacturer")
+                        && !value.is_empty()
+                    {
+                        host.facts
+                            .entry(key.to_string())
+                            .or_insert_with(|| value.to_string());
                     }
                 }
             }
@@ -180,15 +222,23 @@ pub fn browse(local: Ipv4Addr, listen: Duration) -> std::io::Result<BTreeMap<IpA
     while Instant::now() < until {
         match socket.recv_from(&mut buffer) {
             Ok((length, from)) if is_lan(from.ip()) => {
+                if hosts.len() >= MAX_HOSTS && !hosts.contains_key(&from.ip()) {
+                    continue;
+                }
                 for kind in learn(hosts.entry(from.ip()).or_default(), &buffer[..length]) {
-                    let known = kind.ends_with(".local") && kind.starts_with('_') && kind.len() <= 80;
+                    let known =
+                        kind.ends_with(".local") && kind.starts_with('_') && kind.len() <= 80;
                     if known && asked.len() < MAX_KINDS && asked.insert(kind.clone()) {
                         socket.send_to(&question(&kind), GROUP)?;
                     }
                 }
             }
             Ok(_) => {}
-            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) => {}
             Err(e) => return Err(e),
         }
     }
@@ -240,14 +290,21 @@ mod tests {
         let packet = response(&[
             (name("_googlecast._tcp.local"), PTR, name(instance)),
             (name(instance), SRV, srv),
-            (name(instance), TXT, b"\x10md=Chromecast HD\x09fn=Living\x05rs=on".to_vec()),
+            (
+                name(instance),
+                TXT,
+                b"\x10md=Chromecast HD\x09fn=Living\x05rs=on".to_vec(),
+            ),
         ]);
         let mut host = Host::default();
         assert!(learn(&mut host, &packet).is_empty());
         assert_eq!(host.name.as_deref(), Some("Living Room TV"));
         assert!(host.services.contains("_googlecast._tcp"));
         assert_eq!(host.facts["md"], "Chromecast HD");
-        assert!(!host.facts.contains_key("rs"), "only what describes the device is kept");
+        assert!(
+            !host.facts.contains_key("rs"),
+            "only what describes the device is kept"
+        );
     }
 
     #[test]
@@ -257,8 +314,14 @@ mod tests {
             (name(META), PTR, name("_airplay._tcp.local")),
         ]);
         let mut host = Host::default();
-        assert_eq!(learn(&mut host, &packet), ["_ipp._tcp.local", "_airplay._tcp.local"]);
-        assert!(host.services.is_empty(), "listing a kind is not offering an instance of it");
+        assert_eq!(
+            learn(&mut host, &packet),
+            ["_ipp._tcp.local", "_airplay._tcp.local"]
+        );
+        assert!(
+            host.services.is_empty(),
+            "listing a kind is not offering an instance of it"
+        );
     }
 
     #[test]
@@ -268,10 +331,21 @@ mod tests {
         packet.extend(name("_ipp._tcp.local"));
         packet.extend_from_slice(&[0, 12, 0, 1, 0, 0, 0, 120, 0, 9]);
         packet.extend_from_slice(b"\x06Office\xc0\x0c");
-        assert_eq!(records(&packet), [("_ipp._tcp.local".to_string(), Data::Pointer("Office._ipp._tcp.local".into()))]);
+        assert_eq!(
+            records(&packet),
+            [(
+                "_ipp._tcp.local".to_string(),
+                Data::Pointer("Office._ipp._tcp.local".into())
+            )]
+        );
 
-        let looping = [0, 0, 0x84, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0xc0, 0x0c, 0, 12, 0, 1, 0, 0, 0, 0, 0, 0];
+        let looping = [
+            0, 0, 0x84, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0xc0, 0x0c, 0, 12, 0, 1, 0, 0, 0, 0, 0, 0,
+        ];
         assert!(records(&looping).is_empty());
-        assert!(records(&packet[..20]).is_empty(), "a packet cut short gives nothing it did not finish");
+        assert!(
+            records(&packet[..20]).is_empty(),
+            "a packet cut short gives nothing it did not finish"
+        );
     }
 }

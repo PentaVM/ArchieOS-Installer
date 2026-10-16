@@ -301,7 +301,20 @@ impl<S: TurnSource> NemotronCognitive<S> {
     fn request_with(&self, budget: SpeechBudget) -> ToolChatRequest {
         let length = match budget {
             SpeechBudget::Sentence => "Responde en una sola frase.",
-            _ => "Responde con lo que haga falta, y breve.",
+            // Spoken, a full paragraph is twenty seconds of not being able to get a word
+            // in. The answer comes first and short. How much more to say is read from the
+            // conversation, not only from being asked: a passing doubt gets a sentence, a
+            // subject the person is plainly working through gets a few. The conversation
+            // kept in `history` is what a follow-up continues.
+            _ => {
+                "Hablas, no escribes: lo que digas se oye, y la persona no puede interrumpir \
+                 un párrafo. Responde primero lo esencial en una o dos frases cortas, de no \
+                 más de cuarenta palabras. Nunca uses listas, numeración ni varios puntos. \
+                 Decide por el contexto si seguir: ante una duda puntual, detente ahí; si la \
+                 persona pide explicación, viene profundizando en el tema o lo que dijiste \
+                 quedaría incompleto sin más, agrega hasta tres frases y detente. Siempre \
+                 puede pedirte que sigas."
+            }
         };
         let mut system = format!("{}\n\n{length}", self.persona);
         let beside = self.context_with_utterance;

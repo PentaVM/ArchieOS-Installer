@@ -13,6 +13,12 @@ fn adapter() -> EnterpriseAdapter {
     )
 }
 
+fn house_adapter() -> EnterpriseAdapter {
+    adapter()
+        .in_domain(ContextDomain::work("studio", "house").unwrap())
+        .unwrap()
+}
+
 #[test]
 fn corporate_egress_rejects_personal_context_even_when_graded_public() {
     let mut task = Task::new("private task", TraceId::new(), QueueClass::Background);
@@ -60,18 +66,18 @@ fn admitted_work_context_is_bound_to_task_and_quarantine_is_preserved() {
         .unwrap();
     task.labels
         .insert("archie.quarantine".into(), "true".into());
-    assert!(adapter()
+    assert!(house_adapter()
         .cognitive_observation(&task, &context, 101)
         .is_err());
     task.labels.remove("archie.quarantine");
-    let observation = adapter()
+    let observation = house_adapter()
         .cognitive_observation(&task, &context, 101)
         .unwrap();
     assert_eq!(observation.task_id, task.task_id.to_string());
     assert_eq!(observation.privacy, PrivacyGrade::Restricted);
     task.labels
         .insert("archie.context_domain".into(), "work/studio/other".into());
-    assert!(adapter()
+    assert!(house_adapter()
         .cognitive_observation(&task, &context, 101)
         .is_err());
 }
@@ -81,6 +87,18 @@ async fn a_missing_transport_cannot_report_delivery_or_open_credentials() {
     let mut vault = Vault::open(&VaultKey::from_bytes([9; 32])).unwrap();
     assert!(adapter().sync_to_remote(&[], &mut vault).await.is_err());
     assert!(vault.audit_log().is_empty());
+}
+
+#[test]
+fn an_adapter_bound_to_no_project_sees_no_project_s_work() {
+    let mut task = Task::new("plans", TraceId::new(), QueueClass::Background);
+    assert!(
+        adapter().context_visible(&task),
+        "a task from before domains existed"
+    );
+    task.labels
+        .insert("archie.context_domain".into(), "work/studio/house".into());
+    assert!(!adapter().context_visible(&task));
 }
 
 #[test]

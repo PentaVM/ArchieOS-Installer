@@ -9,6 +9,7 @@
 resolver = "2"
 members = [
     "crates/archie-types",
+    "crates/archie-notices",
     "crates/archie-observability",
     "crates/archie-state",
     "crates/archie-postgres",
@@ -53,6 +54,7 @@ members = [
     "crates/archie-orb",
     "crates/archie-rem",
     "crates/archie-lan",
+    "crates/archie-sentry",
     "crates/archie-shell-bridge",
 ]
 
@@ -66,6 +68,7 @@ repository = "https://github.com/PentaVM/ArchieOS-Nvidia"
 [workspace.dependencies]
 # Internal crates.
 archie-types = { path = "crates/archie-types" }
+archie-notices = { path = "crates/archie-notices" }
 archie-observability = { path = "crates/archie-observability" }
 archie-state = { path = "crates/archie-state" }
 archie-postgres = { path = "crates/archie-postgres" }
@@ -85,6 +88,7 @@ archie-voice = { path = "crates/archie-voice" }
 archie-cut = { path = "crates/archie-cut" }
 archie-iris-bridge = { path = "crates/archie-iris-bridge" }
 archie-geofabric = { path = "crates/archie-geofabric" }
+archie-sentry = { path = "crates/archie-sentry" }
 archie-displayd = { path = "crates/archie-displayd" }
 archie-worldd = { path = "crates/archie-worldd", default-features = false }
 archie-model-runtime = { path = "crates/archie-model-runtime" }
@@ -130,6 +134,11 @@ postgres = "=0.19.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ring = "0.17"
+# Raw TLS for CAST v2 (port 8009). Same rustls/ring stack reqwest already pulls in.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+# Protobuf in pure Rust, derive only (no protoc at build time). CAST v2 frames.
+prost = { version = "0.14", default-features = false, features = ["std", "derive"] }
 # The accessibility bus is D-Bus; zbus speaks it in Rust, on tokio, with no C library.
 zbus = { version = "5", default-features = false, features = ["tokio"] }
 sha2 = "0.10"
@@ -139,6 +148,7 @@ thiserror = "2"
 zeroize = { version = "1", features = ["derive"] }
 time = { version = "0.3", features = ["serde", "formatting", "parsing", "macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "io-util", "signal"] }
+libc = "0.2"
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }

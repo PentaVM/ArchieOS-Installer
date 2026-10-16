@@ -51,7 +51,10 @@ fn the_contract_names_every_tool_the_server_can_offer() {
     names.extend(jobs::NAMES);
     names.extend(["stage_surfaces", "stage_act"]);
     for name in names {
-        assert!(CONTRACT.contains(&format!("`{name}`")), "ARCHIE.md does not mention the tool {name}");
+        assert!(
+            CONTRACT.contains(&format!("`{name}`")),
+            "ARCHIE.md does not mention the tool {name}"
+        );
     }
 }
 
@@ -84,7 +87,10 @@ fn the_contract_names_every_bridge_and_every_shipped_model() {
             .find_map(|line| line.strip_prefix("id = \""))
             .and_then(|rest| rest.strip_suffix('"'))
             .unwrap_or_else(|| panic!("{} has no id", manifest.display()));
-        assert!(CONTRACT.contains(&format!("`{id}`")), "ARCHIE.md does not mention the model {id}");
+        assert!(
+            CONTRACT.contains(&format!("`{id}`")),
+            "ARCHIE.md does not mention the model {id}"
+        );
     }
 }
 
@@ -116,7 +122,10 @@ async fn any_client_can_read_the_contract_and_is_told_to() {
             .unwrap(),
     )
     .unwrap();
-    assert!(init["result"]["instructions"].as_str().unwrap().contains("archie_contract"));
+    assert!(init["result"]["instructions"]
+        .as_str()
+        .unwrap()
+        .contains("archie_contract"));
 
     let reply: Value = serde_json::from_str(
         &server
@@ -125,7 +134,11 @@ async fn any_client_can_read_the_contract_and_is_told_to() {
             .unwrap(),
     )
     .unwrap();
-    let text = reply["result"]["content"][0]["text"].as_str().expect("the contract comes back as text");
+    let text = reply["result"]["content"][0]["text"]
+        .as_str()
+        .expect("the contract comes back as text");
     assert!(text.starts_with("# Archie"));
-    assert!(text.contains("Models propose, Cerebra decides, Policy authorises, the Stage executes."));
+    assert!(
+        text.contains("Models propose, Cerebra decides, Policy authorises, the Stage executes.")
+    );
 }

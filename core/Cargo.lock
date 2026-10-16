@@ -129,6 +129,7 @@ dependencies = [
  "archie-mcp",
  "archie-memory",
  "archie-model-runtime",
+ "archie-notices",
  "archie-observability",
  "archie-policy",
  "archie-registry",
@@ -174,10 +175,13 @@ dependencies = [
  "archie-registry",
  "archie-router",
  "archie-scheduler",
+ "archie-sentry",
  "archie-state",
  "archie-types",
+ "async-trait",
  "fs2",
  "hex",
+ "libc",
  "serde",
  "serde_json",
  "sha2",
@@ -219,6 +223,7 @@ version = "0.1.0"
 dependencies = [
  "archie-core",
  "archie-geofabric",
+ "archie-notices",
  "archie-observability",
  "archie-orb",
  "archie-state",
@@ -394,6 +399,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "archie-notices"
+version = "0.1.0"
+dependencies = [
+ "fs2",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "archie-observability"
 version = "0.1.0"
 dependencies = [
@@ -539,6 +556,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "archie-sentry"
+version = "0.1.0"
+dependencies = [
+ "archie-policy",
+ "archie-postgres",
+ "archie-types",
+ "async-trait",
+ "font8x8",
+ "jpeg-encoder",
+ "postgres",
+ "prost",
+ "reqwest",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.20",
+ "time",
+ "tokio",
+ "tokio-rustls",
+]
+
+[[package]]
 name = "archie-shell-bridge"
 version = "0.1.0"
 dependencies = [
@@ -623,6 +663,7 @@ dependencies = [
  "archie-observability",
  "archie-orb",
  "archie-postgres",
+ "archie-sentry",
  "archie-state",
  "archie-types",
  "fs2",
@@ -731,6 +772,7 @@ version = "0.1.0"
 dependencies = [
  "archie-cerebra",
  "archie-model-runtime",
+ "archie-notices",
  "archie-policy",
  "archie-types",
  "archie-vault",
@@ -1301,6 +1343,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "font8x8"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "875488b8711a968268c7cf5d139578713097ca4635a76044e8fe8eedf831d07e"
+
+[[package]]
 name = "form_urlencoded"
 version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1701,6 +1749,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
+name = "itertools"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1714,6 +1771,12 @@ checksum = "00810f1d8b74be64b13dbf3db89ac67740615d6c891f0e7b6179326533011a07"
 dependencies = [
  "rayon",
 ]
+
+[[package]]
+name = "jpeg-encoder"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b454d911ac55068f53495488d8ccd0646eaa540c033a28ee15b07838afafb01f"
 
 [[package]]
 name = "js-sys"
@@ -2256,6 +2319,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "prost"
+version = "0.14.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "528ac67416ff8646872a3c02cad9cc4ee5dc9f9540c9b10771855c95cb2e5ae1"
+dependencies = [
+ "bytes",
+ "prost-derive",
+]
+
+[[package]]
+name = "prost-derive"
+version = "0.14.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
+dependencies = [
+ "anyhow",
+ "itertools",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

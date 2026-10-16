@@ -48,7 +48,10 @@ impl Job {
     fn validate(&self) -> Result<(), String> {
         let named = !self.id.is_empty()
             && self.id.len() <= 64
-            && self.id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.');
+            && self
+                .id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.');
         if !named {
             return Err("id is 1 to 64 letters, digits, '-', '_' or '.'".into());
         }
@@ -63,7 +66,9 @@ impl Job {
 
     /// When the heartbeat was last rewritten, if it exists.
     pub fn beat(&self) -> Option<SystemTime> {
-        std::fs::metadata(&self.heartbeat).and_then(|meta| meta.modified()).ok()
+        std::fs::metadata(&self.heartbeat)
+            .and_then(|meta| meta.modified())
+            .ok()
     }
 
     /// Whether the job has made progress since its heartbeat read `before`: the heartbeat
@@ -91,7 +96,10 @@ impl Job {
 /// file that does not parse is an error, since a job REM does not know about is a job it
 /// will train on top of.
 pub fn load_jobs(dir: &Path) -> Result<Vec<Job>, JobError> {
-    let read = |path: &Path, source| JobError::Read { path: path.display().to_string(), source };
+    let read = |path: &Path, source| JobError::Read {
+        path: path.display().to_string(),
+        source,
+    };
     if !dir.exists() {
         return Ok(Vec::new());
     }
@@ -103,7 +111,10 @@ pub fn load_jobs(dir: &Path) -> Result<Vec<Job>, JobError> {
     files.sort();
     let mut jobs: Vec<Job> = Vec::new();
     for path in files {
-        let invalid = |reason: String| JobError::Invalid { path: path.display().to_string(), reason };
+        let invalid = |reason: String| JobError::Invalid {
+            path: path.display().to_string(),
+            reason,
+        };
         let text = std::fs::read_to_string(&path).map_err(|e| read(&path, e))?;
         let job: Job = toml::from_str(&text).map_err(|e| invalid(e.to_string()))?;
         job.validate().map_err(invalid)?;
@@ -129,7 +140,10 @@ impl ResumeList {
     /// Replaces the list. Written beside itself and renamed, so a crash leaves the old
     /// list or the new one, never half of either.
     pub fn write(&self, jobs: &[Job]) -> Result<(), JobError> {
-        let failed = |source| JobError::Write { path: self.path.display().to_string(), source };
+        let failed = |source| JobError::Write {
+            path: self.path.display().to_string(),
+            source,
+        };
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent).map_err(failed)?;
         }
@@ -147,7 +161,10 @@ impl ResumeList {
                 reason: e.to_string(),
             }),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
-            Err(source) => Err(JobError::Read { path: self.path.display().to_string(), source }),
+            Err(source) => Err(JobError::Read {
+                path: self.path.display().to_string(),
+                source,
+            }),
         }
     }
 
@@ -155,7 +172,10 @@ impl ResumeList {
         match std::fs::remove_file(&self.path) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(source) => Err(JobError::Write { path: self.path.display().to_string(), source }),
+            Err(source) => Err(JobError::Write {
+                path: self.path.display().to_string(),
+                source,
+            }),
         }
     }
 }
@@ -166,7 +186,8 @@ mod tests {
     use std::time::Duration;
 
     fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("archie-rem-jobs-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("archie-rem-jobs-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -199,7 +220,10 @@ mod tests {
         std::fs::write(dir.join("zz-typo.toml"), "id = \"x\"\ncheckpoint = []\nresume = [\"r\"]\nheartbeat = \"h\"\nmax_age_seconds = 5\n").unwrap();
         assert!(matches!(load_jobs(&dir), Err(JobError::Invalid { .. })));
         std::fs::write(dir.join("zz-typo.toml"), "id = \"trainer\"\ncheckpoint = [\"c\"]\nresume = [\"r\"]\nheartbeat = \"h\"\nmax_age_seconds = 5\n").unwrap();
-        assert!(matches!(load_jobs(&dir), Err(JobError::Invalid { .. })), "the same id twice");
+        assert!(
+            matches!(load_jobs(&dir), Err(JobError::Invalid { .. })),
+            "the same id twice"
+        );
     }
 
     #[test]
@@ -207,9 +231,17 @@ mod tests {
         let dir = scratch("list");
         let list = ResumeList::at(dir.join("state/resume.json"));
         assert!(list.read().unwrap().is_empty());
-        let jobs = vec![job("trainer", &dir.join("hb")), job("render", &dir.join("hb2"))];
+        let jobs = vec![
+            job("trainer", &dir.join("hb")),
+            job("render", &dir.join("hb2")),
+        ];
         list.write(&jobs).unwrap();
-        assert_eq!(ResumeList::at(dir.join("state/resume.json")).read().unwrap(), jobs);
+        assert_eq!(
+            ResumeList::at(dir.join("state/resume.json"))
+                .read()
+                .unwrap(),
+            jobs
+        );
         list.write(&jobs[1..]).unwrap();
         assert_eq!(list.read().unwrap().len(), 1);
         list.clear().unwrap();
@@ -226,11 +258,17 @@ mod tests {
         std::fs::write(&heartbeat, "{}").unwrap();
         let before = job.beat();
         assert!(job.moved_from(None), "a heartbeat appeared");
-        assert!(!job.moved_from(before), "the same heartbeat as before the resume");
+        assert!(
+            !job.moved_from(before),
+            "the same heartbeat as before the resume"
+        );
         std::thread::sleep(Duration::from_millis(30));
         std::fs::write(&heartbeat, "{}").unwrap();
         assert!(job.moved_from(before), "rewritten since");
         assert!(job.is_live(SystemTime::now()));
-        assert!(!job.is_live(SystemTime::now() + Duration::from_secs(601)), "older than its maximum age");
+        assert!(
+            !job.is_live(SystemTime::now() + Duration::from_secs(601)),
+            "older than its maximum age"
+        );
     }
 }

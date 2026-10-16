@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# The pieces Archie operates with, in this WSL image: the Stage (the window Archie works
+# in, shown on the Windows desktop by WSLg) and IRIS (its eyes and hands, on the GPU).
+#
+#   archie-session up | down | status
+#   archie-session open URL      open a page in the Stage, in a fresh browser profile
+#   archie-session run PROGRAM   start an installed application in the Stage (kdenlive)
+set -euo pipefail
+RUN=${ARCHIE_RUN:-$HOME/.archie/run}
+VENV=/opt/archie/iris-venv
+WEIGHTS=/var/lib/archie/models/iris/iris-beta21-step132000.pt
+export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+mkdir -p "$RUN" && chmod 700 "$RUN"
+
+pid_file() { echo "${RUN:?}/${1:?}.pid"; }
+running() { [ -f "$(pid_file "$1")" ] && kill -0 "$(cat "$(pid_file "$1")")" 2>/dev/null; }
+start() {
+  local name=$1; shift
+  running "$name" && return 0
+  "$@" > "$RUN/$name.log" 2>&1 &
+  echo $! > "$(pid_file "$name")"
+}
+stop() {
+  if running "$1"; then kill "$(cat "$(pid_file "$1")")" 2>/dev/null || true; fi
+  rm -f "$(pid_file "$1")"
+}
+
+up() {
+  if [ ! -S "$XDG_RUNTIME_DIR/wayland-0" ]; then
+    [ -S /mnt/wslg/runtime-dir/wayland-0 ] || {
+      echo 'archie-session: WSLg is not running, so there is nowhere to show the Stage (needs Windows 11, or Windows 10 with WSLg)' >&2
+      exit 1
+    }
+    export XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir
+  fi
+  echo "$XDG_RUNTIME_DIR" > "$RUN/xdg"
+  [ -f "$RUN/key" ] || archie-stage-cli keygen "$RUN/key" >/dev/null
+  if ! running stage; then
+    rm -f "${RUN:?}/control.sock" "${XDG_RUNTIME_DIR:?}/archie-stage" "${XDG_RUNTIME_DIR:?}/archie-stage.lock"
+  fi
+  # Archie has a pointer and keyboard of its own (--seats shared): the person's mouse
+  # crossing the window does not take the stage from it.
+  WAYLAND_DISPLAY=wayland-0 QT_QPA_PLATFORM=wayland LIBGL_ALWAYS_SOFTWARE=1 \
+    start stage archie-stage --socket-name archie-stage --control "$RUN/control.sock" --key-file "$RUN/key" \
+      --tempo live --seats shared --windowed --width "${ARCHIE_WIDTH:-1280}" --height "${ARCHIE_HEIGHT:-800}"
+  # TORCH_HOME holds the V-JEPA 2 code IRIS's encoder is built from, so it is not fetched.
+  PYTHONPATH=/opt/archie/iris/src HF_HOME=$HOME/.cache/huggingface TORCH_HOME=/opt/archie/torch \
+    start iris "$VENV/bin/python" -m archie_iris_foundry.iris_serve --weights "$WEIGHTS" --port 8765
+  for _ in $(seq 1 100); do [ -S "$RUN/control.sock" ] && break; sleep 0.1; done
+  [ -S "$RUN/control.sock" ] || { echo "archie-session: the Stage did not start; see $RUN/stage.log" >&2; exit 1; }
+  # The first start downloads IRIS's text encoder (about 1.5 GB) and loads the weights.
+  printf 'archie-session: waiting for IRIS' >&2
+  for _ in $(seq 1 900); do
+    if curl -fsS -m 2 http://127.0.0.1:8765/health >/dev/null 2>&1; then echo ' ready' >&2; return 0; fi
+    running iris || { echo >&2; echo "archie-session: IRIS stopped; see $RUN/iris.log" >&2; tail -5 "$RUN/iris.log" >&2; exit 1; }
+    printf '.' >&2
+    sleep 2
+  done
+  echo >&2
+  echo "archie-session: IRIS did not answer in 30 minutes; see $RUN/iris.log" >&2
+  exit 1
+}
+
+open() {
+  local url=${1:?archie-session open URL}
+  local profile="${RUN:?}/ff"
+  stop firefox
+  pkill -f -- "--profile $profile" 2>/dev/null || true
+  rm -rf "$profile"
+  mkdir -p "$profile"
+  cat > "$profile/user.js" <<'P'
+user_pref("browser.sessionstore.resume_from_crash", false);
+user_pref("browser.startup.page", 0);
+user_pref("browser.tabs.warnOnClose", false);
+user_pref("browser.shell.checkDefaultBrowser", false);
+user_pref("browser.aboutwelcome.enabled", false);
+user_pref("datareporting.policy.dataSubmissionEnabled", false);
+user_pref("media.autoplay.default", 5);
+user_pref("browser.translations.automaticallyPopup", false);
+user_pref("browser.translations.enable", false);
+P
+  XDG_RUNTIME_DIR=$(cat "$RUN/xdg") WAYLAND_DISPLAY=archie-stage MOZ_ENABLE_WAYLAND=1 LIBGL_ALWAYS_SOFTWARE=1 \
+    start firefox firefox --profile "$profile" --new-window "$url"
+}
+
+# An application of the image, drawn in the Stage. Its name is checked against what is
+# installed; nothing else of what was asked reaches a shell.
+run_app() {
+  local program=${1:?archie-session run PROGRAM}
+  case "$program" in *[!a-z0-9-]*) echo "archie-session: $program is not a program name" >&2; exit 64 ;; esac
+  command -v "$program" >/dev/null || {
+    echo "archie-session: $program is not installed in this image. From Windows:" >&2
+    echo "  wsl -d ArchieOS-Operator -u root pacman -Sy --noconfirm $program" >&2
+    exit 1
+  }
+  stop app
+  XDG_RUNTIME_DIR=$(cat "$RUN/xdg") WAYLAND_DISPLAY=archie-stage QT_QPA_PLATFORM=wayland LIBGL_ALWAYS_SOFTWARE=1 \
+    start app "$program"
+}
+
+case "${1:-status}" in
+  up) up ;;
+  open) open "${2:-}" ;;
+  run) run_app "${2:-}" ;;
+  down)
+    for name in firefox app iris stage; do stop "$name"; done
+    pkill -f -- "--profile ${RUN:?}/ff" 2>/dev/null || true
+    ;;
+  status) for name in stage iris firefox app; do running "$name" && echo "$name: running" || echo "$name: stopped"; done ;;
+  *) echo 'usage: archie-session up|down|status|open URL|run PROGRAM' >&2; exit 64 ;;
+esac

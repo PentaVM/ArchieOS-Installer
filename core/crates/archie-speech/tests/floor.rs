@@ -13,6 +13,45 @@ fn p(value: f32) -> Probability {
     Probability::new(value)
 }
 
+#[test]
+fn wire_probabilities_cannot_bypass_the_floor_invariant() {
+    for input in ["-0.2", "1.1", "1e38"] {
+        assert!(
+            serde_json::from_str::<Probability>(input).is_err(),
+            "{input}"
+        );
+    }
+    assert_eq!(
+        serde_json::from_str::<Probability>("0.25").unwrap().get(),
+        0.25
+    );
+}
+
+#[test]
+fn valid_remainder_does_not_resume_over_someone_else() {
+    let mut state = floor_is_free_with_an_answer();
+    assert!(FloorPolicy::default().may_resume(&state));
+    state.current_speaker = Speaker::Owner;
+    assert!(!FloorPolicy::default().may_resume(&state));
+    state.current_speaker = Speaker::Nobody;
+    state.speaker_hold = p(0.9);
+    assert!(!FloorPolicy::default().may_resume(&state));
+}
+
+#[test]
+fn invalid_policy_thresholds_fail_silent() {
+    for threshold in [f32::NAN, f32::INFINITY, -0.1, 1.1] {
+        let policy = FloorPolicy {
+            speaker_hold_threshold: threshold,
+            ..FloorPolicy::default()
+        };
+        assert_eq!(
+            policy.decide(&floor_is_free_with_an_answer()).action,
+            FloorAction::Silent
+        );
+    }
+}
+
 /// Nelson has asked a complete question and stopped.
 fn floor_is_free_with_an_answer() -> ConversationalFloorState {
     ConversationalFloorState {

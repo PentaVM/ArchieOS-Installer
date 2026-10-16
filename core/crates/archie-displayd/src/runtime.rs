@@ -82,7 +82,7 @@ impl RuntimeInventory {
                 std::cmp::Reverse(fact.pid),
             )
         };
-        facts.sort_by(|a, b| rank(b).cmp(&rank(a)));
+        facts.sort_by_key(|fact| std::cmp::Reverse(rank(fact)));
         facts.truncate(MAX_PROCESSES);
         facts.sort_unstable_by_key(|fact| fact.pid);
         let ids = facts

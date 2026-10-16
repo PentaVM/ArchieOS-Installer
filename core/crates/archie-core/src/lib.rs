@@ -27,8 +27,14 @@ pub mod endpoint;
 pub mod execution;
 pub mod hardware;
 pub mod hotplug;
+pub mod operator;
+mod operator_session;
+pub mod passive_network;
 pub mod runtime;
+pub mod sentry;
+pub mod sentry_config;
 pub mod task_service;
+pub mod unify;
 
 pub use boot::{BootReport, BootStage, StageStatus};
 pub use config::{ArchieConfig, ConfigError, TransportKind};

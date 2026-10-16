@@ -14,7 +14,8 @@
 #   STAGE, STAGE_CLI, ARCHIE_VOICE   binaries                  default: from PATH
 #   POLICY        stage policy                     default: core/crates/archie-stage/policy/apps.toml
 #   ASR_MODEL     Nemotron 3.5 ASR GGUF            default: the one `nemo-speech pull` cached
-#   PIPER, PIPER_MODEL   Piper and its voice       default: piper, /root/piper-voices/es_MX-ald-medium.onnx
+#   PIPER, PIPER_PYTHON, PIPER_MODEL, PIPER_MODEL_EN   Piper adapter/runtime and voices
+#                 see scripts/models/install-piper-voices.sh
 #   HOST_WAYLAND  session the stage opens in       default: $WAYLAND_DISPLAY
 #                 (WSLg: /mnt/wslg/runtime-dir/wayland-0)
 #   SCREEN        which screen the stage takes     default: the last one
@@ -27,7 +28,11 @@ case "$GRADE" in
     public|internal) ;;
     *) echo "run-archie: say how private this is: run-archie.sh public (or internal)" >&2; exit 64 ;;
 esac
-[ -n "${NEBIUS_TOKEN_FACTORY_KEY:-}" ] || { echo "run-archie: set NEBIUS_TOKEN_FACTORY_KEY" >&2; exit 64; }
+# ARCHIE_VOICE_ENDPOINT names a reasoning model on this machine; then no key is needed.
+[ -n "${NEBIUS_TOKEN_FACTORY_KEY:-}" ] || [ -n "${ARCHIE_VOICE_ENDPOINT:-}" ] || {
+    echo "run-archie: set NEBIUS_TOKEN_FACTORY_KEY, or ARCHIE_VOICE_ENDPOINT for a local model" >&2
+    exit 64
+}
 
 # Accessibility needs a session bus, and the stage's clients inherit it.
 if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && command -v dbus-run-session >/dev/null; then
@@ -41,8 +46,11 @@ STAGE_CLI=${STAGE_CLI:-archie-stage-cli}
 ARCHIE_VOICE=${ARCHIE_VOICE:-archie-voice}
 POLICY=${POLICY:-$REPO/core/crates/archie-stage/policy/apps.toml}
 ASR_MODEL=${ASR_MODEL:-$(ls "$HOME"/.cache/nemo-speech/models/nvidia/nemotron-3.5-asr-streaming-0.6b/*/*.gguf 2>/dev/null | head -n 1)}
-PIPER=${PIPER:-piper}
-PIPER_MODEL=${PIPER_MODEL:-/root/piper-voices/es_MX-ald-medium.onnx}
+PIPER_PYTHON=${PIPER_PYTHON:-python3}
+PIPER=${PIPER:-$REPO/scripts/models/piper-json-bridge.py}
+PIPER_VOICES=${PIPER_VOICES:-$REPO/models-cache/piper}
+PIPER_MODEL=${PIPER_MODEL:-$PIPER_VOICES/es_MX-ald-medium.onnx}
+PIPER_MODEL_EN=${PIPER_MODEL_EN:-$PIPER_VOICES/en_US-john-medium.onnx}
 HOST_WAYLAND=${HOST_WAYLAND:-${WAYLAND_DISPLAY:-}}
 RUN_DIR=${RUN_DIR:-/tmp/archie-run}
 SOCKET_NAME=archie-stage
@@ -59,6 +67,17 @@ if [ -z "${PULSE_SERVER:-}" ]; then
     fi
 fi
 [ -n "$ASR_MODEL" ] && [ -f "$ASR_MODEL" ] || { echo "run-archie: no ASR model; run nemo-speech pull nemotron-3.5 or set ASR_MODEL" >&2; exit 1; }
+[ -f "$PIPER_MODEL" ] || { echo "run-archie: no Spanish Piper model at $PIPER_MODEL; run scripts/models/install-piper-voices.sh" >&2; exit 1; }
+if [ "$PIPER" = "$REPO/scripts/models/piper-json-bridge.py" ]; then
+    PIPER_PYTHON_BIN=$(command -v "$PIPER_PYTHON" 2>/dev/null || true)
+    [ -n "$PIPER_PYTHON_BIN" ] || { echo "run-archie: Python runtime not found: $PIPER_PYTHON" >&2; exit 1; }
+    PATH=$(dirname "$PIPER_PYTHON_BIN"):$PATH
+    export PATH
+    "$PIPER_PYTHON_BIN" -c 'import onnxruntime, piper' 2>/dev/null || {
+        echo "run-archie: install Piper Python and ONNX Runtime in $PIPER_PYTHON" >&2
+        exit 1
+    }
+fi
 
 mkdir -p "$RUN_DIR/xdg"
 chmod 700 "$RUN_DIR" "$RUN_DIR/xdg"
@@ -86,6 +105,11 @@ set -- converse --grade "$GRADE" --asr-model "$ASR_MODEL" \
     --voice-engine piper --piper "$PIPER" --piper-model "$PIPER_MODEL" \
     --socket "$RUN_DIR/control.sock" --key-file "$RUN_DIR/key" --policy "$POLICY" \
     --stage-display "$SOCKET_NAME" --app-log "$RUN_DIR/apps.log"
+if [ -f "$PIPER_MODEL_EN" ]; then
+    set -- "$@" --piper-model-en "$PIPER_MODEL_EN"
+else
+    echo "run-archie: English Piper voice is not installed; using Spanish for every reply" >&2
+fi
 [ "${HEADPHONES:-0}" = 1 ] && set -- "$@" --headphones
 
 # Two thread pools share this process's cores; spinning ones starve each other.

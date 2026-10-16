@@ -16,8 +16,12 @@ pub struct Description {
 /// reader looks for the tag and does not try to be an XML parser.
 pub fn first(xml: &str, tag: &str) -> String {
     let open = format!("<{tag}>");
-    let Some(start) = xml.find(&open).map(|at| at + open.len()) else { return String::new() };
-    let Some(end) = xml[start..].find(&format!("</{tag}>")) else { return String::new() };
+    let Some(start) = xml.find(&open).map(|at| at + open.len()) else {
+        return String::new();
+    };
+    let Some(end) = xml[start..].find(&format!("</{tag}>")) else {
+        return String::new();
+    };
     let raw: String = xml[start..start + end].chars().take(200).collect();
     let text = raw
         .replace("&lt;", "<")
@@ -26,7 +30,11 @@ pub fn first(xml: &str, tag: &str) -> String {
         .replace("&apos;", "'")
         .replace("&amp;", "&");
     // One line of printable text, whatever the device put there.
-    text.chars().filter(|c| !c.is_control()).collect::<String>().trim().to_string()
+    text.chars()
+        .filter(|c| !c.is_control())
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 pub fn parse(xml: &[u8]) -> Description {
@@ -59,7 +67,10 @@ mod tests {
     #[test]
     fn a_description_gives_the_devices_own_name_and_kind() {
         let description = parse(ROUTER.as_bytes());
-        assert_eq!(description.friendly_name, "Casa & Taller", "the root device's name, unescaped");
+        assert_eq!(
+            description.friendly_name, "Casa & Taller",
+            "the root device's name, unescaped"
+        );
         assert_eq!(description.manufacturer, "TP-Link");
         assert_eq!(description.model_name, "Archer AX55");
         assert!(description.device_type.contains("InternetGatewayDevice"));
@@ -71,6 +82,12 @@ mod tests {
         assert_eq!(first("<modelName>unterminated", "modelName"), "");
         let long = format!("<friendlyName>{}</friendlyName>", "a".repeat(5000));
         assert_eq!(first(&long, "friendlyName").len(), 200);
-        assert_eq!(first("<friendlyName>TV\u{1b}[31m\nsala</friendlyName>", "friendlyName"), "TV[31msala");
+        assert_eq!(
+            first(
+                "<friendlyName>TV\u{1b}[31m\nsala</friendlyName>",
+                "friendlyName"
+            ),
+            "TV[31msala"
+        );
     }
 }

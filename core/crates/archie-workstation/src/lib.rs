@@ -5,14 +5,15 @@
 
 #![forbid(unsafe_code)]
 
+pub mod board_api;
+pub mod enterprise_bridge;
 pub mod freecad;
 pub mod harness;
 pub mod health;
 pub mod host;
+pub mod live;
 pub mod provider;
 pub mod speech;
 pub mod trace;
-pub mod enterprise_bridge;
-pub mod board_api;
 
 pub use health::{check_component, doctor, Check, CheckStatus};

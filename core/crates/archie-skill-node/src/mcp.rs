@@ -23,8 +23,15 @@ pub fn handle<H: Hub>(node: &mut Node<H>, line: &str) -> Option<String> {
     let id = id?; // a notification: nothing is answered
     let result = match method {
         "initialize" => {
-            let asked = message.pointer("/params/protocolVersion").and_then(Value::as_str).unwrap_or("");
-            let version = SUPPORTED_VERSIONS.iter().find(|v| **v == asked).copied().unwrap_or(SUPPORTED_VERSIONS[0]);
+            let asked = message
+                .pointer("/params/protocolVersion")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let version = SUPPORTED_VERSIONS
+                .iter()
+                .find(|v| **v == asked)
+                .copied()
+                .unwrap_or(SUPPORTED_VERSIONS[0]);
             json!({"protocolVersion": version, "capabilities": {"tools": {}},
                    "serverInfo": {"name": "archie-skill-node", "version": env!("CARGO_PKG_VERSION")},
                    "instructions": "An IRIS skill node: one person's GPU training LoRA skill adapters for the shared \
@@ -36,18 +43,35 @@ pub fn handle<H: Hub>(node: &mut Node<H>, line: &str) -> Option<String> {
         "tools/list" => json!({"tools": tools().into_iter().map(|tool| json!({
             "name": tool.name, "description": tool.description, "inputSchema": tool.schema})).collect::<Vec<_>>()}),
         "tools/call" => {
-            let name = message.pointer("/params/name").and_then(Value::as_str).unwrap_or("");
+            let name = message
+                .pointer("/params/name")
+                .and_then(Value::as_str)
+                .unwrap_or("");
             if !tools().iter().any(|tool| tool.name == name) {
                 return Some(error(id, -32602, &format!("unknown tool {name}")));
             }
-            let arguments = message.pointer("/params/arguments").and_then(Value::as_object).cloned().unwrap_or_else(Map::new);
+            let arguments = message
+                .pointer("/params/arguments")
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_else(Map::new);
             match node.call(name, &arguments) {
-                Ok(value) => json!({"content": [{"type": "text", "text": serde_json::to_string_pretty(&value).unwrap_or_default()}],
-                                    "isError": false}),
-                Err(message) => json!({"content": [{"type": "text", "text": message}], "isError": true}),
+                Ok(value) => {
+                    json!({"content": [{"type": "text", "text": serde_json::to_string_pretty(&value).unwrap_or_default()}],
+                                    "isError": false})
+                }
+                Err(message) => {
+                    json!({"content": [{"type": "text", "text": message}], "isError": true})
+                }
             }
         }
-        _ => return Some(error(id, -32601, &format!("method {method} is not offered"))),
+        _ => {
+            return Some(error(
+                id,
+                -32601,
+                &format!("method {method} is not offered"),
+            ))
+        }
     };
     Some(json!({"jsonrpc": "2.0", "id": id, "result": result}).to_string())
 }

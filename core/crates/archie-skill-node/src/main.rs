@@ -9,9 +9,9 @@
 //! ```
 
 use archie_skill_node::hub::GitRepo;
+use archie_skill_node::mcp;
 use archie_skill_node::node::{valid_name, NodeConfig};
 use archie_skill_node::tools::{now, Node};
-use archie_skill_node::mcp;
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -29,8 +29,16 @@ fn serve(config: NodeConfig) -> ExitCode {
         return ExitCode::from(2);
     }
     let hub = GitRepo::new(&config.board_repo, &config.board_branch);
-    eprintln!("archie-skill-node: ready for {} on {}", config.contributor, config.board_repo.display());
-    let mut node = Node { config, hub, clock: now };
+    eprintln!(
+        "archie-skill-node: ready for {} on {}",
+        config.contributor,
+        config.board_repo.display()
+    );
+    let mut node = Node {
+        config,
+        hub,
+        clock: now,
+    };
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
     for line in stdin.lock().lines() {
@@ -44,7 +52,10 @@ fn serve(config: NodeConfig) -> ExitCode {
             mcp::handle(&mut node, line.trim_end_matches('\r'))
         };
         if let Some(reply) = reply {
-            if writeln!(stdout, "{reply}").and_then(|_| stdout.flush()).is_err() {
+            if writeln!(stdout, "{reply}")
+                .and_then(|_| stdout.flush())
+                .is_err()
+            {
                 break; // the agent went away
             }
         }
@@ -70,7 +81,11 @@ public_url = ""
 
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
-    let command = if args.is_empty() { String::new() } else { args.remove(0) };
+    let command = if args.is_empty() {
+        String::new()
+    } else {
+        args.remove(0)
+    };
     let config_path = take(&mut args, "--config").map(PathBuf::from);
     match command.as_str() {
         "mcp" => {
@@ -87,23 +102,38 @@ fn main() -> ExitCode {
             }
         }
         "init" => {
-            let (Some(path), Some(contributor)) = (config_path, take(&mut args, "--contributor")) else {
-                eprintln!("archie-skill-node init --config node.toml --contributor NAME [--gpu TEXT]");
+            let (Some(path), Some(contributor)) = (config_path, take(&mut args, "--contributor"))
+            else {
+                eprintln!(
+                    "archie-skill-node init --config node.toml --contributor NAME [--gpu TEXT]"
+                );
                 return ExitCode::from(2);
             };
             if !valid_name(&contributor) {
-                eprintln!("archie-skill-node: the contributor name is 1-32 letters, digits, '-' or '_'");
+                eprintln!(
+                    "archie-skill-node: the contributor name is 1-32 letters, digits, '-' or '_'"
+                );
                 return ExitCode::from(2);
             }
             if path.exists() {
-                eprintln!("archie-skill-node: {} exists; not overwritten", path.display());
+                eprintln!(
+                    "archie-skill-node: {} exists; not overwritten",
+                    path.display()
+                );
                 return ExitCode::from(2);
             }
-            let gpu = take(&mut args, "--gpu").unwrap_or_else(|| "RTX 3060 Ti 8GB".into()).replace('"', "");
-            let text = TEMPLATE.replace("{contributor}", &contributor).replace("{gpu}", &gpu);
+            let gpu = take(&mut args, "--gpu")
+                .unwrap_or_else(|| "RTX 3060 Ti 8GB".into())
+                .replace('"', "");
+            let text = TEMPLATE
+                .replace("{contributor}", &contributor)
+                .replace("{gpu}", &gpu);
             match std::fs::write(&path, text) {
                 Ok(()) => {
-                    println!("wrote {}; fill in the paths and clone the shared repository to board_repo", path.display());
+                    println!(
+                        "wrote {}; fill in the paths and clone the shared repository to board_repo",
+                        path.display()
+                    );
                     ExitCode::SUCCESS
                 }
                 Err(error) => {
@@ -122,8 +152,15 @@ fn main() -> ExitCode {
             println!("Claude Code:\n  claude mcp add {name} -- ssh -T {host} \"{remote}\"\n");
             println!("Any MCP client (JSON):");
             let mut servers = serde_json::Map::new();
-            servers.insert(name, serde_json::json!({"command": "ssh", "args": ["-T", host, remote]}));
-            println!("{}", serde_json::to_string_pretty(&serde_json::json!({"mcpServers": servers})).unwrap_or_default());
+            servers.insert(
+                name,
+                serde_json::json!({"command": "ssh", "args": ["-T", host, remote]}),
+            );
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({"mcpServers": servers}))
+                    .unwrap_or_default()
+            );
             ExitCode::SUCCESS
         }
         _ => {

@@ -29,8 +29,16 @@ pub const SECONDS: f32 = 15.0;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Input {
-    Key { key: String },
-    Mouse { mouse: MouseAction, #[serde(default)] x: f32, #[serde(default)] y: f32 },
+    Key {
+        key: String,
+    },
+    Mouse {
+        mouse: MouseAction,
+        #[serde(default)]
+        x: f32,
+        #[serde(default)]
+        y: f32,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,13 +54,25 @@ impl Input {
         Self::Key { key: key.into() }
     }
     pub fn down(x: f32, y: f32) -> Self {
-        Self::Mouse { mouse: MouseAction::Down, x, y }
+        Self::Mouse {
+            mouse: MouseAction::Down,
+            x,
+            y,
+        }
     }
     pub fn to(x: f32, y: f32) -> Self {
-        Self::Mouse { mouse: MouseAction::Move, x, y }
+        Self::Mouse {
+            mouse: MouseAction::Move,
+            x,
+            y,
+        }
     }
     pub fn up() -> Self {
-        Self::Mouse { mouse: MouseAction::Up, x: 0.0, y: 0.0 }
+        Self::Mouse {
+            mouse: MouseAction::Up,
+            x: 0.0,
+            y: 0.0,
+        }
     }
 }
 
@@ -68,7 +88,12 @@ pub fn colour_keys(colour: [u8; 3]) -> Vec<Input> {
 /// The keys that choose a brush of that diameter.
 pub fn brush_keys(diameter: u32) -> Vec<Input> {
     std::iter::once(Input::key("b"))
-        .chain(diameter.to_string().chars().map(|c| Input::key(c.to_string())))
+        .chain(
+            diameter
+                .to_string()
+                .chars()
+                .map(|c| Input::key(c.to_string())),
+        )
         .chain(std::iter::once(Input::key("Enter")))
         .collect()
 }
@@ -83,7 +108,11 @@ pub struct Sheet {
 
 impl Sheet {
     pub fn white(width: u32, height: u32) -> Self {
-        Self { width, height, pixels: vec![[255, 255, 255]; (width * height) as usize] }
+        Self {
+            width,
+            height,
+            pixels: vec![[255, 255, 255]; (width * height) as usize],
+        }
     }
 
     fn put(&mut self, x: i32, y: i32, colour: [u8; 3], cover: f32) {
@@ -94,7 +123,8 @@ impl Sheet {
         let old = self.pixels[at];
         let cover = cover.min(1.0);
         for c in 0..3 {
-            self.pixels[at][c] = (old[c] as f32 * (1.0 - cover) + colour[c] as f32 * cover).round() as u8;
+            self.pixels[at][c] =
+                (old[c] as f32 * (1.0 - cover) + colour[c] as f32 * cover).round() as u8;
         }
     }
 
@@ -109,7 +139,11 @@ impl Sheet {
         for y in (y0.floor() as i32)..=(y1.ceil() as i32) {
             for x in (x0.floor() as i32)..=(x1.ceil() as i32) {
                 let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
-                let t = if length2 > 0.0 { (((px - a.0) * dx + (py - a.1) * dy) / length2).clamp(0.0, 1.0) } else { 0.0 };
+                let t = if length2 > 0.0 {
+                    (((px - a.0) * dx + (py - a.1) * dy) / length2).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
                 let (cx, cy) = (a.0 + t * dx, a.1 + t * dy);
                 let distance = ((px - cx).powi(2) + (py - cy).powi(2)).sqrt();
                 self.put(x, y, colour, radius + 0.5 - distance);
@@ -207,12 +241,20 @@ pub fn fitted(picture: &crate::Picture, width: u32, height: u32) -> Sheet {
     let mut pixels = Vec::with_capacity((width * height) as usize);
     for y in 0..height {
         for x in 0..width {
-            let (sx0, sx1) = (x as f32 * pw / width as f32, (x + 1) as f32 * pw / width as f32);
-            let (sy0, sy1) = (y as f32 * ph / height as f32, (y + 1) as f32 * ph / height as f32);
+            let (sx0, sx1) = (
+                x as f32 * pw / width as f32,
+                (x + 1) as f32 * pw / width as f32,
+            );
+            let (sy0, sy1) = (
+                y as f32 * ph / height as f32,
+                (y + 1) as f32 * ph / height as f32,
+            );
             let (mut sum, mut n) = ([0f32; 3], 0f32);
             for sy in (sy0 as u32)..(sy1.ceil() as u32).max(sy0 as u32 + 1) {
                 for sx in (sx0 as u32)..(sx1.ceil() as u32).max(sx0 as u32 + 1) {
-                    if let Some(c) = picture.colour(sx.min(picture.width() - 1), sy.min(picture.height() - 1)) {
+                    if let Some(c) =
+                        picture.colour(sx.min(picture.width() - 1), sy.min(picture.height() - 1))
+                    {
                         for k in 0..3 {
                             sum[k] += c[k] as f32;
                         }
@@ -220,10 +262,18 @@ pub fn fitted(picture: &crate::Picture, width: u32, height: u32) -> Sheet {
                     }
                 }
             }
-            pixels.push([(sum[0] / n.max(1.0)) as u8, (sum[1] / n.max(1.0)) as u8, (sum[2] / n.max(1.0)) as u8]);
+            pixels.push([
+                (sum[0] / n.max(1.0)) as u8,
+                (sum[1] / n.max(1.0)) as u8,
+                (sum[2] / n.max(1.0)) as u8,
+            ]);
         }
     }
-    Sheet { width, height, pixels }
+    Sheet {
+        width,
+        height,
+        pixels,
+    }
 }
 
 fn luma(c: [u8; 3]) -> f32 {
@@ -251,7 +301,8 @@ pub fn ssim(a: &Sheet, b: &Sheet) -> f32 {
             let n = 64.0;
             let (ma, mb) = (sa / n, sb / n);
             let (va, vb, cov) = (saa / n - ma * ma, sbb / n - mb * mb, sab / n - ma * mb);
-            total += ((2.0 * ma * mb + c1) * (2.0 * cov + c2)) / ((ma * ma + mb * mb + c1) * (va + vb + c2));
+            total += ((2.0 * ma * mb + c1) * (2.0 * cov + c2))
+                / ((ma * ma + mb * mb + c1) * (va + vb + c2));
             windows += 1;
         }
     }
@@ -261,14 +312,28 @@ pub fn ssim(a: &Sheet, b: &Sheet) -> f32 {
 fn lab(c: [u8; 3]) -> [f32; 3] {
     let lin = |v: u8| {
         let v = v as f32 / 255.0;
-        if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
     };
     let (r, g, b) = (lin(c[0]), lin(c[1]), lin(c[2]));
     let x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047;
     let y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
     let z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883;
-    let f = |t: f32| if t > 0.008856 { t.cbrt() } else { 7.787 * t + 16.0 / 116.0 };
-    [116.0 * f(y) - 16.0, 500.0 * (f(x) - f(y)), 200.0 * (f(y) - f(z))]
+    let f = |t: f32| {
+        if t > 0.008856 {
+            t.cbrt()
+        } else {
+            7.787 * t + 16.0 / 116.0
+        }
+    };
+    [
+        116.0 * f(y) - 16.0,
+        500.0 * (f(x) - f(y)),
+        200.0 * (f(y) - f(z)),
+    ]
 }
 
 /// Mean colour difference (CIE76 ΔE) over 4×4 blocks: how far the colours are, forgiving
@@ -287,8 +352,12 @@ pub fn colour_error(a: &Sheet, b: &Sheet) -> f32 {
                     }
                 }
             }
-            let (la, lb) = (lab([ma[0] as u8, ma[1] as u8, ma[2] as u8]), lab([mb[0] as u8, mb[1] as u8, mb[2] as u8]));
-            total += ((la[0] - lb[0]).powi(2) + (la[1] - lb[1]).powi(2) + (la[2] - lb[2]).powi(2)).sqrt();
+            let (la, lb) = (
+                lab([ma[0] as u8, ma[1] as u8, ma[2] as u8]),
+                lab([mb[0] as u8, mb[1] as u8, mb[2] as u8]),
+            );
+            total += ((la[0] - lb[0]).powi(2) + (la[1] - lb[1]).powi(2) + (la[2] - lb[2]).powi(2))
+                .sqrt();
             blocks += 1;
         }
     }
@@ -337,13 +406,20 @@ impl Default for Realist {
 }
 
 /// [`realist`] with its settings given.
-pub fn realist_with(target: &Sheet, focus: &[Focus], budget: usize, settings: &Realist) -> Vec<Input> {
+pub fn realist_with(
+    target: &Sheet,
+    focus: &[Focus],
+    budget: usize,
+    settings: &Realist,
+) -> Vec<Input> {
     let palette = palette_of(target, settings.palette.max(2));
     let nearest = |c: [u8; 3]| -> usize {
         (0..palette.len())
             .min_by_key(|&i| {
                 let p = palette[i];
-                (0..3).map(|k| (p[k] as i32 - c[k] as i32).pow(2)).sum::<i32>()
+                (0..3)
+                    .map(|k| (p[k] as i32 - c[k] as i32).pow(2))
+                    .sum::<i32>()
             })
             .unwrap_or(0)
     };
@@ -351,7 +427,9 @@ pub fn realist_with(target: &Sheet, focus: &[Focus], budget: usize, settings: &R
         focus
             .iter()
             .filter(|f| x >= f.x0 && x <= f.x1 && y >= f.y0 && y <= f.y1)
-            .fold(1.0f32, |w, f| w.max(1.0 + (f.weight - 1.0) * settings.focus_strength))
+            .fold(1.0f32, |w, f| {
+                w.max(1.0 + (f.weight - 1.0) * settings.focus_strength)
+            })
     };
     let mut events = Vec::new();
     let mut sheet = Sheet::white(target.width, target.height);
@@ -363,7 +441,12 @@ pub fn realist_with(target: &Sheet, focus: &[Focus], budget: usize, settings: &R
         if remaining < 16 {
             break;
         }
-        let allowance = if layer == 0 { remaining } else { ((remaining as f32) * share / layers[layer..].iter().map(|l| l.1).sum::<f32>()).max(16.0) as usize };
+        let allowance = if layer == 0 {
+            remaining
+        } else {
+            ((remaining as f32) * share / layers[layer..].iter().map(|l| l.1).sum::<f32>())
+                .max(16.0) as usize
+        };
         // Runs of one palette colour along each row of this brush's height.
         let step = diameter.max(1);
         let mut candidates: Vec<(usize, u32, u32, u32, f32)> = Vec::new(); // colour, y, x0, x1, gain
@@ -377,8 +460,14 @@ pub fn realist_with(target: &Sheet, focus: &[Focus], budget: usize, settings: &R
                 while x < target.width && nearest(block_mean(target, x, y, step)) == colour {
                     let want = target.pixels[(y * target.width + x) as usize];
                     let have = sheet.pixels[(y * target.width + x) as usize];
-                    let before: f32 = (0..3).map(|k| (want[k] as f32 - have[k] as f32).powi(2)).sum::<f32>().sqrt();
-                    let after: f32 = (0..3).map(|k| (want[k] as f32 - palette[colour][k] as f32).powi(2)).sum::<f32>().sqrt();
+                    let before: f32 = (0..3)
+                        .map(|k| (want[k] as f32 - have[k] as f32).powi(2))
+                        .sum::<f32>()
+                        .sqrt();
+                    let after: f32 = (0..3)
+                        .map(|k| (want[k] as f32 - palette[colour][k] as f32).powi(2))
+                        .sum::<f32>()
+                        .sqrt();
                     gain += (before - after).max(0.0) * weight_at(x as f32, y as f32) * step as f32;
                     x += 1;
                 }
@@ -432,12 +521,16 @@ fn block_mean(sheet: &Sheet, x: u32, y: u32, size: u32) -> [u8; 3] {
     let (mut sum, mut n) = ([0u32; 3], 0u32);
     for yy in y0..y1 {
         let at = (yy * sheet.width + x) as usize;
-        for k in 0..3 {
-            sum[k] += sheet.pixels[at][k] as u32;
+        for (total, channel) in sum.iter_mut().zip(sheet.pixels[at]) {
+            *total += u32::from(channel);
         }
         n += 1;
     }
-    [(sum[0] / n.max(1)) as u8, (sum[1] / n.max(1)) as u8, (sum[2] / n.max(1)) as u8]
+    [
+        (sum[0] / n.max(1)) as u8,
+        (sum[1] / n.max(1)) as u8,
+        (sum[2] / n.max(1)) as u8,
+    ]
 }
 
 /// A palette of `k` colours by k-means over the picture, seeded deterministically from its
@@ -451,7 +544,9 @@ pub fn palette_of(sheet: &Sheet, k: usize) -> Vec<[u8; 3]> {
         .collect();
     let mut sorted = samples.clone();
     sorted.sort_by(|a, b| (a[0] + a[1] + a[2]).total_cmp(&(b[0] + b[1] + b[2])));
-    let mut centres: Vec<[f32; 3]> = (0..k).map(|i| sorted[(i * sorted.len()) / k + sorted.len() / (2 * k)]).collect();
+    let mut centres: Vec<[f32; 3]> = (0..k)
+        .map(|i| sorted[(i * sorted.len()) / k + sorted.len() / (2 * k)])
+        .collect();
     for _ in 0..12 {
         let mut sums = vec![[0f32; 3]; k];
         let mut counts = vec![0usize; k];
@@ -459,18 +554,25 @@ pub fn palette_of(sheet: &Sheet, k: usize) -> Vec<[u8; 3]> {
             let best = (0..k)
                 .min_by(|&a, &b| distance(&centres[a], s).total_cmp(&distance(&centres[b], s)))
                 .unwrap_or(0);
-            for c in 0..3 {
-                sums[best][c] += s[c];
+            for (total, channel) in sums[best].iter_mut().zip(s) {
+                *total += channel;
             }
             counts[best] += 1;
         }
         for i in 0..k {
             if counts[i] > 0 {
-                centres[i] = [sums[i][0] / counts[i] as f32, sums[i][1] / counts[i] as f32, sums[i][2] / counts[i] as f32];
+                centres[i] = [
+                    sums[i][0] / counts[i] as f32,
+                    sums[i][1] / counts[i] as f32,
+                    sums[i][2] / counts[i] as f32,
+                ];
             }
         }
     }
-    centres.iter().map(|c| [c[0].round() as u8, c[1].round() as u8, c[2].round() as u8]).collect()
+    centres
+        .iter()
+        .map(|c| [c[0].round() as u8, c[1].round() as u8, c[2].round() as u8])
+        .collect()
 }
 
 fn distance(a: &[f32; 3], b: &[f32; 3]) -> f32 {
@@ -488,7 +590,11 @@ mod tests {
         events.extend([Input::down(2.0, 5.0), Input::to(18.0, 5.0), Input::up()]);
         let (sheet, report) = replay(&events, 20, 10, usize::MAX);
         assert_eq!(sheet.pixels[(5 * 20 + 10) as usize], [255, 0, 0]);
-        assert_eq!(sheet.pixels[(0 * 20 + 10) as usize], [255, 255, 255], "the paper above the line is untouched");
+        assert_eq!(
+            sheet.pixels[10],
+            [255, 255, 255],
+            "the paper above the line is untouched"
+        );
         assert_eq!((report.strokes, report.colour_changes), (1, 1));
     }
 
@@ -498,7 +604,10 @@ mod tests {
         events.extend([Input::down(2.0, 5.0), Input::to(18.0, 5.0), Input::up()]);
         let (sheet, report) = replay(&events, 20, 10, 5);
         assert_eq!(report.events_drawn, 5);
-        assert!(sheet.pixels.iter().all(|p| *p == [255, 255, 255]), "the colour was never finished");
+        assert!(
+            sheet.pixels.iter().all(|p| *p == [255, 255, 255]),
+            "the colour was never finished"
+        );
     }
 
     #[test]
@@ -529,13 +638,21 @@ mod tests {
         for y in 0..128u32 {
             for x in 0..96u32 {
                 let inside = (x as i32 - 48).pow(2) + (y as i32 - 60).pow(2) < 900;
-                picture.pixels[(y * 96 + x) as usize] = if inside { [200, 150, 110] } else { [40, 60, 50] };
+                picture.pixels[(y * 96 + x) as usize] = if inside {
+                    [200, 150, 110]
+                } else {
+                    [40, 60, 50]
+                };
             }
         }
         let events = realist(&picture, &[], 3000);
         assert!(events.len() <= 3000);
         let (drawn, _) = replay(&events, 96, 128, usize::MAX);
-        assert!(colour_error(&picture, &drawn) < 8.0, "{}", colour_error(&picture, &drawn));
+        assert!(
+            colour_error(&picture, &drawn) < 8.0,
+            "{}",
+            colour_error(&picture, &drawn)
+        );
         assert!(ssim(&picture, &drawn) > 0.6, "{}", ssim(&picture, &drawn));
     }
 }

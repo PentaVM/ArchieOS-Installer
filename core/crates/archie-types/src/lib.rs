@@ -71,7 +71,7 @@ mod tests {
 
     #[test]
     fn version_constants_are_populated() {
-        assert!(!ARCHIEOS_VERSION.is_empty());
+        assert!(ARCHIEOS_VERSION.contains('.'));
         assert_eq!(FABRIC_PROTOCOL_VERSION, 2);
     }
 }

@@ -1206,8 +1206,8 @@ fn layout(entries: &[Entry], shape: &LumenShape, total: usize) -> Placed {
         for &k in kids {
             let w = if entries[k].branch { 1.5 } else { 1.0 };
             weight_sum += w;
-            for d in 0..DIMS {
-                aggregate[d] += signature[k][d] * w;
+            for (sum, value) in aggregate.iter_mut().zip(&signature[k]) {
+                *sum += value * w;
             }
         }
         if weight_sum > 0.0 {
@@ -1221,8 +1221,8 @@ fn layout(entries: &[Entry], shape: &LumenShape, total: usize) -> Placed {
     let leaves: Vec<usize> = (0..count).filter(|&i| !entries[i].branch).collect();
     let mut centroid = [0.0; DIMS];
     for &i in &leaves {
-        for d in 0..DIMS {
-            centroid[d] += signature[i][d];
+        for (sum, value) in centroid.iter_mut().zip(&signature[i]) {
+            *sum += value;
         }
     }
     if !leaves.is_empty() {
@@ -1423,7 +1423,7 @@ mod tests {
             id: id.into(),
             parent_id: parent.map(Into::into),
             kind,
-            label: id.split(':').last().unwrap_or(id).into(),
+            label: id.split(':').next_back().unwrap_or(id).into(),
             direction: normalize([seed.sin(), (seed * 0.7).cos(), (seed * 1.3).sin()]),
             position: [0.0; 3],
             velocity: [0.0; 3],

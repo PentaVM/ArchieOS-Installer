@@ -23,6 +23,7 @@
 #include "sentry/store/graph_store.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <fstream>
 #include <cstdlib>

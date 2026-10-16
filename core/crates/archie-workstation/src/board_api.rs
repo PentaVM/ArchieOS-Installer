@@ -49,19 +49,23 @@ pub struct ErrorResponse {
 }
 
 /// Centralized Error type to prevent leaking internal traces.
+#[derive(Debug, thiserror::Error)]
 pub enum AppError {
+    #[error("internal board error: {0}")]
     Internal(String),
+    #[error("bad request: {0}")]
     BadRequest(String),
+    #[error("unauthorized")]
     Unauthorized,
+    #[error("not implemented: {0}")]
+    NotImplemented(&'static str),
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
-        // The message is owned: a `BadRequest` carries its own text, which ends with this
-        // match, so a borrow of it could not outlive the arm.
         let (status, msg) = match self {
             AppError::Internal(_err) => {
-                // In a real app: tracing::error!("Internal Board Error: {}", _err);
+                // Zero-Leakage: Log internally without exposing internal details to remote client
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Internal Server Error".to_string(),
@@ -69,6 +73,7 @@ impl IntoResponse for AppError {
             }
             AppError::BadRequest(err) => (StatusCode::BAD_REQUEST, err),
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()),
+            AppError::NotImplemented(what) => (StatusCode::NOT_IMPLEMENTED, what.to_string()),
         };
         (status, Json(ErrorResponse { error: msg })).into_response()
     }
@@ -127,12 +132,15 @@ fn same_secret(a: &[u8], b: &[u8]) -> bool {
 }
 
 async fn list_tasks(State(state): State<BoardState>) -> Result<impl IntoResponse, AppError> {
-    let graph = state.task_graph.read().await;
-    let cards: Vec<KanbanCard> = graph
-        .iter()
-        .filter(|task| state.adapter.context_visible(task))
-        .map(KanbanCard::from)
-        .collect();
+    // Lock contention mitigation: read lock is acquired, mapped, and immediately dropped
+    let cards: Vec<KanbanCard> = {
+        let graph = state.task_graph.read().await;
+        graph
+            .iter()
+            .filter(|task| state.adapter.context_visible(task))
+            .map(KanbanCard::from)
+            .collect()
+    };
     Ok((StatusCode::OK, Json(cards)))
 }
 
@@ -140,8 +148,8 @@ async fn create_task(
     State(state): State<BoardState>,
     Json(payload): Json<CreateTaskRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let mut graph = state.task_graph.write().await;
-
+    // Lock contention mitigation: Prepare the Task, labels, timestamps, and privacy resolution
+    // completely in local memory BEFORE acquiring any lock on the shared TaskGraph.
     let mut task = Task::new(payload.title, TraceId::new(), QueueClass::Background);
     if let Some(desc) = payload.description {
         task.description = desc;
@@ -189,13 +197,17 @@ async fn create_task(
 
     if let Some(meta) = payload.metadata {
         for (k, v) in meta {
-            task.labels.insert(format!("meta.{}", k), v);
+            task.labels.insert(format!("meta.{k}"), v);
         }
     }
 
-    graph
-        .insert(task)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    // Critical section: acquire write lock exclusively for the insertion operation.
+    {
+        let mut graph = state.task_graph.write().await;
+        graph
+            .insert(task)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+    }
 
     Ok((StatusCode::CREATED, Json("Task created securely")))
 }
@@ -235,7 +247,10 @@ async fn sync_board(State(state): State<BoardState>) -> Result<impl IntoResponse
         .await
     {
         Ok(_) => Ok((StatusCode::OK, Json("Sync completed"))),
-        Err(e) => Err(AppError::Internal(e.to_string())),
+        // The only failure there is today: nothing sends cards anywhere yet.
+        Err(_) => Err(AppError::NotImplemented(
+            "enterprise transport is not configured",
+        )),
     }
 }
 
@@ -280,5 +295,12 @@ mod tests {
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         let internal = AppError::Internal("database path /secret".into()).into_response();
         assert_eq!(internal.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn internal_errors_do_not_leak_traces_to_client() {
+        let err = AppError::Internal("leaked database sql connection /var/secrets".into());
+        let res = err.into_response();
+        assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }

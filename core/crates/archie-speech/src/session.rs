@@ -163,6 +163,11 @@ impl<C: CognitiveModelAdapter> SpeechSession<C> {
         &self.plan
     }
 
+    /// Inspect the configured floor without starting cognition or assembling context.
+    pub fn floor_decision(&self, state: &ConversationalFloorState) -> FloorDecision {
+        self.policy.decide(state)
+    }
+
     /// Somebody said something. Decide what the floor allows, and start thinking only if
     /// the answer could actually be said.
     ///
@@ -210,6 +215,9 @@ impl<C: CognitiveModelAdapter> SpeechSession<C> {
         let Some(turn) = self.turn.as_mut() else {
             return events;
         };
+        if turn.cancelled.is_some() {
+            return events;
+        }
 
         while let Some(event) = self.cognitive.poll() {
             if event.turn_id() != turn.id {

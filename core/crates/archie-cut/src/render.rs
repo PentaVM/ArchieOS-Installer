@@ -94,6 +94,10 @@ pub fn render(
             "crf=23",
             "movflags=+faststart",
         ])
+        // melt's titles are drawn by Qt, which looks for a display to open even though
+        // nothing is shown. Without one (a service, a shell with no session) it would
+        // not start at all; told to draw off screen, it never needs one.
+        .env("QT_QPA_PLATFORM", "offscreen")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())

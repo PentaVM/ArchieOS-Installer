@@ -30,7 +30,11 @@ pub fn state_of(device_info: &[u8], active_app: &[u8]) -> BTreeMap<String, Strin
         if let Some(close) = app[open..].find('>') {
             let rest = &app[open + close + 1..];
             if let Some(end) = rest.find("</app>") {
-                let name: String = rest[..end].chars().filter(|c| !c.is_control()).take(100).collect();
+                let name: String = rest[..end]
+                    .chars()
+                    .filter(|c| !c.is_control())
+                    .take(100)
+                    .collect();
                 if !name.trim().is_empty() {
                     state.insert("showing".into(), name.trim().to_string());
                 }
@@ -43,9 +47,12 @@ pub fn state_of(device_info: &[u8], active_app: &[u8]) -> BTreeMap<String, Strin
 /// Asks the Roku at `address`. An unanswered question leaves its facts out.
 pub fn observe(address: IpAddr) -> BTreeMap<String, String> {
     let ask = |path: &str| {
-        LanUrl::parse(&format!("http://{}/{path}", std::net::SocketAddr::new(address, 8060)))
-            .and_then(|url| get(&url).ok())
-            .unwrap_or_default()
+        LanUrl::parse(&format!(
+            "http://{}/{path}",
+            std::net::SocketAddr::new(address, 8060)
+        ))
+        .and_then(|url| get(&url).ok())
+        .unwrap_or_default()
     };
     state_of(&ask("query/device-info"), &ask("query/active-app"))
 }
@@ -66,12 +73,18 @@ mod tests {
         assert_eq!(state["model"], "Roku Express 4K");
         assert_eq!(state["power"], "PowerOn");
         assert_eq!(state["showing"], "Netflix");
-        assert!(!state.contains_key("serial"), "the serial number is not kept");
+        assert!(
+            !state.contains_key("serial"),
+            "the serial number is not kept"
+        );
     }
 
     #[test]
     fn a_roku_that_does_not_answer_adds_nothing() {
         assert!(state_of(b"", b"").is_empty());
-        assert_eq!(state_of(INFO.as_bytes(), b"<active-app><app>").get("showing"), None);
+        assert_eq!(
+            state_of(INFO.as_bytes(), b"<active-app><app>").get("showing"),
+            None
+        );
     }
 }

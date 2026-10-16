@@ -1,0 +1,26 @@
+[package]
+name = "archie-sentry"
+description = "Core-owned typed Sentry capabilities, execution and verification."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+archie-types.workspace = true
+archie-policy.workspace = true
+archie-postgres.workspace = true
+postgres.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+time.workspace = true
+rustls.workspace = true
+tokio-rustls.workspace = true
+prost.workspace = true
+font8x8 = "0.3"
+jpeg-encoder = "0.6"

@@ -14,8 +14,9 @@
 //! falls back to a loopback TCP port published in `/run/archie/archied.endpoint`.
 //!
 //! Read-only queries are unauthenticated beyond socket access. Anything that changes
-//! state carries an explicit marker and is refused unless the daemon was started with
-//! control mutations enabled.
+//! state carries an explicit marker. Sentry mutations require an allowed kernel UID,
+//! the same foreground terminal and a single-use review on the same Unix connection.
+//! Windows loopback and the context-free dispatcher cannot provide that authority.
 
 use crate::boot::BootReport;
 use archie_observability::MetricSnapshot;
@@ -37,6 +38,13 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 /// Largest single control message accepted, to bound what a client can make the daemon
 /// allocate.
 pub const MAX_CONTROL_MESSAGE_BYTES: usize = 1024 * 1024;
+pub use archie_sentry::contracts::Command as SentryCommand;
+pub use archie_sentry::contracts::PrintFormat as SentryPrintFormat;
+pub use archie_sentry::contracts::RemoteKeyName as SentryRemoteKey;
+pub use archie_sentry::engine::ExecutionStatus as SentryExecutionStatus;
+/// The IRIS context-feed builders, re-exported so the CLI can run a feed pass
+/// without a direct archie-sentry dependency.
+pub use archie_sentry::feed as sentry_feed;
 
 /// A bounded, operator-scoped Nmap survey profile. These are inventory operations, not
 /// vulnerability exploitation, credential testing, arbitrary NSE script execution, or
@@ -312,7 +320,7 @@ pub struct SourcedNetworkEvidence {
 /// Deterministic analytic result for a candidate inventory class. A classification is
 /// only an observation: it cannot propose pairing, select an adapter, mint a lease or
 /// enable any device transport.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnalyticDeviceClassification {
     pub class: DeviceClass,
     /// 0–100 evidence score. Only candidates at or above the conservative threshold
@@ -332,7 +340,7 @@ pub struct NetworkAssetObservation {
 
 /// Reproducible candidate inventory view of one observation. An empty `candidates`
 /// list means a host was observed but the analytic rules do not identify a device class.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClassifiedNetworkAsset {
     pub ipv4_address: Ipv4Addr,
     pub candidates: Vec<AnalyticDeviceClassification>,
@@ -341,7 +349,8 @@ pub struct ClassifiedNetworkAsset {
 /// Deterministic difference between two observations of the same declared network
 /// scope. This is an analytic finding only: it does not mutate inventory, trust,
 /// pairing, routing, firewall state or any device.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NetworkInventoryChange {
     NewlyObserved {
         ipv4_address: Ipv4Addr,
@@ -1324,7 +1333,7 @@ fn is_lowercase_sha256(value: &str) -> bool {
 
 /// What the CLI can ask for.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "request", rename_all = "snake_case")]
+#[serde(tag = "request", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ControlRequest {
     /// Everything `archie status` shows.
     Status,
@@ -1341,10 +1350,42 @@ pub enum ControlRequest {
     Devices,
     /// Recent durable physical-operation records. This is read-only and cannot approve,
     /// cancel, send, or otherwise dispatch an operation.
-    DeviceOperations { limit: u32 },
+    DeviceOperations {
+        limit: u32,
+    },
+    /// Read-only IPP query for a printer in operator configuration. No caller URL.
+    SentryPrinter {
+        resource_id: String,
+    },
+    /// Read configured HA cache telemetry; no refresh, URL or actuation.
+    SentryHomeStatus {
+        resource_id: String,
+    },
+    /// Read-only Get-Printer-Attributes probe plus driver planning for one
+    /// configured printer. Never installs or executes anything.
+    SentryPrinterDoctor {
+        resource_id: String,
+    },
+    /// Prepare one typed operation in an authenticated local operator session.
+    SentryPrepare {
+        resource_id: String,
+        command: archie_sentry::contracts::Command,
+    },
+    /// Confirm the exact digest returned on this same connection.
+    SentryApprove {
+        intent_id: String,
+        digest: String,
+    },
+    SentryCancel,
+    /// Query a durable outcome/fence through an authenticated local session.
+    SentryReceipt {
+        intent_id: String,
+    },
     /// Recent Cortex learning trajectories. This is a privacy-minimised read-only
     /// projection; it cannot parse a correction, write the graph or promote a model.
-    CortexTrajectories { limit: u32 },
+    CortexTrajectories {
+        limit: u32,
+    },
     /// Registered models.
     Models,
     /// The boot report from this daemon's start.
@@ -1352,7 +1393,9 @@ pub enum ControlRequest {
     /// Metrics snapshot.
     Metrics,
     /// Recent audit records.
-    Audit { limit: u32 },
+    Audit {
+        limit: u32,
+    },
     /// Liveness check.
     Ping,
 }
@@ -1360,11 +1403,12 @@ pub enum ControlRequest {
 impl ControlRequest {
     /// Whether servicing this request changes daemon state.
     ///
-    /// Every request in v0.1 is read-only. The method exists so that adding a mutating
-    /// request later cannot silently skip an authorisation check — the dispatcher
-    /// branches on this.
+    /// Sentry preparation/approval/cancellation require the operator dispatcher.
     pub fn is_mutating(&self) -> bool {
-        false
+        matches!(
+            self,
+            Self::SentryPrepare { .. } | Self::SentryApprove { .. } | Self::SentryCancel
+        )
     }
 
     pub fn name(&self) -> &'static str {
@@ -1376,6 +1420,13 @@ impl ControlRequest {
             Self::Peers => "peers",
             Self::Devices => "devices",
             Self::DeviceOperations { .. } => "device-operations",
+            Self::SentryPrinter { .. } => "sentry-printer",
+            Self::SentryHomeStatus { .. } => "sentry-home-status",
+            Self::SentryPrinterDoctor { .. } => "sentry-printer-doctor",
+            Self::SentryPrepare { .. } => "sentry-prepare",
+            Self::SentryApprove { .. } => "sentry-approve",
+            Self::SentryCancel => "sentry-cancel",
+            Self::SentryReceipt { .. } => "sentry-receipt",
             Self::CortexTrajectories { .. } => "cortex-trajectories",
             Self::Models => "models",
             Self::Boot => "boot",
@@ -1583,6 +1634,28 @@ pub enum ControlResponse {
     DeviceOperations {
         operations: Vec<DeviceOperationView>,
     },
+    SentryPrinter {
+        resource_id: String,
+        snapshot: archie_sentry::adapters::ipp::PrinterSnapshot,
+    },
+    SentryHomeStatus {
+        snapshot: archie_sentry::adapters::home_assistant::HomeSnapshot,
+    },
+    /// Driver-planning outcome for one configured printer. The command line is
+    /// rendered data for the operator; nothing here executes it.
+    SentryPrinterDoctor {
+        resource_id: String,
+        tier: String,
+        detail: String,
+        planned_command_line: String,
+    },
+    SentryPrepared {
+        intent: Box<archie_sentry::contracts::Intent>,
+        digest: String,
+    },
+    SentryResult(Box<archie_sentry::engine::ExecutionResult>),
+    SentryCancelled,
+    SentryReceipt(Box<archie_sentry::journal::JournalRecord>),
     CortexTrajectories {
         trajectories: Vec<CortexTrajectoryView>,
     },

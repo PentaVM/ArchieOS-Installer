@@ -73,7 +73,11 @@ impl Decision {
             return control.clone();
         }
         let planned = &control.chunk[(index - 1).min(control.chunk.len() - 1)];
-        Control { keys: planned.keys.clone(), buttons: planned.buttons.clone(), ..control.clone() }
+        Control {
+            keys: planned.keys.clone(),
+            buttons: planned.buttons.clone(),
+            ..control.clone()
+        }
     }
 }
 
@@ -147,39 +151,66 @@ pub struct Held {
 impl Held {
     /// The Stage actions that take the held state to what IRIS wants now: releases first,
     /// then presses, then renewals of anything held longer than `RENEW_HELD_MS`.
-    pub fn actions_towards(&mut self, control: &Control, now_ms: u128) -> (Vec<StageAction>, Vec<String>) {
+    pub fn actions_towards(
+        &mut self,
+        control: &Control,
+        now_ms: u128,
+    ) -> (Vec<StageAction>, Vec<String>) {
         let mut actions = Vec::new();
         let mut unsupported = Vec::new();
-        let want_keys: BTreeSet<String> = control.keys.iter().filter(|k| {
-            let ok = stage_key(k).is_some();
-            if !ok {
-                unsupported.push((*k).clone());
-            }
-            ok
-        }).cloned().collect();
-        let want_buttons: BTreeSet<String> =
-            control.buttons.iter().filter(|b| stage_button(b).is_some()).cloned().collect();
+        let want_keys: BTreeSet<String> = control
+            .keys
+            .iter()
+            .filter(|k| {
+                let ok = stage_key(k).is_some();
+                if !ok {
+                    unsupported.push((*k).clone());
+                }
+                ok
+            })
+            .cloned()
+            .collect();
+        let want_buttons: BTreeSet<String> = control
+            .buttons
+            .iter()
+            .filter(|b| stage_button(b).is_some())
+            .cloned()
+            .collect();
         for key in self.keys.difference(&want_keys) {
-            actions.push(StageAction::KeyUp { key: stage_key(key).expect("held keys are stage keys") });
+            actions.push(StageAction::KeyUp {
+                key: stage_key(key).expect("held keys are stage keys"),
+            });
             self.pressed_at_ms.remove(&format!("k:{key}"));
         }
         for button in self.buttons.difference(&want_buttons) {
-            actions.push(StageAction::ButtonUp { button: stage_button(button).expect("held buttons are stage buttons") });
+            actions.push(StageAction::ButtonUp {
+                button: stage_button(button).expect("held buttons are stage buttons"),
+            });
             self.pressed_at_ms.remove(&format!("b:{button}"));
         }
         for key in &want_keys {
             let tag = format!("k:{key}");
-            let due = self.pressed_at_ms.get(&tag).is_none_or(|at| now_ms.saturating_sub(*at) >= RENEW_HELD_MS);
+            let due = self
+                .pressed_at_ms
+                .get(&tag)
+                .is_none_or(|at| now_ms.saturating_sub(*at) >= RENEW_HELD_MS);
             if due {
-                actions.push(StageAction::KeyDown { key: stage_key(key).expect("filtered above") });
+                actions.push(StageAction::KeyDown {
+                    key: stage_key(key).expect("filtered above"),
+                });
                 self.pressed_at_ms.insert(tag, now_ms);
             }
         }
         for button in &want_buttons {
             let tag = format!("b:{button}");
-            let due = self.pressed_at_ms.get(&tag).is_none_or(|at| now_ms.saturating_sub(*at) >= RENEW_HELD_MS);
+            let due = self
+                .pressed_at_ms
+                .get(&tag)
+                .is_none_or(|at| now_ms.saturating_sub(*at) >= RENEW_HELD_MS);
             if due {
-                actions.push(StageAction::ButtonDown { button: stage_button(button).expect("filtered above") });
+                actions.push(StageAction::ButtonDown {
+                    button: stage_button(button).expect("filtered above"),
+                });
                 self.pressed_at_ms.insert(tag, now_ms);
             }
         }
@@ -190,8 +221,18 @@ impl Held {
 
     /// Everything still held, let go.
     pub fn release_all(&mut self) -> Vec<StageAction> {
-        let mut actions: Vec<StageAction> = self.keys.iter().filter_map(|k| stage_key(k)).map(|key| StageAction::KeyUp { key }).collect();
-        actions.extend(self.buttons.iter().filter_map(|b| stage_button(b)).map(|button| StageAction::ButtonUp { button }));
+        let mut actions: Vec<StageAction> = self
+            .keys
+            .iter()
+            .filter_map(|k| stage_key(k))
+            .map(|key| StageAction::KeyUp { key })
+            .collect();
+        actions.extend(
+            self.buttons
+                .iter()
+                .filter_map(|b| stage_button(b))
+                .map(|button| StageAction::ButtonUp { button }),
+        );
         self.keys.clear();
         self.buttons.clear();
         self.pressed_at_ms.clear();
@@ -203,7 +244,11 @@ impl Held {
 pub fn teal_pixels(pixels: &[[u8; 3]]) -> usize {
     pixels
         .iter()
-        .filter(|p| (p[0] as i32 - 127).abs() <= 24 && (p[1] as i32 - 240).abs() <= 20 && (p[2] as i32 - 224).abs() <= 22)
+        .filter(|p| {
+            (p[0] as i32 - 127).abs() <= 24
+                && (p[1] as i32 - 240).abs() <= 20
+                && (p[2] as i32 - 224).abs() <= 22
+        })
         .count()
 }
 
@@ -233,7 +278,16 @@ mod tests {
 
     #[test]
     fn the_step_in_force_follows_the_clock_and_the_last_holds() {
-        let steps = vec![Step { what: "drive to the ball".into(), seconds: 3.0 }, Step { what: "jump".into(), seconds: 1.0 }];
+        let steps = vec![
+            Step {
+                what: "drive to the ball".into(),
+                seconds: 3.0,
+            },
+            Step {
+                what: "jump".into(),
+                seconds: 1.0,
+            },
+        ];
         assert_eq!(step_at(&steps, 0.5).unwrap().what, "drive to the ball");
         assert_eq!(step_at(&steps, 3.2).unwrap().what, "jump");
         assert_eq!(step_at(&steps, 99.0).unwrap().what, "jump");
@@ -242,19 +296,48 @@ mod tests {
     #[test]
     fn only_changes_reach_the_stage_and_held_input_is_renewed() {
         let mut held = Held::default();
-        let drive = Control { keys: vec!["w".into(), "shift".into()], buttons: vec!["left".into()], ..Control::default() };
+        let drive = Control {
+            keys: vec!["w".into(), "shift".into()],
+            buttons: vec!["left".into()],
+            ..Control::default()
+        };
         let (first, unsupported) = held.actions_towards(&drive, 0);
         assert_eq!(first.len(), 2, "w down and boost down: {first:?}");
-        assert_eq!(unsupported, vec!["shift".to_string()], "a modifier cannot be held");
-        assert!(held.actions_towards(&drive, 500).0.is_empty(), "nothing changed, nothing sent");
+        assert_eq!(
+            unsupported,
+            vec!["shift".to_string()],
+            "a modifier cannot be held"
+        );
+        assert!(
+            held.actions_towards(&drive, 500).0.is_empty(),
+            "nothing changed, nothing sent"
+        );
         let renewed = held.actions_towards(&drive, 3_200).0;
-        assert_eq!(renewed.len(), 2, "held past 3 s: pressed again before the Stage lets go");
-        let turn = Control { keys: vec!["a".into()], ..Control::default() };
+        assert_eq!(
+            renewed.len(),
+            2,
+            "held past 3 s: pressed again before the Stage lets go"
+        );
+        let turn = Control {
+            keys: vec!["a".into()],
+            ..Control::default()
+        };
         let changed = held.actions_towards(&turn, 3_300).0;
-        assert!(changed.contains(&StageAction::KeyUp { key: Key::parse("w").unwrap() }));
-        assert!(changed.contains(&StageAction::ButtonUp { button: PointerButton::Left }));
-        assert!(changed.contains(&StageAction::KeyDown { key: Key::parse("a").unwrap() }));
-        assert_eq!(held.release_all(), vec![StageAction::KeyUp { key: Key::parse("a").unwrap() }]);
+        assert!(changed.contains(&StageAction::KeyUp {
+            key: Key::parse("w").unwrap()
+        }));
+        assert!(changed.contains(&StageAction::ButtonUp {
+            button: PointerButton::Left
+        }));
+        assert!(changed.contains(&StageAction::KeyDown {
+            key: Key::parse("a").unwrap()
+        }));
+        assert_eq!(
+            held.release_all(),
+            vec![StageAction::KeyUp {
+                key: Key::parse("a").unwrap()
+            }]
+        );
     }
 
     #[test]
@@ -279,20 +362,45 @@ mod tests {
 
     #[test]
     fn a_chunk_plays_out_from_the_frame_it_was_decided_on() {
-        let plan = |keys: &[&str]| Planned { keys: keys.iter().map(|k| k.to_string()).collect(), buttons: vec![] };
+        let plan = |keys: &[&str]| Planned {
+            keys: keys.iter().map(|k| k.to_string()).collect(),
+            buttons: vec![],
+        };
         let control = Control {
             keys: vec!["w".into()],
             chunk: vec![plan(&["w", "space"]), plan(&["a"]), plan(&[])],
             chunk_hz: 16.0,
             ..Control::default()
         };
-        let decision = Decision { number: 1, control, frame_ms: 1_000 };
+        let decision = Decision {
+            number: 1,
+            control,
+            frame_ms: 1_000,
+        };
         assert_eq!(decision.at(1_000).keys, vec!["w"], "now");
-        assert_eq!(decision.at(1_070).keys, vec!["w", "space"], "the first planned frame, 62.5 ms on");
+        assert_eq!(
+            decision.at(1_070).keys,
+            vec!["w", "space"],
+            "the first planned frame, 62.5 ms on"
+        );
         assert_eq!(decision.at(1_130).keys, vec!["a"]);
         assert!(decision.at(1_190).keys.is_empty());
-        assert!(decision.at(9_000).keys.is_empty(), "past the chunk, its last frame holds");
-        let plain = Decision { number: 2, control: Control { keys: vec!["d".into()], ..Control::default() }, frame_ms: 0 };
-        assert_eq!(plain.at(5_000).keys, vec!["d"], "a head without chunks holds its one control");
+        assert!(
+            decision.at(9_000).keys.is_empty(),
+            "past the chunk, its last frame holds"
+        );
+        let plain = Decision {
+            number: 2,
+            control: Control {
+                keys: vec!["d".into()],
+                ..Control::default()
+            },
+            frame_ms: 0,
+        };
+        assert_eq!(
+            plain.at(5_000).keys,
+            vec!["d"],
+            "a head without chunks holds its one control"
+        );
     }
 }

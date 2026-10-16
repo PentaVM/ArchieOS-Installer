@@ -305,10 +305,8 @@ fn place(desk: &Desk, envelope: &Envelope, temporary: &Path) -> std::io::Result<
         name = format!("{stem}-{n}{extension}");
     }
     let target = stage_dir.join(&name);
-    if !target.exists() {
-        if std::fs::rename(temporary, &target).is_err() {
-            std::fs::copy(temporary, &target)?;
-        }
+    if !target.exists() && std::fs::rename(temporary, &target).is_err() {
+        std::fs::copy(temporary, &target)?;
     }
     let latest = project_dir.join("latest");
     std::fs::create_dir_all(&latest)?;

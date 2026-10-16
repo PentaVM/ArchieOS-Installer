@@ -12,7 +12,9 @@
 
 use archie_arena::seat::{load_key, take, Seat};
 use archie_policy::PolicyEngine;
-use archie_stage::{learn, Key, Operator, PointerButton, StageAction, StageClient, StagePolicy, StageWorld};
+use archie_stage::{
+    learn, Key, Operator, PointerButton, StageAction, StageClient, StagePolicy, StageWorld,
+};
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -22,7 +24,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::net::UnixStream;
 
 fn wall_ms() -> u128 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
 }
 
 fn percentile(sorted: &[f64], share: f64) -> f64 {
@@ -35,34 +40,58 @@ fn percentile(sorted: &[f64], share: f64) -> f64 {
 async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
     let socket = take(&mut args, "--socket").ok_or("--socket is required")?;
     let key = load_key(&take(&mut args, "--key-file").ok_or("--key-file is required")?)?;
-    let policy = StagePolicy::load(&take(&mut args, "--policy").ok_or("--policy is required")?).map_err(|e| e.to_string())?;
+    let policy = StagePolicy::load(&take(&mut args, "--policy").ok_or("--policy is required")?)
+        .map_err(|e| e.to_string())?;
     let app_id = take(&mut args, "--app").ok_or("--app is required")?;
-    let count: usize = take(&mut args, "--count").map(|v| v.parse().unwrap_or(40)).unwrap_or(40).clamp(1, 1000);
+    let count: usize = take(&mut args, "--count")
+        .map(|v| v.parse().unwrap_or(40))
+        .unwrap_or(40)
+        .clamp(1, 1000);
     let mut sent = match take(&mut args, "--out") {
         Some(path) => Some(std::fs::File::create(&path).map_err(|e| format!("{path}: {e}"))?),
         None => None,
     };
     let snapshot = take(&mut args, "--snapshot");
     // Also time N captures each way: a full-size PNG snapshot and a 512-wide raw frame.
-    let looks: usize = take(&mut args, "--looks").map(|v| v.parse().unwrap_or(0)).unwrap_or(0).min(500);
-    let stream = UnixStream::connect(&socket).await.map_err(|e| format!("{socket}: {e}"))?;
+    let looks: usize = take(&mut args, "--looks")
+        .map(|v| v.parse().unwrap_or(0))
+        .unwrap_or(0)
+        .min(500);
+    let stream = UnixStream::connect(&socket)
+        .await
+        .map_err(|e| format!("{socket}: {e}"))?;
     let (read, write) = stream.into_split();
     let mut seat = Seat {
         operator: Operator::new(key, policy, PolicyEngine::default()),
         client: StageClient::new(read, write),
         world: StageWorld::default(),
-        snapshots: Path::new(&socket).parent().ok_or("--socket has no directory")?.join("snapshots"),
+        snapshots: Path::new(&socket)
+            .parent()
+            .ok_or("--socket has no directory")?
+            .join("snapshots"),
         app_id: app_id.clone(),
         principal_id: "archie-latency".into(),
     };
     let ready_by = Instant::now() + Duration::from_secs(30);
     while seat.world.surfaces_of(&app_id).next().is_none() {
-        learn(&mut seat.client, &mut seat.world, Duration::from_millis(300)).await.map_err(|e| e.to_string())?;
+        learn(
+            &mut seat.client,
+            &mut seat.world,
+            Duration::from_millis(300),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
         if Instant::now() > ready_by {
             return Err(format!("{app_id} has no window on the stage"));
         }
     }
-    let focus = seat.act(StageAction::Focus, "focus the probe window", Duration::from_secs(5)).await?;
+    let focus = seat
+        .act(
+            StageAction::Focus,
+            "focus the probe window",
+            Duration::from_secs(5),
+        )
+        .await?;
     if !focus.executed() {
         return Err(format!("focus refused: {focus:?}"));
     }
@@ -76,12 +105,21 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
             ("key_down", StageAction::KeyDown { key: w }),
             ("key_up", StageAction::KeyUp { key: w }),
             ("move", StageAction::Move { x, y }),
-            ("click", StageAction::Click { x, y, button: PointerButton::Left }),
+            (
+                "click",
+                StageAction::Click {
+                    x,
+                    y,
+                    button: PointerButton::Left,
+                },
+            ),
         ];
         for (kind, action) in plan {
             let at = wall_ms();
             let started = Instant::now();
-            let outcome = seat.act(action, "latency probe", Duration::from_secs(5)).await;
+            let outcome = seat
+                .act(action, "latency probe", Duration::from_secs(5))
+                .await;
             let took = started.elapsed().as_secs_f64() * 1000.0;
             let executed = matches!(&outcome, Ok(o) if o.executed());
             if executed {
@@ -90,20 +128,30 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
                 *refused.entry(kind).or_default() += 1;
             }
             if let Some(file) = sent.as_mut() {
-                let _ = writeln!(file, "{}", json!({"t": at, "kind": kind, "round": round, "gate_ms": took,
-                                                   "executed": executed, "x": x, "y": y}));
+                let _ = writeln!(
+                    file,
+                    "{}",
+                    json!({"t": at, "kind": kind, "round": round, "gate_ms": took,
+                                                   "executed": executed, "x": x, "y": y})
+                );
             }
         }
     }
     for _ in 0..looks {
         let started = Instant::now();
         match seat.look().await {
-            Ok(_) => times.entry("snapshot_png").or_default().push(started.elapsed().as_secs_f64() * 1000.0),
+            Ok(_) => times
+                .entry("snapshot_png")
+                .or_default()
+                .push(started.elapsed().as_secs_f64() * 1000.0),
             Err(_) => *refused.entry("snapshot_png").or_default() += 1,
         }
         let started = Instant::now();
         match seat.frame(512).await {
-            Ok(_) => times.entry("frame_512_raw").or_default().push(started.elapsed().as_secs_f64() * 1000.0),
+            Ok(_) => times
+                .entry("frame_512_raw")
+                .or_default()
+                .push(started.elapsed().as_secs_f64() * 1000.0),
             Err(_) => *refused.entry("frame_512_raw").or_default() += 1,
         }
     }

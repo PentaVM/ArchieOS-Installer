@@ -1,0 +1,12 @@
+# The traffic audit's account.
+#
+# Static, not DynamicUser: a dynamic user's StateDirectory lives under /var/lib/private
+# (0700 root), where the alert follower, running as `archie`, could never read
+# alerts.jsonl. The unit runs it with Group=archie, so what it writes (0640) is readable by
+# the control plane and by nobody else. Capture rights come from the unit:
+# SupplementaryGroups=wireshark lets it execute dumpcap (root:wireshark 0754 on Arch),
+# and the unit's ambient capabilities are the ones dumpcap needs.
+#
+# Type Name             ID GECOS                          Home                     Shell
+u archie-netwatch      -  "ARCHIE Sentry network audit"   /var/lib/archie/netwatch /usr/bin/nologin
+m archie-netwatch      archie
