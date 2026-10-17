@@ -1,0 +1,2 @@
+# Dataset and receipt SHA256 values identify exact bytes across Windows and WSL.
+*.json -text
