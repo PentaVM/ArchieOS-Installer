@@ -283,7 +283,7 @@ class Worker:
         from .bench import fantom_items, fantom_score, opentom_items, opentom_score
         from .native_chat import NativeChat
         bench_id, benchmark = spec['bench_id'], spec['benchmark']
-        if not re.fullmatch(r'[a-z0-9-]{3,64}', bench_id) or benchmark not in ('opentom', 'fantom'):
+        if not re.fullmatch(r'[a-z0-9-]{3,64}', bench_id) or benchmark not in ('opentom', 'fantom', 'longchat'):
             raise AdmissionError('invalid bench id or benchmark')
         out = self.root/'bench'/bench_id
         out.mkdir(parents=True, exist_ok=True)
@@ -293,7 +293,12 @@ class Worker:
             if not candidate.exists():
                 export_candidate(spec['checkpoint'], candidate)
             spec = dict(spec, adapter=str(candidate))
-        items = opentom_items() if benchmark == 'opentom' else fantom_items()
+        if benchmark == 'longchat':
+            from . import longchat
+            items = longchat.items(seed=int(spec.get('seed', 20261017)), worlds=int(spec.get('worlds', 20)),
+                                   target_chars=int(spec.get('target_chars', 84000)), form=spec.get('form', 'raw'))
+        else:
+            items = opentom_items() if benchmark == 'opentom' else fantom_items()
         if spec.get('batches'):
             items = [i for i in items if i.get('batch') in set(spec['batches'])]
         if spec.get('max_keys'):
@@ -321,7 +326,8 @@ class Worker:
                 continue
             # The server holds VRAM only while we may generate; a hold (owner/Codex needs the
             # GPU) closes it, a short thermal rest keeps it loaded but idle.
-            with NativeChat(self.config, out/'server.log', lora=spec.get('adapter')) as chat, \
+            with NativeChat(self.config, out/'server.log', lora=spec.get('adapter'),
+                            context=int(spec.get('context', 8192))) as chat, \
                     responses_path.open('a') as stream:
                 self.state = 'running'
                 while pending and not self.stopping() and not (self.root/'hold').exists():
@@ -345,7 +351,13 @@ class Worker:
         predictions = {i: r['text'] for i, r in done.items()}
         from .bench import official_embedder
         embed = official_embedder() if benchmark == 'fantom' else None
-        report = opentom_score(items, predictions) if benchmark == 'opentom' else fantom_score(items, predictions, embed)
+        if benchmark == 'longchat':
+            from . import longchat
+            report = longchat.score(items, predictions)
+        elif benchmark == 'opentom':
+            report = opentom_score(items, predictions)
+        else:
+            report = fantom_score(items, predictions, embed)
         result = {'format_version': 1, 'bench_id': bench_id, 'benchmark': benchmark, 'adapter': spec.get('adapter'),
                   'base_sha256': self.config.base_sha256, 'items': len(items), 'max_tokens': max_tokens,
                   'thinking': thinking, 'mode': mode, 'budget': budget if mode == 'think' else None,

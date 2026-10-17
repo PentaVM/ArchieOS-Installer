@@ -149,3 +149,26 @@ is not paused: two GPU jobs on this card overheat it (85–87 °C seen at ~130 W
   with the adapter, scored against `opentom-base`. Blocks 28–30 are Gated DeltaNet
   recurrent layers; the wider adapter (step 3) needs a faithful differentiable
   implementation with native parity first, so it is not part of tonight's runs.
+- 01:13 — **Thinking pilot (OpenToM batch 1, first 20 narratives, 260 questions; base,
+  budget 512)** vs the direct answers on the same items, macro-F1:
+
+  | type | direct | think-512 |
+  | --- | --- | --- |
+  | Loc-coarse FO | 0.444 | 0.444 |
+  | Loc-coarse SO | 0.400 | 0.544 |
+  | MultiHop FO | 0.419 | 0.597 |
+  | MultiHop SO | 0.256 | 0.417 |
+  | Attitude | 0.469 | 0.477 |
+
+  Reasoning helps where tracking state matters (multi-hop, second order). First-order
+  location stays at the "no" default (73 no vs 7 yes). 182/260 (70 %) hit the 512 budget
+  (mean 483 thinking tokens), so a 1024 pilot is queued. It is a pilot subset, not the
+  official 5×50 protocol.
+- 01:13 — Batch extractor gate **passed** (bit-identical to `prefix_export` on 2 probes);
+  `tom-gen-001` prepared in minutes (1,400/1,400, 0 rejected). g1 training started
+  (baseline dev loss 2.419 on 150 dev examples).
+- Social context pack (owner direction): design note
+  `2026-10-17-wanda-social-context-pack-design.md`. Harness `longchat.py`: 20 long chats,
+  ≈84k characters (≈24k tokens) each, 232 balanced questions (knowledge 58/58 yes/no,
+  belief content) asked over the raw transcript and over the compacted pack (≈2.8k
+  tokens, 8.5× shorter). Queued after the 1024 pilot.
