@@ -166,3 +166,9 @@ CPU con revisión útil de parámetros/datos, sin reintentos GPU ni repetir prue
 numéricas ya pasadas. Integración del patch exige preservar el probe prompt-only
 y nueva revisión, no una copia de worker.py. Automatización permanece ACTIVE
 cada30minutos, sin antiguo cutoff.
+
+Tick01:12UTC: ver `../round3/tick-20261017T0112.md` y
+`../round3/parameter-advice-20261017.md`. CPU/Solmedium; sin nuevo GPU.
+La geometría exacta confirma28–30recurrentes,31full; widening necesita grafo,
+estado/backward/export propios. No repetir la inspección ni otra tanda de datos
+para volver a descubrirlo. La prueba propia sigue pendiente de cesión de contexto.
