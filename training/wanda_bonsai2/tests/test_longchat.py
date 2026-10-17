@@ -19,6 +19,18 @@ class LongChatTests(unittest.TestCase):
         self.assertLess(len(packed), len(raw) / 3)
         self.assertEqual(sum('UPDATE' in l for l in world['ledger']), len(world['updates']))
 
+    def test_pack_v2_states_each_persons_view_consistently_with_the_simulation(self):
+        world = longchat.build(9, target_chars=30000)
+        text = longchat.pack_state(world)
+        for topic, verb, _ in world['facts']:
+            for p in world['people']:
+                seen = world['knowledge'][topic][p]
+                if seen is not None:
+                    self.assertIn(f'{p}: last saw that {topic} {verb.format(v=seen)}', text)
+        three = [longchat.items(worlds=3, target_chars=30000, form=f) for f in ('raw', 'pack', 'pack2')]
+        golds = [[(i['id'].split(':', 1)[1], i['gold']) for i in items] for items in three]
+        self.assertEqual(golds[0], golds[1]); self.assertEqual(golds[0], golds[2])
+
     def test_both_forms_ask_identical_questions_and_constant_answers_fail(self):
         raw = longchat.items(worlds=6, target_chars=30000, form='raw')
         packed = longchat.items(worlds=6, target_chars=30000, form='pack')

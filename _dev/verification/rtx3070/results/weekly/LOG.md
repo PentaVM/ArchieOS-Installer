@@ -300,3 +300,12 @@ is not paused: two GPU jobs on this card overheat it (85–87 °C seen at ~130 W
 - **Open problems:** "no" default on Loc-FO; g1-style short traces destroy reasoning;
   long-context ledger tracking is at chance without reasoning (re-run with thinking
   queued); the seed-29 replication of g2 is training now.
+- 10:30 — **Long context, pack + thinking 512 (partial, 124/232):** knowledge 0.45 (≈ chance,
+  mostly "yes"), belief 0.08 (answers the current value instead of the person's belief).
+  Every item hit the budget. The 9B cannot derive per-person beliefs from a ~60-event
+  ledger even with reasoning. **Design consequence for Cortex:** the pack must carry the
+  bookkeeping already done, i.e. each person's last-seen value per fact computed
+  deterministically from presence (IRIS/logs), so Wanda reasons on top of it instead of
+  recomputing it. Added `pack2` (per-person state table + ledger + recent window; a unit
+  test checks it against the simulation) and queued it in direct mode after the
+  raw-with-thinking run. g2 seed 29 finished training (dev 0.718); its OpenToM run follows.

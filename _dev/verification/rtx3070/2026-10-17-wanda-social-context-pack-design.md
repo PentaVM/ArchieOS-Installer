@@ -31,6 +31,16 @@ the KV cache should be reused.
 The pack is unprivileged context under the existing Core/Cortex contracts (Task 9 decision
 channel). It confers no authority, and raw chats are never admitted to training automatically.
 
+## First measurement (2026-10-17, base 9B, 24k-token chats)
+
+A ledger alone is not enough. With the raw 31k-token transcript or the ≈3.9k-token
+ledger pack, knowledge and belief questions stay at chance, without reasoning and with
+a 512-token reasoning budget: the model answers the current value, not the person's
+belief. The pack therefore also needs a **materialised per-person state** ("A last saw X
+at t; missed the change to Y"), computed by the host. Measurement of that form (`pack2`)
+is queued. The cognitive split is: Cortex/IRIS do the deterministic who-saw-what
+bookkeeping; Wanda interprets intentions, consequences and strategy on top of it.
+
 ## Measurement before any contract change
 
 - Extend `tomgen` with long multi-thread chats (24k/50k tokens: joins, leaves and the

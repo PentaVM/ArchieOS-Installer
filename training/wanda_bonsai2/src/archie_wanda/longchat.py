@@ -72,11 +72,36 @@ def pack(world, recent=40):
                      ['Recent messages (verbatim):'] + world['lines'][-recent:])
 
 
+def pack_state(world, recent=40):
+    """Pack v2: the host also materialises each person's last-seen value per fact (the
+    deterministic bookkeeping Cortex can do from presence logs), so the model reads beliefs
+    instead of recomputing them from the whole ledger."""
+    rows = []
+    for topic, verb, _ in world['facts']:
+        current = verb.format(v=world['state'][topic])
+        for p in world['people']:
+            seen = world['knowledge'][topic][p]
+            if seen is None:
+                rows.append(f'- {p}: never saw any message about {topic}.')
+            elif seen == world['state'][topic]:
+                rows.append(f'- {p}: last saw that {topic} {verb.format(v=seen)} (up to date).')
+            else:
+                rows.append(f'- {p}: last saw that {topic} {verb.format(v=seen)}; missed the later change '
+                            f'({topic} {current} now).')
+    header = (f'Social context pack v2. People: {", ".join(world["people"])}. Domain: personal. '
+              'Per-person state is computed from who was present for each message.')
+    return '\n'.join([header, 'What each person has seen:'] + rows + ['Knowledge ledger:'] + world['ledger'] +
+                     ['Recent messages (verbatim):'] + world['lines'][-recent:])
+
+
 def items(seed=20261017, worlds=20, target_chars=84000, form='raw'):
     out = []
+    forms = {'raw': lambda w: '\n'.join(w['lines']), 'pack': pack, 'pack2': pack_state}
+    if form not in forms:
+        raise ValueError('form must be raw, pack or pack2')
     for w in range(worlds):
         world = build(seed * 1000 + w, target_chars)
-        context = '\n'.join(world['lines']) if form == 'raw' else pack(world)
+        context = forms[form](world)
         rng = random.Random(seed * 7 + w)
         for topic, verb, _ in world['facts']:
             current = verb.format(v=world['state'][topic])
