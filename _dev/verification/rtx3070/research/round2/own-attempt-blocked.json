@@ -1,0 +1,31 @@
+{
+  "format_version": 1,
+  "status": "blocked_before_any_child_or_gpu_allocation",
+  "scope": "own_semantic_two_update_experiment",
+  "run_root": "/home/archie/wanda/round2-semantic-cabina-20261016-high",
+  "source_parent_sha256": "a6eff2ddebbe2755c4937a3da9f4aea1737738d49496b9070fc286edeac9202f",
+  "selected_family_ids": ["r2c-cabina-interprete"],
+  "error": "fcntl.flock original worker.lock LOCK_EX|LOCK_NB: BlockingIOError errno11",
+  "launcher_exit_code": 1,
+  "owned_phase_children_created": 0,
+  "gpu_allocations": 0,
+  "optimizer_steps": 0,
+  "automatic_retry": false,
+  "original_worker_observed_after_refusal": {
+    "pid": 150,
+    "boot_id": "062a7c2e-aab4-49f5-85c4-66976ecc27c3",
+    "state": "paused",
+    "job": null,
+    "updated_ms": 1792180930652,
+    "cutoff_epoch": 1792785600.0
+  },
+  "lock_owner_observed_by_lslocks": {
+    "pid": 150,
+    "command": "python",
+    "path": "/home/archie/wanda/run/worker.lock"
+  },
+  "original_worker_command": "/opt/archie/iris-venv/bin/python -m archie_wanda.cli worker --config /mnt/c/Users/Penta/.codex/worktrees/wanda-bonsai9b/ArchieOS/training/wanda_bonsai2/configs/rtx3070-development.toml --headers /mnt/c/Users/Penta/Archie-RTX3070-Handoff/local-verification/prism-b10777-source --cutoff 2026-10-23T17:00:00-03:00",
+  "old_controls_or_processes_modified": false,
+  "new_run_files_only": ["config.json", "deadline.json"],
+  "promoted": false
+}
