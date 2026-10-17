@@ -309,3 +309,16 @@ is not paused: two GPU jobs on this card overheat it (85–87 °C seen at ~130 W
   recomputing it. Added `pack2` (per-person state table + ledger + recent window; a unit
   test checks it against the simulation) and queued it in direct mode after the
   raw-with-thinking run. g2 seed 29 finished training (dev 0.718); its OpenToM run follows.
+- 11:40 — **Long context, complete (base 9B, 20 worlds, 232 balanced questions):**
+
+  | form | mode | knowledge | belief |
+  | --- | --- | --- | --- |
+  | raw transcript (≈31k tokens) | direct | 0.50 | 0.18 |
+  | raw transcript | thinking 512 | 0.51 | 0.16 |
+  | ledger pack (≈3.9k) | thinking 512 | 0.47 | 0.11 |
+  | **pack2: per-person state + ledger** | direct | **0.70** | **0.36** |
+
+  Chance is 0.50 for knowledge and ≈0.20 for belief. Only the materialised per-person state
+  moves the model off chance; 28 of its answers were truncated mid-explanation, so the
+  number is a lower bound. This supports the design split: host bookkeeping in Cortex,
+  interpretation in Wanda. Queued: pack2 with thinking 512.
