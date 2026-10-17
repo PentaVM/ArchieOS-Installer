@@ -172,3 +172,39 @@ is not paused: two GPU jobs on this card overheat it (85–87 °C seen at ~130 W
   ≈84k characters (≈24k tokens) each, 232 balanced questions (knowledge 58/58 yes/no,
   belief content) asked over the raw transcript and over the compacted pack (≈2.8k
   tokens, 8.5× shorter). Queued after the 1024 pilot.
+- ~02:55 — **g1 finished** (LoRA q,k,v,o block 31, lr 2e-4, 2 epochs). Procedural dev loss
+  fell from 2.419 to ≈0.65 (in-distribution: shared templates, not evidence of ToM). The
+  decision anchor was unchanged throughout: probe accuracy 0.906, flip 0/3, p(correct)
+  0.87–0.88.
+- **Native parity of the trained adapter: PASSED** (`verify/g1-qkvo-s17/receipt.json`).
+  The exported GGUF in Prism vs the Torch suffix with the same LoRA gives mean KL 4.2e-5
+  (max 1.9e-4) and 100 % greedy agreement on 3 public sequences; the layer-30 capture is
+  unchanged; the adapter's own effect is KL 0.92, ≈22,000× the parity error. This
+  confirms the export basis (LoRA on the pre-Hadamard activation) and that trained
+  adapters can be served natively. Not promoted.
+- Research note (owner asked how counterfactual flips are best taught): minimal
+  counterfactual pairs (Kaushik et al. 2020; edit minimality predicts gains),
+  program-generated adversarial ToM data (ExploreToM, ICLR 2025: +27 on ToMi; state
+  tracking is the bottleneck) and preference objectives on counterfactual pairs with
+  shortcut negatives (C2PO-style). Planned for g2: paired worlds in `tomgen`, weighted
+  decision tokens, a DPO-style answer margin against the adapter-off base, and explicit
+  longest-option / "no"-default negatives, measured on held-out pairs.
+- 03:20 — **OpenToM with g1, direct mode (partial: 1,637 shared questions)**. g1 learned
+  the procedural answer format, and in direct mode (thinking off) it often emits a bare
+  "Answer:" or no label at all. The official evaluator computes F1 only over parseable
+  answers, so its numbers would flatter g1 (Loc-FO 0.645 on 14 % of the answers). Added a
+  **strict** macro-F1 (ours, not official; unparseable = wrong, macro over gold labels):
+
+  | type | base | g1 strict | g1 unparseable |
+  | --- | --- | --- | --- |
+  | Loc-coarse FO | 0.409 | 0.273 | 86 % |
+  | Loc-coarse SO | 0.284 | 0.416 | 22 % |
+  | MultiHop FO | 0.368 | 0.464 | 10 % |
+  | MultiHop SO | 0.295 | 0.359 | 17 % |
+  | Attitude | 0.324 | 0.462 | 0 % |
+
+  Real gains on Attitude (+0.14, no format issue), second order and multi-hop. The
+  first-order regression is format breakage from training inside `<think>` and
+  evaluating without it. Queued next: g1 with thinking (budget 512) on the same 20-narrative
+  pilot as the base. Fix for g2: also train direct-answer targets, so the adapter answers
+  in the benchmark's format in both modes.

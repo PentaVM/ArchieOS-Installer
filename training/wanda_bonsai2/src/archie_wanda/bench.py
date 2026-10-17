@@ -24,8 +24,8 @@ def _per_label_f1(gold, pred, label):
     return 0.0 if tp == 0 else 2*tp/(2*tp+fp+fn)
 
 
-def f1_macro(gold, pred):
-    labels = sorted(set(gold) | set(pred))
+def f1_macro(gold, pred, labels=None):
+    labels = sorted(set(gold) | set(pred)) if labels is None else sorted(labels)
     return sum(_per_label_f1(gold, pred, l) for l in labels)/len(labels)
 
 
@@ -116,7 +116,7 @@ def opentom_score(items, predictions):
             '_fullness': lambda kind: kind == 'fullness', '_accessibility': lambda kind: kind == 'accessibility',
             '_overall': lambda kind: True}
         for suffix, keep in groups.items():
-            f1s, accs, corrupt = [], [], []
+            f1s, accs, corrupt, strict = [], [], [], []
             for batch in batches:
                 rows = [(g, p) for kind, g, p in batch if keep(kind)]
                 if not rows:
@@ -126,11 +126,16 @@ def opentom_score(items, predictions):
                 if valid:
                     gold, pred = zip(*valid)
                     f1s.append(f1_macro(gold, pred)); accs.append(accuracy(gold, pred))
+                # Strict (ours, not official): an unparseable answer counts as wrong; macro over gold labels.
+                scored = [(g, p) for g, p in rows if g is not None]
+                if scored:
+                    gold, pred = zip(*scored)
+                    strict.append(f1_macro(gold, pred, labels=set(gold)))
             if f1s:
                 import numpy as np
                 report[q_type+suffix] = {'macro_f1': float(np.mean(f1s)), 'macro_f1_std': float(np.std(f1s)),
                                          'accuracy': float(np.mean(accs)), 'corrupted': float(np.mean(corrupt)),
-                                         'batches': len(f1s)}
+                                         'strict_macro_f1': float(np.mean(strict)), 'batches': len(f1s)}
     return report
 
 
