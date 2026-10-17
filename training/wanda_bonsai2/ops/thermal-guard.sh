@@ -16,7 +16,9 @@ CUTOFF="$1"
 # p95 79 °C, max 85 °C, 266 hot pauses; most lost time was cooling from 75 to 60. The resume
 # threshold moves up (60 → 68) and the pause threshold slightly (75 → 78); the peak is bounded by
 # how fast this card heats, not by the threshold, so it is not raised further.
-HOT_C="${HOT_C:-78}"; COOL_C="${COOL_C:-68}"; MAX_LIMIT_W="${MAX_LIMIT_W:-140}"
+# 2026-10-17 14:45 rollback (STEERING rule: sampled peak > 87 °C or hourly p95 > 82 °C): with the
+# owner's Blender sharing the GPU, the last 2 h reached max 89 °C, p95 88 °C. Back to 75/60.
+HOT_C="${HOT_C:-75}"; COOL_C="${COOL_C:-60}"; MAX_LIMIT_W="${MAX_LIMIT_W:-140}"
 RUN_S="${RUN_S:-180}"; REST_S="${REST_S:-20}"; POLL_S="${POLL_S:-3}"
 LOG="$ROOT/thermal.log"
 exec 9>"$ROOT/thermal.lock"

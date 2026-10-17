@@ -343,3 +343,7 @@ is not paused: two GPU jobs on this card overheat it (85–87 °C seen at ~130 W
   0.477 / 0.508 (0 % unparseable). With long reasoning, g2 is at the base's level (mixed,
   within pilot noise): its direct-mode gain does not add on top of thinking. This is the
   case for g3, which trains the reasoning itself on traces that were checked against the label.
+- 13:22–14:45 — The owner used Blender on the GPU (83–85 °C at 100 % by itself); the guard
+  kept the worker paused for ~1 h, as intended. **Thermal rollback** (STEERING rule): the last
+  2 h reached a sampled max of 89 °C and p95 of 88 °C, mostly Blender, but our run phases add
+  on top of it. Guard back to HOT 75 / COOL 60; worker restarted (resumes from saved answers).
