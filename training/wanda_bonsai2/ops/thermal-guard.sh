@@ -25,7 +25,11 @@ end=$(date -d "$CUTOFF" +%s)
 
 current() { python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("command","run"))' "$ROOT/control.json" 2>/dev/null || echo run; }
 set_cmd() {
-  [ "$(current)" = "$1" ] && return
+  # Re-read just before writing: a "stop" that arrived after the loop's check must not be
+  # overwritten (2026-10-17: a pause/run flip at 79-80 °C swallowed a restart's stop).
+  local now_cmd; now_cmd="$(current)"
+  [ "$now_cmd" = "$1" ] && return
+  [ "$now_cmd" = stop ] && { echo "$(date -Is) stop seen; guard exits" >> "$LOG"; exit 0; }
   printf '{"command": "%s"}' "$1" > "$ROOT/control.json.tmp" && mv -f "$ROOT/control.json.tmp" "$ROOT/control.json"
   echo "$(date -Is) control=$1 ($2)" >> "$LOG"
 }

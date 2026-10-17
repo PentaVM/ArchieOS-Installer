@@ -322,3 +322,24 @@ is not paused: two GPU jobs on this card overheat it (85–87 °C seen at ~130 W
   moves the model off chance; 28 of its answers were truncated mid-explanation, so the
   number is a lower bound. This supports the design split: host bookkeeping in Cortex,
   interpretation in Wanda. Queued: pack2 with thinking 512.
+- 12:10 — **g2 seed-29 replication, OpenToM direct, full protocol (3,250, 0 % unparseable)**,
+  base / g2-s17 / g2-s29: Loc-FO 0.413 / 0.428 / 0.428, Loc-SO 0.292 / 0.403 / 0.362,
+  MultiHop FO 0.363 / 0.453 / 0.468, MultiHop SO 0.299 / 0.338 / 0.342, Attitude
+  0.351 / 0.394 / 0.398. **The improvement over the base repeats on both seeds for every
+  type** (the Loc-SO gain is smaller on s29). g2's recipe (direct-only minimal pairs +
+  answer weight) is the current baseline for further training.
+- 12:45 — **g3 started (s1/STaR-style self-traces).** New `star` worker job: the base model
+  reasons with budget forcing (640 tokens) on owned procedural problems (tom-gen-004, seed
+  404, 1,000 problems, sha 376fce42…; 700 of its 916 train-split items are attempted).
+  A trace is kept only if it ended on its own and its answer equals the simulated label.
+  The kept traces become think-mode targets in the model's own style (g1 showed that short
+  templated traces collapse its reasoning to ~48 tokens). g3 then trains on them plus g2's
+  data (same r8/α16 q,k,v,o, seed 17) and runs the think-512 OpenToM pilot against g2.
+  **Guard race fixed:** at 79–83 °C the guard flips pause/run every few seconds, and one flip
+  overwrote a restart's `stop`. `set_cmd` now re-reads control and exits on `stop` instead
+  of overwriting it, and the restart helper re-asserts `stop` until the worker exits.
+- 12:58 — **OpenToM pilot (260 questions), thinking 1024, base vs g2:** Loc-FO 0.657 / 0.657,
+  Loc-SO 0.525 / 0.525, MultiHop FO 0.628 / 0.575, MultiHop SO 0.492 / 0.521, Attitude
+  0.477 / 0.508 (0 % unparseable). With long reasoning, g2 is at the base's level (mixed,
+  within pilot noise): its direct-mode gain does not add on top of thinking. This is the
+  case for g3, which trains the reasoning itself on traces that were checked against the label.

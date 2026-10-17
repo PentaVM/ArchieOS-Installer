@@ -125,6 +125,8 @@ class Worker:
                 result = self.prepare_chat(spec)
             elif spec['type'] == 'verify_native':
                 result = self.verify_native_job(spec)
+            elif spec['type'] == 'star':
+                result = self.star_job(spec)
             else:
                 raise AdmissionError('unknown job type')
             spec['result'], spec['finished_ms'] = result, now_ms()
@@ -374,6 +376,58 @@ class Worker:
                                'ALL*/belief distance need the official embedder and are None until it runs')}
         atomic_json(out/'report.json', result)
         return {'report': str(out/'report.json')}
+
+    # ---- star: self-generated reasoning traces filtered by simulated labels -------------
+    def star_job(self, spec):
+        from .chatdata import load_tranche
+        from .native_chat import NativeChat
+        from .star import build_tranche
+        star_id = spec['star_id']
+        if not re.fullmatch(r'[a-z0-9-]{3,64}', star_id):
+            raise AdmissionError('invalid star id')
+        out = self.root/'star'/star_id
+        out.mkdir(parents=True, exist_ok=True)
+        source = Path(spec['tranche'])
+        examples = [e for e in load_tranche(source)['examples'] if e['split'] == 'train']
+        examples = examples[:int(spec.get('limit', len(examples)))]
+        adapter = None
+        if spec.get('checkpoint'):
+            from .export import export_candidate
+            adapter = out/'adapter.gguf'
+            if not adapter.exists():
+                export_candidate(spec['checkpoint'], adapter)
+        budget, cap = int(spec.get('think_budget', 640)), int(spec.get('max_thinking_tokens', 640))
+        responses = out/'responses.jsonl'
+        done = {}
+        if responses.exists():
+            for line in responses.read_text().splitlines():
+                record = json.loads(line); done[record['id']] = record
+        pending = [e for e in examples if e['example_id'] not in done]
+        while pending:
+            if self.stopping():
+                raise Interrupted()
+            if (self.root/'hold').exists() or self.control() == 'pause':
+                self.state = 'paused'; self.heartbeat(progress=f'{star_id} {len(done)}/{len(examples)}'); time.sleep(10)
+                continue
+            with NativeChat(self.config, out/'server.log', lora=adapter) as chat, responses.open('a') as stream:
+                self.state = 'running'
+                while pending and not self.stopping() and not (self.root/'hold').exists():
+                    if self.control() == 'pause':
+                        self.state = 'paused'; self.heartbeat(progress=f'{star_id} {len(done)}/{len(examples)}')
+                        time.sleep(5); continue
+                    self.state = 'running'
+                    preflight(self.config)
+                    example = pending.pop(0)
+                    result = chat.think(example['messages'], budget=budget, answer_tokens=24)
+                    record = {'id': example['example_id'], **result}
+                    stream.write(json.dumps(record, ensure_ascii=False) + '\n'); stream.flush()
+                    done[example['example_id']] = record
+                    if len(done) % 20 == 0:
+                        self.heartbeat(progress=f'{star_id} {len(done)}/{len(examples)}')
+        tranche = self.root/'tranches'/f'{star_id}.json'
+        summary = build_tranche(source, done, tranche, cap)
+        atomic_json(out/'summary.json', {**summary, 'tranche': str(tranche), 'budget': budget, 'created_ms': now_ms()})
+        return {**summary, 'tranche': str(tranche)}
 
     # ---- verify_native: exported LoRA in Prism vs the trained Torch suffix -------------
     def verify_native_job(self, spec):
