@@ -129,3 +129,40 @@ probe; no copiar archivos encima del código vivo.
 La publicación inicial incluye datos, revisiones y evidencia investigada. Los
 cambios de código aislado y sus recibos se publican por separado cuando estén
 congelados; un borrador de comentario local no equivale a un comentario enviado.
+
+## Publicación y precheck posterior
+
+Datos, revisiones y recibos reales estrictos están en PR38 hasta `26c7456`.
+Se fijó `.gitattributes` para preservar bytes de JSON: SHA256 del blob Git y
+del archivo coinciden para ambos candidatos; se comprobó la cadena extraction
+→suffix→backward y los límites originales.
+
+Sol alto reanudó y pasó cinco pruebas CPU del guard de hold, incluida limpieza de
+hijos ANTES de liberar la reserva. Un nuevo precheck impide el run propio:
+workerPID7864 paused conserva contexto CUDA,1523MiB totales/24°C. No se creó
+hold ni se inició un hijo. Se registra la dependencia para que Claude pueda
+ceder contexto mediante su propio flujo cuando proceda. No se matan procesos,
+no se relajan los límites y no se cuenta como entrenamiento semántico.
+
+## Cierre del tick con continuidad programada
+
+Comentario publicado y actualizable en
+https://github.com/PentaVM/ArchieOS-Nvidia/pull/38#issuecomment-6227519798.
+Código aislado publicado como propuesta `f558637` en rama
+`codex/wanda-strict-f32-proposal`; PR38 contiene su patch exacto y code-handoff.md.
+No se integró sobre el worker nuevo de Claude. Root repitió57tests CPU
+(56pass/1hardware opt-in skip) y5tests propios de hold: pasaron.
+
+Sol medio amplió candidatos en `../round3/`:4familias/16variantes,2work/2personal,
+dos con4opciones, hash557cea647e785de1ae64778b03ffa0260b31fe66ca747618b152557d4eabd8bd.
+Revisión semántica independiente sin must-fix y auditoría CPU de root pasaron;
+tokens y revisión humana siguen pendientes. Total20familias/80variantes nuevas,
+sin contar dos derivados de round2 como familias adicionales. No admitir ni usar
+para evaluación independiente sin respetar parentesco y puertas restantes.
+
+Siguiente tick: leer LOG/resultados y estado de los agentes antes de despachar;
+comprobar si Claude cedió contexto sin interferir con él. Si no cambia, continuar
+CPU con revisión útil de parámetros/datos, sin reintentos GPU ni repetir pruebas
+numéricas ya pasadas. Integración del patch exige preservar el probe prompt-only
+y nueva revisión, no una copia de worker.py. Automatización permanece ACTIVE
+cada30minutos, sin antiguo cutoff.

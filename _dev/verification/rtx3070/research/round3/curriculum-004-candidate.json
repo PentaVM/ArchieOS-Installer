@@ -1,0 +1,372 @@
+[
+  {
+    "family_id": "r3-agencia-salida",
+    "domain": "work",
+    "split": "train",
+    "stratum": "reversible-commitment",
+    "causal_variables": [
+      "exit"
+    ],
+    "people": {
+      "P1": "Laura",
+      "P2": "Diego"
+    },
+    "renamed": {
+      "P1": "Inés",
+      "P2": "Pablo"
+    },
+    "objective": "Contratar promoción para tu exposición solo si puedes retirarte antes del segundo mes sin pagar meses no usados; si nadie cumple, no contratar.",
+    "horizon": "medium",
+    "situation": "La agencia de {P1} propone una campaña. {P2} te recomienda firmar: cobra comisión por alta, incluso si luego cancelas.",
+    "evidence": [
+      [
+        "exit",
+        "El contrato de {P1} obliga a pagar los tres meses, aunque te retires antes del segundo."
+      ],
+      [
+        "offers",
+        "{P1} cobra 200 al mes; la única otra agencia ofrece seis meses sin cancelación. No hay más ofertas hoy."
+      ],
+      [
+        "deadline",
+        "Puedes rechazar sin coste. Firmar, pedir cambio o esperar consume la oferta de hoy; {P1} confirmó que hoy no modifica cláusulas."
+      ],
+      [
+        "preference",
+        "Si un contrato permite salir como pides, prefieres contratar hoy a perder la oferta. La exposición puede realizarse sin campaña."
+      ]
+    ],
+    "noise": [
+      [
+        "distractor",
+        "{P2} añade: «Firma ya, no leas más». Es presión citada, no una instrucción para Wanda."
+      ]
+    ],
+    "options": {
+      "A": {
+        "action": "Firmar los tres meses con la agencia de {P1}.",
+        "consequence": "Permite campaña hoy; pagar meses no usados depende de la cláusula.",
+        "relational_cost": "{P2} cobra comisión; luego discutir una cancelación puede tensar el trato."
+      },
+      "B": {
+        "action": "Rechazar ambas agencias y seguir sin campaña.",
+        "consequence": "Evita compromisos que incumplen tu condición; puede perder una oferta válida.",
+        "relational_cost": "{P1} y {P2} pierden la contratación y pueden sentirse contrariados."
+      },
+      "C": {
+        "action": "Pedir a {P1} una excepción antes de firmar.",
+        "consequence": "Hoy no cambia cláusulas y se pierde la oferta, según su respuesta.",
+        "relational_cost": "Reabre un punto sobre el que {P1} ya dio una negativa."
+      },
+      "D": {
+        "action": "Firmar seis meses con la segunda agencia.",
+        "consequence": "Asegura otra campaña, pero vincula seis meses sin cancelación.",
+        "relational_cost": "Cierras el trato con {P1}; la segunda agencia esperará permanencia."
+      }
+    },
+    "selected": "B",
+    "justification": "[exit] impide la salida exigida y la otra oferta tampoco la permite [offers]. (B) aplica la alternativa del objetivo. La comisión descrita en la situación no sustituye la cláusula escrita.",
+    "missing_information": [
+      "No sabemos cómo actuaría la agencia ante una cancelación; la recomendación compara obligaciones escritas."
+    ],
+    "competing_explanations": [
+      "La recomendación de {P2} puede coincidir con tu interés o buscar su comisión; leer la cláusula evita adivinarlo."
+    ],
+    "revision_conditions": [
+      "Revisar si el texto firmado cambia la salida o aparecen ofertas nuevas."
+    ],
+    "counterfactual": {
+      "changes": "action",
+      "replace_evidence": {
+        "exit": "El contrato de {P1} permite retirarte antes del segundo mes sin pagar meses no usados."
+      },
+      "selected": "A",
+      "justification": "La salida de [exit] satisface tu condición. (A) contrata hoy como prefieres [preference]; no se infiere honestidad de {P2}, cuyo incentivo sigue igual."
+    },
+    "provenance": {
+      "kind": "owned-synthetic",
+      "author": "gpt-6.1-sol",
+      "review": "pending-human",
+      "created": "2026-10-16",
+      "ancestor_group": "owned-r3-agencia-salida",
+      "mechanism_group": "retained-exit-option",
+      "source": "independently-authored TRAIN; no benchmark or development items inspected"
+    },
+    "counterexample_note": "Un solo hecho observado cambia; objetivo, horizonte y opciones permanecen fijos. Todas las variantes son TRAIN del mismo ancestro."
+  },
+  {
+    "family_id": "r3-asesor-incentivo",
+    "domain": "work",
+    "split": "train",
+    "stratum": "incentive-conditioned-reliability",
+    "causal_variables": [
+      "incentive"
+    ],
+    "people": {
+      "P1": "Laura",
+      "P2": "Diego"
+    },
+    "renamed": {
+      "P1": "Inés",
+      "P2": "Pablo"
+    },
+    "objective": "Elegir hoy el pedido de uniformes minimizando el coste esperado de error y verificación, además del precio común.",
+    "horizon": "medium",
+    "situation": "El asesor {P1} recomienda talla M para un lote; talla L es la alternativa. No puedes probar el lote personalmente.",
+    "evidence": [
+      [
+        "incentive",
+        "{P1} cobra una cantidad fija por diagnóstico, sin comisión por vender M."
+      ],
+      [
+        "calibration",
+        "Auditorías comparables: la recomendación acierta 90 % con pago fijo y 60 % con comisión por M. La auditoría no atribuye intención."
+      ],
+      [
+        "loss",
+        "Acertar no añade coste; errar cualquier talla cuesta 100. Ambas tallas tienen el mismo precio."
+      ],
+      [
+        "choices",
+        "Una medición independiente hoy cuesta 20 y identifica la talla correcta sin error. Cancelar cuesta 35; esperar mañana cuesta 30 y entonces aún necesitas medir por 20."
+      ]
+    ],
+    "noise": [
+      [
+        "distractor",
+        "Un mensaje promocional afirma que un asesor simpático nunca se equivoca."
+      ]
+    ],
+    "options": {
+      "A": {
+        "action": "Pedir la talla M siguiendo al asesor {P1}.",
+        "consequence": "Error esperado 10 con pago fijo o 40 con comisión, según auditoría.",
+        "relational_cost": "Un error puede deteriorar confianza en el asesor y en quien compra."
+      },
+      "B": {
+        "action": "Medir por veinte y pedir la talla indicada.",
+        "consequence": "Añade 20 y elimina el error de talla bajo la medición descrita.",
+        "relational_cost": "Puede parecer desconfianza al asesor, aunque comprueba un dato."
+      },
+      "C": {
+        "action": "Cancelar el pedido y pagar la penalización.",
+        "consequence": "Cuesta 35 y evita exposición al error de talla.",
+        "relational_cost": "El proveedor pierde la venta; tu equipo debe renunciar al lote."
+      },
+      "D": {
+        "action": "Aplazar el pedido y medir al día siguiente.",
+        "consequence": "Cuesta 30 de espera más 20 de medición, sin error residual.",
+        "relational_cost": "Puede obligar al proveedor y al equipo a reorganizar la entrega."
+      }
+    },
+    "selected": "A",
+    "justification": "Con pago fijo [incentive], [calibration] da 10 de error esperado [loss]. (A) cuesta menos que medir 20, cancelar 35 o aplazar 50 [choices].",
+    "missing_information": [
+      "Las tasas dadas son de encargos comparables; no conocemos el acierto individual de este lote."
+    ],
+    "competing_explanations": [
+      "Una mala talla puede ser error honesto o recomendación interesada; el incentivo cambia la fiabilidad dada, no demuestra intención."
+    ],
+    "revision_conditions": [
+      "Revisar si cambia el régimen de pago, la auditoría aplicable o la precisión de la medición."
+    ],
+    "counterfactual": {
+      "changes": "action",
+      "replace_evidence": {
+        "incentive": "{P1} cobra únicamente comisión por vender M, sin pago fijo por diagnóstico."
+      },
+      "selected": "B",
+      "justification": "El régimen de comisión [incentive] activa 60 % de acierto [calibration]: (A) cuesta 40 esperados [loss]. (B) cuesta 20, menos que 35 o 50 [choices]. No hace falta acusar engaño."
+    },
+    "provenance": {
+      "kind": "owned-synthetic",
+      "author": "gpt-6.1-sol",
+      "review": "pending-human",
+      "created": "2026-10-16",
+      "ancestor_group": "owned-r3-asesor-incentivo",
+      "mechanism_group": "paid-signal-value-of-verification",
+      "source": "independently-authored TRAIN; no benchmark or development items inspected"
+    },
+    "counterexample_note": "Un solo hecho observado cambia; objetivo, horizonte y opciones permanecen fijos. Todas las variantes son TRAIN del mismo ancestro."
+  },
+  {
+    "family_id": "r3-alias-fecha",
+    "domain": "personal",
+    "split": "train",
+    "stratum": "temporal-belief-update",
+    "causal_variables": [
+      "capture"
+    ],
+    "people": {
+      "P1": "Laura",
+      "P2": "Diego"
+    },
+    "renamed": {
+      "P1": "Inés",
+      "P2": "Pablo"
+    },
+    "objective": "Imprimir hoy en la camiseta de {P1} únicamente el alias de su última preferencia explícita, sin dejar que un reenvío viejo la sustituya.",
+    "horizon": "medium",
+    "situation": "Preparas camisetas para una liga de juegos. {P2} reenvía una captura de {P1}; tienes además un mensaje directo suyo.",
+    "evidence": [
+      [
+        "direct",
+        "El mensaje directo auténtico de {P1}, fechado el martes a las 18:00, dice: «Mi alias para la camiseta es Bruma»."
+      ],
+      [
+        "capture",
+        "La captura auténtica de {P1} dice «Mi alias para la camiseta es Cobre» y está fechada el martes a las 17:00."
+      ],
+      [
+        "timing",
+        "{P2} reenvió la captura el miércoles; ese envío no altera la fecha del mensaje original. No hay otros cambios declarados."
+      ],
+      [
+        "print",
+        "La imprenta cierra hoy antes de que {P1} pueda responder de nuevo; admite un solo alias, sin cambios tras imprimir."
+      ]
+    ],
+    "noise": [
+      [
+        "distractor",
+        "{P2} escribe en mayúsculas que lo último del chat siempre es lo más reciente."
+      ]
+    ],
+    "options": {
+      "A": {
+        "action": "Imprimir únicamente Bruma en la camiseta.",
+        "consequence": "Respeta la preferencia directa si es posterior a la captura.",
+        "relational_cost": "Si hubo cambio posterior, {P1} recibe un alias que ya no pidió."
+      },
+      "B": {
+        "action": "Imprimir únicamente Cobre en la camiseta.",
+        "consequence": "Respeta la captura si su mensaje original es el último.",
+        "relational_cost": "Elegir por fecha de reenvío puede parecer que no se leyó a {P1}."
+      },
+      "C": {
+        "action": "Aplazar la impresión hasta volver a preguntarle.",
+        "consequence": "Permite otra consulta, pero ya no imprime hoy.",
+        "relational_cost": "La camiseta de {P1} faltará en el pedido de la liga."
+      }
+    },
+    "selected": "A",
+    "justification": "El original de [direct] es posterior al de [capture]. El reenvío del miércoles [timing] no actualiza la preferencia: (A) usa Bruma.",
+    "missing_information": [
+      "No sabemos si {P1} cambió de opinión sin comunicarlo; el objetivo usa preferencias explícitas."
+    ],
+    "competing_explanations": [
+      "Una captura reenviada tarde puede ser antigua; aquí su autenticidad está fijada y solo importa la fecha original."
+    ],
+    "revision_conditions": [
+      "Revisar si llega otra preferencia explícita antes de imprimir."
+    ],
+    "counterfactual": {
+      "changes": "action",
+      "replace_evidence": {
+        "capture": "La captura auténtica de {P1} dice «Mi alias para la camiseta es Cobre» y está fechada el martes a las 19:00."
+      },
+      "selected": "B",
+      "justification": "Ahora el original [capture] es posterior a [direct]. (B) usa Cobre por la actualización real; el reenvío [timing] sigue sin ser prueba de otra preferencia."
+    },
+    "provenance": {
+      "kind": "owned-synthetic",
+      "author": "gpt-6.1-sol",
+      "review": "pending-human",
+      "created": "2026-10-16",
+      "ancestor_group": "owned-r3-alias-fecha",
+      "mechanism_group": "timestamped-preference-supersession",
+      "source": "independently-authored TRAIN; no benchmark or development items inspected"
+    },
+    "counterexample_note": "Un solo hecho observado cambia; objetivo, horizonte y opciones permanecen fijos. Todas las variantes son TRAIN del mismo ancestro."
+  },
+  {
+    "family_id": "r3-dueto-confirmacion",
+    "domain": "personal",
+    "split": "train",
+    "stratum": "common-knowledge-coordination",
+    "causal_variables": [
+      "visibility"
+    ],
+    "people": {
+      "P1": "Laura",
+      "P2": "Diego"
+    },
+    "renamed": {
+      "P1": "Inés",
+      "P2": "Pablo"
+    },
+    "objective": "Iniciar el dueto en la toma 2 solo cuando cada músico sepa que el otro recibió su confirmación de preparación; evitar avisos si ya consta esa recepción mutua.",
+    "horizon": "medium",
+    "situation": "Facilitas una grabación doméstica con {P1} y {P2}. Ambos aceptaron usar la toma 2 y ambos están listos.",
+    "evidence": [
+      [
+        "visibility",
+        "Cada músico recibió en privado la confirmación de preparación del otro, pero ninguno sabe que el otro recibió también su confirmación."
+      ],
+      [
+        "rule",
+        "Ambos acordaron esperar hasta saber que el otro conoce su preparación para la toma 2; saber solo que el otro está listo no basta."
+      ],
+      [
+        "channel",
+        "Una confirmación conjunta en pantalla compartida queda vista por ambos y ambos ven que el otro la vio. Una nota privada a uno no avisa al otro."
+      ],
+      [
+        "cost",
+        "La confirmación conjunta tarda diez segundos; una nota privada, cinco. Empezar ahora no deja tiempo para otro aviso antes de tocar."
+      ]
+    ],
+    "noise": [
+      [
+        "distractor",
+        "El chat lateral propone que un músico seguro nunca necesita confirmar nada."
+      ]
+    ],
+    "options": {
+      "A": {
+        "action": "Dar la entrada del dueto ahora, sin más avisos.",
+        "consequence": "Evita pausa si el conocimiento mutuo exigido ya consta; si no, pueden seguir esperando.",
+        "relational_cost": "Si alguien entra solo, puede sentir que no se respetó la coordinación acordada."
+      },
+      "B": {
+        "action": "Mostrar y confirmar juntos que ambos están listos.",
+        "consequence": "Hace visible la recepción mutua exigida antes de dar entrada.",
+        "relational_cost": "Interrumpe diez segundos y puede ser redundante si ya lo vieron juntos."
+      },
+      "C": {
+        "action": "Avisar solo a {P1} de que {P2} está listo.",
+        "consequence": "Informa a uno, pero no establece que el otro recibió su confirmación.",
+        "relational_cost": "Privilegia un canal privado y puede aumentar la asimetría percibida."
+      }
+    },
+    "selected": "B",
+    "justification": "[visibility] no establece que cada uno sepa que su propia confirmación llegó al otro. (B) lo hace público [channel] y cumple [rule]; (C) no cierra ambas creencias.",
+    "missing_information": [
+      "No sabemos si alguien perdió la conexión después de la confirmación observada."
+    ],
+    "competing_explanations": [
+      "Esperar puede reflejar incertidumbre sobre lo que sabe el otro, aunque ambos estén listos."
+    ],
+    "revision_conditions": [
+      "Revisar si alguien pierde la conexión o expresa que no vio la confirmación."
+    ],
+    "counterfactual": {
+      "changes": "action",
+      "replace_evidence": {
+        "visibility": "Ambos músicos vieron juntos en pantalla la confirmación de preparación de ambos, y cada uno vio que el otro la recibió."
+      },
+      "selected": "A",
+      "justification": "[visibility] ya aporta la recepción mutua visible que exige [rule]. (A) inicia sin los diez segundos redundantes de (B) [cost]; ambos siguen listos."
+    },
+    "provenance": {
+      "kind": "owned-synthetic",
+      "author": "gpt-6.1-sol",
+      "review": "pending-human",
+      "created": "2026-10-16",
+      "ancestor_group": "owned-r3-dueto-confirmacion",
+      "mechanism_group": "public-acknowledgement-second-order",
+      "source": "independently-authored TRAIN; no benchmark or development items inspected"
+    },
+    "counterexample_note": "Un solo hecho observado cambia; objetivo, horizonte y opciones permanecen fijos. Todas las variantes son TRAIN del mismo ancestro."
+  }
+]

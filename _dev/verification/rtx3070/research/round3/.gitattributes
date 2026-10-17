@@ -1,0 +1,2 @@
+# Preserve exact frozen candidate and audit bytes.
+*.json -text
