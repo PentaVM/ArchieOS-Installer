@@ -3,8 +3,9 @@
 # starvation flood (one sender, 40 client addresses), a Responder answering LLMNR and
 # NetBIOS for other machines' names, mitm6 answering DHCPv6, a camera whose TLS client
 # stops at TLS 1.0, the rogue sending an ICMP Redirect and answering DNS, an ARP sweep of
-# the network, the NXDOMAIN answers a domain generation algorithm draws, then a macof-style
-# flood of 60 made-up hardware addresses. Nothing is sent.
+# the network, the NXDOMAIN answers a domain generation algorithm draws, POP3 and FTP
+# passwords sent in the clear, then a macof-style flood of 60 made-up hardware addresses.
+# Nothing is sent.
 #   python3 -I make_rogue_pcap.py rogue-dhcp-and-ra.pcap
 import sys
 from scapy.all import Ether, IP, UDP, TCP, ICMP, DNS, BOOTP, DHCP, IPv6, ICMPv6ND_RA, ICMPv6NDOptSrcLLAddr, Raw, wrpcap, ARP, DNSQR, DNSRR, load_layer, load_contrib
@@ -95,6 +96,11 @@ for i in range(40):
     name = "".join(rng.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(15)) + ".com"
     at(Ether(src=router, dst=win)/IP(src="192.168.1.1", dst="192.168.1.50")/UDP(sport=53, dport=5001 + i)/
        DNS(id=100 + i, qr=1, rcode=3, qd=DNSQR(qname=name)), 250 + i * 0.5)
+# The Windows client logs in to a mail server and an FTP server outside, in the clear.
+from scapy.all import Raw
+for i, (port, payload) in enumerate([(110, b"PASS not-a-real-password\r\n"), (21, b"USER owner\r\n"), (21, b"PASS not-a-real-password\r\n")]):
+    at(Ether(src=win, dst=router)/IP(src="192.168.1.50", dst="198.51.100.21")/
+       TCP(sport=41000 + port, dport=port, flags="PA", seq=1000 + 12 * (i == 2), ack=1)/Raw(payload), 280 + i)
 # Then a table flood, as macof sends it: made-up source and destination hardware and IP
 # addresses, 60 frames in a second.
 for i in range(60):

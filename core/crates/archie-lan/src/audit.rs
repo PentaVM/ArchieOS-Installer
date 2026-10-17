@@ -13,6 +13,7 @@
 //! | `port-scan` | one device opens connections to 100 ports of one host within a minute |
 //! | `host-sweep` | one device opens the same port on 50 LAN hosts within a minute |
 //! | `cleartext-login` | a device opens Telnet or FTP, which carry passwords in the clear |
+//! | `cleartext-password` | a device sends a login command in the clear (FTP `PASS`, POP3 `PASS`/`AUTH`, IMAP `LOGIN`, SMTP `AUTH`), on any port: high when the server is outside the LAN, a warning inside it. Only the command word is read, never the password |
 //! | `dns-tunnel-suspect` | a DNS question is long and random enough to be carrying data |
 //! | `unusual-destination` | a device learned for a day sends over 25 MB to an outside destination it had not used before |
 //! | `traffic-surge` | a device that has been learned for a day sends far more in ten minutes than it usually does |
@@ -1211,6 +1212,28 @@ impl Audit {
                 ),
             );
         }
+        if let Some(protocol) = packet.cleartext_password {
+            if let Some(server) = packet.destination {
+                let outside = !is_lan(server);
+                self.tell(
+                    &mut alerts,
+                    format!("password {mac} {server} {protocol}"),
+                    packet.at_ms,
+                    if outside {
+                        Severity::High
+                    } else {
+                        Severity::Warning
+                    },
+                    "cleartext-password",
+                    mac,
+                    format!(
+                        "sent its {protocol} password to {server} unencrypted{}: anyone on the \
+                         way can read it. Use the server's TLS port or change the password",
+                        if outside { ", across the internet" } else { "" }
+                    ),
+                );
+            }
+        }
         if let Some(name) = &packet.answered_name {
             self.answered_name(&mut alerts, packet.at_ms, mac, source, name);
         }
@@ -2366,6 +2389,32 @@ mod tests {
             .unwrap()
             .peers = (0..20).map(|i| format!("p{i}")).collect();
         assert!(State::parse(&serde_json::to_vec(&forged).unwrap()).is_err());
+    }
+
+    #[test]
+    fn a_password_sent_in_the_clear_is_told_by_where_it_went() {
+        let mut audit = Audit::new(State::default(), learned());
+        let login = |server: &str, protocol: &'static str, at_ms: u64| Packet {
+            destination: Some(server.parse().unwrap()),
+            tcp: Some((40_000, 2121)),
+            cleartext_password: Some(protocol),
+            ..from(TV, "192.168.1.84", at_ms)
+        };
+        let told = audit.see(&login("198.51.100.21", "POP3", 1_000));
+        assert_eq!(rules(&told), ["cleartext-password"]);
+        assert_eq!(told[0].severity, Severity::High);
+        assert!(
+            told[0].detail.contains("across the internet"),
+            "{}",
+            told[0].detail
+        );
+        assert!(
+            audit.see(&login("198.51.100.21", "POP3", 2_000)).is_empty(),
+            "once"
+        );
+        let nas = audit.see(&login("192.168.1.5", "FTP", 3_000));
+        assert_eq!(rules(&nas), ["cleartext-password"]);
+        assert_eq!(nas[0].severity, Severity::Warning);
     }
 
     #[test]

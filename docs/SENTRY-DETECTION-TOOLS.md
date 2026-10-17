@@ -32,6 +32,7 @@ with only the broadcast view, and says more with a mirror.
 | `retired-tls` and `tls_versions` | a device whose TLS client stops at 1.1 or older, read from its JA4 | — |
 | `rogue-dhcpv6-server` | a device other than the router answering DHCPv6 (mitm6) | — |
 | `name-poisoning` | a device answering LLMNR/NetBIOS for 3+ names, or for `wpad` (Responder) | — |
+| `cleartext-password` | a client sends FTP `PASS`, POP3 `PASS`/`APOP`/`AUTH`, IMAP `LOGIN`/`AUTHENTICATE` or SMTP `AUTH` unencrypted; high when the server is outside. Only the command word is read | — |
 | `dga-suspect` | 25+ different random-looking names answered NXDOMAIN to one device in a minute (a domain generation algorithm) | — |
 | `mac-flood` | 20+ unknown hardware addresses sending in a minute; the flood is kept out of the inventory | — |
 | `dhcp-starvation` | 30+ unknown DHCP clients in a minute, by the DHCP client address (`chaddr`) | — |
@@ -480,6 +481,28 @@ its basis.
   every five minutes on the router thread: nothing on the capture path.
 - **Not tested here.** No real router: the line format follows the kernel's, as OpenWrt
   prints it. Whether byte counting is on must be checked on the owner's router.
+
+### 2026-10-17: passwords sent in the clear, by the protocol's own command
+
+- **Compared.** `cleartext-login` flags a device opening port 21 or 23: blind to POP3, IMAP
+  and SMTP, to a server on another port, and it cannot tell a login from a connection
+  that never sends one. Zeek's `ftp`/`pop3` analyzers and credential sniffers (dsniff,
+  Ettercap, PCredz) read the login command and keep the credential. Reading
+  `http.authorization` would bring HTTP Basic, but that field carries the credential.
+- **Chosen.** The dissectors' command fields only: `ftp.request.command`,
+  `pop.request.command`, `imap.request.command`, `smtp.req.command`. A client sending
+  `PASS`, `APOP`/`AUTH`, `LOGIN`/`AUTHENTICATE` or `AUTH` in the clear is
+  `cleartext-password`: high when the server is outside the LAN, a warning for one inside
+  (a NAS). Told once per device, server and protocol. The argument is never asked for, so
+  no password reaches Sentry. HTTP Basic is left out for that reason. SMTP `AUTH` after
+  STARTTLS is encrypted and not seen, so what is seen really is in the clear.
+- **Tested.** The four protocols and their non-login commands (`USER`, `EHLO`); severity
+  by where the server is, told once. Through real TShark: the fixture now has the Windows
+  client sending POP3 and FTP passwords to an outside server, told as two high alerts.
+- **Measured.** TShark over the fixture repeated 50 times (11,050 frames), best of five,
+  two rounds: 403/406 ms with 42 fields, 403/416 ms with 46. Within noise.
+- **Not adopted.** Keeping or showing any part of the credential, as the sniffers do; HTTP
+  Basic (needs the credential field).
 
 ## How a tool is accepted
 

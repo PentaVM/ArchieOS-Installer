@@ -7,13 +7,15 @@
 //! server name), and what devices say about themselves in the clear: the DHCP options a
 //! client asks for and its vendor class, the TTL and window of a connection it opens, its
 //! TLS client fingerprint (JA4, computed by TShark), an HTTP User-Agent, an LLDP system
-//! name, a NetBIOS name, and IPv6 Router Advertisements. No payload is asked for, so none
-//! arrives.
+//! name, a NetBIOS name, and IPv6 Router Advertisements. From DNS answers, the addresses
+//! and the response code; from FTP, POP3, IMAP and SMTP, only the command word a client
+//! sent (`PASS`, `LOGIN`, `AUTH`), never its argument. No other payload is asked for, so
+//! none arrives: a password is never read, only the fact that one was sent.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 /// The fields, in the order they are printed, one frame to a line, tab between.
-pub const FIELDS: [&str; 42] = [
+pub const FIELDS: [&str; 46] = [
     "frame.time_epoch",
     "frame.len",
     "eth.src",
@@ -56,6 +58,10 @@ pub const FIELDS: [&str; 42] = [
     "dns.a",
     "dns.aaaa",
     "dns.flags.rcode",
+    "ftp.request.command",
+    "pop.request.command",
+    "imap.request.command",
+    "smtp.req.command",
 ];
 
 /// Enough of each frame for the names above; the rest is never copied off the interface.
@@ -155,6 +161,10 @@ pub struct Packet {
     /// A DNS answer saying a name does not exist (NXDOMAIN): the device it went to (by
     /// the frame's Ethernet destination) and the name it had asked for.
     pub nxdomain: Option<(String, String)>,
+    /// A client sending a password in the clear: the protocol whose login command it
+    /// sent (FTP `PASS`, POP3 `PASS`/`APOP`/`AUTH`, IMAP `LOGIN`/`AUTHENTICATE`, SMTP
+    /// `AUTH`). Only the command word is read, never what follows it.
+    pub cleartext_password: Option<&'static str>,
 }
 
 /// Addresses kept from one DNS answer: a CDN answers with a handful.
@@ -230,6 +240,22 @@ fn resolved(all: &[&str], fields: &[&str]) -> Option<(String, Vec<IpAddr>)> {
         .take(MAX_RESOLVED)
         .collect();
     (!addresses.is_empty()).then_some((asked, addresses))
+}
+
+/// The protocol whose password command a client sent, from the FTP, POP3, IMAP and SMTP
+/// command fields in that order.
+fn password_command(commands: &[&str]) -> Option<&'static str> {
+    let is = |field: &str, words: &[&str]| words.iter().any(|w| field.eq_ignore_ascii_case(w));
+    [
+        ("FTP", &["PASS"][..]),
+        ("POP3", &["PASS", "APOP", "AUTH"][..]),
+        ("IMAP", &["LOGIN", "AUTHENTICATE"][..]),
+        ("SMTP", &["AUTH"][..]),
+    ]
+    .into_iter()
+    .zip(commands)
+    .find(|((_, words), field)| is(field, words))
+    .map(|((protocol, _), _)| protocol)
 }
 
 /// Reads one line TShark printed. A line of another shape is not a frame.
@@ -312,6 +338,7 @@ pub fn parse(line: &str) -> Option<Packet> {
             && ports(fields[14], fields[15]).is_some_and(|(s, _)| s == 53))
         .then(|| mac(fields[3]).zip(name(fields[17])))
         .flatten(),
+        cleartext_password: password_command(&fields[42..46]),
     })
 }
 
@@ -581,6 +608,17 @@ pub(crate) mod tests {
             Some(("54:4e:f0:07:3d:e8".into(), "kq7vx2pzm9wd.com".into()))
         );
         assert_eq!(nxdomain("0"), None, "an answer that resolved");
+        let sent = |field: &str, command: &str| {
+            parse(&line(&[("frame.time_epoch", "1"), (field, command)]))
+                .unwrap()
+                .cleartext_password
+        };
+        assert_eq!(sent("ftp.request.command", "PASS"), Some("FTP"));
+        assert_eq!(sent("ftp.request.command", "USER"), None);
+        assert_eq!(sent("pop.request.command", "pass"), Some("POP3"));
+        assert_eq!(sent("imap.request.command", "LOGIN"), Some("IMAP"));
+        assert_eq!(sent("smtp.req.command", "AUTH"), Some("SMTP"));
+        assert_eq!(sent("smtp.req.command", "EHLO"), None);
         assert!(!advertise("546"), "only a server's port answers");
         // A second occurrence of an address field is not the frame's own (ICMP errors).
         fields.push(("ip.dst", "192.168.1.1,10.0.0.1"));
