@@ -63,9 +63,24 @@ def validate_cache(root, expected_base, expected_split, expected_tokens, cap):
     return info
 
 
-def native_environment(config):
+STRICT_F32_ENV = {'GGML_CUDA_PTQ1_0_MMQ_MAX_BATCH': '0',
+                  'GGML_CUDA_CUBLAS_COMPUTE_TYPE': 'f32', 'NVIDIA_TF32_OVERRIDE': '0'}
+
+
+def strict_microbatch(count):
+    """Both pieces must exceed the native PTQ MMVQ cutoff of four tokens."""
+    if type(count) is not int or count < 10:
+        raise AdmissionError('strict FP32 microbatch proof requires at least ten tokens')
+    return (count + 1) // 2
+
+
+def native_environment(config, precision_profile='native'):
     env = os.environ.copy()
     env['LD_LIBRARY_PATH'] = config.runtime_dir + ':' + config.runtime_dir + '/lib:/usr/lib/wsl/lib'
+    if precision_profile == 'strict-f32':
+        env.update(STRICT_F32_ENV)
+    elif precision_profile != 'native':
+        raise AdmissionError('unknown native precision profile')
     return env
 
 
@@ -92,7 +107,7 @@ def build_native(config, headers, source_name='prefix_export.cpp', binary_name='
     return binary
 
 
-def extract_text(model, text, root, config, binary, *, ubatch=0, split='parity'):
+def extract_text(model, text, root, config, binary, *, ubatch=0, split='parity', precision_profile='native'):
     if model.sha256!=BASE_SHA or signature(model.path)!=model.signature or split not in ('train','development','parity'):
         raise AdmissionError('extraction requires unchanged approved base/admitted split')
     raw = text.encode('utf-8')
@@ -111,19 +126,25 @@ def extract_text(model, text, root, config, binary, *, ubatch=0, split='parity')
     command = [str(binary),'--model',str(model.path),'--request',str(request),
                '--out',str(root),'--runtime',config.runtime_dir]
     with (root/'native.log').open('w') as log:
-        process = run_guarded(command,config,native_environment(config),log,timeout=180)
+        process = run_guarded(command,config,native_environment(config,precision_profile),log,timeout=180)
     if process.returncode:
         raise AdmissionError('native extraction failed; see '+str(root/'native.log'))
     result = json.loads(process.stdout)
     count = len(result['tokens'])
     if not 0<count<=config.sequence_length or result.get('rows')!=count or result.get('hidden_size')!=4096:
         raise AdmissionError('native extraction incomplete/outside sequence limit')
+    if precision_profile == 'strict-f32' and (count <= 4 or (ubatch and (ubatch <= 4 or 0 < count % ubatch <= 4))):
+        raise AdmissionError('strict FP32 reference entered native Q8 MMVQ token layout')
     shape_map = {'prefix.f32':[count,4096],'norm.f32':[count,4096],'logits.f32':[count,248320]}
     info = {'format_version':1,'base_sha256':model.sha256,'split':split,
             'tokens':result['tokens'],'positions':list(range(count)),'sequence_ids':[0]*count,
             'control_vectors':'none','capture_layer':30,'hidden_size':4096,
             'settings':result,'resources_before':asdict(resources),'runtime_commit':PRISM_COMMIT,
             'shim_sha256':sha_file(binary),'metadata_sha256':model.metadata_sha256,
+            'precision_profile':precision_profile,
+            'precision_environment':dict(STRICT_F32_ENV) if precision_profile=='strict-f32' else {},
+            'runtime_library_sha256':{name:sha_file(Path(config.runtime_dir)/name)
+                                      for name in ('libllama.so','libggml-cuda.so','libggml-base.so')},
             'files':{name:{'shape':shape,'dtype':'float32','sha256':sha_file(root/name)}
                      for name,shape in shape_map.items()}}
     (root/'receipt.json').write_text(json.dumps(info,indent=2)+'\n')
@@ -215,16 +236,37 @@ RESET_RELATIVE_RMS = 5e-4
 LAYOUT_MAX_TOKEN_KL = 1e-3
 
 
-def judge_native_comparisons(comparisons):
+def judge_native_comparisons(comparisons, precision_profile='native'):
+    for kind in ('fresh_reset', 'microbatch'):
+        record = comparisons.get(kind, {})
+        for name in ('prefix.f32', 'norm.f32', 'logits.f32'):
+            metric = record.get(name, {}).get('relative_rms')
+            if type(metric) not in (int, float) or not math.isfinite(metric) or metric < 0:
+                raise ParityError('native RMS metrics must be finite and nonnegative')
+        distribution = record.get('distribution', {})
+        if kind == 'microbatch' or distribution:
+            kl = distribution.get('max_token_kl')
+            if type(kl) not in (int, float) or not math.isfinite(kl) or kl < 0:
+                raise ParityError('native KL metrics must be finite and nonnegative')
+            for key in ('mean_token_kl', 'greedy_agreement'):
+                if key in distribution:
+                    value = distribution[key]
+                    if (type(value) not in (int, float) or not math.isfinite(value) or value < 0 or
+                            (key == 'greedy_agreement' and value > 1)):
+                        raise ParityError('invalid native distribution metric: ' + key)
     reset = comparisons['fresh_reset']
     if any(reset[name]['relative_rms']>RESET_RELATIVE_RMS for name in ['prefix.f32','norm.f32','logits.f32']):
         raise ParityError('native clean repeat is not reproducible: '+json.dumps(reset))
     layout = comparisons['microbatch']['distribution']
+    if precision_profile == 'strict-f32' and any(
+            comparisons['microbatch'][name]['relative_rms'] > RESET_RELATIVE_RMS
+            for name in ['prefix.f32','norm.f32','logits.f32']):
+        raise ParityError('strict FP32 native microbatch mismatch: '+json.dumps(comparisons['microbatch']))
     if layout['max_token_kl']>LAYOUT_MAX_TOKEN_KL:
         raise ParityError('native batch-layout noise exceeds bound: '+json.dumps(layout))
 
 
-def verify_extraction(config, headers, cases, output):
+def verify_extraction(config, headers, cases, output, precision_profile='native'):
     from .model import inspect_model
     model=inspect_model(Path(config.model_path),config.base_sha256)
     binary=build_native(config,headers)
@@ -235,8 +277,10 @@ def verify_extraction(config, headers, cases, output):
         if set(case)!={'id','text'} or not case['id'].replace('-','').isalnum():
             raise AdmissionError('invalid public parity case')
         paths=[root/(case['id']+'-'+str(index)) for index in range(3)]
-        receipts=[extract_text(model,case['text'],path,config,binary,ubatch=batch)
-                  for path,batch in zip(paths,[0,4,0])]
+        receipts=[extract_text(model,case['text'],paths[0],config,binary,ubatch=0,precision_profile=precision_profile)]
+        width = strict_microbatch(len(receipts[0]['tokens'])) if precision_profile=='strict-f32' else 4
+        receipts += [extract_text(model,case['text'],path,config,binary,ubatch=batch,precision_profile=precision_profile)
+                     for path,batch in zip(paths[1:],[width,0])]
         comparisons={}
         for index,label in [(1,'microbatch'),(2,'fresh_reset')]:
             if receipts[0]['tokens']!=receipts[index]['tokens']:
@@ -244,7 +288,7 @@ def verify_extraction(config, headers, cases, output):
             comparisons[label]={name:relative_rms(paths[0]/name,paths[index]/name)
                                 for name in ['prefix.f32','norm.f32','logits.f32']}
             comparisons[label]['distribution']=logit_agreement(paths[0]/'logits.f32',paths[index]/'logits.f32')
-        judge_native_comparisons(comparisons)
+        judge_native_comparisons(comparisons,precision_profile)
         results.append({'id':case['id'],'tokens':len(receipts[0]['tokens']),
                         'paths':[str(p) for p in paths],'comparisons':comparisons})
     noise={'norm_relative_rms':max(r['comparisons']['microbatch']['norm.f32']['relative_rms'] for r in results),
@@ -252,9 +296,14 @@ def verify_extraction(config, headers, cases, output):
     receipt={'format_version':1,'scope':'real_native_full_row_capture_microbatch_reset',
              'base_sha256':model.sha256,'runtime_commit':PRISM_COMMIT,
              'shim_sha256':sha_file(binary),'cases':results,'native_layout_noise_floor':noise,
+             'precision_profile':precision_profile,
+             'precision_environment':dict(STRICT_F32_ENV) if precision_profile=='strict-f32' else {},
+             'runtime_library_sha256':{name:sha_file(Path(config.runtime_dir)/name)
+                                      for name in ('libllama.so','libggml-cuda.so','libggml-base.so')},
              'gates':{'reset_relative_rms':RESET_RELATIVE_RMS,'layout_max_token_kl':LAYOUT_MAX_TOKEN_KL,
-                      'revision':'microbatch rms 5e-4 gate replaced after measured native layout noise; '
-                                 'see native.py comment and ledger'},
+                      'revision':('original strict microbatch RMS and KL; no layout-noise substitution'
+                                  if precision_profile=='strict-f32' else
+                                  'legacy diagnostic: microbatch rms replaced by measured native layout noise')},
              'full_model_backward':False}
     output=Path(output); output.parent.mkdir(parents=True,exist_ok=True)
     with output.open('x') as stream: json.dump(receipt,stream,indent=2)

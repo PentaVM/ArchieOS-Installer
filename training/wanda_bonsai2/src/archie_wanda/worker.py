@@ -166,6 +166,7 @@ class Worker:
             self.binary = build_native(self.config, self.headers)
         shim = sha_file(self.binary)
         tokenizer = NativeTokenizer(self.config)
+        precision_profile = spec.get('precision_profile', 'native')
         records, rejected = [], []
         for number, example in enumerate(examples):
             if self.stopping():
@@ -181,7 +182,7 @@ class Worker:
             except AdmissionError as error:
                 rejected.append({'example_id': example.example_id, 'reason': str(error)}); continue
             _, full = render(example)
-            root, info = self.extract_cached(model, full, example.split, shim)
+            root, info = self.extract_cached(model, full, example.split, shim, precision_profile)
             if info['tokens'] != tokens.tokens or info['split'] != example.split:
                 rejected.append({'example_id': example.example_id, 'reason': 'native/tokenizer mismatch'}); continue
             record = {**asdict(example), 'tokens': tokens.tokens, 'prompt_tokens': tokens.prompt_tokens,
@@ -190,11 +191,13 @@ class Worker:
             if example.split == 'development':
                 probe = tokenize_probe(example, tokenizer, self.config.sequence_length)
                 if probe is not None:
-                    probe_root, probe_info = self.extract_cached(model, probe_text(example), example.split, shim)
+                    probe_root, probe_info = self.extract_cached(model, probe_text(example), example.split, shim,
+                                                                  precision_profile)
                     if probe_info['tokens'] == probe[0]:
                         record['probe'] = {'cache': str(probe_root), 'tokens': probe[0], 'choice_token_ids': probe[1]}
             records.append(record)
         index = {'format_version': 1, 'tranche': str(tranche), 'tranche_sha256': sha_file(tranche),
+                 'precision_profile': precision_profile,
                  'split_digest': split_digest(examples), 'base_sha256': model.sha256, 'shim_sha256': shim,
                  'examples': records, 'rejected': rejected, 'created_ms': now_ms()}
         out = self.root/'datasets'/(tranche.stem+'.json')
@@ -272,13 +275,15 @@ class Worker:
         atomic_json(out, index)
         return {'dataset': str(out), 'examples': len(records), 'rejected': len(rejected)}
 
-    def extract_cached(self, model, text, split, shim):
+    def extract_cached(self, model, text, split, shim, precision_profile='native'):
         from .native import extract_text
-        root = self.root/'cache'/digest({'text': text, 'base': model.sha256, 'shim': shim})[:32]
+        root = self.root/'cache'/digest({'text': text, 'base': model.sha256, 'shim': shim,
+                                        'precision_profile': precision_profile})[:32]
         if not (root/'receipt.json').exists():
             if root.exists():
                 shutil.rmtree(root)
-            extract_text(model, text, root, self.config, self.binary, ubatch=0, split=split)
+            extract_text(model, text, root, self.config, self.binary, ubatch=0, split=split,
+                         precision_profile=precision_profile)
             prune_reference_outputs(root)
         return root, json.loads((root/'receipt.json').read_text())
 
@@ -494,7 +499,11 @@ class Worker:
 
     # ---- train -----------------------------------------------------------------------
     def train(self, spec):
+        from .admission import (validate_gates, validate_cache_profile, validate_lora_keys,
+                                run_identity, configure_training_precision)
+        admission = validate_gates(self.config, spec)  # fails before Torch/CUDA can be loaded
         import torch
+        admission['effective_torch_precision'] = configure_training_precision(torch)
         from .head_loss import full_vocab_cross_entropy
         from .model import inspect_model
         from .native import validate_cache
@@ -528,9 +537,11 @@ class Worker:
         if not train or {e['family_id'] for e in train} & {e['family_id'] for e in dev}:
             raise AdmissionError('training set empty or a family crosses train/development')
         for e in examples:
-            validate_cache(e['cache'], BASE_SHA, e['split'], e['tokens'], self.config.cache_cap_bytes)
-        run_digest = digest({'settings': settings, 'base': BASE_SHA,
-                             'data': sorted((e['example_id'], e['cache']) for e in examples)})
+            info = validate_cache(e['cache'], BASE_SHA, e['split'], e['tokens'], self.config.cache_cap_bytes)
+            validate_cache_profile(info, admission)
+        if len({e['domain'] for e in examples}) != 1:
+            raise AdmissionError('one run must preserve a single personal/work domain')
+        run_digest = run_identity(self.config, settings, examples, spec['datasets'], admission)
         run = self.root/'runs'/run_id
         run.mkdir(parents=True, exist_ok=True)
         model = inspect_model(Path(self.config.model_path), self.config.base_sha256)
@@ -550,6 +561,7 @@ class Worker:
             saved = torch.load(last, weights_only=True, map_location='cuda')
             if saved['run_digest'] != run_digest:
                 raise AdmissionError('checkpoint belongs to different settings/data; refusing resume')
+            validate_lora_keys(saved['model'], settings['targets'])
             suffix.load_state_dict(saved['model'], strict=False)
             optimizer.load_state_dict(saved['optimizer'])
             state = saved['state']
@@ -557,10 +569,10 @@ class Worker:
         else:
             if settings['init_from']:
                 initial = torch.load(settings['init_from'], weights_only=True, map_location='cuda')['model']
-                if set(initial) - {k for k in suffix.state_dict() if '_delta.' in k}:
-                    raise AdmissionError('init checkpoint has tensors outside this target set')
+                validate_lora_keys(initial, settings['targets'])
                 suffix.load_state_dict(initial, strict=False)
             atomic_json(run/'spec.json', {'spec': spec, 'settings': settings, 'run_digest': run_digest,
+                                          'admission': admission,
                                           'train_examples': len(train), 'dev_examples': len(dev)})
             state['baseline'] = self.evaluate(suffix, head, dev, train)
             self.log(run, {'event': 'baseline', 'opt_step': 0, **state['baseline']})
@@ -570,6 +582,7 @@ class Worker:
 
         def checkpoint():
             atomic_torch_save({'run_digest': run_digest, 'model': lora_state(), 'optimizer': optimizer.state_dict(),
+                               'settings': settings, 'admission': admission,
                                'state': state, 'rng_cpu': torch.get_rng_state(),
                                'rng_cuda': torch.cuda.get_rng_state()}, last)
 
@@ -609,6 +622,7 @@ class Worker:
                 if self.better(metrics, state['best']):
                     state['best'] = {'opt_step': state['opt_step'], **metrics}
                     atomic_torch_save({'run_digest': run_digest, 'model': lora_state(),
+                                       'admission': admission,
                                        'settings': settings, 'metrics': metrics}, run/'best.pt')
                 checkpoint(); last_save = time.monotonic()
             elif time.monotonic()-last_save > 300:
@@ -628,9 +642,11 @@ class Worker:
         if self.better(final, state['best']):
             state['best'] = {'opt_step': state['opt_step'], **final}
             atomic_torch_save({'run_digest': run_digest, 'model': lora_state(), 'settings': settings,
+                               'admission': admission,
                                'metrics': final}, run/'best.pt')
         checkpoint()
         receipt = {'format_version': 1, 'run_id': run_id, 'run_digest': run_digest, 'base_sha256': BASE_SHA,
+                   'admission': admission,
                    'settings': settings, 'train_examples': len(train), 'dev_examples': len(dev),
                    'baseline': state['baseline'], 'final': final, 'best': state['best'],
                    'opt_steps': state['opt_step'], 'elapsed_seconds': state['elapsed'],
