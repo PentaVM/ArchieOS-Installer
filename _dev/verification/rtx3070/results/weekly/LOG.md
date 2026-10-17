@@ -248,3 +248,19 @@ is not paused: two GPU jobs on this card overheat it (85–87 °C seen at ~130 W
   still stronger on attitude and second-order location when it answers. The "no" default
   is weaker but still dominant (388 no vs 24 yes in g2). Full 3,250 and the g2-think pilot
   are next. Partial numbers; final ones replace these.
+- 06:28 — **g2 final, OpenToM direct, full official protocol (3,250)**, macro-F1 (official =
+  strict, 0 % unparseable), base → g2: Loc-FO 0.413 → 0.428, Loc-SO 0.292 → 0.403,
+  MultiHop FO 0.363 → 0.453, MultiHop SO 0.299 → 0.338, Attitude 0.351 → 0.394. This is
+  the first adapter that improves every type without breaking the format. g1 (strict,
+  same items) still scores higher on Loc-SO (0.430), MultiHop (0.475 / 0.371) and
+  Attitude (0.425), but fails the format on Loc-FO (0.233). The "no" default softens (997
+  → 939 "no"; "yes" 0 → 61). Target status: still far from GPT-4 CoT (0.94 / 0.83 /
+  0.84 / 0.76 / 0.58). The g2-think pilot is running; seed 29 is needed before any
+  claim of repeatability.
+- 06:58 — **g2 with thinking** (same 260-question pilot, budget 512), base-think → g2-think:
+  Loc-FO 0.444 → 0.562, Loc-SO 0.544 → 0.525, MultiHop FO 0.597 → 0.578, MultiHop SO
+  0.417 → 0.472, Attitude 0.477 → 0.508; 0 % unparseable. Mean thinking 482 tokens
+  (171/260 hit the budget), i.e. the base's own reasoning is preserved, unlike g1
+  (48 tokens). Direct-only training combines with test-time reasoning; **g2 + thinking is
+  the best configuration so far**. Pilot size: the two small decreases are within noise.
+  Queued: the base 1024 pilot, long context, the g2 seed-29 replication, then FANToM.
