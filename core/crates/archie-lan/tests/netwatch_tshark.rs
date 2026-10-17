@@ -1,9 +1,9 @@
 //! archie-netwatch reading a real capture through a real TShark: the field names it asks
 //! for exist, and a rogue DHCP server, a rogue IPv6 router, a DHCP starvation flood, a
 //! Responder poisoning names, mitm6 answering DHCPv6, an ICMP Redirect, a rogue DNS server,
-//! an ARP sweep, a domain generation algorithm, passwords sent in the clear, a login burst
-//! and a switch table flood are told, with what the devices said of themselves kept for
-//! them.
+//! an ARP sweep, a domain generation algorithm, passwords sent in the clear, a login burst,
+//! SMB version 1 and a switch table flood are told, with what the devices said of
+//! themselves kept for them.
 //!
 //! ```text
 //! cargo test -p archie-lan --test netwatch_tshark -- --ignored
@@ -87,6 +87,12 @@ fn a_rogue_dhcp_server_and_a_rogue_router_are_told_from_a_real_capture() {
         .unwrap()
         .iter()
         .any(|a| a["rule"] == "dga-suspect" && a["device"] == "00:50:56:12:34:56"));
+    // The NAS speaking SMB version 1 is told.
+    assert!(report["alerts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|a| a["rule"] == "retired-smb" && a["device"] == "00:11:32:00:00:05"));
     // The old camera is told, as a notice, and its profile says why.
     assert!(report["alerts"]
         .as_array()

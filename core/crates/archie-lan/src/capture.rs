@@ -15,7 +15,7 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 /// The fields, in the order they are printed, one frame to a line, tab between.
-pub const FIELDS: [&str; 46] = [
+pub const FIELDS: [&str; 47] = [
     "frame.time_epoch",
     "frame.len",
     "eth.src",
@@ -62,6 +62,7 @@ pub const FIELDS: [&str; 46] = [
     "pop.request.command",
     "imap.request.command",
     "smtp.req.command",
+    "smb.cmd",
 ];
 
 /// Enough of each frame for the names above; the rest is never copied off the interface.
@@ -165,6 +166,9 @@ pub struct Packet {
     /// sent (FTP `PASS`, POP3 `PASS`/`APOP`/`AUTH`, IMAP `LOGIN`/`AUTHENTICATE`, SMTP
     /// `AUTH`). Only the command word is read, never what follows it.
     pub cleartext_password: Option<&'static str>,
+    /// An SMB version 1 command other than Negotiate: the two ends agreed on SMBv1. A
+    /// Negotiate alone is not counted, since clients open with one and move to SMB2.
+    pub smb1: bool,
 }
 
 /// Addresses kept from one DNS answer: a CDN answers with a handful.
@@ -339,6 +343,7 @@ pub fn parse(line: &str) -> Option<Packet> {
         .then(|| mac(fields[3]).zip(name(fields[17])))
         .flatten(),
         cleartext_password: password_command(&fields[42..46]),
+        smb1: !fields[46].is_empty() && fields[46] != "0x72",
     })
 }
 
@@ -619,6 +624,14 @@ pub(crate) mod tests {
         assert_eq!(sent("imap.request.command", "LOGIN"), Some("IMAP"));
         assert_eq!(sent("smtp.req.command", "AUTH"), Some("SMTP"));
         assert_eq!(sent("smtp.req.command", "EHLO"), None);
+        let smb = |command: &str| {
+            parse(&line(&[("frame.time_epoch", "1"), ("smb.cmd", command)]))
+                .unwrap()
+                .smb1
+        };
+        assert!(smb("0x73"), "Session Setup AndX");
+        assert!(!smb("0x72"), "a Negotiate that may move to SMB2");
+        assert!(!smb(""));
         assert!(!advertise("546"), "only a server's port answers");
         // A second occurrence of an address field is not the frame's own (ICMP errors).
         fields.push(("ip.dst", "192.168.1.1,10.0.0.1"));

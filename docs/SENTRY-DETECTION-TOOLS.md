@@ -32,6 +32,7 @@ with only the broadcast view, and says more with a mirror.
 | `retired-tls` and `tls_versions` | a device whose TLS client stops at 1.1 or older, read from its JA4 | — |
 | `rogue-dhcpv6-server` | a device other than the router answering DHCPv6 (mitm6) | — |
 | `name-poisoning` | a device answering LLMNR/NetBIOS for 3+ names, or for `wpad` (Responder) | — |
+| `retired-smb` | a device sends SMB version 1 commands past the Negotiate (EternalBlue's protocol) | — |
 | `login-burst` | 30+ connections from one device to one host's FTP, SSH, Telnet (23/2323), RDP or VNC port within a minute | — |
 | `cleartext-password` | a client sends FTP `PASS`, POP3 `PASS`/`APOP`/`AUTH`, IMAP `LOGIN`/`AUTHENTICATE` or SMTP `AUTH` unencrypted; high when the server is outside. Only the command word is read | — |
 | `dga-suspect` | 25+ different random-looking names answered NXDOMAIN to one device in a minute (a domain generation algorithm) | — |
@@ -528,6 +529,25 @@ its basis.
   Nothing for other traffic.
 - **Limit.** An encrypted protocol hides whether the logins failed, so a tool that opens
   many sessions on purpose (Ansible without `ControlPersist`) looks the same.
+
+### 2026-10-17: SMB version 1 still in use
+
+- **Compared.** nmap's `smb-protocols` asks each host which dialects it accepts: active,
+  and against devices it would be probing. Windows' own `AuditSmb1Access` logs SMB1 on the
+  server, which only works on Windows. Zeek's `smb1` analyzer logs every SMB1 message,
+  Negotiate included, though Windows and Samba clients open with an SMB1 Negotiate only to
+  move to SMB2, so counting Negotiates flags healthy machines.
+- **Chosen.** TShark's `smb.cmd`, present only in an SMB version 1 header; any command
+  other than Negotiate (`0x72`) means the two ends agreed on SMBv1. The device sending it
+  is `retired-smb`, a warning, once per device: usually an old NAS, printer or camera, the
+  kind EternalBlue and WannaCry spread through. Passive: nothing is asked of any device.
+- **Tested.** Parsing (Session Setup counted, Negotiate and absence not); told once with
+  the peer named. Through real TShark: the fixture's NAS answers a Negotiate and then a
+  Session Setup AndX in SMB1, and only the device is told.
+- **Measured.** TShark over the fixture repeated 50 times (12,900 frames), best of five,
+  two rounds: 454/459 ms with 46 fields, 457/449 ms with 47. Within noise.
+- **Not adopted.** Probing for SMB1 (nmap): active. Counting Negotiates: false alarms on
+  every modern Windows machine whose client still offers SMB1 first.
 
 ## How a tool is accepted
 

@@ -4,8 +4,8 @@
 # NetBIOS for other machines' names, mitm6 answering DHCPv6, a camera whose TLS client
 # stops at TLS 1.0, the rogue sending an ICMP Redirect and answering DNS, an ARP sweep of
 # the network, the NXDOMAIN answers a domain generation algorithm draws, POP3 and FTP
-# passwords sent in the clear, a camera trying Telnet logins on a NAS, then a macof-style
-# flood of 60 made-up hardware addresses. Nothing is sent.
+# passwords sent in the clear, a camera trying Telnet logins on a NAS, the NAS speaking
+# SMB version 1, then a macof-style flood of 60 made-up hardware addresses. Nothing is sent.
 #   python3 -I make_rogue_pcap.py rogue-dhcp-and-ra.pcap
 import sys
 from scapy.all import Ether, IP, UDP, TCP, ICMP, DNS, BOOTP, DHCP, IPv6, ICMPv6ND_RA, ICMPv6NDOptSrcLLAddr, Raw, wrpcap, ARP, DNSQR, DNSRR, load_layer, load_contrib
@@ -106,6 +106,17 @@ for i, (port, payload) in enumerate([(110, b"PASS not-a-real-password\r\n"), (21
 for i in range(35):
     at(Ether(src=camera, dst="00:11:32:00:00:05")/IP(src="192.168.1.60", dst="192.168.1.5")/
        TCP(sport=42000 + i, dport=23, flags="S", seq=7000 + i), 290 + i * 0.1)
+# The NAS answers the camera in SMB version 1: a Session Setup AndX response, after the
+# Negotiate, which alone is not counted.
+import struct
+def smb1(command):
+    header = b"\xffSMB" + bytes([command]) + b"\x00" * 4 + b"\x98" + b"\x01\x28" + b"\x00" * 12 + b"\x00\x00\xff\xfe\x00\x00\x00\x00"
+    body = b"\x00\x00\x00"
+    return b"\x00" + struct.pack(">I", len(header + body))[1:] + header + body
+nas = "00:11:32:00:00:05"
+for i, command in enumerate([0x72, 0x73]):
+    at(Ether(src=nas, dst=camera)/IP(src="192.168.1.5", dst="192.168.1.60")/
+       TCP(sport=445, dport=44000, flags="PA", seq=1 + 64 * i, ack=1)/Raw(smb1(command)), 295 + i)
 # Then a table flood, as macof sends it: made-up source and destination hardware and IP
 # addresses, 60 frames in a second.
 for i in range(60):

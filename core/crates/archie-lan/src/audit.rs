@@ -14,6 +14,7 @@
 //! | `host-sweep` | one device opens the same port on 50 LAN hosts within a minute |
 //! | `cleartext-login` | a device opens Telnet or FTP, which carry passwords in the clear |
 //! | `login-burst` | a device opens 30 or more connections to one host's login port (FTP, SSH, Telnet, RDP, VNC) within a minute: password guessing, from a person's tool or from malware |
+//! | `retired-smb` | a device speaks SMB version 1 past the Negotiate (Session Setup, Tree Connect…): the protocol EternalBlue and WannaCry spread through, off by default in Windows since 2017 |
 //! | `cleartext-password` | a device sends a login command in the clear (FTP `PASS`, POP3 `PASS`/`AUTH`, IMAP `LOGIN`, SMTP `AUTH`), on any port: high when the server is outside the LAN, a warning inside it. Only the command word is read, never the password |
 //! | `dns-tunnel-suspect` | a DNS question is long and random enough to be carrying data |
 //! | `unusual-destination` | a device learned for a day sends over 25 MB to an outside destination it had not used before |
@@ -1219,6 +1220,24 @@ impl Audit {
                 format!(
                     "its TLS client offers nothing newer than {version}{to}, retired in 2021: \
                      its firmware has likely not been updated in years"
+                ),
+            );
+        }
+        if packet.smb1 {
+            let peer = packet
+                .destination
+                .map_or_else(String::new, |peer| format!(" with {peer}"));
+            self.tell(
+                &mut alerts,
+                format!("smb1 {mac}"),
+                packet.at_ms,
+                Severity::Warning,
+                "retired-smb",
+                mac,
+                format!(
+                    "speaks SMB version 1{peer}, the protocol EternalBlue and WannaCry spread \
+                     through; Windows has had it off by default since 2017. Turn SMBv1 off on \
+                     it, or replace it"
                 ),
             );
         }
@@ -2460,6 +2479,27 @@ mod tests {
         assert_eq!(rules(&told), ["cleartext-login", "login-burst"]);
         assert_eq!(told[1].severity, Severity::High);
         assert!(told[1].detail.contains("Telnet"), "{}", told[1].detail);
+    }
+
+    #[test]
+    fn a_device_speaking_smb1_is_told_once() {
+        let mut audit = Audit::new(State::default(), learned());
+        let nas = "00:11:32:00:00:05";
+        let smb = |at_ms: u64| Packet {
+            destination: Some("192.168.1.60".parse().unwrap()),
+            tcp: Some((445, 43_000)),
+            smb1: true,
+            ..from(nas, "192.168.1.5", at_ms)
+        };
+        let told = audit.see(&smb(1_000));
+        assert_eq!(rules(&told), ["retired-smb"]);
+        assert_eq!(told[0].device, nas);
+        assert!(
+            told[0].detail.contains("with 192.168.1.60"),
+            "{}",
+            told[0].detail
+        );
+        assert!(audit.see(&smb(2_000)).is_empty(), "once per device");
     }
 
     #[test]
