@@ -162,7 +162,17 @@ archie-netwatch router pull --state-dir DIR        # one read now
   through the same address checks as ARP heard on the wire (`address-moved`,
   `lease-conflict`).
 
-Nothing is changed on the router: the key can only read.
+- On OpenWrt, Asuswrt and Linux routers the read also takes the first 2,048 lines of the
+  kernel's connection tracking (`/proc/net/nf_conntrack`). Per device (matched by address
+  through the same read's lease and neighbour tables), `router_flows` keeps the number of
+  connections to the outside, the bytes sent over them when the kernel counts bytes
+  (`nf_conntrack_acct`), and the eight busiest destinations, by name when Sentry knows one.
+  It is the latest view, replaced at each read, and adds nothing to `sent_to`, which counts
+  only what Sentry itself heard. pfSense and OPNsense keep connections in pf, whose state
+  table needs root, so they are not read.
+
+Nothing is changed on the router: the key can only read. A key enrolled before the
+connection tracking was added keeps its old command until it is enrolled again.
 
 ## Running it as a service
 

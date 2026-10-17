@@ -200,6 +200,18 @@ fn apply_router(audit: &mut Audit, tables: &router::Tables, at_ms: u64) -> Vec<A
     for (mac, address) in &tables.neighbours {
         alerts.extend(audit.router_saw(mac, *address, at_ms));
     }
+    // Connections are by address; the same read's neighbour and lease tables say whose.
+    let owners: std::collections::HashMap<std::net::Ipv4Addr, &str> = tables
+        .leases
+        .iter()
+        .map(|lease| (lease.address, lease.mac.as_str()))
+        .chain(tables.neighbours.iter().map(|(mac, a)| (*a, mac.as_str())))
+        .collect();
+    for (address, outbound) in &tables.flows {
+        if let Some(mac) = owners.get(address) {
+            audit.router_flows(mac, outbound, at_ms);
+        }
+    }
     alerts
 }
 

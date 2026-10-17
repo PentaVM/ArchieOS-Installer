@@ -458,6 +458,29 @@ its basis.
   nothing on the common path. The list is as current as the crate version; it is updated
   with the crate.
 
+### 2026-10-17: the router's connection tracking (roadmap stage 2, third step)
+
+- **Compared.** Linux's `/proc/net/nf_conntrack` (read with the same pinned key, no new
+  service); `conntrack -L` from conntrack-tools (same data, not installed on most stock
+  firmware); NetFlow/IPFIX exported by the router (`softflowd`, needs a package and a
+  collector on Sentry's side, and pushes a stream where a pull every five minutes does);
+  SNMP `ipNetToMediaTable` (neighbours only, no connections). pf's state table on pfSense
+  and OPNsense needs root.
+- **Chosen.** `/proc/net/nf_conntrack`, the first 2,048 lines, appended to the read-only
+  command after a separator. Per LAN address: connections to outside addresses, bytes sent
+  in the original direction when counted, connections per peer. The audit keeps the latest
+  view on the device (`router_flows`, eight busiest peers, named where Sentry knows a name)
+  and never adds it to `sent_to`, so a device Sentry also hears is not counted twice.
+- **Tested.** Parsing (TCP and UDP, with and without byte counts, LAN to LAN, the router's
+  own WAN connection, IPv6 and junk lines skipped); the full read with all three sections;
+  the pinned command on every kind, still with nothing that writes; the busiest peers
+  first and by name, no device made from connections alone, the field surviving a save and
+  a load, and a file with too many peers refused.
+- **Measured.** 2,048 lines (460 KB) parsed in under 1 ms in release, best of 20, once
+  every five minutes on the router thread: nothing on the capture path.
+- **Not tested here.** No real router: the line format follows the kernel's, as OpenWrt
+  prints it. Whether byte counting is on must be checked on the owner's router.
+
 ## How a tool is accepted
 
 A tool joins Sentry when, on a recorded pcap of the owner's network and on the fixtures in

@@ -24,6 +24,7 @@
 
 use crate::leases::Lease;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
@@ -32,6 +33,13 @@ use std::time::{Duration, Instant};
 
 /// Between the lease table and the neighbour table in the command's output.
 pub const SEPARATOR: &str = "@@ARCHIE-NEIGHBOURS@@";
+/// What the read prints between the neighbour table and the connection-tracking table.
+pub const FLOWS: &str = "@@ARCHIE-FLOWS@@";
+/// Connection-tracking lines read at most: a home router tracks a few hundred to a few
+/// thousand, about 300 bytes each, and the whole read stays under `MAX_OUTPUT`.
+pub const MAX_FLOWS: usize = 2048;
+/// Outside peers kept per device from one read, the busiest first.
+pub const MAX_ROUTER_PEERS: usize = 8;
 /// The most of a router's answer that is read.
 pub const MAX_OUTPUT: usize = 1024 * 1024;
 /// How long one read of the router may take, connection included.
@@ -66,8 +74,9 @@ impl Kind {
         }
     }
 
-    /// The one command the key may run: print the lease table, the separator, then the
-    /// neighbour table. Read-only, on every kind.
+    /// The one command the key may run: print the lease table, the separator, the
+    /// neighbour table and, on Linux routers, the first `MAX_FLOWS` lines of the kernel's
+    /// connection tracking. Read-only, on every kind.
     pub fn read_command(self) -> String {
         let (leases, neighbours) = match self {
             Self::Openwrt => ("cat /tmp/dhcp.leases", "cat /proc/net/arp"),
@@ -81,7 +90,12 @@ impl Kind {
                 "cat /proc/net/arp",
             ),
         };
-        format!("{leases}; echo {SEPARATOR}; {neighbours}")
+        let flows = match self {
+            // pf's state table needs root (`pfctl -ss`); the read stays without it.
+            Self::BsdFirewall => String::new(),
+            _ => format!("; echo {FLOWS}; head -n {MAX_FLOWS} /proc/net/nf_conntrack 2>/dev/null"),
+        };
+        format!("{leases}; echo {SEPARATOR}; {neighbours}{flows}")
     }
 
     /// Where the owner puts the key line, said plainly.
@@ -272,15 +286,68 @@ fn common_arguments(config: &Config, directory: &Path, batch: bool) -> Vec<Strin
 pub struct Tables {
     pub leases: Vec<Lease>,
     pub neighbours: Vec<(String, Ipv4Addr)>,
+    /// What each LAN address has open to the outside, by the router's connection tracking.
+    pub flows: BTreeMap<Ipv4Addr, Outbound>,
+}
+
+/// One LAN address's connections to the outside, as the router tracks them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Outbound {
+    pub connections: u32,
+    /// Bytes it sent over those connections, when the kernel counts them
+    /// (`nf_conntrack_acct`, on by default in OpenWrt).
+    pub bytes: Option<u64>,
+    /// Connections to each outside address.
+    pub peers: BTreeMap<IpAddr, u32>,
 }
 
 /// Takes the command's output apart.
 pub fn parse(output: &str, now_s: u64) -> Tables {
-    let (leases, neighbours) = output.split_once(SEPARATOR).unwrap_or((output, ""));
+    let (leases, rest) = output.split_once(SEPARATOR).unwrap_or((output, ""));
+    let (neighbours, flows) = rest.split_once(FLOWS).unwrap_or((rest, ""));
     Tables {
         leases: crate::leases::parse(leases, now_s),
         neighbours: neighbours_of(neighbours),
+        flows: flows_of(flows),
     }
+}
+
+/// Linux's `/proc/net/nf_conntrack`: per IPv4 connection from a LAN address to an outside
+/// one, its original direction's addresses and, when counted, bytes. Other lines (IPv6,
+/// LAN to LAN, the router's own) are skipped.
+pub fn flows_of(text: &str) -> BTreeMap<Ipv4Addr, Outbound> {
+    let mut flows: BTreeMap<Ipv4Addr, Outbound> = BTreeMap::new();
+    for line in text.lines().take(MAX_FLOWS) {
+        let mut fields = line.split_whitespace();
+        if fields.next() != Some("ipv4") {
+            continue;
+        }
+        let first = |key: &str| {
+            line.split_whitespace()
+                .find_map(|field| field.strip_prefix(key))
+        };
+        let (Some(source), Some(destination)) = (
+            first("src=").and_then(|a| a.parse::<Ipv4Addr>().ok()),
+            first("dst=").and_then(|a| a.parse::<Ipv4Addr>().ok()),
+        ) else {
+            continue;
+        };
+        let outside = !crate::is_lan_v4(destination)
+            && !destination.is_multicast()
+            && !destination.is_broadcast()
+            && !destination.is_loopback()
+            && !destination.is_unspecified();
+        if !crate::is_lan_v4(source) || !outside {
+            continue;
+        }
+        let entry = flows.entry(source).or_default();
+        entry.connections += 1;
+        if let Some(bytes) = first("bytes=").and_then(|b| b.parse::<u64>().ok()) {
+            entry.bytes = Some(entry.bytes.unwrap_or(0).saturating_add(bytes));
+        }
+        *entry.peers.entry(IpAddr::V4(destination)).or_default() += 1;
+    }
+    flows
 }
 
 /// The complete entries of a neighbour table: Linux's `/proc/net/arp`, or BSD's
@@ -453,7 +520,8 @@ mod tests {
     fn the_key_line_pins_a_read_only_command() {
         let line = authorized_line(Kind::Openwrt, "ssh-ed25519 AAAAC3Nza archie-sentry\n");
         assert!(line.starts_with(
-            "command=\"cat /tmp/dhcp.leases; echo @@ARCHIE-NEIGHBOURS@@; cat /proc/net/arp\","
+            "command=\"cat /tmp/dhcp.leases; echo @@ARCHIE-NEIGHBOURS@@; cat /proc/net/arp; \
+             echo @@ARCHIE-FLOWS@@; head -n 2048 /proc/net/nf_conntrack 2>/dev/null\","
         ));
         assert!(line.contains("no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty "));
         assert!(line.ends_with("ssh-ed25519 AAAAC3Nza archie-sentry"));
@@ -526,5 +594,34 @@ IP address       HW type     Flags       HW address            Mask     Device
         let whole = format!("1791750000 54:4e:f0:07:3d:e8 192.168.1.84 tv *\n{SEPARATOR}\n{linux}");
         let read = parse(&whole, 0);
         assert_eq!((read.leases.len(), read.neighbours.len()), (1, 2));
+        assert!(read.flows.is_empty(), "a read without connection tracking");
+    }
+
+    #[test]
+    fn the_router_s_connection_tracking_is_summed_per_lan_address() {
+        let conntrack = "\
+ipv4     2 tcp      6 7440 ESTABLISHED src=192.168.1.84 dst=142.250.184.14 sport=50000 dport=443 packets=10 bytes=1500 src=142.250.184.14 dst=203.0.113.5 sport=443 dport=50000 packets=8 bytes=4000 [ASSURED] mark=0 zone=0 use=2
+ipv4     2 udp      17 25 src=192.168.1.84 dst=142.250.184.14 sport=50001 dport=443 packets=3 bytes=900 src=142.250.184.14 dst=203.0.113.5 sport=443 dport=50001 packets=3 bytes=3000 mark=0 zone=0 use=2
+ipv4     2 tcp      6 300 ESTABLISHED src=192.168.1.84 dst=198.51.100.7 sport=50002 dport=8883 packets=4 bytes=600 src=198.51.100.7 dst=203.0.113.5 sport=8883 dport=50002 packets=4 bytes=700 [ASSURED] mark=0 use=1
+ipv4     2 udp      17 29 src=192.168.1.61 dst=192.168.1.1 sport=5353 dport=53 packets=1 bytes=70 src=192.168.1.1 dst=192.168.1.61 sport=53 dport=5353 packets=1 bytes=120 mark=0 use=1
+ipv4     2 tcp      6 60 SYN_SENT src=192.168.1.61 dst=192.0.2.9 sport=40000 dport=443 [UNREPLIED] src=192.0.2.9 dst=203.0.113.5 sport=443 dport=40000 mark=0 use=1
+ipv4     2 udp      17 20 src=203.0.113.5 dst=8.8.8.8 sport=123 dport=123 packets=1 bytes=76 src=8.8.8.8 dst=203.0.113.5 sport=123 dport=123 packets=1 bytes=76 mark=0 use=1
+ipv6     10 tcp     6 431999 ESTABLISHED src=fd00::84 dst=2001:db8::1 sport=50003 dport=443 packets=2 bytes=200 src=2001:db8::1 dst=fd00::84 sport=443 dport=50003 packets=2 bytes=300 [ASSURED] mark=0 use=2
+garbage
+";
+        let flows = flows_of(conntrack);
+        assert_eq!(flows.len(), 2, "{flows:?}");
+        let tv = &flows[&"192.168.1.84".parse::<Ipv4Addr>().unwrap()];
+        assert_eq!((tv.connections, tv.bytes), (3, Some(3_000)));
+        assert_eq!(tv.peers[&"142.250.184.14".parse::<IpAddr>().unwrap()], 2);
+        // LAN to LAN is skipped; a connection without byte counts still counts.
+        let camera = &flows[&"192.168.1.61".parse::<Ipv4Addr>().unwrap()];
+        assert_eq!((camera.connections, camera.bytes), (1, None));
+        let whole = format!("{SEPARATOR}\n{FLOWS}\n{conntrack}");
+        assert_eq!(parse(&whole, 0).flows, flows);
+        assert!(Kind::Openwrt
+            .read_command()
+            .ends_with("head -n 2048 /proc/net/nf_conntrack 2>/dev/null"));
+        assert!(!Kind::BsdFirewall.read_command().contains(FLOWS));
     }
 }

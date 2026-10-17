@@ -142,6 +142,23 @@ pub struct Device {
     /// the last lease table read said (`Some(0)` for a lease that does not end).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub leased_until_s: Option<u64>,
+    /// What the router's connection tracking showed it had open to the outside, the last
+    /// time the router was read: seen even when a switch hides its traffic from Sentry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub router_flows: Option<RouterFlows>,
+}
+
+/// A device's connections to the outside at one read of the router.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RouterFlows {
+    pub at_ms: u64,
+    pub connections: u32,
+    /// Bytes it sent over them, when the router counts bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<u64>,
+    /// The outside destinations it had the most connections to, by name where one is
+    /// known, at most `crate::router::MAX_ROUTER_PEERS`.
+    pub peers: Vec<String>,
 }
 
 /// The holder of one address in the router's lease table.
@@ -408,6 +425,12 @@ impl State {
                 "outside peers of one device",
             )?;
             over(limits.peers, device.beacons.len(), "rhythms of one device")?;
+            let router_peers = device.router_flows.as_ref().map_or(0, |f| f.peers.len());
+            over(
+                crate::router::MAX_ROUTER_PEERS,
+                router_peers,
+                "router-seen peers of one device",
+            )?;
             for (count, what) in [
                 (device.ja4.len(), "TLS fingerprints of one device"),
                 (device.user_agents.len(), "User-Agents of one device"),
@@ -420,6 +443,7 @@ impl State {
                 .iter()
                 .chain(device.sent_to.keys())
                 .chain(device.beacons.keys())
+                .chain(device.router_flows.iter().flat_map(|f| f.peers.iter()))
                 .chain(device.hostname.iter())
                 .chain(device.dhcp_requested.iter())
                 .chain(device.dhcp_vendor.iter())
@@ -831,6 +855,32 @@ impl Audit {
         self.claim(&mut alerts, at_ms, mac, IpAddr::V4(address));
         self.known_through_router(&mut alerts, at_ms, mac, address, "neighbour table");
         alerts
+    }
+
+    /// What the router's connection tracking showed `mac` had open to the outside. Kept on
+    /// the device as the latest view; it adds no bytes to `sent_to`, which counts only what
+    /// Sentry itself heard, so nothing is counted twice.
+    pub fn router_flows(&mut self, mac: &str, outbound: &crate::router::Outbound, at_ms: u64) {
+        let mut busiest: Vec<(&IpAddr, &u32)> = outbound.peers.iter().collect();
+        busiest.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+        let peers = busiest
+            .into_iter()
+            .take(crate::router::MAX_ROUTER_PEERS)
+            .map(|(peer, _)| {
+                self.named
+                    .get(peer)
+                    .cloned()
+                    .unwrap_or_else(|| peer.to_string())
+            })
+            .collect();
+        if let Some(device) = self.state.devices.get_mut(mac) {
+            device.router_flows = Some(RouterFlows {
+                at_ms,
+                connections: outbound.connections,
+                bytes: outbound.bytes,
+                peers,
+            });
+        }
     }
 
     /// The device the router knows as `mac` at `address`, made if the audit has not met it
@@ -2271,6 +2321,51 @@ mod tests {
             "{}",
             told[0].detail
         );
+    }
+
+    #[test]
+    fn the_router_s_view_of_a_device_s_connections_is_kept_by_name() {
+        let mut audit = Audit::new(State::default(), learned());
+        audit.see(&Packet {
+            destination: Some("142.250.184.14".parse().unwrap()),
+            server_name: Some("www.google.com".into()),
+            ..from(TV, "192.168.1.84", 1_000)
+        });
+        let outbound = crate::router::Outbound {
+            connections: 12,
+            bytes: Some(40_000),
+            peers: (1..=12u8)
+                .map(|i| (IpAddr::from([198, 51, 100, i]), u32::from(i)))
+                .chain([("142.250.184.14".parse().unwrap(), 30)])
+                .collect(),
+        };
+        audit.router_flows(TV, &outbound, 300_000);
+        let flows = audit.state.devices[TV].router_flows.clone().unwrap();
+        assert_eq!((flows.connections, flows.bytes), (12, Some(40_000)));
+        assert_eq!(flows.peers.len(), crate::router::MAX_ROUTER_PEERS);
+        assert_eq!(flows.peers[0], "www.google.com", "busiest first, by name");
+        assert_eq!(flows.peers[1], "198.51.100.12");
+        // Nothing is added to what Sentry heard itself.
+        assert_eq!(audit.state.devices[TV].sent_to["www.google.com"], 100);
+        // A device the audit has not met is not made from connections alone.
+        audit.router_flows("00:99:99:00:00:01", &outbound, 300_000);
+        assert!(!audit.state.devices.contains_key("00:99:99:00:00:01"));
+        // It survives a save and a load, and too many peers in a file are refused.
+        let saved = serde_json::to_vec(&audit.state).unwrap();
+        assert_eq!(
+            State::parse(&saved).unwrap().devices[TV].router_flows,
+            Some(flows)
+        );
+        let mut forged = audit.state.clone();
+        forged
+            .devices
+            .get_mut(TV)
+            .unwrap()
+            .router_flows
+            .as_mut()
+            .unwrap()
+            .peers = (0..20).map(|i| format!("p{i}")).collect();
+        assert!(State::parse(&serde_json::to_vec(&forged).unwrap()).is_err());
     }
 
     #[test]
