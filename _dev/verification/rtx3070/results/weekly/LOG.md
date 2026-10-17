@@ -63,3 +63,38 @@ is not paused: two GPU jobs on this card overheat it (85–87 °C seen at ~130 W
   alternatives first. It measures decision preference without the model's own
   reasoning. Scoring after self-generated reasoning is still to do (also needed for
   step 6 budget forcing).
+- 23:00 — **Step 2 (benchmark harness) started**, owner OK for FANToM/OpenToM (evaluation
+  only). Official repos fetched to `/home/archie/wanda/bench/src` (fantom main zip
+  sha256 5f7c4712…, OpenToM main zip 0c625eee…). FANToM data from the official GCS URL,
+  sha256 `1d08dfa0…53a4` verified against the hash pinned in its loader: 870 sets,
+  12,832 questions. Nothing is in git or `datasets/`.
+  - `bench.py`: OpenToM imports the official `build_prompt`, `OpenToMUtils` and
+    `OpenToMEvaluator` and reproduces `run_baseline.py` sampling (seed 42, 5 batches ×
+    50 narratives, coarse location, normal-length narratives, system prompt "You are an
+    expert in modeling other's mental state."). FANToM ports `setup_fantom` (short
+    input, set aggregation, `random.seed(99)` option order) and `score_and_analyze`;
+    sklearn/pandas/evaluate are not installed, so macro/weighted F1 and set
+    aggregation are reimplemented and unit-tested against reference values.
+  - Generation runs as a worker `bench` job through an owned loopback `llama-server`, so
+    thermal pauses and `hold` apply between requests. Greedy, 256 max tokens (the FANToM
+    chat-agent default), **thinking disabled** in this first condition. Resumable
+    `responses.jsonl`.
+  - Found and fixed: `llama-server`'s default 8 GiB host prompt cache plus 32 checkpoints
+    of the hybrid model's state grew to 6.2 GiB RSS and starved the 7.9 GiB guest (the
+    worker correctly waited on RAM). Now `--cache-ram 1024 --ctx-checkpoints 4`: steady
+    1.83 GiB.
+  - Not yet computable: FANToM ALL* and belief "distance" need the official embedder
+    `sentence-transformers/all-roberta-large-v1` (~1.4 GB download). They are reported as
+    `None` until the owner approves that download. ALL and every other metric are computed.
+- **Published "best AI" references** (different harnesses; recorded for the target):
+  - OpenToM (Xu et al. 2024, ACL; arXiv:2402.06044, Tables 2–3, macro-F1): best LLM per
+    type = GPT-4-Turbo with CoT. Loc-coarse FO 0.942 / SO 0.828, MultiHop FO 0.835 /
+    SO 0.755, Attitude 0.580 (vanilla GPT-4: 0.643 / 0.442 / 0.658 / 0.637 / 0.544).
+    A +20 % relative target on Attitude means ≥ 0.696. On Loc-coarse FO it would mean
+    ≥ 1.13, which is impossible, so per-type targets cap at 1.0 and will be reported
+    honestly as such.
+  - FANToM (official README leaderboard, short input, set aggregation): ALL* 0.8 and
+    ALL 2.0 (GPT-4o-2024-05-13); BeliefQ[Choice] best 79.2 (Claude-3-Opus). Third-party
+    (Kim et al. 2025, arXiv:2502.11881, a subset with a different protocol): o1-preview
+    44.4 / 66.7 / 63.5. That is not directly comparable to the official harness.
+    Search found no newer official leaderboard entry.

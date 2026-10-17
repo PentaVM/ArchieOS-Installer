@@ -119,6 +119,8 @@ class Worker:
                 result = self.train(spec)
             elif spec['type'] == 'eval':
                 result = self.eval_job(spec)
+            elif spec['type'] == 'bench':
+                result = self.bench_job(spec)
             else:
                 raise AdmissionError('unknown job type')
             spec['result'], spec['finished_ms'] = result, now_ms()
@@ -203,6 +205,62 @@ class Worker:
             extract_text(model, text, root, self.config, self.binary, ubatch=0, split=split)
             prune_reference_outputs(root)
         return root, json.loads((root/'receipt.json').read_text())
+
+    # ---- bench: external ToM benchmarks by native generation (evaluation only) --------
+    def bench_job(self, spec):
+        from .bench import fantom_items, fantom_score, opentom_items, opentom_score
+        from .native_chat import NativeChat
+        bench_id, benchmark = spec['bench_id'], spec['benchmark']
+        if not re.fullmatch(r'[a-z0-9-]{3,64}', bench_id) or benchmark not in ('opentom', 'fantom'):
+            raise AdmissionError('invalid bench id or benchmark')
+        out = self.root/'bench'/bench_id
+        out.mkdir(parents=True, exist_ok=True)
+        items = opentom_items() if benchmark == 'opentom' else fantom_items()
+        if spec.get('limit'):
+            items = items[:int(spec['limit'])]
+        responses_path = out/'responses.jsonl'
+        done = {}
+        if responses_path.exists():
+            for line in responses_path.read_text().splitlines():
+                record = json.loads(line); done[record['id']] = record
+        pending = [item for item in items if item['id'] not in done]
+        max_tokens, thinking = int(spec.get('max_tokens', 256)), bool(spec.get('thinking', False))
+        while pending:
+            if self.stopping():
+                raise Interrupted()
+            if (self.root/'hold').exists() or self.control() == 'pause':
+                self.state = 'paused'; self.heartbeat(progress=f'{bench_id} {len(done)}/{len(items)}'); time.sleep(10)
+                continue
+            # The server holds VRAM only while we may generate; a hold (owner/Codex needs the
+            # GPU) closes it, a short thermal rest keeps it loaded but idle.
+            with NativeChat(self.config, out/'server.log', lora=spec.get('adapter')) as chat, \
+                    responses_path.open('a') as stream:
+                self.state = 'running'
+                while pending and not self.stopping() and not (self.root/'hold').exists():
+                    if self.control() == 'pause':
+                        self.state = 'paused'; self.heartbeat(progress=f'{bench_id} {len(done)}/{len(items)}')
+                        time.sleep(5); continue
+                    self.state = 'running'
+                    preflight(self.config)
+                    item = pending.pop(0)
+                    answer = chat.chat(item['messages'], max_tokens=max_tokens, thinking=thinking)
+                    record = {'id': item['id'], **answer}
+                    stream.write(json.dumps(record, ensure_ascii=False) + '\n'); stream.flush()
+                    done[item['id']] = record
+                    if len(done) % 20 == 0:
+                        self.heartbeat(progress=f'{bench_id} {len(done)}/{len(items)}')
+        predictions = {i: r['text'] for i, r in done.items()}
+        report = opentom_score(items, predictions) if benchmark == 'opentom' else fantom_score(items, predictions)
+        result = {'format_version': 1, 'bench_id': bench_id, 'benchmark': benchmark, 'adapter': spec.get('adapter'),
+                  'base_sha256': self.config.base_sha256, 'items': len(items), 'max_tokens': max_tokens,
+                  'thinking': thinking, 'truncated': sum(r.get('finish') == 'length' for r in done.values()),
+                  'report': report, 'created_ms': now_ms(),
+                  'protocol': ('OpenToM run_baseline.py sampling (seed 42, 5x50, coarse) + official evaluator'
+                               if benchmark == 'opentom' else
+                               'FANToM eval_fantom.py setup (short input, set aggregation, seed 99); '
+                               'ALL*/belief distance need the official embedder and are None until it runs')}
+        atomic_json(out/'report.json', result)
+        return {'report': str(out/'report.json')}
 
     # ---- eval: score a checkpoint (or the unchanged base) without training ------------
     def eval_job(self, spec):
