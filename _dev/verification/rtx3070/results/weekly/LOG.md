@@ -229,3 +229,22 @@ is not paused: two GPU jobs on this card overheat it (85–87 °C seen at ~130 W
   PYTHONHASHSEED), so `generate_v2` was not reproducible across processes (tom-gen-002
   is affected and stays unused). Now sorted; a cross-process test passes, and tom-gen-003
   is byte-identical under two hash seeds.
+- 03:50 — Thermal guard relaxed at the owner's request ("temps are fine"): pause 78 °C /
+  resume 68 °C / 20 s rest (was 75/60/45). Over the previous 2 h: p50 54 °C, p95 79 °C,
+  max 85 °C, 266 hot pauses. Rollback criteria are in STEERING.md.
+- 06:10 — **g2 (direct-only, minimal pairs, answer weight 1.0, pairs per step)** finished at
+  dev loss 0.731; the decision anchor was unchanged. **OpenToM direct, partial (1,331
+  shared questions)**, strict macro-F1 (identical to official for g2: 0 % unparseable):
+
+  | type | base | g1 strict | g2 |
+  | --- | --- | --- | --- |
+  | Loc-coarse FO | 0.391 | 0.273 | 0.488 |
+  | Loc-coarse SO | 0.249 | 0.432 | 0.344 |
+  | MultiHop FO | 0.352 | 0.414 | 0.405 |
+  | MultiHop SO | 0.310 | 0.334 | 0.343 |
+  | Attitude | 0.354 | 0.609 | 0.374 |
+
+  g2 fixes the format (no unparseable answers) and beats the base on every type; g1 is
+  still stronger on attitude and second-order location when it answers. The "no" default
+  is weaker but still dominant (388 no vs 24 yes in g2). Full 3,250 and the g2-think pilot
+  are next. Partial numbers; final ones replace these.
