@@ -260,7 +260,8 @@ class Worker:
                             'tokens': info['tokens'], 'prompt_tokens': info['prompt_tokens'], 'cache': str(root),
                             'choice_row': None, 'choice_token_ids': {}, 'probe': None, 'option_letters': [],
                             'shown_to_original': [], 'selected': '', 'counterfactual_changes': '',
-                            'user': e['messages'][-1]['content'], 'label': e['label']})
+                            'user': e['messages'][-1]['content'], 'label': e['label'],
+                            'mode': e.get('mode', 'think'), 'pair': e.get('pair'), 'side': e.get('side')})
         index = {'format_version': 1, 'format': 'chat-v1', 'tranche': str(tranche), 'tranche_sha256': sha_file(tranche),
                  'base_sha256': model.sha256, 'shim_sha256': shim, 'provenance': data['provenance'],
                  'examples': records, 'rejected': rejected, 'created_ms': now_ms()}
@@ -441,6 +442,11 @@ class Worker:
                     'eval_every': int(spec.get('eval_every', 4)), 'init_from': spec.get('init_from'),
                     'betas': [0.9, 0.999], 'eps': 1e-8, 'weight_decay': 0.0, 'grad_clip': 1.0,
                     'rank': self.config.rank, 'alpha': self.config.alpha}
+        # Optional g2 objectives; only present when requested, so earlier run digests are unchanged.
+        if 'answer_weight' in spec:
+            settings['answer_weight'] = float(spec['answer_weight'])
+        if 'keep_pairs' in spec:
+            settings['keep_pairs'] = bool(spec['keep_pairs'])
         if not (0 < settings['lr'] <= 1e-3 and 1 <= settings['accumulation'] <= 64 and settings['epochs'] >= 1):
             raise AdmissionError('training settings outside reviewed bounds')
         examples = []
@@ -504,15 +510,15 @@ class Worker:
         torch.cuda.reset_peak_memory_stats()
         while state['epoch'] < settings['epochs'] and state['opt_step'] < settings['max_optimizer_steps']:
             if state['order'] is None:
-                order = list(range(len(train)))
-                random.Random(f'{settings["seed"]}:{state["epoch"]}').shuffle(order)
+                order = self.epoch_order(train, settings['seed'], state['epoch'], settings.get('keep_pairs', False))
                 state['order'], state['position'] = order, 0
             losses = []
             optimizer.zero_grad(set_to_none=True)
             while len(losses) < settings['accumulation'] and state['position'] < len(state['order']):
                 example = train[state['order'][state['position']]]
                 preflight(self.config, required_gpu_mib=512)
-                loss = self.example_loss(suffix, head, example, full_vocab_cross_entropy)
+                loss = self.example_loss(suffix, head, example, full_vocab_cross_entropy,
+                                         settings.get('answer_weight', 0.0))
                 (loss/settings['accumulation']).backward()
                 losses.append(float(loss.detach()))
                 state['position'] += 1
@@ -590,14 +596,56 @@ class Worker:
             raise AdmissionError('prefix cache incomplete')
         return torch.from_numpy(values.reshape(rows, 4096)).cuda()
 
-    def example_loss(self, suffix, head, example, loss_fn):
+    def think_end_id(self):
+        if getattr(self, '_think_end', None) is None:
+            from .data import NativeTokenizer
+            ids = NativeTokenizer(self.config)('</think>')
+            if len(ids) != 1:
+                raise AdmissionError('</think> is not a single token in the pinned vocabulary')
+            self._think_end = ids[0]
+        return self._think_end
+
+    def example_loss(self, suffix, head, example, loss_fn, answer_weight=0.0):
+        """Teacher-forced loss on the target; optionally `answer_weight` × the loss on the
+        answer tokens alone (after the last </think>), so a ~200-token trace cannot drown
+        the decision it leads to."""
         import torch
         tokens, prompt = example['tokens'], example['prompt_tokens']
         labels = torch.tensor([tokens[i+1] if i+1 >= prompt else -100 for i in range(len(tokens)-1)]+[-100],
                               device='cuda', dtype=torch.int64)
         hidden = suffix(self.load_prefix(example))
         rows = labels != -100
-        return loss_fn(hidden[rows], labels[rows], head, self.config.row_chunk)
+        loss = loss_fn(hidden[rows], labels[rows], head, self.config.row_chunk)
+        if answer_weight > 0 and example.get('mode'):              # chat-v1 examples only
+            end = self.think_end_id()
+            marks = [i for i, t in enumerate(tokens) if t == end]
+            if marks:
+                first_answer = max(marks[-1] + 1, prompt)          # index of the first answer token
+                answer = torch.zeros_like(rows)
+                answer[first_answer - 1:len(tokens) - 1] = True    # rows predicting those tokens
+                answer &= rows
+                if answer.any():
+                    loss = loss + answer_weight * loss_fn(hidden[answer], labels[answer], head, self.config.row_chunk)
+        return loss
+
+    @staticmethod
+    def epoch_order(train, seed, epoch, keep_pairs=False):
+        """Shuffled example order; with keep_pairs, both twins of a minimal pair stay adjacent
+        (shuffled as one unit) so they fall into the same optimizer step."""
+        rng = random.Random(f'{seed}:{epoch}')
+        if not keep_pairs:
+            order = list(range(len(train))); rng.shuffle(order); return order
+        units, index = [], {}
+        for i, e in enumerate(train):
+            pair = e.get('pair')
+            if pair and pair in index:
+                units[index[pair]].append(i)
+            else:
+                if pair:
+                    index[pair] = len(units)
+                units.append([i])
+        rng.shuffle(units)
+        return [i for unit in units for i in unit]
 
     def evaluate(self, suffix, head, dev, train):
         """Development metrics from the model's own distribution, not formatting alone."""

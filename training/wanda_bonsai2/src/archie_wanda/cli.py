@@ -29,6 +29,9 @@ def main():
     gen.add_argument('--count', type=int, required=True)
     gen.add_argument('--seed', type=int, required=True)
     gen.add_argument('--out', required=True)
+    gen.add_argument('--version', type=int, default=1, choices=(1, 2),
+                     help='2 = minimal counterfactual pairs + think/direct mix')
+    gen.add_argument('--direct-share', type=float, default=0.5, help='version 2: share of direct-mode problems')
     rescore = commands.add_parser('bench-rescore', help='recompute a bench report from saved responses (CPU)')
     rescore.add_argument('--dir', required=True)
     rescore.add_argument('--out', required=True)
@@ -47,10 +50,12 @@ def main():
     if args.command == 'gen-tom':
         from collections import Counter
         from .chatdata import write_tranche
-        from .tomgen import generate
-        problems = generate(args.count, seed=args.seed)
+        from .tomgen import generate, generate_v2
+        problems = (generate_v2(args.count, seed=args.seed, direct_share=args.direct_share) if args.version == 2
+                    else generate(args.count, seed=args.seed))
         examples = write_tranche(problems, args.out, {'kind': 'owned-procedural', 'generator': 'archie_wanda.tomgen',
-                                                      'seed': args.seed, 'count': args.count})
+                                                      'version': args.version, 'seed': args.seed, 'count': args.count,
+                                                      'direct_share': args.direct_share if args.version == 2 else None})
         print(json.dumps({'examples': len(examples), 'splits': Counter(e['split'] for e in examples),
                           'kinds': Counter(e['variant'] for e in examples)}))
         return

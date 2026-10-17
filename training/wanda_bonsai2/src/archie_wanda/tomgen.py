@@ -13,6 +13,7 @@ cannot score well. Every target is a short trace (who observed what → beliefs 
 for the model's <think> block, then the answer.
 """
 from dataclasses import dataclass, field
+import hashlib
 import random
 import re
 
@@ -135,17 +136,24 @@ class Problem:
     answer: str
     label: str            # normalised label used for balancing
     meta: dict = field(default_factory=dict)
+    mode: str = 'think'   # 'think': trace in <think> then the answer; 'direct': empty think, answer only
 
     def messages(self):
         return [{'role': 'system', 'content': T[self.lang]['system']},
                 {'role': 'user', 'content': self.story + '\n\n' + self.question}]
 
     def target(self):
-        return ' '.join(self.trace) + '\n</think>\n\n' + T[self.lang]['answer'].format(a=self.answer)
+        """Completion after the assistant's opened think block (think) or after an empty one (direct).
+
+        The answer is the bare label, as benchmark parsers expect; no "Answer:" prefix.
+        """
+        if self.mode == 'direct':
+            return self.answer
+        return ' '.join(self.trace) + '\n</think>\n\n' + self.answer
 
 
 class ObjectWorld:
-    def __init__(self, rng, lang, world_id):
+    def __init__(self, rng, lang, world_id, force=None):
         self.lang, self.id = lang, world_id
         self.mover, self.watcher, self.third = rng.sample(NAMES[lang], 3)
         self.place, self.obj = rng.choice(PLACES[lang]), rng.choice(OBJECTS[lang])
@@ -156,19 +164,24 @@ class ObjectWorld:
                  s('start', o=self.obj, c=self.start[0]),
                  s('prefer', p=self.watcher, o=self.obj, pref=T[lang]['pref_' + self.preference])]
         present = {self.mover, self.watcher}
-        watcher_leaves = rng.random() < 0.5
-        if watcher_leaves:
+        # Every random decision is drawn in a fixed order, then `force` may override it, so a
+        # forced twin differs from its original in exactly the forced variable(s).
+        draws = {'watcher_leaves': rng.random() < 0.5, 'third': rng.random() < 0.5,
+                 'tell': rng.random() < 0.35, 'back': rng.random() < 0.5}
+        draws.update(force or {})
+        self.draws = draws
+        if draws['watcher_leaves']:
             lines.append(s('leave', p=self.watcher, place=self.place)); present.discard(self.watcher)
-        self.third_in_story = rng.random() < 0.5
+        self.third_in_story = draws['third']
         if self.third_in_story:
             lines.append(s('enter', p=self.third, place=self.place)); present.add(self.third)
         lines.append(s('move', p=self.mover, o=self.obj, a=self.start[0], b=self.dest[0]))
         self.saw = {p: p in present for p in (self.mover, self.watcher, self.third)}
         self.told = set()
-        if not self.saw[self.watcher] and rng.random() < 0.35:
+        if not self.saw[self.watcher] and draws['tell']:
             lines.append(s('tell', p=self.mover, q=self.watcher, o=self.obj, b=self.dest[0]))
             self.told.add(self.watcher)
-        if watcher_leaves and rng.random() < 0.5:
+        if draws['watcher_leaves'] and draws['back']:
             lines.append(s('back', p=self.watcher, place=self.place))
         self.lines = lines
 
@@ -310,6 +323,46 @@ class ConversationWorld:
         out.append(Problem(self.id, 'who_knows', lang, self.story(), s('q_who', topic=self.topic, state=new),
                            [s('heard', p=p) for p in names], ', '.join(names), str(len(names))))
         return out
+
+
+def minimal_pairs(seed, lang, world_id):
+    """Twin object worlds differing only in whether the watcher left before the move (and no
+    telling), so the watcher's beliefs flip while everything else is identical. Returns
+    (sensitive, invariant): question pairs whose answer flips, and pairs that must not."""
+    first = ObjectWorld(random.Random(seed), lang, world_id, force={'tell': False})
+    twin = ObjectWorld(random.Random(seed), lang, world_id,
+                       force={'tell': False, 'watcher_leaves': not first.draws['watcher_leaves']})
+    left = {(p.kind, p.question): p for p in first.problems()}
+    right = {(p.kind, p.question): p for p in twin.problems()}
+    sensitive, invariant = [], []
+    for key in sorted(left.keys() & right.keys()):              # sorted: set order varies per process
+        a, b = left[key], right[key]
+        tag = hashlib.sha256(key[1].encode()).hexdigest()[:8]
+        a.meta = dict(a.meta, pair=f'{world_id}:{key[0]}:{tag}', side='a')
+        b.meta = dict(b.meta, pair=a.meta['pair'], side='b')
+        (sensitive if a.label != b.label else invariant).append((a, b))
+    return sensitive, invariant
+
+
+def generate_v2(count, seed=20261018, langs=('en', 'es'), pair_share=0.5, direct_share=0.5):
+    """g2 mix: half minimal counterfactual pairs (mostly answer-flipping, some invariant),
+    half balanced single problems; each problem in think or direct mode."""
+    rng = random.Random(seed)
+    out, world = [], 0
+    pair_quota = int(count * pair_share)
+    while len(out) < pair_quota and world < count * 50:
+        lang = langs[world % len(langs)]
+        sensitive, invariant = minimal_pairs(rng.randrange(2**31), lang, f'p{seed}-{world}')
+        world += 1
+        rng.shuffle(sensitive); rng.shuffle(invariant)
+        for a, b in sensitive[:2] + invariant[:1]:
+            if len(out) + 2 > pair_quota:
+                break
+            out += [a, b]
+    out += generate(count - len(out), seed=seed + 1, langs=langs)
+    for problem in out:
+        problem.mode = 'direct' if rng.random() < direct_share else 'think'
+    return out
 
 
 LABELS = {'location_coarse_fo': ('yes', 'no'), 'location_coarse_so': ('yes', 'no'), 'knowledge': ('yes', 'no'),

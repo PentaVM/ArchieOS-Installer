@@ -22,6 +22,16 @@ class ChatDataTests(unittest.TestCase):
         self.assertTrue(prompt.endswith('<|im_start|>assistant\n<think>\n'))
         self.assertTrue(full.endswith('<|im_end|>') and '</think>' in full[len(prompt):])
 
+    def test_direct_mode_renders_an_empty_think_block_and_the_bare_answer(self):
+        from archie_wanda.tomgen import generate_v2
+        problems = [p for p in generate_v2(60, seed=3) if p.mode == 'direct'][:3]
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d)/'t.json'
+            examples = write_tranche(problems, path, {'kind': 'owned-procedural'})
+        prompt, full = render(examples[0])
+        self.assertTrue(prompt.endswith('<think>\n\n</think>\n\n'))
+        self.assertEqual(full[len(prompt):], problems[0].answer + '<|im_end|>')
+
     def test_split_is_stable_per_world(self):
         self.assertEqual(world_split('w1-7'), world_split('w1-7'))
 

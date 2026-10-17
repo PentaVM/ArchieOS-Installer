@@ -39,7 +39,9 @@ class ObjectWorldTests(unittest.TestCase):
         for w in self.worlds('es', 50):
             for p in w.problems():
                 self.assertIn('\n</think>\n\n', p.target())
-                self.assertTrue(p.target().endswith('Respuesta: ' + p.answer))
+                self.assertTrue(p.target().endswith('\n</think>\n\n' + p.answer))
+                p.mode = 'direct'
+                self.assertEqual(p.target(), p.answer)
 
     def test_spanish_contractions_and_capitals(self):
         for w in self.worlds('es', 200):
@@ -47,6 +49,37 @@ class ObjectWorldTests(unittest.TestCase):
             self.assertIsNone(re.search(r'\bde el\b|\ba el\b', text))
             for sentence in w.lines:
                 self.assertTrue(sentence[0].isupper(), sentence)
+
+
+class MinimalPairTests(unittest.TestCase):
+    def test_twins_differ_only_in_the_forced_variable_and_flip_the_watcher(self):
+        from archie_wanda.tomgen import minimal_pairs
+        flips = 0
+        for seed in range(100):
+            sensitive, invariant = minimal_pairs(seed, 'en', f'p{seed}')
+            for a, b in sensitive + invariant:
+                self.assertEqual(a.meta['pair'], b.meta['pair'])
+                self.assertEqual(a.question, b.question)
+                story_a = set(re.split(r'(?<=\.) ', a.story)); story_b = set(re.split(r'(?<=\.) ', b.story))
+                self.assertLessEqual(len(story_a ^ story_b), 2)      # leave (+ come back) only
+            flips += len(sensitive)
+            self.assertTrue(invariant)                               # e.g. the mover's own belief
+        self.assertGreater(flips, 300)
+
+    def test_v2_is_reproducible_across_processes(self):
+        import subprocess, sys, os
+        code = ('import sys; sys.path.insert(0, "src"); from archie_wanda.tomgen import generate_v2; '
+                'print("|".join(p.question + p.label for p in generate_v2(120, seed=9)))')
+        runs = {subprocess.run([sys.executable, '-c', code], capture_output=True, text=True,
+                               env=dict(os.environ, PYTHONHASHSEED=str(seed))).stdout for seed in (1, 2)}
+        self.assertEqual(len(runs), 1)
+
+    def test_v2_mix_has_pairs_both_modes_and_unique_ids(self):
+        from archie_wanda.tomgen import generate_v2
+        problems = generate_v2(400, seed=7)
+        self.assertEqual(len(problems), 400)
+        self.assertEqual({p.mode for p in problems}, {'think', 'direct'})
+        self.assertGreaterEqual(sum('pair' in p.meta for p in problems), 180)
 
 
 class ConversationTests(unittest.TestCase):

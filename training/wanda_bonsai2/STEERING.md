@@ -88,16 +88,19 @@ PowerShell quoting breaks inline Python/bash: write a script file and run
 
 Unguarded training steps take the GPU from ~37 °C to 85–87 °C in 10–20 s. The owner set
 Afterburner to power limit 48 % (129.6 W) and fan 100 %. `ops/thermal-guard.sh` only
-writes `control.json`: pause at ≥ 75 °C until ≤ 60 °C, 180 s run / 45 s rest, pause if
-the enforced power limit is > 140 W (profile lost after a reboot), pause while
-`/home/archie/wanda/run/hold` exists, pause if `nvidia-smi` fails. Peaks ≈ 78 °C.
+writes `control.json`: pause at ≥ 78 °C until ≤ 68 °C, 180 s run / 20 s rest (owner asked
+for more throughput on 2026-10-17; previously 75/60 and 45 s), pause if the enforced power
+limit is > 140 W (profile lost after a reboot), pause while `/home/archie/wanda/run/hold`
+exists, pause if `nvidia-smi` fails. With 75/60 the 1-minute samples showed p50 54 °C,
+p95 79 °C and max 85 °C. The peak comes from how fast this card heats, not from the
+threshold.
 
 - If `thermal.log` shows `power limit … > 140W`, the owner must reapply the Afterburner
   profile. Never change power, fan, clocks or drivers yourself.
 - If the guard is not running but the worker is, write `{"command":"pause"}` and record
   it; the next ensure-worker run restarts the guard.
-- Peaks above 82 °C in `thermal.log` → lower `HOT_C` in the script default, commit, and
-  report it.
+- Sampled peaks above 87 °C, or a p95 above 82 °C over an hour, in `thermal.log` → step back
+  towards 75/60, commit and report it. Never go above `HOT_C=78` without the owner.
 - GPU missing (`CM_PROB_PHANTOM`, NVML blocked): confirm in one command, change nothing,
   end the tick; see `_dev/verification/rtx3070/results/overnight/INCIDENT-gpu-lost.md`.
 

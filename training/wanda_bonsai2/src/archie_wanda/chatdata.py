@@ -22,7 +22,8 @@ def write_tranche(problems, path, provenance, development_share=0.1):
     for n, p in enumerate(problems):
         examples.append({'example_id': f'{p.world_id}:{n}', 'family_id': p.world_id,
                          'split': world_split(p.world_id, development_share), 'variant': p.kind, 'lang': p.lang,
-                         'domain': 'personal', 'messages': p.messages(), 'target': p.target(), 'label': p.label})
+                         'domain': 'personal', 'messages': p.messages(), 'target': p.target(), 'label': p.label,
+                         'mode': p.mode, 'pair': p.meta.get('pair'), 'side': p.meta.get('side')})
     Path(path).write_text(json.dumps({'format': FORMAT, 'provenance': provenance, 'examples': examples},
                                      ensure_ascii=False, indent=0), encoding='utf-8')
     return examples
@@ -45,6 +46,11 @@ def load_tranche(path):
 
 
 def render(example):
-    """(prompt, full): prompt ends inside the assistant's opened <think> block."""
-    prompt = render_chat(example['messages']) + '<think>\n'
+    """(prompt, full). think mode: the prompt ends inside the assistant's opened <think>
+    block. direct mode: the prompt carries an empty think block (the base template's
+    non-thinking form) and the target is the bare answer."""
+    if example.get('mode', 'think') == 'direct':
+        prompt = render_chat(example['messages']) + '<think>\n\n</think>\n\n'
+    else:
+        prompt = render_chat(example['messages']) + '<think>\n'
     return prompt, prompt + example['target'] + '<|im_end|>'

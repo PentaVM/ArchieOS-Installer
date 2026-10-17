@@ -208,3 +208,24 @@ is not paused: two GPU jobs on this card overheat it (85–87 °C seen at ~130 W
   evaluating without it. Queued next: g1 with thinking (budget 512) on the same 20-narrative
   pilot as the base. Fix for g2: also train direct-answer targets, so the adapter answers
   in the benchmark's format in both modes.
+- 03:45 — **g1 complete results.** Direct, full official item set (3,250), strict macro-F1,
+  base → g1: Loc-FO 0.413 → 0.233 (89 % unparseable), Loc-SO 0.292 → 0.430, MultiHop FO
+  0.363 → 0.475, MultiHop SO 0.299 → 0.371, Attitude 0.351 → 0.425 (0.4 % unparseable).
+  **With thinking** (same 260-question pilot, budget 512), base → g1: Loc-FO 0.444 → 0.333,
+  Loc-SO 0.544 → 0.425, MultiHop FO 0.597 → 0.547, MultiHop SO 0.417 → 0.464, Attitude
+  0.477 → 0.463. **g1 with thinking is worse than the base with thinking.** It reasons in
+  ≈48 tokens instead of the base's ≈480, copying our short templated traces, and it
+  hallucinates generator details ("Maya was not in the story": a `tomgen` name, absent
+  from OpenToM, in 9 of 260 answers). The short synthetic traces replaced the model's
+  own reasoning.
+- **Plan change (main dev).** g2 → **direct-only**: minimal pairs plus answer weight 1.0
+  and pairs kept in one optimizer step, bare labels, tranche `tom-gen-003` (1,600; sha
+  f36cc27b…). This tests the decision objective without touching the reasoning style. The think
+  path will be trained on **the model's own correct traces** (STaR/s1-style rejection
+  sampling: the base reasons on procedural problems with budget forcing, only traces that
+  reach the simulated label are kept). That is g3. Generator names must also widen,
+  so that no name becomes a learned prior.
+- Bug fixed: `minimal_pairs` iterated a set intersection (order depends on
+  PYTHONHASHSEED), so `generate_v2` was not reproducible across processes (tom-gen-002
+  is affected and stays unused). Now sorted; a cross-process test passes, and tom-gen-003
+  is byte-identical under two hash seeds.

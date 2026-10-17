@@ -12,8 +12,12 @@
 set -u
 ROOT=/home/archie/wanda/run
 CUTOFF="$1"
-HOT_C="${HOT_C:-75}"; COOL_C="${COOL_C:-60}"; MAX_LIMIT_W="${MAX_LIMIT_W:-140}"
-RUN_S="${RUN_S:-180}"; REST_S="${REST_S:-45}"; POLL_S="${POLL_S:-3}"
+# 2026-10-17 owner asked for more throughput ("temps are fine"). Measured over 2 h: p50 54 °C,
+# p95 79 °C, max 85 °C, 266 hot pauses; most lost time was cooling from 75 to 60. The resume
+# threshold moves up (60 → 68) and the pause threshold slightly (75 → 78); the peak is bounded by
+# how fast this card heats, not by the threshold, so it is not raised further.
+HOT_C="${HOT_C:-78}"; COOL_C="${COOL_C:-68}"; MAX_LIMIT_W="${MAX_LIMIT_W:-140}"
+RUN_S="${RUN_S:-180}"; REST_S="${REST_S:-20}"; POLL_S="${POLL_S:-3}"
 LOG="$ROOT/thermal.log"
 exec 9>"$ROOT/thermal.lock"
 flock -n 9 || exit 0
