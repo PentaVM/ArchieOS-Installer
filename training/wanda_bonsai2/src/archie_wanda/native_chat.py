@@ -77,3 +77,43 @@ class NativeChat:
         return {'text': choice['message'].get('content') or '', 'finish': choice.get('finish_reason'),
                 'tokens_in': answer.get('usage', {}).get('prompt_tokens'),
                 'tokens_out': answer.get('usage', {}).get('completion_tokens')}
+
+    def _complete(self, prompt, n_predict, stop, seed):
+        out = self._post('/completion', {'prompt': prompt, 'n_predict': n_predict, 'temperature': 0, 'seed': seed,
+                                         'stop': stop, 'cache_prompt': True})
+        stopped_word = out.get('stop_type') == 'word' or out.get('stopped_word')
+        return out.get('content', ''), int(out.get('tokens_predicted', 0)), bool(stopped_word)
+
+    def think(self, messages, budget=512, min_think=0, max_waits=0, answer_tokens=64, seed=17):
+        """s1-style budget forcing (arXiv:2501.19393) on the model's own chat template.
+
+        The model reasons inside <think>. At `budget` tokens the thinking is cut and the
+        end-of-thinking delimiter is appended; if it stops before `min_think` tokens, the
+        delimiter is replaced by "Wait" (at most `max_waits` times). The answer is then
+        decoded greedily after the delimiter.
+        """
+        prompt = render_chat(messages) + '<think>\n'
+        thinking, used, waits = '', 0, 0
+        while used < budget:
+            text, n, stopped = self._complete(prompt + thinking, budget - used, ['</think>'], seed)
+            thinking += text; used += n
+            if not stopped:
+                break                                   # budget exhausted: force the end
+            if used < min_think and waits < max_waits:
+                thinking += 'Wait'; waits += 1
+                continue
+            break
+        closed = prompt + thinking.rstrip() + '\n</think>\n\n'
+        answer, n_answer, _ = self._complete(closed, answer_tokens, ['<|im_end|>'], seed)
+        return {'text': answer.strip(), 'thinking_tokens': used, 'waits': waits,
+                'forced_end': used >= budget, 'tokens_out': used + n_answer, 'thinking': thinking}
+
+
+def render_chat(messages):
+    """The base model's chat template (no tools), up to the assistant turn header."""
+    parts = []
+    for message in messages:
+        if message['role'] not in ('system', 'user'):
+            raise ValueError('only system/user turns are rendered for evaluation prompts')
+        parts.append(f"<|im_start|>{message['role']}\n{message['content'].strip()}<|im_end|>\n")
+    return ''.join(parts) + '<|im_start|>assistant\n'

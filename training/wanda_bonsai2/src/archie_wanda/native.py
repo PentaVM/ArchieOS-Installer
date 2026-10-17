@@ -132,6 +132,53 @@ def extract_text(model, text, root, config, binary, *, ubatch=0, split='parity')
     return validate_cache(root,model.sha256,split,result['tokens'],config.cache_cap_bytes)
 
 
+def extract_batch(model, entries, config, binary, split, chunk=200):
+    """Layer-30 prefixes for many (out_dir, prompt, text) entries with one model load per chunk.
+
+    Writes a cache receipt per example in the same contract as extract_text (prefix only;
+    no reference logits). Returns {out_dir: receipt or {'error': ...}}.
+    """
+    if model.sha256!=BASE_SHA or signature(model.path)!=model.signature or split not in ('train','development'):
+        raise AdmissionError('batch extraction requires unchanged approved base/admitted split')
+    results = {}
+    shim = sha_file(binary)
+    for first in range(0, len(entries), chunk):
+        part = entries[first:first+chunk]
+        preflight(config, required_gpu_mib=3000)
+        work = Path(config.run_dir)/'cache'/'_batch'
+        work.mkdir(parents=True, exist_ok=True)
+        manifest = work/f'manifest-{os.getpid()}-{first}.tsv'
+        manifest.write_text(''.join(f'{out}\t{prompt.encode().hex()}\t{text.encode().hex()}\n'
+                                    for out, prompt, text in part))
+        command = [str(binary), '--model', str(model.path), '--manifest', str(manifest),
+                   '--runtime', config.runtime_dir, '--max-tokens', str(config.sequence_length)]
+        with (work/'native-batch.log').open('a') as log:
+            process = run_guarded(command, config, native_environment(config), log, timeout=60+30*len(part))
+        manifest.unlink(missing_ok=True)
+        if process.returncode:
+            raise AdmissionError('native batch extraction failed; see '+str(work/'native-batch.log'))
+        for line in process.stdout.splitlines():
+            row = json.loads(line)
+            root = Path(row['out'])
+            if 'error' in row:
+                results[str(root)] = {'error': row['error']}; continue
+            tokens = json.loads((root/'tokens.json').read_text())
+            count = len(tokens)
+            if count != row['count']:
+                raise ParityError('batch token file does not match the reported count')
+            info = {'format_version':1,'base_sha256':model.sha256,'split':split,'tokens':tokens,
+                    'positions':list(range(count)),'sequence_ids':[0]*count,'control_vectors':'none',
+                    'capture_layer':30,'hidden_size':4096,'prompt_tokens':row['prompt_tokens'],
+                    'settings':{'ubatch':count,'kv_dtype':'float32','flash_attention':False,'n_ctx':1024},
+                    'runtime_commit':PRISM_COMMIT,'shim_sha256':shim,'metadata_sha256':model.metadata_sha256,
+                    'files':{'prefix.f32':{'shape':[count,4096],'dtype':'float32','sha256':sha_file(root/'prefix.f32')}}}
+            (root/'receipt.json').write_text(json.dumps(info)+'\n')
+            results[str(root)] = validate_cache(root, model.sha256, split, tokens, config.cache_cap_bytes)
+    if signature(model.path)!=model.signature:
+        raise AdmissionError('base changed during native extraction')
+    return results
+
+
 def relative_rms(path_a, path_b):
     a = np.memmap(path_a,mode='r',dtype='<f4'); b = np.memmap(path_b,mode='r',dtype='<f4')
     if a.shape!=b.shape: raise ParityError('native comparison shape mismatch')

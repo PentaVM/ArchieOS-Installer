@@ -98,3 +98,54 @@ is not paused: two GPU jobs on this card overheat it (85–87 °C seen at ~130 W
     (Kim et al. 2025, arXiv:2502.11881, a subset with a different protocol): o1-preview
     44.4 / 66.7 / 63.5. That is not directly comparable to the official harness.
     Search found no newer official leaderboard entry.
+- 23:43 — **OpenToM, base Bonsai2 9B** (official protocol, 3,250 questions, thinking off,
+  0 % corrupted, 0 truncated; `bench/opentom-base/report.json` on the run root), macro-F1
+  mean ± std over 5 batches:
+
+  | type | base 9B | GPT-4 vanilla | best published (GPT-4 CoT) | +20 % target |
+  | --- | --- | --- | --- | --- |
+  | Loc-coarse FO | 0.413 ± 0.016 | 0.643 | 0.942 | 1.000 (capped) |
+  | Loc-coarse SO | 0.292 ± 0.037 | 0.442 | 0.828 | 0.994 |
+  | MultiHop FO | 0.363 ± 0.014 | 0.658 | 0.835 | 1.000 (capped) |
+  | MultiHop SO | 0.299 ± 0.020 | 0.637 | 0.755 | 0.906 |
+  | Attitude | 0.351 ± 0.023 | 0.544 | 0.580 | 0.696 |
+
+  The answers collapse onto defaults: "no" 997 vs "yes" 3, "less full" 963 vs "more full"
+  33 and "equally full" 4. The model is not tracking beliefs, and the macro-F1 punishes
+  that. **Target status: far off track** on every type (gaps of 0.35–0.6 F1). Next
+  measurement: thinking-on and budget forcing (step 6) on the same items; first it must
+  be checked that the base reasons at all within the token budget.
+
+## 2026-10-17
+
+- 00:20 — Owner: full main-dev autonomy toward the weekly target (this also counts as the
+  OK for the FANToM embedder). Night plan, in GPU order: OpenToM thinking pilot →
+  procedural ToM tranche → train g1 → native parity of g1 → OpenToM with g1 → FANToM
+  base (resumes from 1,152/12,832 answers already saved).
+- **Budget forcing** (`NativeChat.think`, s1 arXiv:2501.19393): reasoning inside the
+  model's own `<think>` up to N tokens, then the delimiter is forced and the answer
+  decoded greedily; early stops can be extended with "Wait". Unit-tested with a scripted
+  server. `bench` jobs take `mode=think`, `think_budget`, `min_think`, `max_waits`.
+- **Pilot** (running): OpenToM batch 1, first 20 narratives (260 questions), thinking
+  budget 512, answer 32 tokens. It will be compared with the direct answers on the same
+  items from `opentom-base`. It is a pilot, not the official 5×50 protocol.
+- **FANToM embedder**: `sentence-transformers/all-roberta-large-v1` @ cf74d8ac
+  (1.4 GB, CPU), mean pooling + cosine as in the official scorer. A sanity test
+  passes. `bench-rescore` recomputes ALL* for saved FANToM responses.
+- **Step 4, procedural ToM generator** (`tomgen.py`): object worlds (enter/leave/move,
+  witnessed or told; first- and second-order beliefs simulated exactly; fullness,
+  accessibility, attitude from stated preference) and chat worlds (join/leave around a
+  fact update; knowledge, belief content, who-knows). Our own templates in English and
+  Spanish, code-derived traces, labels balanced within 2 per (kind, language). 8 unit
+  tests cover the belief logic, balance, grammar and determinism. First tranche
+  `tom-gen-001` (seed 20261017): 1,400 problems, 1,282 train / 118 dev split by world,
+  sha256 ae3ce50d…; run root only, reproducible with `gen-tom`.
+- **Batch prefix extractor** (`native/prefix_batch.cpp`): one model load, a fresh context
+  per example with the single-shim settings. `prepare_chat` refuses to run unless two
+  probes are bit-identical to `prefix_export`. This removes the ~16 s/example cost
+  (model reload plus 5 tokenizer processes) that made thousands of problems impractical.
+- Queued **g1**: LoRA q,k,v,o on block 31, lr 2e-4, 2 epochs, procedural + decision
+  families. Then `verify_native` (exported GGUF in Prism vs the Torch suffix) and OpenToM
+  with the adapter, scored against `opentom-base`. Blocks 28–30 are Gated DeltaNet
+  recurrent layers; the wider adapter (step 3) needs a faithful differentiable
+  implementation with native parity first, so it is not part of tonight's runs.

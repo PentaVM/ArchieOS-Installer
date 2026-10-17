@@ -25,6 +25,13 @@ def main():
     worker.add_argument('--cutoff', required=True, help='ISO-8601 local time with offset')
     status = commands.add_parser('status', help='read-only summary; allocates no GPU memory')
     status.add_argument('--root', required=True)
+    gen = commands.add_parser('gen-tom', help='write a procedural ToM chat-v1 tranche (reproducible by seed)')
+    gen.add_argument('--count', type=int, required=True)
+    gen.add_argument('--seed', type=int, required=True)
+    gen.add_argument('--out', required=True)
+    rescore = commands.add_parser('bench-rescore', help='recompute a bench report from saved responses (CPU)')
+    rescore.add_argument('--dir', required=True)
+    rescore.add_argument('--out', required=True)
     export = commands.add_parser('export', help='write an unpromoted native GGUF LoRA candidate')
     export.add_argument('--checkpoint', required=True)
     export.add_argument('--out', required=True)
@@ -37,6 +44,23 @@ def main():
     native.add_argument('--out', required=True)
     native.add_argument('--pause-root', help='pause the owned worker in this run root while verifying')
     args = parser.parse_args()
+    if args.command == 'gen-tom':
+        from collections import Counter
+        from .chatdata import write_tranche
+        from .tomgen import generate
+        problems = generate(args.count, seed=args.seed)
+        examples = write_tranche(problems, args.out, {'kind': 'owned-procedural', 'generator': 'archie_wanda.tomgen',
+                                                      'seed': args.seed, 'count': args.count})
+        print(json.dumps({'examples': len(examples), 'splits': Counter(e['split'] for e in examples),
+                          'kinds': Counter(e['variant'] for e in examples)}))
+        return
+    if args.command == 'bench-rescore':
+        from .bench import rescore
+        from .verification import atomic_json
+        result = rescore(args.dir)
+        atomic_json(args.out, result)
+        print(json.dumps(result['report'], indent=2))
+        return
     if args.command == 'export':
         from .export import export_candidate
         print(json.dumps(export_candidate(args.checkpoint, args.out)))

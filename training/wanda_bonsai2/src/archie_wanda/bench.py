@@ -268,6 +268,48 @@ def fantom_score(items, predictions, embed=None):
     return report
 
 
+def official_embedder():
+    """sentence-transformers/all-roberta-large-v1 (FANToM's belief-distance embedder) on CPU.
+
+    Same computation as SentenceTransformer.encode for this model: Transformer truncated
+    to max_seq_length, attention-masked mean pooling; vectors are unit-normalised so a dot
+    product is the cosine similarity the official scorer compares.
+    """
+    path = BENCH/'models'/'all-roberta-large-v1'
+    if not (path/'model.safetensors').exists():
+        return None
+    import torch
+    from transformers import AutoModel, AutoTokenizer
+    max_len = json.loads((path/'sentence_bert_config.json').read_text())['max_seq_length']
+    tokenizer, model = AutoTokenizer.from_pretrained(path), AutoModel.from_pretrained(path).eval()
+
+    def embed(texts):
+        batch = tokenizer(list(texts), padding=True, truncation=True, max_length=max_len, return_tensors='pt')
+        with torch.no_grad():
+            hidden = model(**batch).last_hidden_state
+        mask = batch['attention_mask'].unsqueeze(-1).float()
+        vectors = torch.nn.functional.normalize((hidden*mask).sum(1)/mask.sum(1).clamp(min=1e-9), dim=-1)
+        return [v.numpy() for v in vectors]
+    return embed
+
+
+def rescore(bench_dir):
+    """Recompute a bench report from its saved responses (CPU only)."""
+    bench_dir = Path(bench_dir)
+    report = json.loads((bench_dir/'report.json').read_text())
+    responses = {json.loads(l)['id']: json.loads(l)['text'] for l in (bench_dir/'responses.jsonl').read_text().splitlines()}
+    if report['benchmark'] == 'opentom':
+        items = [i for i in opentom_items() if i['id'] in responses]
+        report['report'] = opentom_score(items, responses)
+    else:
+        items = [i for i in fantom_items() if i['id'] in responses]
+        embed = official_embedder()
+        report['report'] = fantom_score(items, responses, embed)
+        report['embedder'] = 'sentence-transformers/all-roberta-large-v1@cf74d8ac' if embed else None
+    report['rescored_items'] = len(items)
+    return report
+
+
 def _mean(values):
     values = [v for v in values if v is not None]
     return sum(values)/len(values) if values else None

@@ -18,7 +18,7 @@ import traceback
 from dataclasses import asdict
 from pathlib import Path
 import numpy as np
-from .contracts import BASE_SHA, AdmissionError, ResourceError, digest
+from .contracts import BASE_SHA, AdmissionError, ParityError, ResourceError, digest
 from .resources import preflight
 from .verification import atomic_json
 
@@ -121,6 +121,10 @@ class Worker:
                 result = self.eval_job(spec)
             elif spec['type'] == 'bench':
                 result = self.bench_job(spec)
+            elif spec['type'] == 'prepare_chat':
+                result = self.prepare_chat(spec)
+            elif spec['type'] == 'verify_native':
+                result = self.verify_native_job(spec)
             else:
                 raise AdmissionError('unknown job type')
             spec['result'], spec['finished_ms'] = result, now_ms()
@@ -196,6 +200,74 @@ class Worker:
         return {'dataset': str(out), 'examples': len(records), 'rejected': len(rejected),
                 'dev_probes': sum(r['probe'] is not None for r in records)}
 
+    # ---- prepare_chat: chat-v1 tranches through the batch extractor ------------------
+    def prepare_chat(self, spec):
+        from .chatdata import load_tranche, render
+        from .model import inspect_model
+        from .native import build_native, extract_batch, extract_text, sha_file
+        tranche = Path(spec['tranche'])
+        data = load_tranche(tranche)
+        model = inspect_model(Path(self.config.model_path), self.config.base_sha256)
+        if self.binary is None:
+            self.binary = build_native(self.config, self.headers)
+        batch_binary = build_native(self.config, self.headers, 'prefix_batch.cpp', 'archie-wanda-prefix-batch')
+        shim = sha_file(batch_binary)
+        examples = data['examples']
+        roots = {}
+        for e in examples:
+            _, full = render(e)
+            roots[e['example_id']] = self.root/'cache'/digest({'text': full, 'base': model.sha256, 'shim': shim})[:32]
+        # Gate: the batch extractor must reproduce the single-example shim bit for bit.
+        gate = self.root/'cache'/'_batch_gate'
+        if not (gate/'passed.json').exists():
+            if gate.exists():
+                shutil.rmtree(gate)
+            gate.mkdir(parents=True)
+            probes = examples[:2]
+            entries = [(str(gate/f'batch-{i}'), *render(e)) for i, e in enumerate(probes)]
+            extract_batch(model, entries, self.config, batch_binary, 'train')
+            for i, e in enumerate(probes):
+                single = gate/f'single-{i}'
+                extract_text(model, render(e)[1], single, self.config, self.binary, ubatch=0, split='train')
+                a = (gate/f'batch-{i}'/'prefix.f32').read_bytes(); b = (single/'prefix.f32').read_bytes()
+                if a != b:
+                    raise ParityError('batch extractor differs from the single-example shim')
+            atomic_json(gate/'passed.json', {'examples': [e['example_id'] for e in probes], 'bit_identical': True,
+                                             'batch_shim_sha256': shim, 'created_ms': now_ms()})
+        records, rejected = [], []
+        for split in ('train', 'development'):
+            todo = [e for e in examples if e['split'] == split and not (roots[e['example_id']]/'receipt.json').exists()]
+            for first in range(0, len(todo), 200):
+                if self.stopping():
+                    raise Interrupted()
+                while self.control() == 'pause':
+                    self.state = 'paused'; self.heartbeat(progress=f'prepare_chat {split} {first}/{len(todo)}')
+                    time.sleep(10)
+                self.state = 'running'; self.heartbeat(progress=f'prepare_chat {split} {first}/{len(todo)}')
+                part = todo[first:first+200]
+                for e in part:
+                    if roots[e['example_id']].exists():
+                        shutil.rmtree(roots[e['example_id']])
+                extract_batch(model, [(str(roots[e['example_id']]), *render(e)) for e in part],
+                              self.config, batch_binary, split)
+        for e in examples:
+            root = roots[e['example_id']]
+            if not (root/'receipt.json').exists():
+                rejected.append({'example_id': e['example_id'], 'reason': 'too long or prompt boundary'}); continue
+            info = json.loads((root/'receipt.json').read_text())
+            records.append({'example_id': e['example_id'], 'family_id': e['family_id'], 'split': e['split'],
+                            'variant': e['variant'], 'lang': e['lang'], 'domain': e['domain'],
+                            'tokens': info['tokens'], 'prompt_tokens': info['prompt_tokens'], 'cache': str(root),
+                            'choice_row': None, 'choice_token_ids': {}, 'probe': None, 'option_letters': [],
+                            'shown_to_original': [], 'selected': '', 'counterfactual_changes': '',
+                            'user': e['messages'][-1]['content'], 'label': e['label']})
+        index = {'format_version': 1, 'format': 'chat-v1', 'tranche': str(tranche), 'tranche_sha256': sha_file(tranche),
+                 'base_sha256': model.sha256, 'shim_sha256': shim, 'provenance': data['provenance'],
+                 'examples': records, 'rejected': rejected, 'created_ms': now_ms()}
+        out = self.root/'datasets'/(tranche.stem+'.json')
+        atomic_json(out, index)
+        return {'dataset': str(out), 'examples': len(records), 'rejected': len(rejected)}
+
     def extract_cached(self, model, text, split, shim):
         from .native import extract_text
         root = self.root/'cache'/digest({'text': text, 'base': model.sha256, 'shim': shim})[:32]
@@ -215,9 +287,25 @@ class Worker:
             raise AdmissionError('invalid bench id or benchmark')
         out = self.root/'bench'/bench_id
         out.mkdir(parents=True, exist_ok=True)
+        if spec.get('checkpoint'):
+            from .export import export_candidate
+            candidate = out/'adapter.gguf'
+            if not candidate.exists():
+                export_candidate(spec['checkpoint'], candidate)
+            spec = dict(spec, adapter=str(candidate))
         items = opentom_items() if benchmark == 'opentom' else fantom_items()
+        if spec.get('batches'):
+            items = [i for i in items if i.get('batch') in set(spec['batches'])]
+        if spec.get('max_keys'):
+            keys = list(dict.fromkeys(i.get('key', i.get('set_id')) for i in items))[:int(spec['max_keys'])]
+            items = [i for i in items if i.get('key', i.get('set_id')) in set(keys)]
         if spec.get('limit'):
             items = items[:int(spec['limit'])]
+        mode = spec.get('mode', 'direct')
+        if mode not in ('direct', 'think'):
+            raise AdmissionError('bench mode must be direct or think')
+        budget = {k: int(spec.get(k, d)) for k, d in
+                  (('think_budget', 512), ('min_think', 0), ('max_waits', 0), ('answer_tokens', 64))}
         responses_path = out/'responses.jsonl'
         done = {}
         if responses_path.exists():
@@ -243,24 +331,50 @@ class Worker:
                     self.state = 'running'
                     preflight(self.config)
                     item = pending.pop(0)
-                    answer = chat.chat(item['messages'], max_tokens=max_tokens, thinking=thinking)
+                    if mode == 'think':
+                        answer = chat.think(item['messages'], budget=budget['think_budget'],
+                                            min_think=budget['min_think'], max_waits=budget['max_waits'],
+                                            answer_tokens=budget['answer_tokens'])
+                    else:
+                        answer = chat.chat(item['messages'], max_tokens=max_tokens, thinking=thinking)
                     record = {'id': item['id'], **answer}
                     stream.write(json.dumps(record, ensure_ascii=False) + '\n'); stream.flush()
                     done[item['id']] = record
                     if len(done) % 20 == 0:
                         self.heartbeat(progress=f'{bench_id} {len(done)}/{len(items)}')
         predictions = {i: r['text'] for i, r in done.items()}
-        report = opentom_score(items, predictions) if benchmark == 'opentom' else fantom_score(items, predictions)
+        from .bench import official_embedder
+        embed = official_embedder() if benchmark == 'fantom' else None
+        report = opentom_score(items, predictions) if benchmark == 'opentom' else fantom_score(items, predictions, embed)
         result = {'format_version': 1, 'bench_id': bench_id, 'benchmark': benchmark, 'adapter': spec.get('adapter'),
                   'base_sha256': self.config.base_sha256, 'items': len(items), 'max_tokens': max_tokens,
-                  'thinking': thinking, 'truncated': sum(r.get('finish') == 'length' for r in done.values()),
+                  'thinking': thinking, 'mode': mode, 'budget': budget if mode == 'think' else None,
+                  'forced_end': sum(bool(r.get('forced_end')) for r in done.values()),
+                  'mean_thinking_tokens': (sum(r.get('thinking_tokens', 0) for r in done.values())/max(1, len(done))),
+                  'filters': {k: spec.get(k) for k in ('batches', 'max_keys', 'limit')},
+                  'truncated': sum(r.get('finish') == 'length' for r in done.values()),
                   'report': report, 'created_ms': now_ms(),
+                  'embedder': 'sentence-transformers/all-roberta-large-v1@cf74d8ac' if embed else None,
                   'protocol': ('OpenToM run_baseline.py sampling (seed 42, 5x50, coarse) + official evaluator'
                                if benchmark == 'opentom' else
                                'FANToM eval_fantom.py setup (short input, set aggregation, seed 99); '
                                'ALL*/belief distance need the official embedder and are None until it runs')}
         atomic_json(out/'report.json', result)
         return {'report': str(out/'report.json')}
+
+    # ---- verify_native: exported LoRA in Prism vs the trained Torch suffix -------------
+    def verify_native_job(self, spec):
+        from .export import export_candidate
+        from .verification import verify_native
+        out = self.root/'verify'/spec['verify_id']
+        out.mkdir(parents=True, exist_ok=True)
+        candidate = out/'adapter.gguf'
+        if not candidate.exists():
+            export_candidate(spec['checkpoint'], candidate)
+        cases = Path(__file__).resolve().parents[2]/'tests'/'hardware'/'public-parity.jsonl'
+        result = verify_native(self.config, self.headers, candidate, spec['checkpoint'], cases, out/'receipt.json')
+        return {'status': result['status'], 'receipt': str(out/'receipt.json'),
+                'mean_adapter_effect_kl': result['mean_adapter_effect_kl'], 'mean_parity_kl': result['mean_parity_kl']}
 
     # ---- eval: score a checkpoint (or the unchanged base) without training ------------
     def eval_job(self, spec):
