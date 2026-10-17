@@ -1,0 +1,174 @@
+[
+  {
+    "family_id": "r2c-bono-metrica",
+    "domain": "work",
+    "split": "train",
+    "stratum": "contingent-contract",
+    "causal_variables": [
+      "metric"
+    ],
+    "people": {
+      "P1": "Marina",
+      "P2": "Tomás"
+    },
+    "renamed": {
+      "P1": "Elena",
+      "P2": "Iván"
+    },
+    "objective": "Elegir la remuneración de un taller que maximice tu ingreso esperado descontando materiales y riesgo de cobro.",
+    "horizon": "short",
+    "situation": "{P1} organiza un taller; ofrece fijo o bono por asistencia, con idénticos contenido y fechas.",
+    "evidence": [
+      [
+        "metric",
+        "Plataforma independiente certifica asistencia; el contrato obliga a pagar ese conteo."
+      ],
+      [
+        "pay",
+        "Fijo: 800. Variable: 600+500 si asisten veinte; reservas auditadas dan 70 % de probabilidad."
+      ],
+      [
+        "cost",
+        "Materiales: 100 en ambos. Si solo {P1} cuenta, estimas perder medio bono por disputas, según cuatro encargos comparables."
+      ]
+    ],
+    "noise": [
+      [
+        "distractor",
+        "Afiche: éxito asegurado."
+      ]
+    ],
+    "options": {
+      "A": {
+        "action": "Aceptar 800 fijos por el taller.",
+        "consequence": "Neto 700, sin riesgo de conteo.",
+        "relational_cost": "{P1} asume incertidumbre de asistencia."
+      },
+      "B": {
+        "action": "Aceptar 600 más bono por asistencia.",
+        "consequence": "Neto esperado 850 con certificación; menos si disputan.",
+        "relational_cost": "Discrepar del conteo puede tensar el cobro."
+      },
+      "C": {
+        "action": "Pedir 950 fijos y aplazar confirmación.",
+        "consequence": "Mejora ingreso si aceptan; hoy no acordado.",
+        "relational_cost": "Reabre negociación que {P1} daba por cerrada."
+      }
+    },
+    "selected": "B",
+    "justification": "[metric] respalda cobrar: (B) neto 600+0,7×500−100=850; (A), 700 [pay].",
+    "missing_information": [
+      "Cuatro disputas: muestra pequeña."
+    ],
+    "competing_explanations": [
+      "Discrepar: error o interés, no engaño seguro."
+    ],
+    "revision_conditions": [
+      "Revisar conteo independiente o estimación de cobro."
+    ],
+    "counterfactual": {
+      "changes": "action",
+      "replace_evidence": {
+        "metric": "Solo {P1} certifica asistencia; el contrato excluye verificación independiente."
+      },
+      "selected": "A",
+      "justification": "[metric] activa [cost]: (B) neto esperado 675; (A), 700. Mismo taller y objetivo."
+    },
+    "provenance": {
+      "kind": "owned-synthetic",
+      "author": "gpt-6.1-sol",
+      "review": "pending-human",
+      "created": "2026-10-16",
+      "source": "wording-only derivative of owned-synthetic TRAIN; not independent; never evaluation",
+      "parent_family_id": "r2-bono-metrica",
+      "parent_sha256": "98c9929a3b8836bd25b422d499f9648933c5577084cac673f859e5ffd5ae5461"
+    },
+    "counterexample_note": "Derivada verbal, misma familia causal TRAIN; no contar como caso independiente ni evaluar."
+  },
+  {
+    "family_id": "r2c-cabina-interprete",
+    "domain": "work",
+    "split": "train",
+    "stratum": "observation-asymmetry",
+    "causal_variables": [
+      "access"
+    ],
+    "people": {
+      "P1": "Marina",
+      "P2": "Tomás"
+    },
+    "renamed": {
+      "P1": "Elena",
+      "P2": "Iván"
+    },
+    "objective": "Que la interpretación de la demostración use el glosario vigente sin demorar el inicio más de un minuto.",
+    "horizon": "short",
+    "situation": "Demostración: {P1} interpreta en cabina; {P2} corrigió un término técnico antes de abrir puertas.",
+    "evidence": [
+      [
+        "access",
+        "Registro: cabina de {P1} no recibió audio del cambio de glosario."
+      ],
+      [
+        "rule",
+        "{P1} usa último glosario recibido; confirma cambios por escrito antes de traducir."
+      ],
+      [
+        "cost",
+        "Nota del término y confirmación: 30 segundos. Repetir guion por producción: cuatro minutos. Guion ya preparado."
+      ]
+    ],
+    "noise": [
+      [
+        "distractor",
+        "Visita: cabina muy moderna."
+      ]
+    ],
+    "options": {
+      "A": {
+        "action": "Enviar término y pedir confirmación.",
+        "consequence": "Actualiza a intérprete si falta cambio.",
+        "relational_cost": "Interrumpe preparación terminada 30 segundos."
+      },
+      "B": {
+        "action": "Iniciar con el glosario recibido.",
+        "consequence": "Evita pausa si ya tiene versión vigente.",
+        "relational_cost": "Traducir versión antigua arriesga descoordinación."
+      },
+      "C": {
+        "action": "Repetir guion completo por producción.",
+        "consequence": "Sincroniza contexto; tarda cuatro minutos.",
+        "relational_cost": "Todo el equipo repite material conocido."
+      }
+    },
+    "selected": "A",
+    "justification": "Laguna de acceso [access], no incapacidad: (A) cabe en el minuto; (C) excede [cost].",
+    "missing_information": [
+      "Posibles cambios durante demostración."
+    ],
+    "competing_explanations": [
+      "Versión antigua: falta de acceso, no desinterés probado."
+    ],
+    "revision_conditions": [
+      "Revisar otra corrección o confirmación fallida."
+    ],
+    "counterfactual": {
+      "changes": "action",
+      "replace_evidence": {
+        "access": "Registro: cabina de {P1} recibió audio del cambio y confirmó término por escrito."
+      },
+      "selected": "B",
+      "justification": "Confirmación [access] cumple [rule]; (B) evita repetir. Objetivo y término iguales."
+    },
+    "provenance": {
+      "kind": "owned-synthetic",
+      "author": "gpt-6.1-sol",
+      "review": "pending-human",
+      "created": "2026-10-16",
+      "source": "wording-only derivative of owned-synthetic TRAIN; not independent; never evaluation",
+      "parent_family_id": "r2-cabina-interprete",
+      "parent_sha256": "98c9929a3b8836bd25b422d499f9648933c5577084cac673f859e5ffd5ae5461"
+    },
+    "counterexample_note": "Derivada verbal, misma familia causal TRAIN; no contar como caso independiente ni evaluar."
+  }
+]
