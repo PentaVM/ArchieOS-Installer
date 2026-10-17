@@ -1,2 +1,2 @@
 # Preserve exact frozen candidate and audit bytes.
-*.json -text
+*.json -text whitespace=cr-at-eol

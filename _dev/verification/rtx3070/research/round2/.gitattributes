@@ -1,2 +1,4 @@
 # Dataset and receipt SHA256 values identify exact bytes across Windows and WSL.
-*.json -text
+*.json -text whitespace=cr-at-eol
+# Unified diffs contain significant single-space context lines; preserve them.
+*.patch -text -whitespace
