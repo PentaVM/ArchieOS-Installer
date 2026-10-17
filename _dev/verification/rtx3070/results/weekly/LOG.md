@@ -264,3 +264,17 @@ is not paused: two GPU jobs on this card overheat it (85–87 °C seen at ~130 W
   (48 tokens). Direct-only training combines with test-time reasoning; **g2 + thinking is
   the best configuration so far**. Pilot size: the two small decreases are within noise.
   Queued: the base 1024 pilot, long context, the g2 seed-29 replication, then FANToM.
+- 07:45 — **Base, thinking budget 1024 vs 512** (same 260-question pilot): Loc-FO 0.444 →
+  0.657, Loc-SO 0.544 → 0.525, MultiHop FO 0.597 → 0.628, MultiHop SO 0.417 → 0.492,
+  Attitude 0.477 → 0.477. Mean 732 thinking tokens; 99/260 still hit the budget. A larger
+  budget is a strong lever; g2 + 1024 is queued.
+- 07:50 — **Long context, base, direct mode** (20 worlds, 232 questions, balanced):
+  raw transcript (≈31k tokens): knowledge 0.50 (chance), belief 0.18 (≈ 1/5 chance);
+  pack (≈3.9k tokens): knowledge 0.18 and belief 0.11. In the pack the model starts
+  reasoning in prose and is cut at 32 tokens (77 truncated), so the pack number is a
+  harness artifact, not evidence against compaction. Neither form works without
+  reasoning. **KV reuse confirmed**: the first question prefills 31,204 tokens in 16.0 s
+  (1,951 tok/s); later questions on the same chat reprocess ≈515 tokens (≈0.5 s). Re-run
+  queued with thinking (budget 512) for both forms.
+- Thermals with 78/68: p50 66 °C, p95 80 °C, max 85 °C over 2 h. Within the rollback
+  criteria.
