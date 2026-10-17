@@ -14,6 +14,7 @@
 //! | `host-sweep` | one device opens the same port on 50 LAN hosts within a minute |
 //! | `cleartext-login` | a device opens Telnet or FTP, which carry passwords in the clear |
 //! | `login-burst` | a device opens 30 or more connections to one host's login port (FTP, SSH, Telnet, RDP, VNC) within a minute: password guessing, from a person's tool or from malware |
+//! | `dns-bypass` | a device resolves names outside the network's own DNS: plain DNS or DNS over TLS to an outside resolver, or DNS over HTTPS to a known provider. The router and the LAN's DNS servers (a Pi-hole) forward upstream and are not told |
 //! | `retired-smb` | a device speaks SMB version 1 past the Negotiate (Session Setup, Tree Connect…): the protocol EternalBlue and WannaCry spread through, off by default in Windows since 2017 |
 //! | `cleartext-password` | a device sends a login command in the clear (FTP `PASS`, POP3 `PASS`/`AUTH`, IMAP `LOGIN`, SMTP `AUTH`), on any port: high when the server is outside the LAN, a warning inside it. Only the command word is read, never the password |
 //! | `dns-tunnel-suspect` | a DNS question is long and random enough to be carrying data |
@@ -619,6 +620,40 @@ struct Openings {
     logins: HashMap<(IpAddr, u16), usize>,
 }
 
+/// DNS-over-HTTPS endpoints of the public resolvers, by the TLS server name a client asks
+/// for; a name ending in one of `DOH_SUFFIXES` counts too.
+const DOH_NAMES: [&str; 11] = [
+    "dns.google",
+    "dns.google.com",
+    "one.one.one.one",
+    "dns.quad9.net",
+    "dns9.quad9.net",
+    "dns11.quad9.net",
+    "doh.opendns.com",
+    "doh.cleanbrowsing.org",
+    "dns.adguard-dns.com",
+    "doh.mullvad.net",
+    "dns.mullvad.net",
+];
+const DOH_SUFFIXES: [&str; 2] = ["cloudflare-dns.com", "dns.nextdns.io"];
+
+/// How `packet` resolves a name outside the network, if it does: the kind and the resolver.
+fn bypass(packet: &Packet, outside: IpAddr) -> Option<(&'static str, String)> {
+    let port = packet.tcp.or(packet.udp).map(|(_, port)| port);
+    if packet.dns_question.is_some() && port == Some(53) {
+        return Some(("plain DNS", outside.to_string()));
+    }
+    if port == Some(853) && (packet.opening || packet.udp.is_some()) {
+        return Some(("DNS over TLS", outside.to_string()));
+    }
+    let name = packet.server_name.as_deref()?;
+    let doh = DOH_NAMES.contains(&name)
+        || DOH_SUFFIXES
+            .iter()
+            .any(|suffix| name == *suffix || name.ends_with(&format!(".{suffix}")));
+    doh.then(|| ("DNS over HTTPS", name.to_string()))
+}
+
 /// Ports a password is typed into: FTP, SSH, Telnet (and Mirai's 2323), RDP, VNC.
 const LOGIN_PORTS: [u16; 6] = [21, 22, 23, 2323, 3389, 5900];
 /// Connections to one host's login port within a minute before `login-burst`. Zeek's
@@ -1220,6 +1255,31 @@ impl Audit {
                 format!(
                     "its TLS client offers nothing newer than {version}{to}, retired in 2021: \
                      its firmware has likely not been updated in years"
+                ),
+            );
+        }
+        let forwards_dns = self.state.dns_servers.contains(mac)
+            || self
+                .settings
+                .gateway
+                .and_then(|gateway| self.state.owners.get(&IpAddr::V4(gateway)))
+                .is_some_and(|router| router == mac);
+        if let Some((kind, resolver)) = packet
+            .destination
+            .filter(|ip| !is_lan(*ip) && !ip.is_multicast())
+            .filter(|_| !forwards_dns)
+            .and_then(|outside| bypass(packet, outside))
+        {
+            self.tell(
+                &mut alerts,
+                format!("bypass {mac} {resolver}"),
+                packet.at_ms,
+                Severity::Notice,
+                "dns-bypass",
+                mac,
+                format!(
+                    "resolves names with {kind} through {resolver}, not the network's own DNS: \
+                     a filter such as a Pi-hole does not see or block what it looks up"
                 ),
             );
         }
@@ -2479,6 +2539,76 @@ mod tests {
         assert_eq!(rules(&told), ["cleartext-login", "login-burst"]);
         assert_eq!(told[1].severity, Severity::High);
         assert!(told[1].detail.contains("Telnet"), "{}", told[1].detail);
+    }
+
+    #[test]
+    fn resolving_outside_the_network_s_dns_is_told_once_per_resolver() {
+        let gateway: Ipv4Addr = "192.168.1.1".parse().unwrap();
+        let mut audit = Audit::new(
+            State::default(),
+            Settings {
+                learn_ms: u64::MAX,
+                gateway: Some(gateway),
+                gateway_v6: None,
+            },
+        );
+        audit.see(&Packet {
+            arp: Some((ROUTER.into(), gateway)),
+            ..from(ROUTER, "192.168.1.1", 1)
+        });
+        let ask = |mac: &str, source: &str, to: &str, at_ms: u64| Packet {
+            destination: Some(to.parse().unwrap()),
+            udp: Some((50_000, 53)),
+            dns_question: Some("www.example.com".into()),
+            ..from(mac, source, at_ms)
+        };
+        // Asking the router is the network's own DNS; the router asking upstream forwards.
+        assert!(audit
+            .see(&ask(TV, "192.168.1.84", "192.168.1.1", 1_000))
+            .is_empty());
+        assert!(audit
+            .see(&ask(ROUTER, "203.0.113.5", "8.8.8.8", 1_100))
+            .is_empty());
+        // A Chromecast asking 8.8.8.8 itself: told once.
+        let told = audit.see(&ask(TV, "192.168.1.84", "8.8.8.8", 2_000));
+        assert_eq!(rules(&told), ["dns-bypass"]);
+        assert_eq!(told[0].severity, Severity::Notice);
+        assert!(
+            told[0].detail.contains("plain DNS through 8.8.8.8"),
+            "{}",
+            told[0].detail
+        );
+        assert!(audit
+            .see(&ask(TV, "192.168.1.84", "8.8.8.8", 3_000))
+            .is_empty());
+        // DNS over TLS and over HTTPS (by the name the browser asks for) are told apart.
+        let dot = audit.see(&Packet {
+            destination: Some("1.1.1.1".parse().unwrap()),
+            tcp: Some((50_001, 853)),
+            opening: true,
+            ..from(TV, "192.168.1.84", 4_000)
+        });
+        assert!(dot[0].detail.contains("DNS over TLS"), "{}", dot[0].detail);
+        let doh = audit.see(&Packet {
+            destination: Some("104.16.248.249".parse().unwrap()),
+            tcp: Some((50_002, 443)),
+            server_name: Some("mozilla.cloudflare-dns.com".into()),
+            ..from(TV, "192.168.1.84", 5_000)
+        });
+        assert!(
+            doh[0].detail.contains("DNS over HTTPS"),
+            "{}",
+            doh[0].detail
+        );
+        // An ordinary site over HTTPS is not.
+        assert!(audit
+            .see(&Packet {
+                destination: Some("93.184.216.34".parse().unwrap()),
+                tcp: Some((50_003, 443)),
+                server_name: Some("www.example.com".into()),
+                ..from(TV, "192.168.1.84", 6_000)
+            })
+            .is_empty());
     }
 
     #[test]

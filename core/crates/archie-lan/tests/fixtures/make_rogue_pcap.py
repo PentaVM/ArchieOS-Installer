@@ -5,7 +5,8 @@
 # stops at TLS 1.0, the rogue sending an ICMP Redirect and answering DNS, an ARP sweep of
 # the network, the NXDOMAIN answers a domain generation algorithm draws, POP3 and FTP
 # passwords sent in the clear, a camera trying Telnet logins on a NAS, the NAS speaking
-# SMB version 1, then a macof-style flood of 60 made-up hardware addresses. Nothing is sent.
+# SMB version 1, a phone asking an outside resolver directly, then a macof-style flood of 60
+# made-up hardware addresses. Nothing is sent.
 #   python3 -I make_rogue_pcap.py rogue-dhcp-and-ra.pcap
 import sys
 from scapy.all import Ether, IP, UDP, TCP, ICMP, DNS, BOOTP, DHCP, IPv6, ICMPv6ND_RA, ICMPv6NDOptSrcLLAddr, Raw, wrpcap, ARP, DNSQR, DNSRR, load_layer, load_contrib
@@ -117,6 +118,9 @@ nas = "00:11:32:00:00:05"
 for i, command in enumerate([0x72, 0x73]):
     at(Ether(src=nas, dst=camera)/IP(src="192.168.1.5", dst="192.168.1.60")/
        TCP(sport=445, dport=44000, flags="PA", seq=1 + 64 * i, ack=1)/Raw(smb1(command)), 295 + i)
+# A phone asks Google's resolver directly, past the network's own DNS.
+at(Ether(src=phone, dst=router)/IP(src="192.168.1.30", dst="8.8.8.8")/UDP(sport=51000, dport=53)/
+   DNS(id=9, rd=1, qd=DNSQR(qname="clients3.google.com")), 297)
 # Then a table flood, as macof sends it: made-up source and destination hardware and IP
 # addresses, 60 frames in a second.
 for i in range(60):

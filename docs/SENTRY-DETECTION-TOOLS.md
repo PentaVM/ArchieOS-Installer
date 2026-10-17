@@ -32,6 +32,7 @@ with only the broadcast view, and says more with a mirror.
 | `retired-tls` and `tls_versions` | a device whose TLS client stops at 1.1 or older, read from its JA4 | — |
 | `rogue-dhcpv6-server` | a device other than the router answering DHCPv6 (mitm6) | — |
 | `name-poisoning` | a device answering LLMNR/NetBIOS for 3+ names, or for `wpad` (Responder) | — |
+| `dns-bypass` | plain DNS or DNS over TLS to an outside resolver, or DNS over HTTPS to a known provider, from a device that is not the router or a LAN DNS server | — |
 | `retired-smb` | a device sends SMB version 1 commands past the Negotiate (EternalBlue's protocol) | — |
 | `login-burst` | 30+ connections from one device to one host's FTP, SSH, Telnet (23/2323), RDP or VNC port within a minute | — |
 | `cleartext-password` | a client sends FTP `PASS`, POP3 `PASS`/`APOP`/`AUTH`, IMAP `LOGIN`/`AUTHENTICATE` or SMTP `AUTH` unencrypted; high when the server is outside. Only the command word is read | — |
@@ -548,6 +549,31 @@ its basis.
   two rounds: 454/459 ms with 46 fields, 457/449 ms with 47. Within noise.
 - **Not adopted.** Probing for SMB1 (nmap): active. Counting Negotiates: false alarms on
   every modern Windows machine whose client still offers SMB1 first.
+
+### 2026-10-17: DNS that goes around the network's own resolver
+
+- **Compared.** Suricata's ET POLICY rules flag DoH by the TLS server name of known
+  providers and DoT by port 853; Pi-hole answers Mozilla's canary domain
+  (`use-application-dns.net`) to ask Firefox not to turn DoH on, which only works for
+  Firefox; a firewall rule redirecting port 53 to the router fixes plain DNS but is a
+  change to the router, which Sentry only proposes. Zeek has no built-in check.
+- **Chosen.** Passive, in three forms: a DNS question to port 53 of an outside address,
+  a connection to port 853 outside, and a TLS server name of a public DoH endpoint (eleven
+  names and two suffixes: Google, Cloudflare, Quad9, OpenDNS, CleanBrowsing, AdGuard,
+  Mullvad, NextDNS). Told as `dns-bypass`, a notice, once per device and resolver. The
+  router and any device answering DNS on the LAN (a Pi-hole) forward upstream and are
+  never told. It says that a filter does not see those lookups; a Chromecast with
+  8.8.8.8 built in is the usual case, and nothing is wrong with it beyond that.
+- **Tested.** Asking the router is quiet; the router asking upstream is quiet; plain DNS,
+  DoT and DoH are each told and named; an ordinary HTTPS site is not; once per resolver.
+  Through real TShark, the fixture's phone asking 8.8.8.8 is the only device told.
+- **Measured.** No new TShark field. In the audit, a port comparison per frame and a name
+  lookup against thirteen entries only when a TLS server name is seen.
+- **Not adopted.** Matching DoH by address (providers share addresses with other
+  services); answering the canary domain (that is the resolver's job, not a sensor's).
+- **Limit.** A DoH server not on the list, or one reached by address with no server name
+  (Encrypted Client Hello), passes unseen. A network where every device is set to use
+  an outside resolver on purpose gets one notice per device.
 
 ## How a tool is accepted
 
