@@ -278,3 +278,25 @@ is not paused: two GPU jobs on this card overheat it (85–87 °C seen at ~130 W
   queued with thinking (budget 512) for both forms.
 - Thermals with 78/68: p50 66 °C, p95 80 °C, max 85 °C over 2 h. Within the rollback
   criteria.
+
+### Daily summary — 2026-10-17 09:15
+
+- **Plan step reached:** steps 1–2 done (honest measurement; FANToM/OpenToM harness with
+  official protocols, strict F1 as an extra), step 4 started (procedural generator,
+  minimal pairs), step 6 started (budget forcing works). Step 3 (blocks 28–31) is not
+  started: blocks 28–30 are Gated DeltaNet and need a faithful differentiable port.
+- **OpenToM, official protocol, best adapter so far (g2 direct, seed 17)** vs base:
+  Loc-FO 0.428 (0.413), Loc-SO 0.403 (0.292), MultiHop FO 0.453 (0.363), MultiHop SO 0.338
+  (0.299), Attitude 0.394 (0.351). Pilot (260 questions) **g2 + thinking 512**: 0.562 /
+  0.525 / 0.578 / 0.472 / 0.508. Base + thinking 1024: 0.657 / 0.525 / 0.628 / 0.492 /
+  0.477. g2 + thinking 1024 is queued.
+- **FANToM:** base run paused at 1,152/12,832 answers to give the GPU to training; not
+  yet scored.
+- **Versus the published best (GPT-4 CoT: 0.942 / 0.828 / 0.835 / 0.755 / 0.580) and the
+  +20 % target (≈1.0 / 0.99 / 1.0 / 0.91 / 0.70): not on track.** The best pilot numbers
+  reach 50–80 % of GPT-4 CoT. Reasoning budget and direct training both add up; the
+  realistic next gains come from training on the model's own correct reasoning traces
+  (g3) and from a larger budget.
+- **Open problems:** "no" default on Loc-FO; g1-style short traces destroy reasoning;
+  long-context ledger tracking is at chance without reasoning (re-run with thinking
+  queued); the seed-29 replication of g2 is training now.
