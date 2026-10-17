@@ -172,3 +172,19 @@ Tick01:12UTC: ver `../round3/tick-20261017T0112.md` y
 La geometría exacta confirma28–30recurrentes,31full; widening necesita grafo,
 estado/backward/export propios. No repetir la inspección ni otra tanda de datos
 para volver a descubrirlo. La prueba propia sigue pendiente de cesión de contexto.
+
+Tick21:25UTC: leer `../round4/star-quality-review-20261017.md` antes de repetir
+auditoría/generación. Sol6.1medium y root reprodujeron en CPU fallos de admisión
+STaR: prefijo gold acepta contradicción y la construcción instala gold; natural
+end no exige stop de delimitador. Auditoría13casos incluye seis discrepancias
+adversariales y un fixture de parada temprana; no son tasas de error reales.
+Revisión también cubre manifest de reanudación, cap840 vs secuencia completa,
+cohortes self/rationalized y falso positivo español de filtro léxico. No se
+modificó código activo, datos admitidos ni tareas/procesos de Claude.
+HEAD9183b8e con cambios concurrentes de Claude preservados. El snapshot CPU
+vio workerPID6290 paused, bench-fantom-base7209/12832,30trazas g3 (24forced),
+sin campos de fin/conteo ausentes; no acredita disponibilidad GPU. Claude ya
+reporta mejoras g2 direct en OpenToM; no confundirlas con los antiguos adapters
+sin cambio de decisión ni afirmarlas verificadas independientemente por Codex.
+El addendum de Claude enlaza round4. Siguiente tick: revisar su LOG/adopción y
+resultados nuevos; no repetir corpus, probes adversariales ni intentos GPU.
