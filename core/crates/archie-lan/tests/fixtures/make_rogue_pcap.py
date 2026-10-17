@@ -4,8 +4,8 @@
 # NetBIOS for other machines' names, mitm6 answering DHCPv6, a camera whose TLS client
 # stops at TLS 1.0, the rogue sending an ICMP Redirect and answering DNS, an ARP sweep of
 # the network, the NXDOMAIN answers a domain generation algorithm draws, POP3 and FTP
-# passwords sent in the clear, then a macof-style flood of 60 made-up hardware addresses.
-# Nothing is sent.
+# passwords sent in the clear, a camera trying Telnet logins on a NAS, then a macof-style
+# flood of 60 made-up hardware addresses. Nothing is sent.
 #   python3 -I make_rogue_pcap.py rogue-dhcp-and-ra.pcap
 import sys
 from scapy.all import Ether, IP, UDP, TCP, ICMP, DNS, BOOTP, DHCP, IPv6, ICMPv6ND_RA, ICMPv6NDOptSrcLLAddr, Raw, wrpcap, ARP, DNSQR, DNSRR, load_layer, load_contrib
@@ -101,6 +101,11 @@ from scapy.all import Raw
 for i, (port, payload) in enumerate([(110, b"PASS not-a-real-password\r\n"), (21, b"USER owner\r\n"), (21, b"PASS not-a-real-password\r\n")]):
     at(Ether(src=win, dst=router)/IP(src="192.168.1.50", dst="198.51.100.21")/
        TCP(sport=41000 + port, dport=port, flags="PA", seq=1000 + 12 * (i == 2), ack=1)/Raw(payload), 280 + i)
+# The old camera tries Telnet passwords on a NAS, 35 connections in under four seconds,
+# as Mirai spreads.
+for i in range(35):
+    at(Ether(src=camera, dst="00:11:32:00:00:05")/IP(src="192.168.1.60", dst="192.168.1.5")/
+       TCP(sport=42000 + i, dport=23, flags="S", seq=7000 + i), 290 + i * 0.1)
 # Then a table flood, as macof sends it: made-up source and destination hardware and IP
 # addresses, 60 frames in a second.
 for i in range(60):

@@ -32,6 +32,7 @@ with only the broadcast view, and says more with a mirror.
 | `retired-tls` and `tls_versions` | a device whose TLS client stops at 1.1 or older, read from its JA4 | — |
 | `rogue-dhcpv6-server` | a device other than the router answering DHCPv6 (mitm6) | — |
 | `name-poisoning` | a device answering LLMNR/NetBIOS for 3+ names, or for `wpad` (Responder) | — |
+| `login-burst` | 30+ connections from one device to one host's FTP, SSH, Telnet (23/2323), RDP or VNC port within a minute | — |
 | `cleartext-password` | a client sends FTP `PASS`, POP3 `PASS`/`APOP`/`AUTH`, IMAP `LOGIN`/`AUTHENTICATE` or SMTP `AUTH` unencrypted; high when the server is outside. Only the command word is read | — |
 | `dga-suspect` | 25+ different random-looking names answered NXDOMAIN to one device in a minute (a domain generation algorithm) | — |
 | `mac-flood` | 20+ unknown hardware addresses sending in a minute; the flood is kept out of the inventory | — |
@@ -503,6 +504,30 @@ its basis.
   two rounds: 403/406 ms with 42 fields, 403/416 ms with 46. Within noise.
 - **Not adopted.** Keeping or showing any part of the credential, as the sniffers do; HTTP
   Basic (needs the credential field).
+
+### 2026-10-17: password guessing (login bursts)
+
+- **Compared.** Zeek's `ssh/detect-bruteforcing` counts failed SSH logins (30 within 30
+  minutes) by inferring the outcome of each session; Suricata's ET "Potential SSH Scan"
+  counts SYNs to port 22 (5 in 120 s), which a person reconnecting trips; fail2ban works on
+  the server's own logs, which Sentry does not have. `port-scan` and `host-sweep` already
+  cover many ports of one host and one port of many hosts, not many tries at one door.
+- **Chosen.** Count connections a device opens to each host's login port (21, 22, 23,
+  2323, 3389, 5900) in the same one-minute window the scan rules use; the 30th is
+  `login-burst`, high, once per device, host, port and window. Zeek's 30 kept as the
+  number, Suricata's SYN counting as the signal, with the minute so a person's handful of
+  sessions never reaches it. It works inside the LAN (a camera attacking the NAS, as Mirai
+  spreads) and outward (an owner's device attacking someone else's).
+- **Tested.** An admin's ten SSH sessions and a browser's hundred HTTPS connections stay
+  quiet; forty logins spread at one every three seconds never fill a window; a camera
+  opening Telnet ten times a second is told once (with `cleartext-login` for Telnet
+  itself). Through real TShark, the fixture's camera opening 35 Telnet connections to a
+  NAS in under four seconds is told.
+- **Measured.** One map update per connection opened to one of the six ports, inside the
+  existing per-device window; at most 64 host and port pairs per device and window.
+  Nothing for other traffic.
+- **Limit.** An encrypted protocol hides whether the logins failed, so a tool that opens
+  many sessions on purpose (Ansible without `ControlPersist`) looks the same.
 
 ## How a tool is accepted
 

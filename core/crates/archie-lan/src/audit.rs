@@ -13,6 +13,7 @@
 //! | `port-scan` | one device opens connections to 100 ports of one host within a minute |
 //! | `host-sweep` | one device opens the same port on 50 LAN hosts within a minute |
 //! | `cleartext-login` | a device opens Telnet or FTP, which carry passwords in the clear |
+//! | `login-burst` | a device opens 30 or more connections to one host's login port (FTP, SSH, Telnet, RDP, VNC) within a minute: password guessing, from a person's tool or from malware |
 //! | `cleartext-password` | a device sends a login command in the clear (FTP `PASS`, POP3 `PASS`/`AUTH`, IMAP `LOGIN`, SMTP `AUTH`), on any port: high when the server is outside the LAN, a warning inside it. Only the command word is read, never the password |
 //! | `dns-tunnel-suspect` | a DNS question is long and random enough to be carrying data |
 //! | `unusual-destination` | a device learned for a day sends over 25 MB to an outside destination it had not used before |
@@ -613,7 +614,16 @@ struct Openings {
     since_ms: u64,
     ports_of: HashMap<IpAddr, HashSet<u16>>,
     hosts_on: HashMap<u16, HashSet<IpAddr>>,
+    /// Connections opened to each host's login port, for `login-burst`.
+    logins: HashMap<(IpAddr, u16), usize>,
 }
+
+/// Ports a password is typed into: FTP, SSH, Telnet (and Mirai's 2323), RDP, VNC.
+const LOGIN_PORTS: [u16; 6] = [21, 22, 23, 2323, 3389, 5900];
+/// Connections to one host's login port within a minute before `login-burst`. Zeek's
+/// SSH password-guessing script stops at 30 guesses; a person, or a tool that reuses its
+/// connection, opens a handful.
+const LOGIN_ATTEMPTS: usize = 30;
 
 pub struct Audit {
     pub state: State,
@@ -1859,7 +1869,36 @@ impl Audit {
             let hosts = window.hosts_on.entry(port).or_default();
             hosts.insert(destination) && hosts.len() == SWEEP_HOSTS
         };
+        let attempts = if LOGIN_PORTS.contains(&port) && window.logins.len() < MAX_PEERS {
+            let count = window.logins.entry((destination, port)).or_default();
+            *count += 1;
+            *count
+        } else {
+            0
+        };
         let since = window.since_ms;
+        if attempts == LOGIN_ATTEMPTS {
+            let service = match port {
+                21 => "FTP",
+                22 => "SSH",
+                3389 => "RDP",
+                5900 => "VNC",
+                _ => "Telnet",
+            };
+            self.tell(
+                alerts,
+                format!("logins {mac} {destination} {port} {since}"),
+                at_ms,
+                Severity::High,
+                "login-burst",
+                mac,
+                format!(
+                    "opened {LOGIN_ATTEMPTS} {service} connections to {destination} within a \
+                     minute: someone trying passwords, or malware on it spreading the way \
+                     Mirai does"
+                ),
+            );
+        }
         if scanned {
             self.tell(
                 alerts,
@@ -2389,6 +2428,38 @@ mod tests {
             .unwrap()
             .peers = (0..20).map(|i| format!("p{i}")).collect();
         assert!(State::parse(&serde_json::to_vec(&forged).unwrap()).is_err());
+    }
+
+    #[test]
+    fn many_logins_to_one_host_within_a_minute_are_a_burst() {
+        let mut audit = Audit::new(State::default(), learned());
+        let open = |mac: &str, host: &str, port: u16, at_ms: u64| Packet {
+            destination: Some(host.parse().unwrap()),
+            tcp: Some((40_000, port)),
+            opening: true,
+            ..from(mac, "192.168.1.84", at_ms)
+        };
+        // An admin's few SSH sessions, and a browser's many HTTPS ones: quiet.
+        let usual: Vec<Alert> = (0..10)
+            .map(|i| open(TV, "192.168.1.5", 22, i * 1_000))
+            .chain((0..100).map(|i| open(TV, "192.168.1.5", 443, 20_000 + i * 100)))
+            .flat_map(|p| audit.see(&p))
+            .collect();
+        assert!(usual.is_empty(), "{usual:?}");
+        // Thirty logins spread over more than a minute never fill one window.
+        let slow: Vec<Alert> = (0..40)
+            .flat_map(|i| audit.see(&open(TV, "192.168.1.6", 22, 100_000 + i * 3_000)))
+            .collect();
+        assert!(slow.is_empty(), "{slow:?}");
+        // A camera trying Telnet passwords on the NAS, ten a second: told once.
+        let camera = "00:12:12:00:00:01";
+        let told: Vec<Alert> = (0..100)
+            .flat_map(|i| audit.see(&open(camera, "192.168.1.5", 23, 300_000 + i * 100)))
+            .collect();
+        // Telnet itself is told too, once.
+        assert_eq!(rules(&told), ["cleartext-login", "login-burst"]);
+        assert_eq!(told[1].severity, Severity::High);
+        assert!(told[1].detail.contains("Telnet"), "{}", told[1].detail);
     }
 
     #[test]
