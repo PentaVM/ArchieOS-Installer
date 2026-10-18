@@ -15,6 +15,14 @@ state = root / 'worker.json'
 if state.exists() and state.stat().st_size <= 65536:
     data = json.loads(state.read_text())
     out['worker'] = {k: data[k] for k in ('state', 'pid', 'job', 'progress', 'updated_ms', 'updated_at') if k in data}
+    pid = data.get('pid')
+    out['worker']['pid_exists'] = type(pid) is int and pid > 0 and Path(f'/proc/{pid}').exists()
+    current_boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+    out['worker']['same_boot'] = data.get('boot_id') == current_boot
+    updated = data.get('updated_ms')
+    out['worker']['heartbeat_age_s'] = ((datetime.now(timezone.utc).timestamp() * 1000 - updated) / 1000
+        if type(updated) in (int, float) else None)
+    out['worker']['identity_note'] = 'PID existence is not sufficient identity; this tool never authorizes a GPU job.'
 out['star_files'] = []
 files = list((root / 'star').glob('*/*.jsonl')) if (root / 'star').exists() else []
 for file in sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)[:8]:

@@ -188,3 +188,14 @@ reporta mejoras g2 direct en OpenToM; no confundirlas con los antiguos adapters
 sin cambio de decisión ni afirmarlas verificadas independientemente por Codex.
 El addendum de Claude enlaza round4. Siguiente tick: revisar su LOG/adopción y
 resultados nuevos; no repetir corpus, probes adversariales ni intentos GPU.
+
+Tick2026-10-18 02:22UTC: ver `../round4/health-20261018T0222.md`. Estado cambió:
+worker.json dice running7600/12832 pero heartbeat tiene4h46m, PID6290 ausente y
+boot_id distinto al kernel actual. No coincidencias de worker/guard/llama-server
+ni watchdog Windows documentado. No se reinició ni tocó ejecución ajena; causa
+de desaparición no establecida. El helper CPU ahora muestra edad/boot/PID para
+no confundir archivo persistido con salud. Claude debe revisar su propio ciclo
+de recuperación y resume; no inferir GPU libre ni iniciar job Codex sin cesión.
+Código STaR y LOG siguen sin novedades respecto al informe21:25UTC; no repetí
+auditoría ni generé volumen. Próximo tick: comprobar cambio de salud/adopción;
+si sigue igual, silencio y ningún reinicio ni notificación duplicada.
