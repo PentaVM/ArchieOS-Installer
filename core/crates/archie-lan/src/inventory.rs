@@ -89,6 +89,9 @@ pub fn assemble(
             if !tags.is_empty() {
                 state.insert("discovery_tags".into(), tags.join(","));
             }
+            if let Some(control_url) = &description.igd_control_url {
+                state.insert("upnp.igd_control_url".into(), control_url.clone());
+            }
             let fact = |key: &str| host.facts.get(key).map(String::as_str).unwrap_or("");
             let said = |key: &str| state.get(key).map(String::as_str).unwrap_or("");
             let mut evidence = Evidence {
@@ -99,6 +102,9 @@ pub fn assemble(
                 ],
                 services: host.services.iter().cloned().collect(),
             };
+            if description.igd_control_url.is_some() {
+                evidence.upnp.push(upnp::IGD_WANIP_SERVICE_TYPE.to_string());
+            }
             evidence.upnp.extend(
                 heard
                     .iter()
@@ -334,7 +340,7 @@ pub fn scan_with(options: ScanOptions, listen: Duration) -> std::io::Result<Scan
         if let Some(url) = published {
             if !descriptions.contains_key(&answer.from) && Instant::now() < until {
                 if let Ok(body) = get(&url) {
-                    descriptions.insert(answer.from, upnp::parse(&body));
+                    descriptions.insert(answer.from, upnp::parse_with_base(&body, &url));
                 }
             }
         }
@@ -619,5 +625,36 @@ mod tests {
         assert_eq!(inventory.devices.len(), 1);
         assert_eq!(inventory.devices[0].address, "10.0.0.9");
         assert_eq!(inventory.devices[0].seen_by, ["ssdp"]);
+    }
+
+    #[test]
+    fn a_gateway_description_with_wanipconnection_exposes_its_igd_control_url() {
+        let gateway: IpAddr = "192.168.1.1".parse().unwrap();
+        let descriptions = BTreeMap::from([(
+            gateway,
+            upnp::Description {
+                friendly_name: "MitraStar GPT-2741GNAC".into(),
+                manufacturer: "MitraStar".into(),
+                model_name: "GPT-2741GNAC".into(),
+                igd_control_url: Some(
+                    "http://192.168.1.1:5000/upnp/control/WANIPConnection1".into(),
+                ),
+                ..Default::default()
+            },
+        )]);
+        let inventory = assemble(
+            &[answer("192.168.1.1", "upnp:rootdevice", "Linux UPnP/1.0")],
+            &descriptions,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            100,
+        );
+        assert_eq!(inventory.devices.len(), 1);
+        let router = &inventory.devices[0];
+        assert_eq!(router.class.as_deref(), Some("router"));
+        assert_eq!(
+            router.state.get("upnp.igd_control_url").map(String::as_str),
+            Some("http://192.168.1.1:5000/upnp/control/WANIPConnection1")
+        );
     }
 }

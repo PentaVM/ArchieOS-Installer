@@ -44,6 +44,54 @@ impl LanUrl {
     pub fn host(&self) -> IpAddr {
         self.host
     }
+
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// Resolves a relative path or same-origin `http://` URL against this announcement
+    /// URL. Rejects query strings, fragments, `..` traversal, and any host or port that
+    /// differs from `self`.
+    pub fn resolve_same_origin(&self, target: &str) -> Option<String> {
+        let trimmed = target.trim();
+        if trimmed.is_empty()
+            || trimmed.len() > 512
+            || trimmed.contains('?')
+            || trimmed.contains('#')
+            || trimmed.contains("..")
+            || !trimmed.bytes().all(|b| b.is_ascii_graphic())
+        {
+            return None;
+        }
+        let resolved_path = if trimmed.starts_with("http://") {
+            let parsed = Self::parse(trimmed)?;
+            if parsed.host != self.host || parsed.port != self.port {
+                return None;
+            }
+            parsed.path
+        } else if trimmed.starts_with('/') {
+            trimmed.to_string()
+        } else if !trimmed.contains(':') && !trimmed.contains("//") {
+            let base_dir = match self.path.rfind('/') {
+                Some(idx) => &self.path[..=idx],
+                None => "/",
+            };
+            format!("{base_dir}{trimmed}")
+        } else {
+            return None;
+        };
+        let authority = match (self.host, self.port) {
+            (IpAddr::V4(v4), 80) => v4.to_string(),
+            _ => SocketAddr::new(self.host, self.port).to_string(),
+        };
+        let candidate = format!("http://{authority}{resolved_path}");
+        let verified = Self::parse(&candidate)?;
+        (verified.host == self.host && verified.port == self.port).then_some(candidate)
+    }
 }
 
 /// The body of a `200 OK`, or why there is none.

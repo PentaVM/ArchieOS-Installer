@@ -383,6 +383,52 @@ impl RouterBinding {
             capabilities,
         ))
     }
+
+    /// Runs [`archie_sentry::adapters::router::probe_router`] against the configured
+    /// IGD and SSH channels so the controller hands the adapter only the capabilities
+    /// and tools (`radio_tools`, `dhcp_leases_path`, `firmware_hint`) that actually
+    /// answered on the router.
+    pub async fn probe_router_config(
+        &self,
+        runner: Arc<dyn archie_sentry::adapters::process::CommandRunner>,
+    ) -> Result<(RouterConfig, RouterCapabilities), AdapterError> {
+        use archie_sentry::adapters::router::{probe_router, IgdClient, SshChannel};
+        let (config, _) = self.to_router_config()?;
+        let igd = match &config.control_url {
+            Some(url) => Some(IgdClient::new(url)?),
+            None => None,
+        };
+        let ssh = config
+            .ssh
+            .as_ref()
+            .map(|cfg| SshChannel::new(cfg.clone(), runner));
+        let capabilities = probe_router(igd.as_ref(), ssh.as_ref()).await;
+        Ok((config, capabilities))
+    }
+
+    /// Binds a discovered UPnP `WANIPConnection:1` control URL (such as
+    /// `device.state["upnp.igd_control_url"]` from `archie-lan`) when `control_url` is
+    /// not yet set in static configuration, verifying that its host matches `self.host`
+    /// and that `IgdClient::new` accepts it.
+    pub fn with_discovered_igd_url(&self, discovered_url: &str) -> Result<Self, AdapterError> {
+        use archie_sentry::adapters::router::IgdClient;
+        let host: std::net::Ipv4Addr = self.host.parse().map_err(|_| AdapterError::Protocol)?;
+        IgdClient::new(discovered_url)?;
+        let rest = discovered_url
+            .strip_prefix("http://")
+            .ok_or(AdapterError::Protocol)?;
+        let authority = rest.split('/').next().unwrap_or(rest);
+        let url_host = authority.split(':').next().unwrap_or(authority);
+        if url_host.parse::<std::net::Ipv4Addr>().ok() != Some(host) {
+            return Err(AdapterError::Protocol);
+        }
+        let mut updated = self.clone();
+        if updated.control_url.is_none() {
+            updated.control_url = Some(discovered_url.to_string());
+        }
+        updated.validate()?;
+        Ok(updated)
+    }
 }
 
 /// Wake-on-LAN wiring: one subnet broadcast address, the neighbor-cache tool

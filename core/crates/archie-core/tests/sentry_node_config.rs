@@ -141,3 +141,61 @@ fn the_cli_commands_match_the_contract_bounds() {
     .validate()
     .is_ok());
 }
+
+#[tokio::test]
+async fn router_binding_discovers_same_host_igd_url_and_probes_live_capabilities() {
+    use archie_sentry::adapters::process::{CommandOutput, CommandRunner};
+    use archie_sentry::engine::AdapterError;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    struct ProbeRunner;
+    impl CommandRunner for ProbeRunner {
+        fn run(&self, argv: &[String], _timeout: Duration) -> Result<CommandOutput, AdapterError> {
+            let out = |status, stdout: &str| {
+                Ok(CommandOutput {
+                    status,
+                    stdout: stdout.as_bytes().to_vec(),
+                    stderr: Vec::new(),
+                })
+            };
+            let remote = &argv[argv.len().saturating_sub(4)..];
+            if argv.ends_with(&["ip".to_string(), "link".into()]) {
+                out(0, "1: lo: <LOOPBACK>\n")
+            } else if remote == ["wl", "-i", "wl0", "radio"] {
+                out(0, "0x0001\n")
+            } else if argv.ends_with(&["cat".to_string(), "/tmp/dhcp.leases".into()]) {
+                out(0, "1730000000 aa:bb:cc:11:22:33 192.168.1.20 host *\n")
+            } else {
+                out(255, "")
+            }
+        }
+    }
+
+    let ssh_only_toml = config_text().replace("control_url='http://192.168.1.1/igd/control'\n", "");
+    let config = ArchieConfig::from_toml(&ssh_only_toml).unwrap();
+    let router = config.sentry.router.as_ref().unwrap();
+    assert!(router.control_url.is_none());
+
+    // A discovered IGD URL on the router's own host is accepted; another host is refused.
+    let bound = router
+        .with_discovered_igd_url("http://192.168.1.1:5000/upnp/control/WANIPConnection1")
+        .unwrap();
+    assert_eq!(
+        bound.control_url.as_deref(),
+        Some("http://192.168.1.1:5000/upnp/control/WANIPConnection1")
+    );
+    assert!(router
+        .with_discovered_igd_url("http://192.168.1.99:5000/upnp/control/WANIPConnection1")
+        .is_err());
+
+    // Live probing populates radio_tools and dhcp_leases_path from what actually answered.
+    let (_router_cfg, probed) = router
+        .probe_router_config(Arc::new(ProbeRunner))
+        .await
+        .unwrap();
+    assert!(!probed.igd);
+    assert!(probed.ssh);
+    assert_eq!(probed.radio_tools, vec!["wl".to_string()]);
+    assert_eq!(probed.dhcp_leases_path.as_deref(), Some("/tmp/dhcp.leases"));
+}

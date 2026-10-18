@@ -39,15 +39,17 @@ paralelo ni un driver propio del modelo para hablar con esos protocolos.
   mantienen emparejamiento, Policy, leases, recursos y comprobaciones existentes.
 - El controlador Core ya tiene cableado para `[sentry.router]`. Sus pruebas de
   protocolo y actuación no sustituyen una prueba autenticada en este router real.
-  **Matiz de integración:** `RouterBinding::to_router_config` marca IGD/SSH según
-  la configuración, y `operator_session` entrega esas capacidades al adaptador;
-  no ejecuta `probe_router` en ese recorrido. `radio_tools` queda vacío, por lo que
-  Wi-Fi sigue `Unsupported`. No presentar un canal configurado como canal sondeado.
-  Falta conectar/verificar esa sonda en el ciclo del controlador.
-- `archie-sentry-probe` expone únicamente la sonda IPP de impresoras. La sonda de
-  router existe como biblioteca, pero todavía no como subcomando de esa herramienta.
-- El descubrimiento LAN conserva metadatos de la descripción UPnP, pero no conecta
-  automáticamente sus servicios/control URLs al adaptador IGD. Es un pendiente real.
+  **Integración actualizada:** `RouterBinding::to_router_config` valida la configuración
+  estática, mientras que `RouterBinding::probe_router_config` y `operator_session`
+  ejecutan `probe_router` antes de construir `RouterAdapter`, entregando únicamente los
+  canales y herramientas (`radio_tools`, `dhcp_leases_path`, `firmware_hint`) que
+  contestaron de verdad.
+- `archie-sentry-probe` expone tanto la sonda IPP (`archie-sentry-probe ipp <URI>`)
+  como la sonda de router (`archie-sentry-probe router [--control-url <URI>] [--ssh-host ...]`).
+- El descubrimiento LAN (`archie-lan::upnp::parse_with_base` e `inventory::assemble`)
+  extrae y valida `WANIPConnection:1` (`upnp.igd_control_url`) exigiendo mismo origen
+  (mismo host y puerto que la descripción UPnP en red privada), y `RouterBinding::with_discovered_igd_url`
+  permite enlazarla al adaptador IGD tras verificarla.
 
 ## Opciones y decisión
 

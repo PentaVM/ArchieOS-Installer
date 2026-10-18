@@ -37,6 +37,7 @@ pub fn classify(evidence: &Evidence) -> Option<DeviceAdapterClass> {
     }
     if evidence.says("internetgatewaydevice")
         || evidence.says("wandevice")
+        || evidence.says("wanipconnection")
         || evidence.says("wfadevice")
     {
         return Some(Router);

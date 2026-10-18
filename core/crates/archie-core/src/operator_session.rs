@@ -182,7 +182,7 @@ impl OperatorSession {
     }
     /// Builds the owning adapter for one configured actuable resource, opening
     /// referenced secrets for this one operation only.
-    fn adapter_for(&self, resource_id: &str) -> Result<Box<dyn EdgeAdapter>, EngineError> {
+    async fn adapter_for(&self, resource_id: &str) -> Result<Box<dyn EdgeAdapter>, EngineError> {
         let sentry = &self.core.config.sentry;
         let (route, _) = sentry
             .actuable_route(resource_id)
@@ -253,8 +253,11 @@ impl OperatorSession {
             ),
             "router" => {
                 let binding = sentry.router.as_ref().ok_or(EngineError::Authority)?;
+                let runner: Arc<dyn archie_sentry::adapters::process::CommandRunner> =
+                    Arc::new(ProcessRunner::default());
                 let (config, capabilities) = binding
-                    .to_router_config()
+                    .probe_router_config(Arc::clone(&runner))
+                    .await
                     .map_err(|_| EngineError::Authority)?;
                 Box::new(
                     RouterAdapter::new(
@@ -263,7 +266,7 @@ impl OperatorSession {
                         &binding.resource_id,
                         config,
                         capabilities,
-                        Arc::new(ProcessRunner::default()),
+                        runner,
                     )
                     .map_err(|_| EngineError::Authority)?,
                 )
@@ -383,7 +386,7 @@ impl OperatorSession {
             true,
             digest,
         )?;
-        let mut adapter = self.adapter_for(&intent.resource_id)?;
+        let mut adapter = self.adapter_for(&intent.resource_id).await?;
         let guard = Arc::new(SessionGuard {
             peer,
             connected: self.connected.clone(),

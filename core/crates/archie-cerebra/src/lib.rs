@@ -47,6 +47,8 @@ pub mod alert_follower;
 pub mod clarification;
 pub mod feeder;
 pub mod focus;
+pub mod forge_bridge;
+pub mod iris_bridge;
 pub mod observation;
 pub mod parameters;
 pub mod pass;

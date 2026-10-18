@@ -77,9 +77,23 @@ pub fn lan_address() -> std::io::Result<Ipv4Addr> {
     socket.connect((Ipv4Addr::new(192, 0, 2, 1), 9))?;
     match socket.local_addr()?.ip() {
         IpAddr::V4(address) if is_lan_v4(address) => Ok(address),
-        other => Err(std::io::Error::other(format!(
-            "this machine's route out is {other}, which is not a local network"
-        ))),
+        other => {
+            if let Ok(interfaces) = if_addrs::get_if_addrs() {
+                if let Some(address) =
+                    interfaces
+                        .into_iter()
+                        .find_map(|iface| match iface.addr.ip() {
+                            IpAddr::V4(v4) if !iface.is_loopback() && is_lan_v4(v4) => Some(v4),
+                            _ => None,
+                        })
+                {
+                    return Ok(address);
+                }
+            }
+            Err(std::io::Error::other(format!(
+                "this machine's route out is {other}, which is not a local network"
+            )))
+        }
     }
 }
 

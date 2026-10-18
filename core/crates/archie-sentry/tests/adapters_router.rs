@@ -971,3 +971,33 @@ async fn a_non_ascii_error_from_the_router_is_unavailable_not_a_crash() {
         Err(AdapterError::Unavailable)
     );
 }
+
+#[tokio::test]
+async fn archie_sentry_probe_router_cli_reports_capabilities_and_rejects_bad_args() {
+    let bin = env!("CARGO_BIN_EXE_archie-sentry-probe");
+    let bad = std::process::Command::new(bin)
+        .args(["router"])
+        .output()
+        .unwrap();
+    assert_eq!(bad.status.code(), Some(2));
+
+    let (url, task) = igd_server(1, Arc::new(Mutex::new(IgdState::default()))).await;
+    let control_url = format!("{url}/upnp/control/WANIPConnection1");
+    let ok = tokio::task::spawn_blocking(move || {
+        std::process::Command::new(bin)
+            .args(["router", "--control-url", &control_url])
+            .output()
+            .unwrap()
+    })
+    .await
+    .unwrap();
+    assert!(
+        ok.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ok.stderr)
+    );
+    let parsed: RouterCapabilities = serde_json::from_slice(&ok.stdout).unwrap();
+    assert!(parsed.igd);
+    assert!(!parsed.ssh);
+    assert_eq!(task.await.unwrap().len(), 1);
+}

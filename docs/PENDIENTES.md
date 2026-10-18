@@ -81,8 +81,11 @@ No sustituye el trabajo de Kimi ni prueba cobertura universal de IoT.
   de WinDivert, PcapPlusPlus y NDISAPI en el informe del router.
 - [ ] Canal administrativo del router real: no hay credencial/clave en Vault.
   SSH abierto (Dropbear 2019.78), acceso autenticado/firmware exacto sin verificar.
-  Reutilizar el adaptador router existente; faltan sonda CLI, sonda real en Core y descubrimiento de
-  control URL IGD. Opciones, herramientas y límites: [`SENTRY-ROUTER-AUDIT.md`](SENTRY-ROUTER-AUDIT.md).
+  Reutilizar el adaptador router existente; ya están conectados la sonda CLI
+  (`archie-sentry-probe router`), la sonda real en Core (`RouterBinding::probe_router_config`
+  en `operator_session`) y el descubrimiento/validación de control URL IGD
+  (`upnp.igd_control_url` + `RouterBinding::with_discovered_igd_url`). Opciones,
+  herramientas y límites: [`SENTRY-ROUTER-AUDIT.md`](SENTRY-ROUTER-AUDIT.md).
 - [ ] Identificar la impresora desde evidencia de Sentry y completar la impresión
   autorizada con recibo de trabajo; la búsqueda actual no obtuvo una impresora.
 
@@ -261,14 +264,14 @@ fixture se reporta como fixture, no como dispositivo real. Un PR por avance, con
   un nodo sin modelo local esos pases terminan en rechazo. Hace falta un modelo local o
   que Cerebra gradúe por contenido y use `ask_private` (el velo).
 - [ ] **Transporte Enterprise.** `POST /sync` responde 501: no hay envío a ningún tablero.
-- [ ] Productores reales de Sentry, Wanda, Vault, IRIS y Forge hacia `PillarContext`.
+- [x] Productores reales de Sentry, Wanda, Vault, IRIS y Forge hacia `PillarContext`.
   **Parcial (Kimi, 2026-10-12):** Sentry (punto 3 de la sección 3) y Wanda ya producen —
   `archie_cerebra::wanda_bridge` parsea exports de WhatsApp (.txt), Instagram (JSON) y
   notificaciones on-device (JSONL), clasifica cada conversación en un vector de 10
   categorías con saliencia 0–100 (ES/EN) y lo registra con `record_chat_context`:
   Vault en grado Restricted + referencia `PillarContext` del pilar Wanda. El seudónimo
   usa doble FNV (sha2 no es dependencia de cerebra): es seudónimo, no protección.
-  Faltan Vault, IRIS y Forge. **Llamador en vivo (2026-10-12):**
+  **Llamador en vivo (2026-10-12):**
   `archie_cerebra::wanda_watcher` sigue el directorio configurado
   (`[sentry.chat_exports] watch_dir` + `salt`), con journal de hashes de contenido
   para que reiniciar no duplique. CLI: `archie wanda-watch [--once]` y
@@ -282,8 +285,12 @@ fixture se reporta como fixture, no como dispositivo real. Un PR por avance, con
   nota) sale del front-matter `kind:` o del nombre del archivo, nunca de adivinar por la
   prosa. CLI `archie vault-docs --dir … --domain work/<org>/<proyecto>`. El feeder los
   pesa (encargo 90, restricción 80, versión 60, nota 40): entran en `trabajo` y
-  `personal`, nunca en `pantalla-1`. Faltan IRIS (nada escribe sus episodios ni sus
-  recibos a disco) y Forge (`core.forge` no tiene worker).
+  `personal`, nunca en `pantalla-1`.
+  **IRIS y Forge (2026-10-18):** `archie_cerebra::iris_bridge` sella episodios/recibos
+  semánticos acotados (`PrivateMemory`/`Restricted`, nunca frames) como `Pillar::Iris`
+  (y `Pillar::VerifiedOutcome` si se verificó la postcondición), y
+  `archie_cerebra::forge_bridge` sella recibos de build/test/patch/review como
+  `Pillar::Forge`, integrados en `feeder::collect_from_vault` y `FocusProfile`.
 
 ## 5. Voz
 
