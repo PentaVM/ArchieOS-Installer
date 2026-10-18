@@ -2,7 +2,8 @@
 //!
 //! ```text
 //! archie-iris-serve --weights iris-beta21-step132000.pt --text-tower <dir> [--port 8765]
-//!                   [--sha256 <hex>] [--device auto|cpu|cuda]
+//!                   [--sha256 <hex>] [--device auto|cpu|cuda] [--rem-spool <dir>]
+//!                   [--skills-dir <dir>]
 //! ```
 //!
 //! `--text-tower` is a directory with SigLIP2's `model.safetensors`, `tokenizer.json` and
@@ -22,15 +23,16 @@ use std::path::PathBuf;
 fn usage() -> ! {
     eprintln!(
         "usage: archie-iris-serve --weights <file.pt> (--text-tower <dir> | --phrase-table <dir>) \
-         [--port 8765] [--sha256 <hex>] [--device auto|cpu|cuda]"
+         [--port 8765] [--sha256 <hex>] [--device auto|cpu|cuda] [--rem-spool <dir>] [--skills-dir <dir>]"
     );
-    std::process::exit(2)
+    std::process::exit(2);
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
     let (mut weights, mut tower, mut table, mut sha256) = (None, None, None, None);
+    let (mut rem_spool, mut skills_dir) = (None, None);
     let (mut port, mut device) = (8765u16, "auto".to_owned());
     while let Some(flag) = args.next() {
         let mut value = || args.next().unwrap_or_else(|| usage());
@@ -41,6 +43,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--sha256" => sha256 = Some(value()),
             "--port" => port = value().parse().unwrap_or_else(|_| usage()),
             "--device" => device = value(),
+            "--rem-spool" => rem_spool = Some(PathBuf::from(value())),
+            "--skills-dir" => skills_dir = Some(PathBuf::from(value())),
             _ => usage(),
         }
     }
@@ -69,6 +73,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(Error::Weights(_)) => None,
         Err(error) => return Err(error.into()),
     };
+    let has_skills = actor.as_ref().is_some_and(|a| a.bank.is_some());
     let info = json!({
         "weights": weights_path.display().to_string(),
         "sha256": loaded.release.sha256,
@@ -79,11 +84,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "parameters": loaded.parameter_count(),
         "instance_embeddings": true,
         "action_head": actor.is_some(),
-        "skill_adapters": false,
-        "rem_recording": false,
+        "skill_adapters": has_skills,
+        "rem_recording": rem_spool.is_some(),
     });
     drop(loaded);
-    let service = Service::new(Detector::new(model, phrases), actor, info);
+    let mut service =
+        Service::new(Detector::new(model, phrases), actor, info).with_rem_spool(rem_spool);
+    if let Some(dir) = skills_dir {
+        service = service.with_skills_dir(dir);
+    }
     let health = service.health();
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     println!(

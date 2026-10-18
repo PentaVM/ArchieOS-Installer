@@ -8,6 +8,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Clone)]
 pub struct Linear {
+    name: Option<String>,
     weight: Tensor,
     bias: Option<Tensor>,
 }
@@ -16,6 +17,7 @@ impl Linear {
     pub fn load(weights: &Weights, prefix: &str) -> Result<Self> {
         let bias = format!("{prefix}.bias");
         Ok(Self {
+            name: Some(prefix.to_owned()),
             weight: weights.get(&format!("{prefix}.weight"))?,
             bias: if weights.contains(&bias) {
                 Some(weights.get(&bias)?)
@@ -26,7 +28,11 @@ impl Linear {
     }
 
     pub fn from_parts(weight: Tensor, bias: Option<Tensor>) -> Self {
-        Self { weight, bias }
+        Self {
+            name: None,
+            weight,
+            bias,
+        }
     }
 
     pub fn out_features(&self) -> usize {
@@ -34,7 +40,13 @@ impl Linear {
     }
 
     pub fn forward(&self, x: &Tensor) -> Result<Tensor> {
-        Ok(candle_nn::Linear::new(self.weight.clone(), self.bias.clone()).forward(x)?)
+        let out = candle_nn::Linear::new(self.weight.clone(), self.bias.clone()).forward(x)?;
+        if let Some(name) = &self.name {
+            if let Some(delta) = crate::lora::delta_for(name, x, out.dtype())? {
+                return Ok((out + delta)?);
+            }
+        }
+        Ok(out)
     }
 }
 

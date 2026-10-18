@@ -30,6 +30,9 @@ It binds to `127.0.0.1:8765`. The endpoints are `GET /health`, `POST /detect`, `
 | Instance embeddings | `roi_align` 3×3 + head | torchvision's `aligned=True` sampling |
 | Detection | `detect`, `detect_everything` | same thresholds, NMS, 256-phrase everyday vocabulary, rounding |
 | Acting | `ActionMemoryHead` + `IrisActor` | T1–T4 memory per session, slot pooling, pointer, grounding override, 8-control chunk |
+| LoRA skill adapters | `LoRABank` + `load_skill` | `--skills-dir`, `/act?adapter=<name\|auto>`, base-fingerprint & shape verification |
+| REM recording | `spool_window` + `recorded` | `--rem-spool`, `/act?record=<run>&app=<skill>`, `/act/recorded`, `.npz` windows + JSON sidecars |
+| Browser demo page | `iris_serve.PAGE` | `GET /` and `GET /index.html` |
 
 ## Parity with the Python IRIS
 
@@ -137,10 +140,5 @@ look every `--iris-sweep-ms`.
 
 ## Not ported yet
 
-- **LoRA skill adapters** (`/act?adapter=`). These are refused rather than served without
-  the adapter.
-- **REM recording** (`/act?record=`). This is refused as well, and `/act/recorded` returns no
-  samples, as `iris_serve` does without `--rem-spool`.
 - **The mask, keypoint, reading and temporal heads.** Nothing served reads them.
-- **The browser demo page** of `iris_serve`.
 

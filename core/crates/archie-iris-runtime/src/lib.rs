@@ -11,16 +11,18 @@
 //!
 //! What a node needs besides the release: the SigLIP2 text tower (`model.safetensors` and
 //! `tokenizer.json` of `google/siglip2-base-patch16-384`), which the release does not carry,
-//! or a table of pre-encoded phrases. Not ported: LoRA skill adapters, REM recording, and
-//! the mask, keypoint and reading heads, which nothing served reads.
+//! or a table of pre-encoded phrases. LoRA skill adapters (`lora`) and REM experience
+//! recording (`rem`) are supported on `/act` and `/act/recorded`.
 
 pub mod act;
 pub mod detect;
 pub mod fast;
+pub mod lora;
 pub mod model;
 pub mod nn;
 pub mod phrases;
 pub mod preprocess;
+pub mod rem;
 pub mod roi;
 pub mod server;
 pub mod siglip;

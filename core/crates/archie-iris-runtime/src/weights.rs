@@ -194,6 +194,55 @@ impl Weights {
     pub fn names(&self) -> impl Iterator<Item = &String> {
         self.tensors.keys()
     }
+
+    /// `lora.base_fingerprint`: every parameter's name, shape and first 1024 values (rounded
+    /// through bfloat16), hashed in sorted order, excluding frozen pretrained towers.
+    pub fn base_fingerprint(&self) -> Result<String, Error> {
+        let mut names: Vec<&String> = self
+            .tensors
+            .keys()
+            .filter(|name| {
+                !name.starts_with("text.model.")
+                    && !name.starts_with("instance_teacher.")
+                    && !name.starts_with("instance_embedding.")
+            })
+            .collect();
+        names.sort();
+        let mut digest = Sha256::new();
+        for name in names {
+            let tensor = &self.tensors[name];
+            digest.update(name.as_bytes());
+            let dims = tensor.dims();
+            let shape = match dims.len() {
+                0 => "()".to_owned(),
+                1 => format!("({},)", dims[0]),
+                _ => format!(
+                    "({})",
+                    dims.iter()
+                        .map(usize::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            };
+            digest.update(shape.as_bytes());
+            let flat = tensor.flatten_all()?;
+            let count = flat.elem_count().min(1024);
+            let sample = if count < flat.elem_count() {
+                flat.narrow(0, 0, count)?
+            } else {
+                flat
+            };
+            let values: Vec<f32> = sample
+                .to_device(&Device::Cpu)?
+                .to_dtype(DType::BF16)?
+                .to_dtype(DType::F32)?
+                .to_vec1()?;
+            for value in values {
+                digest.update(value.to_le_bytes());
+            }
+        }
+        Ok(hex::encode(digest.finalize()))
+    }
 }
 
 pub fn file_sha256(path: &Path) -> Result<String, Error> {

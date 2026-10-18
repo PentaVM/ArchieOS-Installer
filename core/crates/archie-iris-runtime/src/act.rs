@@ -493,11 +493,16 @@ struct Session {
     events: VecDeque<(Vec<f32>, f64)>,
     last_compacted: f64,
     last_seen: f64,
+    recent_frames: VecDeque<(Rgb, f64)>,
+    compacted_frames: VecDeque<(Rgb, f64)>,
+    recorded: usize,
 }
 
 pub struct Actor {
     head: Head,
     sessions: HashMap<String, Session>,
+    pub bank: Option<crate::lora::SkillBank>,
+    pub record_errors: usize,
 }
 
 impl Actor {
@@ -506,10 +511,27 @@ impl Actor {
         if !config.act_head {
             return Err(Error::Weights("these weights have no action head".into()));
         }
+        let head = Head::load(weights, config.heads, config.act_layers)?;
+        let bank = crate::lora::SkillBank::from_weights(
+            weights,
+            head.query.device().clone(),
+            head.query.dtype(),
+        )
+        .ok();
         Ok(Self {
-            head: Head::load(weights, config.heads, config.act_layers)?,
+            head,
             sessions: HashMap::new(),
+            bank,
+            record_errors: 0,
         })
+    }
+
+    pub fn use_skill(&mut self, name: &str, directory: &std::path::Path) -> Result<()> {
+        let bank = self
+            .bank
+            .as_mut()
+            .ok_or_else(|| Error::Refused("lora_skill_bank_unavailable".into()))?;
+        bank.use_skill(name, directory)
     }
 
     pub fn reset(&mut self, session: &str) {
@@ -528,138 +550,223 @@ impl Actor {
         skill: &str,
         now: f64,
     ) -> Result<Value> {
-        let size = model.config.image_size;
-        let (canvas, scale) = letterbox(image, size);
-        let tokens = model.encode_image(&to_tensor(&canvas, &model.device)?)?;
-        let instruction_features = phrases.encode(&[instruction.to_owned()])?;
-        let encoded = model.encode_phrases(&[instruction_features])?;
-        // The scene with no phrase, as memory frames were in training: the null token padded
-        // to the instruction's length, both fused as one batch of two.
-        let length = encoded.text.dim(1)?;
-        let d = model.config.dimension;
-        let null_row = Tensor::cat(
-            &[
-                model.null_phrase.reshape((1, d))?,
-                Tensor::zeros((length - 1, d), model.dtype, &model.device)?,
-            ],
-            0,
-        )?
-        .unsqueeze(0)?;
-        let mut null_padding = vec![1u8; length];
-        null_padding[0] = 0;
-        let null_padding = Tensor::from_vec(null_padding, (1, length), &model.device)?;
-        let text = Tensor::cat(&[&encoded.text, &null_row], 0)?;
-        let padding = Tensor::cat(&[&encoded.text_padding, &null_padding], 0)?;
-        let both = tokens.broadcast_as((2, tokens.dim(1)?, d))?.contiguous()?;
-        let (fused_both, text_both) = model.fuse(&both, &text, &padding)?;
-        let fused = fused_both.narrow(0, 0, 1)?;
-        let fused_null = fused_both.narrow(0, 1, 1)?;
+        self.act_with_options(
+            model,
+            phrases,
+            session_name,
+            image,
+            instruction,
+            skill,
+            now,
+            None,
+            None,
+        )
+    }
 
-        let durable_text = if skill.is_empty() { instruction } else { skill };
-        let durable_encoded =
-            model.encode_phrases(&[phrases.encode(&[durable_text.to_owned()])?])?;
-        let durable = durable_encoded.vectors.narrow(1, 0, 1)?;
-        let head = &self.head;
-        let session = {
+    /// One frame of acting with optional LoRA skill adapter and REM experience recording.
+    #[allow(clippy::too_many_arguments)]
+    pub fn act_with_options(
+        &mut self,
+        model: &IrisModel,
+        phrases: &mut dyn PhraseSource,
+        session_name: &str,
+        image: &Rgb,
+        instruction: &str,
+        skill: &str,
+        now: f64,
+        adapter: Option<&str>,
+        record: Option<&crate::rem::Recording>,
+    ) -> Result<Value> {
+        let active_adapter = match (adapter, &self.bank) {
+            (Some(name), Some(bank)) if !name.is_empty() => bank.get(name),
+            _ => None,
+        };
+        let active_name = active_adapter.as_ref().map(|a| a.skill.clone());
+        crate::lora::with_adapter(active_adapter, || {
+            let size = model.config.image_size;
+            let (canvas, scale) = letterbox(image, size);
+            let tokens = model.encode_image(&to_tensor(&canvas, &model.device)?)?;
+            let instruction_features = phrases.encode(&[instruction.to_owned()])?;
+            let encoded = model.encode_phrases(&[instruction_features])?;
+            // The scene with no phrase, as memory frames were in training: the null token padded
+            // to the instruction's length, both fused as one batch of two.
+            let length = encoded.text.dim(1)?;
+            let d = model.config.dimension;
+            let null_row = Tensor::cat(
+                &[
+                    model.null_phrase.reshape((1, d))?,
+                    Tensor::zeros((length - 1, d), model.dtype, &model.device)?,
+                ],
+                0,
+            )?
+            .unsqueeze(0)?;
+            let mut null_padding = vec![1u8; length];
+            null_padding[0] = 0;
+            let null_padding = Tensor::from_vec(null_padding, (1, length), &model.device)?;
+            let text = Tensor::cat(&[&encoded.text, &null_row], 0)?;
+            let padding = Tensor::cat(&[&encoded.text_padding, &null_padding], 0)?;
+            let both = tokens.broadcast_as((2, tokens.dim(1)?, d))?.contiguous()?;
+            let (fused_both, text_both) = model.fuse(&both, &text, &padding)?;
+            let fused = fused_both.narrow(0, 0, 1)?;
+            let fused_null = fused_both.narrow(0, 1, 1)?;
+
+            let durable_text = if skill.is_empty() { instruction } else { skill };
+            let durable_encoded =
+                model.encode_phrases(&[phrases.encode(&[durable_text.to_owned()])?])?;
+            let durable = durable_encoded.vectors.narrow(1, 0, 1)?;
+            let head = &self.head;
             self.sessions
                 .retain(|_, s| now - s.last_seen <= SESSION_IDLE_S);
-            let s = self
+            let session = self
                 .sessions
                 .entry(session_name.to_owned())
                 .or_insert_with(|| Session {
                     last_compacted: -1e9,
                     ..Session::default()
                 });
-            s.last_seen = now;
-            s
-        };
-        let ages = |items: &VecDeque<(Tensor, f64)>| {
-            items.iter().map(|(_, t)| now - t).collect::<Vec<f64>>()
-        };
-        let memory = Memory {
-            durable,
-            events: if session.events.is_empty() {
-                None
-            } else {
-                let vectors: Vec<Vec<f32>> =
-                    session.events.iter().map(|(v, _)| v.clone()).collect();
-                Some((
-                    head.embed_actions(&vectors, &model.device, model.dtype)?,
-                    session.events.iter().map(|(_, t)| now - t).collect(),
-                ))
-            },
-            compacted: if session.compacted.is_empty() {
-                None
-            } else {
-                let rows: Vec<Tensor> = session.compacted.iter().map(|(t, _)| t.clone()).collect();
-                Some((
-                    Tensor::stack(&rows, 0)?.unsqueeze(0)?,
-                    ages(&session.compacted),
-                ))
-            },
-            recent: if session.recent.is_empty() {
-                None
-            } else {
-                let rows: Vec<Tensor> = session.recent.iter().map(|(t, _)| t.clone()).collect();
-                Some((Tensor::cat(&rows, 0)?.unsqueeze(0)?, ages(&session.recent)))
-            },
-        };
-        let anchors = model.anchors.clone();
-        let out = head.forward(&fused, &anchors, &memory)?;
-        let mut control = decode(&out.controls, Some(out.pointer));
-        control["pointer_source"] = json!("act");
-        let step = control["step_type"].as_str().unwrap_or_default().to_owned();
-        if POINTING_STEPS.contains(&step.as_str()) {
-            let grounded = model.decode(&fused, &text_both.narrow(0, 0, 1)?, &encoded)?;
-            let scores: Vec<f32> =
-                candle_nn::ops::sigmoid(&grounded.logits.get(0)?.narrow(1, 0, 1)?)?
-                    .flatten_all()?
-                    .to_vec1()?;
-            let best = argmax(&scores);
-            if scores[best] >= GROUNDING_CONFIDENCE {
-                let centre: Vec<f32> = grounded
-                    .boxes
-                    .get(0)?
-                    .get(best)?
-                    .to_dtype(DType::F32)?
-                    .to_vec1()?;
-                control["pointer_canvas"] = json!([
-                    round_to(f64::from(centre[0].clamp(0.0, 1.0)), 4),
-                    round_to(f64::from(centre[1].clamp(0.0, 1.0)), 4)
-                ]);
-                control["pointer_source"] = json!("grounding");
-                control["grounding_score"] = json!(round_to(f64::from(scores[best]), 3));
+            session.last_seen = now;
+            let ages = |items: &VecDeque<(Tensor, f64)>| {
+                items.iter().map(|(_, t)| now - t).collect::<Vec<f64>>()
+            };
+            let memory = Memory {
+                durable,
+                events: if session.events.is_empty() {
+                    None
+                } else {
+                    let vectors: Vec<Vec<f32>> =
+                        session.events.iter().map(|(v, _)| v.clone()).collect();
+                    Some((
+                        head.embed_actions(&vectors, &model.device, model.dtype)?,
+                        session.events.iter().map(|(_, t)| now - t).collect(),
+                    ))
+                },
+                compacted: if session.compacted.is_empty() {
+                    None
+                } else {
+                    let rows: Vec<Tensor> =
+                        session.compacted.iter().map(|(t, _)| t.clone()).collect();
+                    Some((
+                        Tensor::stack(&rows, 0)?.unsqueeze(0)?,
+                        ages(&session.compacted),
+                    ))
+                },
+                recent: if session.recent.is_empty() {
+                    None
+                } else {
+                    let rows: Vec<Tensor> = session.recent.iter().map(|(t, _)| t.clone()).collect();
+                    Some((Tensor::cat(&rows, 0)?.unsqueeze(0)?, ages(&session.recent)))
+                },
+            };
+            let anchors = model.anchors.clone();
+            let out = head.forward(&fused, &anchors, &memory)?;
+            let mut control = decode(&out.controls, Some(out.pointer));
+            control["pointer_source"] = json!("act");
+            let step = control["step_type"].as_str().unwrap_or_default().to_owned();
+            if POINTING_STEPS.contains(&step.as_str()) {
+                let grounded = model.decode(&fused, &text_both.narrow(0, 0, 1)?, &encoded)?;
+                let scores: Vec<f32> =
+                    candle_nn::ops::sigmoid(&grounded.logits.get(0)?.narrow(1, 0, 1)?)?
+                        .flatten_all()?
+                        .to_vec1()?;
+                let best = argmax(&scores);
+                if scores[best] >= GROUNDING_CONFIDENCE {
+                    let centre: Vec<f32> = grounded
+                        .boxes
+                        .get(0)?
+                        .get(best)?
+                        .to_dtype(DType::F32)?
+                        .to_vec1()?;
+                    control["pointer_canvas"] = json!([
+                        round_to(f64::from(centre[0].clamp(0.0, 1.0)), 4),
+                        round_to(f64::from(centre[1].clamp(0.0, 1.0)), 4)
+                    ]);
+                    control["pointer_source"] = json!("grounding");
+                    control["grounding_score"] = json!(round_to(f64::from(scores[best]), 3));
+                }
             }
-        }
-        if !out.future.is_empty() {
-            control["chunk"] = Value::Array(out.future.iter().map(|c| decode(c, None)).collect());
-            control["chunk_hz"] = json!(CHUNK_HZ);
-        }
-        let slots = head.pool(&fused_null)?.squeeze(0)?;
-        if session.recent.len() == RECENT && now - session.last_compacted >= COMPACT_EVERY_S {
-            let (oldest, when) = session.recent[0].clone();
-            session.compacted.push_back((oldest.mean(0)?, when));
-            if session.compacted.len() > COMPACTED {
-                session.compacted.pop_front();
+            if !out.future.is_empty() {
+                control["chunk"] =
+                    Value::Array(out.future.iter().map(|c| decode(c, None)).collect());
+                control["chunk_hz"] = json!(CHUNK_HZ);
             }
-            session.last_compacted = now;
-        }
-        session.recent.push_back((slots, now));
-        if session.recent.len() > RECENT {
-            session.recent.pop_front();
-        }
-        session.events.push_back((action_vector(&control), now));
-        if session.events.len() > EVENTS {
-            session.events.pop_front();
-        }
-        let x = control["pointer_canvas"][0].as_f64().unwrap_or(0.0);
-        let y = control["pointer_canvas"][1].as_f64().unwrap_or(0.0);
-        control["pointer"] = json!([
-            round_to(x * size as f64 / scale, 1),
-            round_to(y * size as f64 / scale, 1)
-        ]);
-        control["memory"] = json!({"recent": session.recent.len(), "compacted": session.compacted.len(), "events": session.events.len()});
-        control["adapter"] = Value::Null;
-        Ok(control)
+            let slots = head.pool(&fused_null)?.squeeze(0)?;
+            if let Some(rec) = record {
+                if session.recent_frames.len() >= RECENT
+                    && session.compacted_frames.len() >= COMPACTED
+                    && session.events.len() >= EVENTS
+                {
+                    let sample_id = format!("{:06}", session.recorded);
+                    let recent_vec: Vec<(Rgb, f64)> =
+                        session.recent_frames.iter().cloned().collect();
+                    let compacted_vec: Vec<(Rgb, f64)> =
+                        session.compacted_frames.iter().cloned().collect();
+                    let events_vec: Vec<(Vec<f32>, f64)> = session.events.iter().cloned().collect();
+                    match crate::rem::spool_window(
+                        rec,
+                        &sample_id,
+                        instruction,
+                        skill,
+                        &canvas,
+                        &recent_vec,
+                        &compacted_vec,
+                        &events_vec,
+                        &control,
+                        now,
+                    ) {
+                        Ok(_) => {
+                            session.recorded += 1;
+                            control["recorded"] = json!(sample_id);
+                        }
+                        Err(_) => {
+                            self.record_errors += 1;
+                            control["recorded"] = Value::Null;
+                        }
+                    }
+                } else {
+                    control["recorded"] = Value::Null;
+                }
+            }
+            if session.recent.len() == RECENT && now - session.last_compacted >= COMPACT_EVERY_S {
+                let (oldest, when) = session.recent[0].clone();
+                session.compacted.push_back((oldest.mean(0)?, when));
+                if session.compacted.len() > COMPACTED {
+                    session.compacted.pop_front();
+                }
+                session.last_compacted = now;
+                if record.is_some() && session.recent_frames.len() == RECENT {
+                    let oldest_frame = session.recent_frames[0].clone();
+                    session.compacted_frames.push_back(oldest_frame);
+                    if session.compacted_frames.len() > COMPACTED {
+                        session.compacted_frames.pop_front();
+                    }
+                }
+            }
+            session.recent.push_back((slots, now));
+            if session.recent.len() > RECENT {
+                session.recent.pop_front();
+            }
+            session.events.push_back((action_vector(&control), now));
+            if session.events.len() > EVENTS {
+                session.events.pop_front();
+            }
+            if record.is_some() {
+                session.recent_frames.push_back((canvas, now));
+                if session.recent_frames.len() > RECENT {
+                    session.recent_frames.pop_front();
+                }
+            } else {
+                session.recent_frames.clear();
+                session.compacted_frames.clear();
+            }
+            let x = control["pointer_canvas"][0].as_f64().unwrap_or(0.0);
+            let y = control["pointer_canvas"][1].as_f64().unwrap_or(0.0);
+            control["pointer"] = json!([
+                round_to(x * size as f64 / scale, 1),
+                round_to(y * size as f64 / scale, 1)
+            ]);
+            control["memory"] = json!({"recent": session.recent.len(), "compacted": session.compacted.len(), "events": session.events.len()});
+            control["adapter"] = active_name.map_or(Value::Null, |n| json!(n));
+            Ok(control)
+        })
     }
 }
