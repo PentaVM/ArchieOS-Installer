@@ -199,3 +199,17 @@ de recuperación y resume; no inferir GPU libre ni iniciar job Codex sin cesión
 Código STaR y LOG siguen sin novedades respecto al informe21:25UTC; no repetí
 auditoría ni generé volumen. Próximo tick: comprobar cambio de salud/adopción;
 si sigue igual, silencio y ningún reinicio ni notificación duplicada.
+
+Tick2026-10-18 05:25UTC: cambio real, ver round4/recovery-review-20261018T0525.md
+(ruta desde research). Claude reactivó workerPID14364, boot actual, pero espera
+recursos: GPU budget -16MiB. No asumir causa ni GPU libre. Generación STaR14
+registros,11forced; archivo1024 anterior archivado. No report FANToM final.
+Sol6.1medium revisó recursos; root reprodujo CPU fixes de contradicción inglesa,
+esquema numérico, pista/despistada y natural stop. Persisten contradicción española
+y comparativa + forced_end ausente. Recheck15probes y fixture separado, no métrica.
+Nuevo fixture CPU confirma limpieza faltante si __enter__ del servidor falla por
+health timeout; no prueba fuga viva. Preflight tras cargar servidor puede ciclar
+si el mismo contexto excede límites; no restar memoria propia del límite absoluto.
+Config observada4096/row2048, contexto generación32768 independiente; validar fit
+y nueva paridad antes de entrenar con nativos modificados. Todo código activo de
+Claude queda intacto; revisar LOG/adopción antes de repetir pruebas o GPU.

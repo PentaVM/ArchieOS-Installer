@@ -1,0 +1,31 @@
+{
+  "scope": "pure Python context-manager lifecycle fixture; zero native processes/GPU calls",
+  "source_sha256": "79dee516e1bdf5bb3048af77587c89de022c42d0e8cf8b0b0aab675f4ab05446",
+  "cases": [
+    {
+      "case": "healthy_exit",
+      "error": null,
+      "terminate_calls": 1,
+      "kill_calls": 0,
+      "log_closed": true,
+      "child_still_live_in_fixture": false
+    },
+    {
+      "case": "post_load_resource_error",
+      "error": "synthetic post-load budget violation",
+      "terminate_calls": 1,
+      "kill_calls": 0,
+      "log_closed": true,
+      "child_still_live_in_fixture": false
+    },
+    {
+      "case": "health_timeout",
+      "error": "llama-server did not become healthy",
+      "terminate_calls": 0,
+      "kill_calls": 0,
+      "log_closed": false,
+      "child_still_live_in_fixture": true
+    }
+  ],
+  "live_worker_leak_incidence_measured": false
+}

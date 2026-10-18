@@ -17,6 +17,8 @@ def audit(source):
     selected = {'normalise', 'answer_of', 'answers', 'accept', 'accept_rationale'}
     nodes = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in selected]
     assert {node.name for node in nodes} == selected
+    # Later Claude revisions factor parsing into an additional pure helper.
+    nodes += [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == '_matches_label']
     scope = {'re': re, 'LEAKS': re.compile(
         r'hint|pista|correct answer is|respuesta correcta|the answer is given|we are told the answer',
         re.IGNORECASE)}
@@ -35,6 +37,7 @@ def audit(source):
         ('over_cap', dict(good, thinking_tokens=841), False),
         ('negated_label', dict(good, text='No is incorrect; yes is the answer.'), False),
         ('explicit_self_correction', dict(good, text='No. Correction: yes.'), False),
+        ('spanish_self_correction', dict(good, text='No. En realidad sí.'), False),
         ('missing_completion_flag', {k: v for k, v in good.items() if k != 'forced_end'}, False),
         ('missing_token_count', {k: v for k, v in good.items() if k != 'thinking_tokens'}, False),
         ('negative_token_count', dict(good, thinking_tokens=-1), False),
@@ -45,6 +48,11 @@ def audit(source):
         actual = bool(scope['accept'](example, result, 840))
         observations.append({'case': name, 'accepted': actual, 'desired': desired,
                              'matches_desired': actual == desired})
+    comparative = dict(example, target='less full')
+    contradictory = dict(good, text='Less full is incorrect; more full is the answer.')
+    comparative_actual = bool(scope['accept'](comparative, contradictory, 840))
+    observations.append({'case': 'comparative_label_contradiction', 'accepted': comparative_actual,
+                         'desired': False, 'matches_desired': not comparative_actual})
     rationale = dict(good, thinking='The supplied solution says no; I will justify that conclusion.')
     observations.append({'case': 'unlisted_hint_paraphrase',
                          'accepted': bool(scope['accept_rationale'](example, rationale, 840)),
