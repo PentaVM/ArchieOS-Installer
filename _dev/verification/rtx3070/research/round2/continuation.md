@@ -213,3 +213,18 @@ si el mismo contexto excede límites; no restar memoria propia del límite absol
 Config observada4096/row2048, contexto generación32768 independiente; validar fit
 y nueva paridad antes de entrenar con nativos modificados. Todo código activo de
 Claude queda intacto; revisar LOG/adopción antes de repetir pruebas o GPU.
+
+Revisión pedida por propietario18-oct de Gemini Argon/f25a904: ver
+`../round5/argon-review-f25a904.md`. Sol6.1medium revisó recovery/monitor y
+Sol6.1high contrato/datos. Root confirmó16tests CPU,15probes STaR sin desajustes,
+cleanup de health-timeout corregido, y fixtures de hashes/objetivos/dashboard.
+Nuevos P1: recovery mata cualquier llama-server y modifica cola sin worker.lock
+ni terminación verificada. P2: métricas/proveniencia/pausa/JSONL, hold impide stop,
+hashes y dominios Python/Rust incompatibles, objetivo inventado si lista vacía,
+pares conductuales multicausales y comparaciones con presupuesto distinto.
+Snapshot23:30UTC: G3curación172self/0hint retained, entrenamiento330updates hasta
+max_minutes; anchorprobe sin mejora. G4generaba293/400, todavía sin training
+receipt. FANToM base final12832items disponible; G3think512 en realidadbudget2048.
+Pack2-v2 belief39.66%, no98.2%; diferencias de artefactos/transcript no resueltas.
+No se reinició/tocó ejecución ni otros PR. Addendum de Claude y PR38 enlazan
+informe. Próximo tick revisar adopción/nueva evidencia, no repetir esta auditoría.
