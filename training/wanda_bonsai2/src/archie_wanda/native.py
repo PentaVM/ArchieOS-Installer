@@ -96,7 +96,7 @@ def extract_text(model, text, root, config, binary, *, ubatch=0, split='parity')
     if model.sha256!=BASE_SHA or signature(model.path)!=model.signature or split not in ('train','development','parity'):
         raise AdmissionError('extraction requires unchanged approved base/admitted split')
     raw = text.encode('utf-8')
-    if not 0<len(raw)<=32768 or type(ubatch) is not int or not 0<=ubatch<=512:
+    if not 0<len(raw)<=131072 or type(ubatch) is not int or not 0<=ubatch<=512:
         raise AdmissionError('extraction text/batch outside bounds')
     resources = preflight(config,required_gpu_mib=3000)
     root = Path(root)
@@ -169,7 +169,7 @@ def extract_batch(model, entries, config, binary, split, chunk=200):
             info = {'format_version':1,'base_sha256':model.sha256,'split':split,'tokens':tokens,
                     'positions':list(range(count)),'sequence_ids':[0]*count,'control_vectors':'none',
                     'capture_layer':30,'hidden_size':4096,'prompt_tokens':row['prompt_tokens'],
-                    'settings':{'ubatch':count,'kv_dtype':'float32','flash_attention':False,'n_ctx':1024},
+                    'settings':{'ubatch':count,'kv_dtype':'float32','flash_attention':False,'n_ctx':max(1024,count)},
                     'runtime_commit':PRISM_COMMIT,'shim_sha256':shim,'metadata_sha256':model.metadata_sha256,
                     'files':{'prefix.f32':{'shape':[count,4096],'dtype':'float32','sha256':sha_file(root/'prefix.f32')}}}
             (root/'receipt.json').write_text(json.dumps(info)+'\n')

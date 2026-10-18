@@ -7,6 +7,7 @@
 // JSON line per example (stdout stays small for the guarded runner).
 #include "llama.h"
 #include "ggml-backend.h"
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -40,7 +41,7 @@ static std::vector<llama_token> tokenize(const llama_vocab * vocab, const std::s
 int main(int argc, char ** argv) {
     try {
         std::string model_path, manifest_path, runtime;
-        int max_tokens = 1024;
+        int max_tokens = 4096;
         for (int i = 1; i < argc; i += 2) {
             if (i + 1 >= argc) throw std::runtime_error("missing argument");
             const std::string key(argv[i]);
@@ -50,7 +51,7 @@ int main(int argc, char ** argv) {
             else if (key == "--max-tokens") max_tokens = std::stoi(argv[i+1]);
             else throw std::runtime_error("unknown argument");
         }
-        if (model_path.empty() || manifest_path.empty() || runtime.empty() || max_tokens < 1 || max_tokens > 1024)
+        if (model_path.empty() || manifest_path.empty() || runtime.empty() || max_tokens < 1 || max_tokens > 4096)
             throw std::runtime_error("required arguments absent or out of bounds");
         ggml_backend_load_all_from_path(runtime.c_str());
         ggml_backend_dev_t device = nullptr;
@@ -81,7 +82,7 @@ int main(int argc, char ** argv) {
             if (!prefix_ok) { std::cout << ",\"error\":\"length or prompt boundary\"}" << std::endl; continue; }
             const int count = static_cast<int>(tokens.size());
             auto cp = llama_context_default_params();
-            cp.n_ctx = 1024; cp.n_batch = count; cp.n_ubatch = count;
+            cp.n_ctx = std::max(1024, count); cp.n_batch = count; cp.n_ubatch = count;
             cp.n_seq_max = 1; cp.n_threads = 4; cp.n_threads_batch = 4; cp.n_outputs_max = count;
             cp.type_k = GGML_TYPE_F32; cp.type_v = GGML_TYPE_F32;
             cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;

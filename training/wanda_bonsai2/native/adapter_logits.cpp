@@ -27,7 +27,7 @@ static bool observe(ggml_tensor * tensor, bool ask, void * opaque) {
     if (ask) return true;
     if (tensor->type != GGML_TYPE_F32 || !ggml_is_contiguous(tensor) || tensor->ne[0] != 4096) { capture.invalid = true; return false; }
     const auto count = static_cast<size_t>(ggml_nelements(tensor));
-    if (capture.normalized.size() + count > 1024U * 4096U) { capture.invalid = true; return false; }
+    if (capture.normalized.size() + count > 4096U * 4096U) { capture.invalid = true; return false; }
     const auto offset = capture.normalized.size();
     capture.normalized.resize(offset + count);
     ggml_backend_tensor_get(tensor, capture.normalized.data() + offset, 0, count*sizeof(float));
@@ -67,7 +67,7 @@ int main(int argc, char ** argv) {
         char magic[8]{}; request.read(magic,8);
         if (std::memcmp(magic,"ARWPRE01",8) || read<uint32_t>(request)!=1) throw std::runtime_error("invalid request version");
         const auto ubatch=read<uint32_t>(request), max_tokens=read<uint32_t>(request), length=read<uint32_t>(request);
-        if (ubatch>512 || max_tokens==0 || max_tokens>1024 || length==0 || length>32768) throw std::runtime_error("request bounds");
+        if (ubatch>512 || max_tokens==0 || max_tokens>4096 || length==0 || length>131072) throw std::runtime_error("request bounds");
         std::string text(length,'\0');
         if (!request.read(text.data(),length) || request.peek()!=std::ifstream::traits_type::eof()) throw std::runtime_error("request payload mismatch");
         fs::create_directories(out);
@@ -97,7 +97,7 @@ int main(int argc, char ** argv) {
         tokens.resize(count);
         Capture capture{};
         auto cp=llama_context_default_params();
-        cp.n_ctx=1024; cp.n_batch=count; cp.n_ubatch=ubatch ? std::min<uint32_t>(ubatch,count) : count;
+        cp.n_ctx=std::max<uint32_t>(1024,count); cp.n_batch=count; cp.n_ubatch=ubatch ? std::min<uint32_t>(ubatch,count) : count;
         cp.n_seq_max=1; cp.n_threads=4; cp.n_threads_batch=4; cp.n_outputs_max=count;
         cp.type_k=GGML_TYPE_F32; cp.type_v=GGML_TYPE_F32;
         cp.flash_attn_type=LLAMA_FLASH_ATTN_TYPE_DISABLED;

@@ -117,3 +117,33 @@ class GenerateTests(unittest.TestCase):
             if p.kind in LABELS:
                 out.setdefault((p.kind, p.lang), []).append(p)
         return out
+
+
+class BehavioralAndPackTests(unittest.TestCase):
+    def test_behavioral_world_faux_pas_and_emotional_consequences(self):
+        from archie_wanda.tomgen import BehavioralWorld, behavioral_minimal_pairs
+        for seed in range(40):
+            sensitive, _ = behavioral_minimal_pairs(seed, 'en', f'bp{seed}')
+            self.assertEqual(len(sensitive), 3)
+            for a, b in sensitive:
+                self.assertNotEqual(a.label, b.label)
+        w = BehavioralWorld(random.Random(1), 'es', 'bw1',
+                            force={'proposer_present_at_disclosure': False,
+                                   'reply_style': 'tentative',
+                                   'proposer_response': 'push'})
+        by_kind = {p.kind: p for p in w.problems()}
+        self.assertEqual(by_kind['faux_pas_aware'].label, 'no')
+        self.assertEqual(by_kind['commitment'].label, 'tentative')
+        self.assertEqual(by_kind['emotional_effect'].label, 'pressured')
+
+    def test_pack_state_world_pairs_and_generate_v3(self):
+        from archie_wanda.tomgen import generate_v3, pack_minimal_pairs
+        pairs = pack_minimal_pairs(11, 'pp11')
+        self.assertEqual(len(pairs), 2)
+        for a, b in pairs:
+            self.assertNotEqual(a.label, b.label)
+        problems = generate_v3(240, seed=19)
+        self.assertEqual(len(problems), 240)
+        kinds = {p.kind for p in problems}
+        self.assertTrue({'faux_pas_aware', 'commitment', 'emotional_effect', 'pack_knowledge', 'pack_belief'}.issubset(kinds))
+

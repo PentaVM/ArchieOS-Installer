@@ -82,12 +82,14 @@ def pack_state(world, recent=40):
         for p in world['people']:
             seen = world['knowledge'][topic][p]
             if seen is None:
-                rows.append(f'- {p}: never saw any message about {topic}.')
+                rows.append(f'- {p}: never saw any message about {topic} '
+                            f'(does not know that {topic} {current}).')
             elif seen == world['state'][topic]:
-                rows.append(f'- {p}: last saw that {topic} {verb.format(v=seen)} (up to date).')
+                rows.append(f'- {p}: last saw that {topic} {verb.format(v=seen)} '
+                            f'(up to date; knows that {topic} {current}).')
             else:
                 rows.append(f'- {p}: last saw that {topic} {verb.format(v=seen)}; missed the later change '
-                            f'({topic} {current} now).')
+                            f'(does not know that {topic} {current}; still believes {topic} {verb.format(v=seen)}).')
     header = (f'Social context pack v2. People: {", ".join(world["people"])}. Domain: personal. '
               'Per-person state is computed from who was present for each message.')
     return '\n'.join([header, 'What each person has seen:'] + rows + ['Knowledge ledger:'] + world['ledger'] +

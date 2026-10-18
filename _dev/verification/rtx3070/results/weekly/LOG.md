@@ -347,3 +347,29 @@ is not paused: two GPU jobs on this card overheat it (85–87 °C seen at ~130 W
   kept the worker paused for ~1 h, as intended. **Thermal rollback** (STEERING rule): the last
   2 h reached a sampled max of 89 °C and p95 of 88 °C, mostly Blender, but our run phases add
   on top of it. Guard back to HOT 75 / COOL 60; worker restarted (resumes from saved answers).
+- 15:15 — **Long context, pack2 with thinking 512:** knowledge 0.83, belief 0.38 (direct
+  0.70 / 0.36; raw transcript 0.51 / 0.16). Every trace hit the 512-token budget, so belief
+  may still be budget-limited. Each question reprocesses only ~515 tokens of the 31k-token
+  context (KV reuse holds).
+  **g3 trace generation re-specified after 26 items:** 24 traces were cut at the 640 budget
+  (the base writes long "Final Check / Construct Output" passages), and answers are prose
+  that opens with the label ("Yes. Hugo entered…"), so only 1 of 26 was accepted. Fix:
+  accept an answer that opens with the label (a test checks that "Nobody" ≠ "no" and that
+  "less" ≠ "less full"; the target stays the bare label), budget 1,024, keep only traces
+  that ended on their own within 840 tokens so they fit the 1,024-token training sequence.
+  The 640-budget answers are set aside, not mixed in.
+- 15:31 — **g3 still not viable as pure self-traces:** at a 1,024 budget, 24 of 30 traces
+  still ran out (mean 952 thinking tokens) and only 2 of 30 answers were right, so the yield
+  would be ~3 % (≈25 traces in ~4 h). Two changes:
+  (1) **FANToM base moved ahead** of g3. We have no FANToM number yet, and the weekly target
+  is reported on FANToM and OpenToM separately.
+  (2) **STaR rationalization added** (Zelikman et al. 2022): failed items are retried with the
+  simulated label as a hint; the trace is kept only if it ends on its own within 840 tokens,
+  reaches the label, and never mentions the hint (hint/pista/"correct answer is" filter).
+  Training uses the original hint-free prompt. Self traces are preferred, and each kept item
+  records `trace: self|rationalized` so the two can be compared. g3 now attempts 400 items.
+- 15:40 — **Owner: "dedicate the GPU and CPU fully to this".** At the owner's request, stopped
+  four headless Blender renders that another session had started at 15:26 (the frames already
+  written stay on disk) and closed Steam and Epic. Guard in full-use mode: no duty rest, pause
+  at 86 °C until 78 °C (STEERING updated; step back if a sample exceeds 90 °C). The first run
+  phase went from 63 to 88 °C in 9 s before the pause, as expected for this card.

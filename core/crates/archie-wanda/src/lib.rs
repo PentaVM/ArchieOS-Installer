@@ -7,6 +7,7 @@ pub mod advice;
 pub mod chat;
 pub mod client;
 pub mod config;
+pub mod decision;
 pub mod graph;
 pub mod runtime;
 pub mod server;

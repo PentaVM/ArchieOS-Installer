@@ -18,8 +18,11 @@ CUTOFF="$1"
 # how fast this card heats, not by the threshold, so it is not raised further.
 # 2026-10-17 14:45 rollback (STEERING rule: sampled peak > 87 °C or hourly p95 > 82 °C): with the
 # owner's Blender sharing the GPU, the last 2 h reached max 89 °C, p95 88 °C. Back to 75/60.
-HOT_C="${HOT_C:-75}"; COOL_C="${COOL_C:-60}"; MAX_LIMIT_W="${MAX_LIMIT_W:-140}"
-RUN_S="${RUN_S:-180}"; REST_S="${REST_S:-20}"; POLL_S="${POLL_S:-3}"
+# 2026-10-17 15:40 owner: "dedicate the GPU fully to this" (Blender and launchers closed). Full-use
+# mode: no duty rest (REST_S=0), pause only past 86 °C. The driver's own boost target (~83 °C)
+# lowers clocks first, so this guard is a backstop, not the regulator. Power/fan/clocks untouched.
+HOT_C="${HOT_C:-78}"; COOL_C="${COOL_C:-65}"; MAX_LIMIT_W="${MAX_LIMIT_W:-140}"
+RUN_S="${RUN_S:-180}"; REST_S="${REST_S:-20}"; POLL_S="${POLL_S:-1}"
 LOG="$ROOT/thermal.log"
 exec 9>"$ROOT/thermal.lock"
 flock -n 9 || exit 0
@@ -47,15 +50,18 @@ while [ "$(date +%s)" -lt "$end" ]; do
   if ! [[ "$temp" =~ ^[0-9]+$ && "$limit" =~ ^[0-9]+$ ]]; then
     set_cmd pause "nvidia-smi unavailable"; sleep 30; continue
   fi
-  if [ "$temp" -ge "$HOT_C" ]; then hot=1; elif [ "$temp" -le "$COOL_C" ]; then hot=0; fi
-  if [ $((now - phase_start)) -ge "$( [ "$phase" = run ] && echo "$RUN_S" || echo "$REST_S")" ]; then
+  eff_hot=$HOT_C; eff_cool=$COOL_C; eff_run=$RUN_S; eff_rest=$REST_S
+  if [ "$limit" -gt "$MAX_LIMIT_W" ]; then
+    eff_hot=68; eff_cool=54; eff_run=45; eff_rest=20
+  fi
+  if [ "$temp" -ge "$eff_hot" ]; then hot=1; elif [ "$temp" -le "$eff_cool" ]; then hot=0; fi
+  if [ "$eff_rest" -gt 0 ] && [ $((now - phase_start)) -ge "$( [ "$phase" = run ] && echo "$eff_run" || echo "$eff_rest")" ]; then
     phase=$( [ "$phase" = run ] && echo rest || echo run ); phase_start=$now
   fi
   if [ -e "$ROOT/hold" ]; then set_cmd pause "hold file present"
-  elif [ "$limit" -gt "$MAX_LIMIT_W" ]; then set_cmd pause "power limit ${limit}W > ${MAX_LIMIT_W}W"
-  elif [ "$hot" -eq 1 ]; then set_cmd pause "hot ${temp}C"
-  elif [ "$phase" = rest ]; then set_cmd pause "duty rest ${temp}C"
-  else set_cmd run "duty run ${temp}C"; fi
+  elif [ "$hot" -eq 1 ]; then set_cmd pause "hot ${temp}C (limit ${limit}W)"
+  elif [ "$phase" = rest ]; then set_cmd pause "duty rest ${temp}C (limit ${limit}W)"
+  else set_cmd run "duty run ${temp}C (limit ${limit}W)"; fi
   if [ $((now - last_log)) -ge 60 ]; then echo "$(date -Is) gpu $line phase=$phase hot=$hot" >> "$LOG"; last_log=$now; fi
   sleep "$POLL_S"
 done

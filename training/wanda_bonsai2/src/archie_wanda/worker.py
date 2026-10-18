@@ -263,7 +263,8 @@ class Worker:
                             'choice_row': None, 'choice_token_ids': {}, 'probe': None, 'option_letters': [],
                             'shown_to_original': [], 'selected': '', 'counterfactual_changes': '',
                             'user': e['messages'][-1]['content'], 'label': e['label'],
-                            'mode': e.get('mode', 'think'), 'pair': e.get('pair'), 'side': e.get('side')})
+                            'mode': e.get('mode', 'think'), 'trace': e.get('trace'),
+                            'pair': e.get('pair'), 'side': e.get('side')})
         index = {'format_version': 1, 'format': 'chat-v1', 'tranche': str(tranche), 'tranche_sha256': sha_file(tranche),
                  'base_sha256': model.sha256, 'shim_sha256': shim, 'provenance': data['provenance'],
                  'examples': records, 'rejected': rejected, 'created_ms': now_ms()}
@@ -313,7 +314,7 @@ class Worker:
         if mode not in ('direct', 'think'):
             raise AdmissionError('bench mode must be direct or think')
         budget = {k: int(spec.get(k, d)) for k, d in
-                  (('think_budget', 512), ('min_think', 0), ('max_waits', 0), ('answer_tokens', 64))}
+                  (('think_budget', 2048), ('min_think', 0), ('max_waits', 0), ('answer_tokens', 64))}
         responses_path = out/'responses.jsonl'
         done = {}
         if responses_path.exists():
@@ -330,7 +331,7 @@ class Worker:
             # The server holds VRAM only while we may generate; a hold (owner/Codex needs the
             # GPU) closes it, a short thermal rest keeps it loaded but idle.
             with NativeChat(self.config, out/'server.log', lora=spec.get('adapter'),
-                            context=int(spec.get('context', 8192))) as chat, \
+                            context=int(spec.get('context', 32768))) as chat, \
                     responses_path.open('a') as stream:
                 self.state = 'running'
                 while pending and not self.stopping() and not (self.root/'hold').exists():
@@ -380,8 +381,7 @@ class Worker:
     # ---- star: self-generated reasoning traces filtered by simulated labels -------------
     def star_job(self, spec):
         from .chatdata import load_tranche
-        from .native_chat import NativeChat
-        from .star import build_tranche
+        from .star import accept, build_tranche, hinted
         star_id = spec['star_id']
         if not re.fullmatch(r'[a-z0-9-]{3,64}', star_id):
             raise AdmissionError('invalid star id')
@@ -396,38 +396,52 @@ class Worker:
             adapter = out/'adapter.gguf'
             if not adapter.exists():
                 export_candidate(spec['checkpoint'], adapter)
-        budget, cap = int(spec.get('think_budget', 640)), int(spec.get('max_thinking_tokens', 640))
-        responses = out/'responses.jsonl'
+        budget, cap = int(spec.get('think_budget', 2048)), int(spec.get('max_thinking_tokens', 2048))
+        context = int(spec.get('context', 32768))
+        done = self.star_stage(out, 'responses.jsonl', examples, lambda e: e['messages'], budget, adapter, star_id, context=context)
+        rationales = {}
+        if spec.get('rationalize'):
+            # STaR rationalization: retry only the failed items, with the simulated label as a hint.
+            failed = [e for e in examples if not accept(e, done[e['example_id']], cap)]
+            rationales = self.star_stage(out, 'rationales.jsonl', failed, hinted,
+                                         int(spec.get('rationale_budget', cap)), adapter, f'{star_id} hint', context=context)
+        tranche = self.root/'tranches'/f'{star_id}.json'
+        summary = build_tranche(source, done, tranche, cap, rationales)
+        atomic_json(out/'summary.json', {**summary, 'tranche': str(tranche), 'budget': budget, 'created_ms': now_ms()})
+        return {**summary, 'tranche': str(tranche)}
+
+    def star_stage(self, out, name, examples, messages_of, budget, adapter, label, context=32768):
+        """Resumable generation of one thinking response per example into out/name."""
+        from .native_chat import NativeChat
+        responses = out/name
         done = {}
         if responses.exists():
             for line in responses.read_text().splitlines():
                 record = json.loads(line); done[record['id']] = record
         pending = [e for e in examples if e['example_id'] not in done]
+        progress = lambda: f'{label} {sum(e["example_id"] in done for e in examples)}/{len(examples)}'
         while pending:
             if self.stopping():
                 raise Interrupted()
             if (self.root/'hold').exists() or self.control() == 'pause':
-                self.state = 'paused'; self.heartbeat(progress=f'{star_id} {len(done)}/{len(examples)}'); time.sleep(10)
+                self.state = 'paused'; self.heartbeat(progress=progress()); time.sleep(10)
                 continue
-            with NativeChat(self.config, out/'server.log', lora=adapter) as chat, responses.open('a') as stream:
+            with NativeChat(self.config, out/'server.log', lora=adapter, context=context) as chat, responses.open('a') as stream:
                 self.state = 'running'
                 while pending and not self.stopping() and not (self.root/'hold').exists():
                     if self.control() == 'pause':
-                        self.state = 'paused'; self.heartbeat(progress=f'{star_id} {len(done)}/{len(examples)}')
+                        self.state = 'paused'; self.heartbeat(progress=progress())
                         time.sleep(5); continue
                     self.state = 'running'
                     preflight(self.config)
                     example = pending.pop(0)
-                    result = chat.think(example['messages'], budget=budget, answer_tokens=24)
+                    result = chat.think(messages_of(example), budget=budget, answer_tokens=96)
                     record = {'id': example['example_id'], **result}
                     stream.write(json.dumps(record, ensure_ascii=False) + '\n'); stream.flush()
                     done[example['example_id']] = record
                     if len(done) % 20 == 0:
-                        self.heartbeat(progress=f'{star_id} {len(done)}/{len(examples)}')
-        tranche = self.root/'tranches'/f'{star_id}.json'
-        summary = build_tranche(source, done, tranche, cap)
-        atomic_json(out/'summary.json', {**summary, 'tranche': str(tranche), 'budget': budget, 'created_ms': now_ms()})
-        return {**summary, 'tranche': str(tranche)}
+                        self.heartbeat(progress=progress())
+        return done
 
     # ---- verify_native: exported LoRA in Prism vs the trained Torch suffix -------------
     def verify_native_job(self, spec):

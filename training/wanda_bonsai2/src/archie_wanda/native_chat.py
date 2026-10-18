@@ -20,7 +20,7 @@ def _free_port():
 
 
 class NativeChat:
-    def __init__(self, config, log_path, lora=None, context=8192):
+    def __init__(self, config, log_path, lora=None, context=32768):
         self.config, self.log_path, self.lora, self.context = config, Path(log_path), lora, context
         self.port, self.process, self.log = _free_port(), None, None
 
@@ -35,19 +35,23 @@ class NativeChat:
         if self.lora:
             command += ['--lora', str(self.lora)]
         self.log = self.log_path.open('a')
-        self.process = subprocess.Popen(command, env=native_environment(self.config), stdout=self.log,
-                                        stderr=subprocess.STDOUT)
-        deadline = time.time() + 180
-        while time.time() < deadline:
-            if self.process.poll() is not None:
-                raise ResourceError('llama-server exited during start; see ' + str(self.log_path))
-            try:
-                if self._get('/health').get('status') == 'ok':
-                    return self
-            except OSError:
-                pass
-            time.sleep(1)
-        raise ResourceError('llama-server did not become healthy')
+        try:
+            self.process = subprocess.Popen(command, env=native_environment(self.config), stdout=self.log,
+                                            stderr=subprocess.STDOUT)
+            deadline = time.time() + 180
+            while time.time() < deadline:
+                if self.process.poll() is not None:
+                    raise ResourceError('llama-server exited during start; see ' + str(self.log_path))
+                try:
+                    if self._get('/health').get('status') == 'ok':
+                        return self
+                except OSError:
+                    pass
+                time.sleep(1)
+            raise ResourceError('llama-server did not become healthy')
+        except BaseException:
+            self.__exit__(None, None, None)
+            raise
 
     def __exit__(self, *exc):
         if self.process and self.process.poll() is None:
@@ -78,13 +82,38 @@ class NativeChat:
                 'tokens_in': answer.get('usage', {}).get('prompt_tokens'),
                 'tokens_out': answer.get('usage', {}).get('completion_tokens')}
 
-    def _complete(self, prompt, n_predict, stop, seed):
-        out = self._post('/completion', {'prompt': prompt, 'n_predict': n_predict, 'temperature': 0, 'seed': seed,
-                                         'stop': stop, 'cache_prompt': True})
-        stopped_word = out.get('stop_type') == 'word' or out.get('stopped_word')
-        return out.get('content', ''), int(out.get('tokens_predicted', 0)), bool(stopped_word)
+    def _wait_if_paused(self):
+        run_dir = getattr(self.config, 'run_dir', None)
+        if not run_dir:
+            return
+        control = Path(run_dir) / 'control.json'
+        hold = Path(run_dir) / 'hold'
+        while True:
+            try:
+                cmd = json.loads(control.read_text()).get('command', 'run')
+            except (OSError, ValueError):
+                cmd = 'run'
+            if cmd != 'pause' and not hold.exists():
+                return
+            time.sleep(2)
 
-    def think(self, messages, budget=512, min_think=0, max_waits=0, answer_tokens=64, seed=17):
+    def _complete(self, prompt, n_predict, stop, seed):
+        content, total, stopped_word = '', 0, False
+        step = 160
+        while total < n_predict:
+            self._wait_if_paused()
+            ask = min(step, n_predict - total)
+            out = self._post('/completion', {'prompt': prompt + content, 'n_predict': ask, 'temperature': 0,
+                                             'seed': seed, 'stop': stop, 'cache_prompt': True})
+            piece = out.get('content', '')
+            n = int(out.get('tokens_predicted', 0))
+            stopped_word = bool(out.get('stop_type') == 'word' or out.get('stopped_word'))
+            content += piece; total += n
+            if stopped_word or n < ask or n <= 0:
+                break
+        return content, total, stopped_word
+
+    def think(self, messages, budget=2048, min_think=0, max_waits=0, answer_tokens=64, seed=17):
         """s1-style budget forcing (arXiv:2501.19393) on the model's own chat template.
 
         The model reasons inside <think>. At `budget` tokens the thinking is cut and the
@@ -93,20 +122,21 @@ class NativeChat:
         decoded greedily after the delimiter.
         """
         prompt = render_chat(messages) + '<think>\n'
-        thinking, used, waits = '', 0, 0
+        thinking, used, waits, ended = '', 0, 0, False
         while used < budget:
             text, n, stopped = self._complete(prompt + thinking, budget - used, ['</think>'], seed)
             thinking += text; used += n
             if not stopped:
-                break                                   # budget exhausted: force the end
+                break                                   # budget exhausted or non-delimiter stop
             if used < min_think and waits < max_waits:
                 thinking += 'Wait'; waits += 1
                 continue
+            ended = True
             break
         closed = prompt + thinking.rstrip() + '\n</think>\n\n'
         answer, n_answer, _ = self._complete(closed, answer_tokens, ['<|im_end|>'], seed)
         return {'text': answer.strip(), 'thinking_tokens': used, 'waits': waits,
-                'forced_end': used >= budget, 'tokens_out': used + n_answer, 'thinking': thinking}
+                'forced_end': (not ended) or used >= budget, 'tokens_out': used + n_answer, 'thinking': thinking}
 
 
 def render_chat(messages):

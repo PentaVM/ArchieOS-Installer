@@ -99,8 +99,12 @@ threshold.
   profile. Never change power, fan, clocks or drivers yourself.
 - If the guard is not running but the worker is, write `{"command":"pause"}` and record
   it; the next ensure-worker run restarts the guard.
-- Sampled peaks above 87 °C, or a p95 above 82 °C over an hour, in `thermal.log` → step back
-  towards 75/60, commit and report it. Never go above `HOT_C=78` without the owner.
+- **Full-use mode (owner, 2026-10-17 15:40: "dedicate the GPU and CPU fully to this"):**
+  no duty rest, pause at ≥ 86 °C until ≤ 78 °C. With the 3 s poll, samples of 87–88 °C are
+  expected in this mode. Sampled peaks above 90 °C → step back to 78/68 with a 20 s rest,
+  commit and report it. Never go above `HOT_C=86` without the owner.
+- (Before full-use mode) sampled peaks above 87 °C, or a p95 above 82 °C over an hour → step
+  back towards 75/60. Applied once on 2026-10-17 14:45, while Blender shared the GPU.
 - GPU missing (`CM_PROB_PHANTOM`, NVML blocked): confirm in one command, change nothing,
   end the tick; see `_dev/verification/rtx3070/results/overnight/INCIDENT-gpu-lost.md`.
 

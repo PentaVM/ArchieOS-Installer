@@ -1,7 +1,7 @@
 {
   "scope": "pure-function CPU audit; synthetic adversarial inputs only",
-  "source": "training\\wanda_bonsai2\\src\\archie_wanda\\star.py",
-  "source_sha256": "5a78f5194e9dac3d43ee98c287c69f85a1818342a44fa56b82c314854aa8b7c5",
+  "source": "training/wanda_bonsai2/src/archie_wanda/star.py",
+  "source_sha256": "1d16ea676d16c6345d416dae107c44f8758c4ea2a3273cf350edbef7f4379c10",
   "functions": {
     "normalise": {
       "start": 14,
@@ -12,20 +12,20 @@
       "end": 23
     },
     "answers": {
-      "start": 36,
-      "end": 47
+      "start": 56,
+      "end": 67
     },
     "accept": {
-      "start": 50,
-      "end": 57
+      "start": 70,
+      "end": 77
     },
     "accept_rationale": {
-      "start": 74,
-      "end": 76
+      "start": 94,
+      "end": 96
     },
     "_matches_label": {
       "start": 26,
-      "end": 33
+      "end": 53
     }
   },
   "cases": [
@@ -73,15 +73,15 @@
     },
     {
       "case": "spanish_self_correction",
-      "accepted": true,
+      "accepted": false,
       "desired": false,
-      "matches_desired": false
+      "matches_desired": true
     },
     {
       "case": "missing_completion_flag",
-      "accepted": true,
+      "accepted": false,
       "desired": false,
-      "matches_desired": false
+      "matches_desired": true
     },
     {
       "case": "missing_token_count",
@@ -103,9 +103,9 @@
     },
     {
       "case": "comparative_label_contradiction",
-      "accepted": true,
+      "accepted": false,
       "desired": false,
-      "matches_desired": false
+      "matches_desired": true
     },
     {
       "case": "unlisted_hint_paraphrase",
@@ -122,9 +122,9 @@
     "completion_fixture": "non-delimiter stop after 10 tokens, then correct answer",
     "forced_end": true,
     "accepted": false,
-    "native_source_sha256": "79dee516e1bdf5bb3048af77587c89de022c42d0e8cf8b0b0aab675f4ab05446",
+    "native_source_sha256": "988482170a9ed76ad9883c4d81ecac00d6b25de7300e5fdccef69ec28b30ffa9",
     "hardware_or_live_incidence_claim": false
   },
-  "adversarial_mismatches": 3,
+  "adversarial_mismatches": 0,
   "no_live_trace_incidence_estimated": true
 }

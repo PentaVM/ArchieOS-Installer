@@ -368,17 +368,316 @@ def generate_v2(count, seed=20261018, langs=('en', 'es'), pair_share=0.5, direct
 LABELS = {'location_coarse_fo': ('yes', 'no'), 'location_coarse_so': ('yes', 'no'), 'knowledge': ('yes', 'no'),
           'location_fine_fo': ('moved', 'start'), 'location_fine_so': ('moved', 'start'),
           'fullness': ('more', 'same', 'less'), 'accessibility': ('more', 'same', 'less'),
-          'attitude': ('positive', 'neutral', 'negative'), 'belief': ('new', 'old')}
+          'attitude': ('positive', 'neutral', 'negative'), 'belief': ('new', 'old'),
+          'faux_pas_aware': ('yes', 'no'), 'commitment': ('firm', 'tentative', 'declining'),
+          'emotional_effect': ('pressured', 'supported', 'unbothered'),
+          'pack_knowledge': ('yes', 'no'), 'pack_belief': ('new', 'old')}
+
+CONSTRAINTS = {
+    'en': [
+        ('exhausted from a double shift', 'an late-night rehearsal', 'is exhausted after working a double shift'),
+        ('worried about tight finances this month', 'an expensive weekend retreat', 'is worried about tight finances this month'),
+        ('recovering from a migraine', 'a loud concert downtown', 'is recovering from a migraine'),
+        ('on deadline for a client delivery', 'an all-afternoon hike', 'is on a strict deadline for a client delivery'),
+    ],
+    'es': [
+        ('agotado tras un turno doble', 'un ensayo nocturno hasta tarde', 'está agotado tras trabajar un turno doble'),
+        ('preocupado por los gastos de este mes', 'una escapada cara de fin de semana', 'está preocupado por los gastos de este mes'),
+        ('recuperándose de una migraña', 'un concierto ruidoso en el centro', 'se está recuperando de una migraña'),
+        ('con una entrega urgente del trabajo', 'una caminata de toda la tarde', 'tiene una entrega urgente del trabajo'),
+    ],
+}
+
+REPLIES = {
+    'en': {
+        'firm': ('Count me in, I cleared my schedule and I will definitely be there.', 'firm'),
+        'tentative': ('Maybe, let me see how things go and check back later.', 'tentative'),
+        'declining': ('You all go ahead without me this time, another week would be much easier for me.', 'declining'),
+    },
+    'es': {
+        'firm': ('Cuenten conmigo, ya liberé mi agenda y seguro que voy.', 'firme'),
+        'tentative': ('Quizás, déjame ver cómo avanzo y les aviso más tarde.', 'tentativo'),
+        'declining': ('Vayan ustedes sin mí esta vez, otra semana me vendría mucho mejor.', 'rechazando'),
+    },
+}
 
 
-def generate(count, seed=20261017, langs=('en', 'es'), per_world=4, slack=2):
+class BehavioralWorld:
+    """Social and behavioral psychology simulation: private constraint disclosure, witness
+    asymmetry (who heard the constraint), polite indirectness / hedging vs firm commitment,
+    faux-pas awareness, and emotional impact of pushing vs accommodating."""
+
+    def __init__(self, rng, lang, world_id, force=None):
+        self.lang, self.id = lang, world_id
+        self.speaker, self.proposer, self.observer = rng.sample(NAMES[lang], 3)
+        self.short_constraint, self.proposal, self.clause = rng.choice(CONSTRAINTS[lang])
+        draws = {
+            'proposer_present_at_disclosure': rng.random() < 0.5,
+            'observer_present_at_disclosure': rng.random() < 0.5,
+            'reply_style': rng.choice(['firm', 'tentative', 'declining']),
+            'proposer_response': rng.choice(['push', 'support', 'neutral']),
+        }
+        draws.update(force or {})
+        self.draws = draws
+        if lang == 'en':
+            listeners = [self.observer] + ([self.proposer] if draws['proposer_present_at_disclosure'] else [])
+            absent = [] if draws['proposer_present_at_disclosure'] else [f'{self.proposer} is not in the room yet.']
+            lines = [
+                f'Earlier, while talking with {", ".join(listeners)}, {self.speaker} mentions that {self.speaker} {self.clause}.',
+                *absent,
+                f'Later, {self.proposer} joins and proposes {self.proposal} for tonight.',
+                f'{self.speaker} replies: "{REPLIES[lang][draws["reply_style"]][0]}"',
+            ]
+            if draws['proposer_response'] == 'push':
+                lines.append(f'{self.proposer} insists that everyone must join tonight with no excuses.')
+            elif draws['proposer_response'] == 'support':
+                lines.append(f'{self.proposer} says there is zero pressure and offers a low-key option next week.')
+            else:
+                lines.append(f'{self.proposer} notes the time and leaves the plan open.')
+        else:
+            listeners = [self.observer] + ([self.proposer] if draws['proposer_present_at_disclosure'] else [])
+            absent = [] if draws['proposer_present_at_disclosure'] else [f'{self.proposer} todavía no está en la sala.']
+            lines = [
+                f'Antes, hablando con {", ".join(listeners)}, {self.speaker} comenta que {self.clause}.',
+                *absent,
+                f'Más tarde, {self.proposer} se une y propone {self.proposal} para esta noche.',
+                f'{self.speaker} responde: "{REPLIES[lang][draws["reply_style"]][0]}"',
+            ]
+            if draws['proposer_response'] == 'push':
+                lines.append(f'{self.proposer} insiste en que todos tienen que ir esta noche sin excusas.')
+            elif draws['proposer_response'] == 'support':
+                lines.append(f'{self.proposer} dice que no hay ninguna presión y ofrece una opción tranquila la próxima semana.')
+            else:
+                lines.append(f'{self.proposer} anota la hora y deja el plan abierto.')
+        self.lines = lines
+
+    def story(self):
+        return ' '.join(self.lines)
+
+    def problems(self):
+        lang, out = self.lang, []
+        t = T[lang]
+        aware = self.draws['proposer_present_at_disclosure']
+        style = self.draws['reply_style']
+        resp = self.draws['proposer_response']
+        if lang == 'en':
+            q_fp = (f'Did {self.proposer} know that {self.speaker} {self.clause} when proposing '
+                    f'{self.proposal}? Answer yes or no.')
+            tr_fp = [
+                f'{self.proposer} {"was present" if aware else "was not in the room"} when {self.speaker} mentioned being {self.short_constraint}.',
+                f'So {self.proposer} {"knew" if aware else "did not know"} about {self.speaker}\'s constraint.',
+            ]
+            q_comm = (f'Based on {self.speaker}\'s reply, is {self.speaker}\'s commitment to {self.proposal} '
+                      'firm, tentative, or declining?')
+            tr_comm = [
+                f'{self.speaker} replied: "{REPLIES[lang][style][0]}"',
+                f'That wording is a {style} signal regarding attendance.',
+            ]
+            if style == 'firm':
+                eff_ans, eff_lbl = 'unbothered', 'unbothered'
+                tr_eff = [f'{self.speaker} explicitly committed and cleared their schedule, so {self.speaker} feels unbothered.']
+            elif resp == 'push':
+                eff_ans, eff_lbl = 'pressured', 'pressured'
+                tr_eff = [f'{self.speaker} signalled "{style}" while {self.short_constraint}, and {self.proposer} insisted with no excuses, leaving {self.speaker} feeling pressured.']
+            elif resp == 'support':
+                eff_ans, eff_lbl = 'supported', 'supported'
+                tr_eff = [f'{self.proposer} removed pressure and offered an alternative, so {self.speaker} feels supported.']
+            else:
+                eff_ans, eff_lbl = 'unbothered', 'unbothered'
+                tr_eff = [f'{self.proposer} left the plan open without pressuring {self.speaker}, so {self.speaker} feels unbothered.']
+            q_eff = (f'After {self.proposer}\'s follow-up, is {self.speaker} most likely to feel '
+                     'pressured, supported, or unbothered?')
+        else:
+            q_fp = (f'¿Sabía {self.proposer} que {self.speaker} {self.clause} al proponer '
+                    f'{self.proposal}? Responde sí o no.')
+            tr_fp = [
+                f'{self.proposer} {"estaba presente" if aware else "no estaba en la sala"} cuando {self.speaker} comentó que estaba {self.short_constraint}.',
+                f'Así que {self.proposer} {"sí sabía" if aware else "no sabía"} de la situación de {self.speaker}.',
+            ]
+            q_comm = (f'Según la respuesta de {self.speaker}, ¿su compromiso con {self.proposal} es '
+                      'firme, tentativo o rechazando?')
+            tr_comm = [
+                f'{self.speaker} respondió: "{REPLIES[lang][style][0]}"',
+                f'Esa respuesta expresa un compromiso {REPLIES[lang][style][1]}.',
+            ]
+            if style == 'firm':
+                eff_ans, eff_lbl = 'tranquilo', 'unbothered'
+                tr_eff = [f'{self.speaker} confirmó con seguridad que liberó su agenda, así que se siente tranquilo.']
+            elif resp == 'push':
+                eff_ans, eff_lbl = 'presionado', 'pressured'
+                tr_eff = [f'{self.speaker} dio una señal no firme estando {self.short_constraint} y {self.proposer} insistió sin excusas, por lo que {self.speaker} se siente presionado.']
+            elif resp == 'support':
+                eff_ans, eff_lbl = 'apoyado', 'supported'
+                tr_eff = [f'{self.proposer} quitó toda presión y ofreció alternativa, así que {self.speaker} se siente apoyado.']
+            else:
+                eff_ans, eff_lbl = 'tranquilo', 'unbothered'
+                tr_eff = [f'{self.proposer} dejó el plan abierto sin insistir, así que {self.speaker} se siente tranquilo.']
+            q_eff = (f'Tras la reacción de {self.proposer}, ¿es más probable que {self.speaker} se sienta '
+                     'presionado, apoyado o tranquilo?')
+
+        out.append(Problem(self.id, 'faux_pas_aware', lang, self.story(), q_fp, tr_fp,
+                           t['yes'] if aware else t['no'], 'yes' if aware else 'no'))
+        out.append(Problem(self.id, 'commitment', lang, self.story(), q_comm, tr_comm,
+                           REPLIES[lang][style][1], style))
+        out.append(Problem(self.id, 'emotional_effect', lang, self.story(), q_eff, tr_eff,
+                           eff_ans, eff_lbl))
+        return out
+
+
+class PackStateWorld:
+    """Compacted Social Context Pack v2 world (train-length counterpart to longchat.pack_state)
+    so the model learns to read materialised per-person epistemic state and ledger updates."""
+
+    def __init__(self, rng, lang, world_id, force=None):
+        self.lang, self.id = lang, world_id
+        self.people = rng.sample(NAMES[lang], 4)
+        self.topic, self.state, values = rng.choice(TOPICS[lang])
+        self.old, self.new = rng.sample(values, 2)
+        draws = {'target_present': rng.random() < 0.5}
+        draws.update(force or {})
+        self.draws = draws
+        self.target_person = self.people[1]
+        present_initial = sorted(self.people[:3])
+        present_update = sorted([self.people[0], self.people[2]] + ([self.target_person] if draws['target_present'] else [self.people[3]]))
+        absent_update = sorted(set(self.people) - set(present_update))
+        old_clause = self.state.format(v=self.old)
+        new_clause = self.state.format(v=self.new)
+        self.seen = {}
+        for p in self.people:
+            if p in present_update:
+                self.seen[p] = self.new
+            elif p in present_initial:
+                self.seen[p] = self.old
+            else:
+                self.seen[p] = None
+        rows = []
+        for p in self.people:
+            seen_val = self.seen[p]
+            if seen_val is None:
+                rows.append(f'- {p}: never saw any message about {self.topic} (does not know that {self.topic} {new_clause}).')
+            elif seen_val == self.new:
+                rows.append(f'- {p}: last saw that {self.topic} {self.state.format(v=seen_val)} (up to date; knows that {self.topic} {new_clause}).')
+            else:
+                rows.append(f'- {p}: last saw that {self.topic} {self.state.format(v=seen_val)}; missed the later change '
+                            f'(does not know that {self.topic} {new_clause}; still believes {self.topic} {self.state.format(v=seen_val)}).')
+        ledger = [
+            f'[1] {self.topic} {old_clause} — present: {", ".join(present_initial)}.',
+            f'[4] UPDATE {self.topic} {new_clause} — present: {", ".join(present_update)}; absent: {", ".join(absent_update) or "nobody"}.',
+        ]
+        recent = [
+            f'[3] {present_update[0]}: {rng.choice(T["en"]["small"])}',
+            f'[4] {self.people[0]}: Change of plan, {self.topic} {new_clause} now.',
+        ]
+        header = (f'Social context pack v2. People: {", ".join(self.people)}. Domain: personal. '
+                  'Per-person state is computed from who was present for each message.')
+        self.text = '\n'.join([header, 'What each person has seen:'] + rows +
+                              ['Knowledge ledger:'] + ledger + ['Recent messages (verbatim):'] + recent)
+
+    def story(self):
+        return self.text
+
+    def problems(self):
+        out = []
+        new_clause = self.state.format(v=self.new)
+        p = self.target_person
+        knows = self.seen[p] == self.new
+        seen_val = self.seen[p]
+        q_know = f'Does {p} know that {self.topic} {new_clause}? Answer yes or no.'
+        tr_know = [
+            f'In the per-person state, {p} {"last saw the current update and is up to date" if knows else f"missed the later change and still believes {self.topic} {self.state.format(v=seen_val)}"}.',
+            f'So {p} {"knows" if knows else "does not know"} that {self.topic} {new_clause}.',
+        ]
+        out.append(Problem(self.id, 'pack_knowledge', 'en', self.story(), q_know, tr_know,
+                           'yes' if knows else 'no', 'yes' if knows else 'no'))
+        q_bel = f'What does {p} believe about {self.topic}? Answer with the value only.'
+        tr_bel = [
+            f'According to what {p} has seen, {p} last saw that {self.topic} {self.state.format(v=seen_val)}.',
+            f'Therefore {p} believes the value is {seen_val}.',
+        ]
+        out.append(Problem(self.id, 'pack_belief', 'en', self.story(), q_bel, tr_bel,
+                           seen_val, 'new' if knows else 'old'))
+        return out
+
+
+def behavioral_minimal_pairs(seed, lang, world_id):
+    """Twin behavioral worlds differing in disclosure presence and reply style/response so
+    faux-pas awareness, commitment reliability, and emotional impact flip cleanly."""
+    rng = random.Random(seed)
+    first = BehavioralWorld(random.Random(seed), lang, world_id,
+                            force={'reply_style': 'tentative', 'proposer_response': 'push'})
+    twin = BehavioralWorld(random.Random(seed), lang, world_id,
+                           force={'proposer_present_at_disclosure': not first.draws['proposer_present_at_disclosure'],
+                                  'reply_style': 'firm' if rng.random() < 0.5 else 'declining',
+                                  'proposer_response': 'support'})
+    left = {(p.kind, p.question): p for p in first.problems()}
+    right = {(p.kind, p.question): p for p in twin.problems()}
+    sensitive, invariant = [], []
+    for key in sorted(left.keys() & right.keys()):
+        a, b = left[key], right[key]
+        tag = hashlib.sha256(key[1].encode()).hexdigest()[:8]
+        a.meta = dict(a.meta, pair=f'{world_id}:{key[0]}:{tag}', side='a')
+        b.meta = dict(b.meta, pair=a.meta['pair'], side='b')
+        (sensitive if a.label != b.label else invariant).append((a, b))
+    return sensitive, invariant
+
+
+def pack_minimal_pairs(seed, world_id):
+    """Twin PackStateWorld problems differing only in whether the target person was present
+    for the update."""
+    first = PackStateWorld(random.Random(seed), 'en', world_id, force={'target_present': True})
+    twin = PackStateWorld(random.Random(seed), 'en', world_id, force={'target_present': False})
+    left = {(p.kind, p.question): p for p in first.problems()}
+    right = {(p.kind, p.question): p for p in twin.problems()}
+    sensitive = []
+    for key in sorted(left.keys() & right.keys()):
+        a, b = left[key], right[key]
+        tag = hashlib.sha256(key[1].encode()).hexdigest()[:8]
+        a.meta = dict(a.meta, pair=f'{world_id}:{key[0]}:{tag}', side='a')
+        b.meta = dict(b.meta, pair=a.meta['pair'], side='b')
+        if a.label != b.label:
+            sensitive.append((a, b))
+    return sensitive
+
+
+def generate_v3(count, seed=20261019, langs=('en', 'es'), pair_share=0.55, direct_share=0.45):
+    """g3 mix: counterfactual minimal pairs across ObjectWorld, BehavioralWorld, and
+    PackStateWorld plus balanced single problems across all four world families."""
+    rng = random.Random(seed)
+    out, world = [], 0
+    pair_quota = int(count * pair_share)
+    while len(out) < pair_quota and world < count * 50:
+        lang = langs[world % len(langs)]
+        subseed = rng.randrange(2**31)
+        if world % 4 == 0:
+            sensitive, invariant = behavioral_minimal_pairs(subseed, lang, f'bp{seed}-{world}')
+        elif world % 4 == 1:
+            sensitive, invariant = pack_minimal_pairs(subseed, f'pp{seed}-{world}'), []
+        else:
+            sensitive, invariant = minimal_pairs(subseed, lang, f'p{seed}-{world}')
+        world += 1
+        rng.shuffle(sensitive); rng.shuffle(invariant)
+        for a, b in sensitive[:2] + invariant[:1]:
+            if len(out) + 2 > pair_quota:
+                break
+            out += [a, b]
+    out += generate(count - len(out), seed=seed + 1, langs=langs, include_behavioral=True)
+    for problem in out:
+        problem.mode = 'direct' if rng.random() < direct_share else 'think'
+    return out
+
+
+def generate(count, seed=20261017, langs=('en', 'es'), per_world=4, slack=2, include_behavioral=False):
     """`count` problems from fresh worlds; within each (kind, language) every label stays
     within `slack` of the rarest one, so a constant answer cannot exceed chance by much."""
     rng = random.Random(seed)
     counts, out, world = {}, [], 0
     while len(out) < count and world < count * 200:
         lang = langs[world % len(langs)]
-        cls = ConversationWorld if world % 3 == 0 else ObjectWorld
+        if include_behavioral:
+            mod = world % 5
+            cls = ConversationWorld if mod == 0 else (BehavioralWorld if mod == 1 else (PackStateWorld if mod == 2 else ObjectWorld))
+        else:
+            cls = ConversationWorld if world % 3 == 0 else ObjectWorld
         problems = cls(random.Random(rng.random()), lang, f'w{seed}-{world}').problems()
         world += 1
         rng.shuffle(problems)

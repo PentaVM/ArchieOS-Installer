@@ -1,6 +1,6 @@
 {
   "scope": "pure Python context-manager lifecycle fixture; zero native processes/GPU calls",
-  "source_sha256": "79dee516e1bdf5bb3048af77587c89de022c42d0e8cf8b0b0aab675f4ab05446",
+  "source_sha256": "988482170a9ed76ad9883c4d81ecac00d6b25de7300e5fdccef69ec28b30ffa9",
   "cases": [
     {
       "case": "healthy_exit",
@@ -21,10 +21,10 @@
     {
       "case": "health_timeout",
       "error": "llama-server did not become healthy",
-      "terminate_calls": 0,
+      "terminate_calls": 1,
       "kill_calls": 0,
-      "log_closed": false,
-      "child_still_live_in_fixture": true
+      "log_closed": true,
+      "child_still_live_in_fixture": false
     }
   ],
   "live_worker_leak_incidence_measured": false
