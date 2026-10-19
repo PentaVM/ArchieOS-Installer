@@ -1,5 +1,5 @@
 """Packaging proofs; tiny files exercise integrity, never model quality or hardware."""
-import hashlib, importlib.util, json, pathlib, tempfile, unittest
+import hashlib, importlib.util, json, os, pathlib, subprocess, tempfile, unittest
 
 ENTRY = pathlib.Path(__file__).resolve().parents[2] / 'distro/wsl-operator/rootfs/usr/lib/archie/offline-session.py'
 
@@ -51,5 +51,21 @@ class OfflineBundle(unittest.TestCase):
         except OSError: self.skipTest('symlinks unavailable')
         with self.assertRaisesRegex(ValueError, 'path'):
             self.module.verify_bundle(self.root)
+
+    def run_oobe(self, runuser_script):
+        if not pathlib.Path('/bin/bash').exists(): self.skipTest('Linux shell integration')
+        bindir = self.root / 'bin'; bindir.mkdir()
+        for name, script in [('install', 'exit 0'), ('pacman-key', 'exit 0'), ('runuser', runuser_script)]:
+            path = bindir / name; path.write_text('#!/bin/sh\n' + script + '\n'); path.chmod(0o755)
+        oobe = ENTRY.parent.parent / 'wsl/archie-offline-oobe'
+        return subprocess.run(['/bin/bash', str(oobe)], env=dict(os.environ, PATH=str(bindir)+':/usr/bin:/bin'), capture_output=True, text=True)
+
+    def test_oobe_preserves_install_when_desktop_cannot_start(self):
+        result = self.run_oobe('case "$*" in *--check*) exit 0;; esac\necho "port occupied" >&2\nexit 7')
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_oobe_still_rejects_invalid_payload(self):
+        result = self.run_oobe('exit 9')
+        self.assertNotEqual(result.returncode, 0)
 
 if __name__ == '__main__': unittest.main()

@@ -4,4 +4,9 @@ set -euo pipefail
 install -d -o archie -g archie -m 0700 /home/archie/.local/state
 # Generate a machine-local package-manager key, never clone the builder's key.
 pacman-key --init
-exec runuser -u archie -- /usr/bin/archie-offline --background
+runuser -u archie -- /usr/bin/archie-offline --check
+# An unavailable desktop (for example another distro holding a port) must not
+# leave a valid installation permanently stuck in WSL's OOBE retry state.
+if ! runuser -u archie -- /usr/bin/archie-offline --background; then
+  printf '%s\n' 'ArchieOS instalado. No se pudo abrir el escritorio; revisa el diagnóstico anterior y vuelve a abrir ArchieOS desde Inicio.' >&2
+fi
