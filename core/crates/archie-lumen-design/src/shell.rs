@@ -57,6 +57,8 @@ fn seeded(index: u32) -> f32 {
     x ^= x >> 16;
     x as f32 / u32::MAX as f32
 }
+// Keep the delivered scalar geometry contract stable for the C ABI and presets.
+#[allow(clippy::too_many_arguments)]
 pub fn build(
     kind: u32,
     nodes: &[ShellNode],
