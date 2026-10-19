@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Archie Mac · Tabla de movimiento</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<style>
+
+body{margin:0}
+.root,.root *{box-sizing:border-box}
+.root{--disp:'Space Grotesk','Inter',system-ui,sans-serif;--desktop:#07080c;--bar:rgba(16,17,23,.62);--bar-blur:blur(30px) saturate(1.4);--dock:rgba(20,21,28,.55);--dock-blur:blur(36px);--win:rgba(18,19,26,.78);--win-blur:blur(40px);--side:rgba(26,27,36,.66);--panel:rgba(22,23,31,.86);--panel-blur:blur(44px);--raised:rgba(255,255,255,.05);--hover:rgba(255,255,255,.08);--pressed:rgba(255,255,255,.11);--hair:rgba(255,255,255,.09);--inner:rgba(255,255,255,.06);--t1:#f2f1ee;--t2:#b9b8c4;--t3:#8d8c9c;--tdis:#5e5d6b;--acc:#6fc8f5;--arch:#f0bb78;--ok:#47d18b;--warn:#f0b429;--bad:#f2626b;--info:#6fe3f5;--unk:#8d8c9c;--sel:rgba(111,200,245,.16);font-family:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;font-size:13px;line-height:18px;color:var(--t1);font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+.root.opaque{--bar:#101117;--bar-blur:none;--dock:#14151c;--dock-blur:none;--win:#12131a;--win-blur:none;--side:#1a1b24;--panel:#16171f;--panel-blur:none;--raised:#22232a;--hover:#2a2b32;--pressed:#31323a;--hair:#2c2d36;--inner:#25262e;--sel:#1f3a4a}
+.root :where(button){font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:default;text-align:inherit}
+.root button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.ico{flex:none;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:var(--sw,1.5)}
+.ico .dot{stroke-width:calc(var(--sw,1.5) * 2.2)}
+.i12{width:12px;height:12px;--sw:3}.i14{width:14px;height:14px;--sw:2.6}.i16{width:16px;height:16px;--sw:2.25}.i18{width:18px;height:18px;--sw:2}.i20{width:20px;height:20px;--sw:1.8}.i28{width:28px;height:28px;--sw:1.4}
+.bg{position:absolute;left:0;top:0;right:0;bottom:0;background:radial-gradient(900px 620px at 52% 46%,rgba(86,120,140,.20),transparent 70%),radial-gradient(700px 500px at 18% 78%,rgba(60,70,110,.14),transparent 70%),radial-gradient(600px 420px at 86% 22%,rgba(90,110,100,.10),transparent 70%),#07080c}
+.sph{position:absolute;left:410px;top:14px;width:1100px;height:1052px;background:url(/_blob/c3b3bf3e53c322d2a8d8cce317287da4) center/100% 100% no-repeat;-webkit-mask-image:radial-gradient(closest-side,#000 58%,transparent 100%);mask-image:radial-gradient(closest-side,#000 58%,transparent 100%);pointer-events:none}
+.bar{position:absolute;left:0;right:0;top:0;height:32px;display:flex;align-items:center;justify-content:space-between;padding:0 12px 0 14px;background:var(--bar);backdrop-filter:var(--bar-blur);-webkit-backdrop-filter:var(--bar-blur);border-bottom:1px solid var(--inner)}
+.bl,.br{display:flex;align-items:center}.bl{gap:4px}.br{gap:6px}
+.brand{display:inline-flex;align-items:center;gap:8px;font-weight:600;font-size:13.5px;margin-right:14px}
+.app{font-weight:600;margin-right:12px}
+.mi{padding:3px 9px;border-radius:6px;color:var(--t2);font-size:13px}
+.ibtn{display:inline-flex;align-items:center;justify-content:center;width:28px;height:26px;border-radius:7px;color:var(--t2)}
+.ibtn.pr{background:var(--pressed);color:var(--t1)}
+.ibtn.cnt{width:auto;padding:0 8px;gap:6px;font-weight:600;font-size:12.5px;color:var(--t1)}
+.sep{width:1px;height:14px;background:var(--hair);margin:0 6px}
+.clock{margin-left:8px;font-size:13px;font-weight:500;color:var(--t1);white-space:nowrap}
+.chip{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 9px 0 7px;border-radius:999px;font-size:11.5px;line-height:16px;font-weight:500;color:var(--t2);background:var(--raised);border:1px solid var(--hair);white-space:nowrap}
+.chip.sm{height:20px;font-size:11px;padding:0 8px 0 6px;gap:5px}
+.chip.pr{background:var(--pressed);color:var(--t1)}
+.chip .sub{color:var(--t3);font-weight:400}
+.chip.ok .ico{color:var(--ok)}.chip.inf .ico{color:var(--info)}.chip.neu .ico{color:var(--t3)}
+.chip.unk{border-style:dashed;border-color:rgba(141,140,156,.6);background:transparent}.chip.unk .ico{color:var(--unk)}
+.chip.warn{background:rgba(240,180,41,.12);border-color:rgba(240,180,41,.36);color:var(--t1)}.chip.warn .ico{color:var(--warn)}
+.chip.bad{background:rgba(242,98,107,.13);border-color:rgba(242,98,107,.4);color:var(--t1)}.chip.bad .ico{color:var(--bad)}
+.chip.arch{background:rgba(240,187,120,.12);border-color:rgba(240,187,120,.34);color:var(--arch)}
+.chip.src{font-family:var(--disp);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:600;color:var(--t2)}
+.chip.src.dsg{border-style:dashed;border-color:rgba(240,180,41,.6);color:var(--t1)}.chip.src.dsg .ico{color:var(--warn)}
+.chip.kd{min-width:58px;justify-content:center;font-family:var(--disp);font-size:10px;letter-spacing:.1em;text-transform:uppercase;font-weight:600;color:var(--t3)}
+.dm{display:inline-block;flex:none;width:7px;height:7px}.dm.p{border-radius:50%;background:var(--info)}.dm.w{border-radius:2px;transform:rotate(45deg);background:var(--warn)}
+.notice{position:absolute;left:14px;top:42px;display:inline-flex;align-items:center;gap:8px;height:26px;padding:0 12px 0 9px;border-radius:999px;background:var(--bar);backdrop-filter:var(--bar-blur);-webkit-backdrop-filter:var(--bar-blur);border:1px dashed rgba(240,180,41,.6);font-family:var(--disp);font-size:10.5px;font-weight:600;letter-spacing:.1em;color:var(--t1);text-transform:uppercase}
+.notice .ico{color:var(--warn)}
+.ovl{font-family:var(--disp);font-size:10px;line-height:14px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--t3)}
+.panel{position:relative;border-radius:16px;background:var(--panel);backdrop-filter:var(--panel-blur);-webkit-backdrop-filter:var(--panel-blur);border:1px solid var(--hair);box-shadow:inset 0 1px 0 var(--inner),0 24px 70px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.3);padding:20px}
+.abs{position:absolute}
+.ptitle{font-family:var(--disp);font-size:22px;line-height:28px;font-weight:600;letter-spacing:-.015em}
+.shd{display:flex;align-items:center;gap:10px;margin:18px 0 10px}.shd .chip{margin-left:auto}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 4px}
+.hr{height:1px;background:var(--hair);margin:16px 0 0}
+.cd{background:var(--raised);border:1px solid var(--hair);border-radius:10px;padding:11px 14px;display:flex;flex-direction:column;gap:7px;margin-bottom:8px}
+.cd .t{display:flex;align-items:center;gap:8px;font-weight:500;font-size:13px}.cd .t .chip{margin-left:auto}
+.cd .l2{font-size:12px;color:var(--t2)}.cd .l3{font-size:11px;color:var(--t3);display:flex;align-items:center;gap:6px}
+.prog{height:4px;border-radius:2px;background:rgba(255,255,255,.1);overflow:hidden}.prog i{display:block;height:100%;border-radius:2px;background:var(--acc)}.prog.k i{background:var(--ok)}
+.err{font-size:12px;color:var(--bad);background:rgba(242,98,107,.1);border:1px solid rgba(242,98,107,.3);border-radius:8px;padding:8px 10px;display:flex;gap:8px;align-items:flex-start;line-height:17px}
+.note2{display:flex;align-items:flex-start;gap:8px;margin-top:2px;padding:9px 12px;border-radius:8px;border:1px dashed var(--hair);font-size:11.5px;line-height:16px;color:var(--t3)}.note2 .ico{margin-top:1px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:28px;padding:0 12px;border-radius:8px;font-size:12px;font-weight:500;color:var(--t1);background:var(--hover);border:1px solid var(--hair)}
+.btn.fc{outline:2px solid var(--acc);outline-offset:2px}.btn.ghost{background:transparent}
+.btn.dis{background:transparent;color:var(--tdis);border-style:dashed}
+.why{font-size:11px;color:var(--warn)}
+.rw{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.kbd{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;margin-right:4px;border-radius:5px;font-size:11px;font-weight:500;color:var(--t2);background:var(--raised);border:1px solid var(--hair)}
+.fld{display:flex;align-items:center;gap:10px;height:40px;padding:0 14px;border-radius:10px;background:var(--raised);border:1px solid var(--hair);font-size:14px;color:var(--t1)}
+.fld.dis{border-style:dashed;color:var(--tdis)}.fld .ico{color:var(--t3)}.fld .ph{color:var(--t3)}
+.void{display:flex;flex-direction:column;align-items:center;text-align:center;padding:30px 28px;border:1px dashed rgba(141,140,156,.45);border-radius:12px;background:rgba(255,255,255,.02);color:var(--t3)}
+.void .ico{color:var(--t3);margin-bottom:10px}
+.void .vt{font-family:var(--disp);font-size:16px;line-height:22px;font-weight:600;letter-spacing:-.01em;color:var(--t1)}
+.void .vp{max-width:380px;margin-top:5px;font-size:12px;line-height:17px;color:var(--t2)}
+.void.sm{padding:22px 24px}
+.dim{opacity:.62}
+.mono{font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:11.5px;color:var(--t1)}
+.dock{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:flex;gap:14px;padding:10px 12px 16px;border-radius:22px;background:var(--dock);backdrop-filter:var(--dock-blur);-webkit-backdrop-filter:var(--dock-blur);border:1px solid var(--hair);box-shadow:inset 0 1px 0 var(--inner),0 8px 24px rgba(0,0,0,.35)}
+.dk{position:relative;width:56px;height:56px;border-radius:14px;display:flex;align-items:center;justify-content:center;color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14),0 1px 2px rgba(0,0,0,.35)}
+.dk.orb{background:linear-gradient(165deg,rgba(255,255,255,.10),rgba(0,0,0,.14)),#1b8fa6}.dk.vault{background:linear-gradient(165deg,rgba(255,255,255,.10),rgba(0,0,0,.14)),#3b7fd6}.dk.forge{background:linear-gradient(165deg,rgba(255,255,255,.10),rgba(0,0,0,.14)),#b87a0b}.dk.sentry{background:linear-gradient(165deg,rgba(255,255,255,.10),rgba(0,0,0,.14)),#1f9a62}.dk.stage{background:linear-gradient(165deg,rgba(255,255,255,.10),rgba(0,0,0,.14)),#8a5fd6}.dk.set{background:linear-gradient(165deg,rgba(255,255,255,.10),rgba(0,0,0,.14)),#6b7686}
+.dk.act{outline:1.5px solid var(--acc);outline-offset:3px}
+.dk .run{position:absolute;left:50%;bottom:-11px;width:4px;height:4px;margin-left:-2px;border-radius:50%;background:var(--t1)}
+/* ventana */
+.win{position:relative;display:flex;flex-direction:column;border-radius:14px;background:var(--win);backdrop-filter:var(--win-blur);-webkit-backdrop-filter:var(--win-blur);border:1px solid var(--hair);box-shadow:inset 0 1px 0 var(--inner),0 18px 50px rgba(0,0,0,.45),0 2px 6px rgba(0,0,0,.25);overflow:hidden}
+.tbar{height:52px;flex:none;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 16px;border-bottom:1px solid var(--hair)}
+.tls{display:flex;gap:8px;align-items:center}.tl{width:12px;height:12px;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(0,0,0,.22)}
+.tl.c{background:#d9605a}.tl.m{background:#d9a441}.tl.z{background:#4fb67b}.tl.off{background:rgba(255,255,255,.17);box-shadow:none}
+.wtitle{font-family:var(--disp);font-size:17px;line-height:22px;font-weight:600;letter-spacing:-.01em;color:var(--t1)}
+.tbar .tr{justify-self:end;display:flex;gap:8px;align-items:center}
+.wbody{flex:1;display:flex;min-height:0}
+.side{width:200px;flex:none;background:var(--side);border-right:1px solid var(--hair);padding:14px 10px;display:flex;flex-direction:column;gap:2px}
+.side .ovl{padding:0 10px 8px}
+.srow{display:flex;align-items:center;gap:10px;height:30px;padding:0 10px;border-radius:8px;color:var(--t2);font-size:13px}
+.srow .ico{color:var(--t3)}.srow.on{background:var(--sel);color:var(--t1)}.srow.on .ico{color:var(--acc)}.srow.fc{outline:2px solid var(--acc);outline-offset:-2px}
+.main{flex:1;min-width:0;padding:18px 20px;display:flex;flex-direction:column;gap:12px}
+/* filas genéricas */
+.lrow{display:grid;align-items:center;column-gap:12px;min-height:44px;padding:6px 12px;border-radius:8px}
+.lrow.on{background:var(--sel)}.lrow.fc{background:var(--sel);outline:2px solid var(--acc);outline-offset:-2px}
+.lrow+.lrow{margin-top:2px}
+.lbl{display:flex;flex-direction:column;min-width:0}.lbl b{font-size:13px;font-weight:500}.lbl span{font-size:11px;color:var(--t3)}
+.gl{width:32px;height:32px;border-radius:8px;background:rgba(255,255,255,.05);border:1px solid var(--hair);display:flex;align-items:center;justify-content:center;color:var(--t2);flex:none}
+.tbl{display:flex;flex-direction:column}
+.th{display:grid;column-gap:12px;padding:0 12px 6px;font-size:11px;font-weight:500;color:var(--t3);border-bottom:1px solid var(--hair);margin-bottom:4px}
+/* tarjeta de lámina */
+.sheetcard{display:flex;flex-direction:column;gap:12px}
+.sheetcard .sh{display:flex;align-items:center;gap:10px}
+.sheetcard .sh .n{font-family:var(--disp);font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--t2)}
+.sheetcard .sh .chip{margin-left:auto}
+.sheetcard .stage{position:relative;padding:22px;border-radius:16px;background:#0b0c11;border:1px solid var(--hair);background-image:radial-gradient(500px 300px at 50% 0%,rgba(86,120,140,.10),transparent 70%)}
+.pg{background:#0a0b10;color:var(--t1);padding:56px 60px 64px;min-height:100%}
+.pg h1{font-family:var(--disp);font-size:40px;line-height:46px;font-weight:600;letter-spacing:-.02em;margin:0}
+.pg .lede{margin:10px 0 0;max-width:980px;color:var(--t2);font-size:15px;line-height:22px}
+.sgrid{display:grid;gap:36px 32px;margin-top:36px;align-items:start}
+
+.foothint{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--t3)}
+.pf{display:flex;align-items:center;gap:18px;height:38px;margin:12px -20px -20px;padding:0 20px;border-top:1px solid var(--hair);font-size:11.5px;color:var(--t3)}
+.pf .sp{flex:1}
+.tile{position:relative;width:168px;padding:14px 12px 12px;border-radius:12px;background:var(--raised);border:1px solid var(--hair);display:flex;flex-direction:column;gap:8px}
+.tile.on{background:var(--sel);border-color:rgba(111,200,245,.45)}
+.tile.fc{background:var(--sel);outline:2px solid var(--acc);outline-offset:2px}
+.tile .dk{width:44px;height:44px;border-radius:11px}
+.tile .tt{font-size:13px;font-weight:500;line-height:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .ta{font-size:11px;color:var(--t3)}
+.tile .td{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--t2)}
+.tile .dk.unkapp{background:transparent;border:1px dashed rgba(141,140,156,.6);box-shadow:none;color:var(--t3)}
+.tiles{display:flex;flex-wrap:wrap;gap:12px}
+.tg{margin:16px 0 8px;display:flex;align-items:center;gap:8px}
+.ni{display:grid;grid-template-columns:32px minmax(0,1fr) auto;column-gap:12px;align-items:start;padding:10px 10px;border-radius:10px;border:1px solid transparent}
+.ni+.ni{margin-top:4px}
+.ni.fc{background:var(--sel);outline:2px solid var(--acc);outline-offset:-2px}
+.ni b{display:block;font-size:13px;font-weight:500;line-height:17px}
+.ni .d{font-size:12px;color:var(--t2);margin-top:2px;line-height:16px}
+.ni .m{display:flex;align-items:center;gap:8px;margin-top:6px;font-size:11px;color:var(--t3)}
+.ni time{font-size:11px;color:var(--t3);white-space:nowrap}
+.ni .prog{margin-top:8px}
+.toast{width:380px;padding:12px 14px;border-radius:14px;background:var(--panel);backdrop-filter:var(--panel-blur);-webkit-backdrop-filter:var(--panel-blur);border:1px solid var(--hair);box-shadow:inset 0 1px 0 var(--inner),0 14px 40px rgba(0,0,0,.45),0 2px 6px rgba(0,0,0,.25);display:grid;grid-template-columns:32px minmax(0,1fr);column-gap:12px}
+.toast b{display:block;font-size:13px;font-weight:500}
+.toast .d{font-size:12px;color:var(--t2);margin-top:2px;line-height:16px}
+.toast .m{display:flex;align-items:center;gap:8px;margin-top:6px;font-size:11px;color:var(--t3)}
+.stackedge{height:8px;margin:-1px 14px 0;border-radius:0 0 12px 12px;background:var(--panel);border:1px solid var(--hair);border-top:0;opacity:.8}
+.stackedge.s2{margin:-1px 28px 0;opacity:.55}
+.pipe{display:flex;align-items:stretch;gap:0}
+.pn{flex:1;min-width:0;padding:10px 12px;border:1px dashed rgba(141,140,156,.55);border-radius:10px;display:flex;flex-direction:column;gap:3px}
+.pn b{font-size:12.5px;font-weight:500;color:var(--t2)}.pn span{font-size:11px;color:var(--t3)}
+.pj{width:22px;flex:none;display:flex;align-items:center;justify-content:center;color:var(--t3)}
+.red{display:flex;flex-direction:column;gap:5px;margin-top:6px}
+.red i{display:block;height:6px;border-radius:3px;background:repeating-linear-gradient(90deg,rgba(185,184,196,.30) 0 6px,rgba(185,184,196,.14) 6px 8px)}
+.dd{width:300px;padding:8px;border-radius:14px}
+.dd .ovl{padding:8px 10px 6px}
+.dr{display:flex;align-items:center;gap:10px;height:42px;padding:0 10px;border-radius:9px}
+.dr.on{background:var(--sel)}.dr.fc{background:var(--sel);outline:2px solid var(--acc);outline-offset:-2px}
+.dr .n{font-size:13px;font-weight:500}.dr .s{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--t3)}
+.dr.dis .n{color:var(--tdis)}
+.hole{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;border:1.5px dashed rgba(141,140,156,.55);border-radius:50%;text-align:center;color:var(--t3)}
+.hole b{font-family:var(--disp);font-size:11px;letter-spacing:.12em;text-transform:uppercase;font-weight:600;color:var(--t2)}
+.hole span{font-size:11px;max-width:240px;line-height:15px}
+.sr{display:grid;grid-template-columns:32px minmax(0,1fr) auto;column-gap:12px;align-items:center;min-height:50px;padding:6px 12px;border-radius:9px;border:1px solid transparent}
+.sr.on{background:var(--sel);border-color:rgba(111,200,245,.35)}.sr.fc{background:var(--sel);outline:2px solid var(--acc);outline-offset:-2px}
+.sr .nm b{display:block;font-size:13.5px;font-weight:500;line-height:18px}.sr .nm span{display:block;font-size:11.5px;color:var(--t3)}
+.sr.dis .nm b{color:var(--tdis)}.sr.dis .gl{color:var(--tdis)}
+.sr .rt{display:flex;align-items:center;gap:8px}
+.sgrp{padding:12px 12px 4px}
+.lock{display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;padding:34px 36px 30px}
+.lock .clk{font-family:var(--disp);font-size:68px;line-height:72px;font-weight:500;letter-spacing:-.03em}
+.lock .dte{font-size:14px;color:var(--t2)}
+.chk{display:flex;align-items:center;gap:10px;height:34px;font-size:13px;color:var(--t2);width:100%;border-bottom:1px solid var(--hair)}
+.chk:last-child{border-bottom:0}.chk .st{margin-left:auto}
+
+.panel.sp .pf{margin:12px -16px 0}
+
+.tw{width:100%;border-collapse:separate;border-spacing:0;font-size:13px;line-height:18px}
+.tw th{position:static;text-align:left;font-family:var(--disp);font-size:10px;letter-spacing:.12em;text-transform:uppercase;font-weight:600;color:var(--t3);padding:10px 12px;border-bottom:1px solid var(--hair);white-space:nowrap}
+.tw td{padding:12px 12px;border-bottom:1px solid var(--hair);vertical-align:top;color:var(--t2)}
+.tw td b{color:var(--t1);font-weight:500}
+.tw td .mono{color:var(--t1)}
+.tw tr.grp td{padding:18px 12px 8px;border-bottom:1px solid var(--hair);font-family:var(--disp);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600;color:var(--t2)}
+.pcards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-top:28px}
+.pc{padding:16px 18px;border-radius:12px;background:var(--raised);border:1px solid var(--hair);display:flex;flex-direction:column;gap:6px}
+.pc b{font-family:var(--disp);font-size:16px;font-weight:600}
+.pc span{font-size:12.5px;line-height:18px;color:var(--t2)}
+.rules{margin-top:20px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.code{margin-top:24px;padding:18px 20px;border-radius:12px;background:#0d0e14;border:1px solid var(--hair);font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:12px;line-height:19px;color:var(--t2);white-space:pre}
+.dl{display:flex;flex-direction:column;margin-top:28px}
+.dr2{display:grid;grid-template-columns:44px minmax(0,1.1fr) minmax(0,2.2fr) minmax(0,1.5fr);column-gap:24px;padding:18px 0;border-bottom:1px solid var(--hair);align-items:start}
+.dr2 .num{font-family:var(--disp);font-size:20px;font-weight:600;color:var(--t3)}
+.dr2 h3{margin:0;font-size:15px;line-height:20px;font-weight:600;color:var(--t1)}
+.dr2 .ctx{font-size:12px;line-height:17px;color:var(--t3);margin-top:4px}
+.dr2 ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
+.dr2 li{font-size:13px;line-height:18px;color:var(--t2);padding-left:18px;position:relative}
+.dr2 li::before{content:attr(data-k);position:absolute;left:0;color:var(--t3);font-family:var(--disp);font-size:11px;font-weight:600}
+.dr2 .rec{font-size:13px;line-height:18px;color:var(--t1);padding:10px 12px;border-radius:10px;background:var(--sel);border:1px solid rgba(111,200,245,.35)}
+.dr2 .rec span{display:block;font-family:var(--disp);font-size:10px;letter-spacing:.12em;text-transform:uppercase;font-weight:600;color:var(--acc);margin-bottom:3px}
+
+</style>
+</helmet>
+<div class="root pg">
+<div class="ovl" style="font-size:11px;color:var(--t2)">Archie Mac · movimiento</div>
+<h1 style="margin-top:8px">Tabla de movimiento</h1>
+<p class="lede">Una animación explica una causa y un estado; nunca se dispara por temporizador ni sustituye al aviso de estado. Solo se animan <b style="color:var(--t1);font-weight:500">transform</b> y <b style="color:var(--t1);font-weight:500">opacity</b>: ni blur ni sombras animadas, porque el shell no puede desenfocar.</p>
+<div class="pcards">
+ <div class="pc"><b>Full</b><span>Todas las transiciones con su desplazamiento y escala. Para equipos con margen de sobra.</span></div>
+ <div class="pc"><b>Balanced</b><span>Mismas transiciones, más cortas y con menos recorrido. Recomendado por omisión.</span></div>
+ <div class="pc"><b>Quiet</b><span>Solo opacidad, 120 ms como máximo. Sin desplazamiento ni escala.</span></div>
+ <div class="pc"><b>Movimiento reducido</b><span>Cero movimiento espacial: el estado cambia al instante. El glifo y la palabra de estado quedan intactos.</span></div>
+</div>
+<div class="rules">
+ <div class="cd" style="margin:0"><span class="ovl">Curvas</span><div class="l2"><span class="mono">Salida</span> cubic-bezier(.16, 1, .3, 1) · <span class="mono">Entrada</span> cubic-bezier(.4, 0, 1, 1) · <span class="mono">Estándar</span> cubic-bezier(.4, 0, .2, 1) · <span class="mono">Lineal</span> solo para valores continuos.</div></div>
+ <div class="cd" style="margin:0"><span class="ovl">Quién decide el perfil</span><div class="l2">El ajuste de la persona; si no hay ajuste, la preferencia del sistema «reducir movimiento» fuerza Movimiento reducido.</div></div>
+ <div class="cd" style="margin:0"><span class="ovl">Honestidad</span><div class="l2">Un pulso de éxito solo ocurre tras una confirmación real. Los eventos sin disparo real hoy van marcados «Diseño».</div></div>
+</div>
+<div style="margin-top:32px"><table class="tw"><thead><tr><th>Evento</th><th>Qué se mueve</th><th>Full</th><th>Balanced</th><th>Quiet</th><th>Movimiento reducido</th><th>Curva</th><th>Disparo</th></tr></thead><tbody><tr class="grp"><td colspan="8">Ventanas</td></tr><tr><td><b>Abrir ventana</b></td><td>transform: scale(.96→1) · opacity 0→1, desde el icono del dock</td><td>220 ms</td><td>160 ms</td><td>100 ms (opacity)</td><td>instantánea</td><td><span class="mono">Salida</span></td><td><span class="chip neu sm"><svg class="ico i12" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16z"/><path class="dot" d="M12 12h.01"/></svg>Real</span></td></tr><tr><td><b>Cerrar ventana</b></td><td>transform: scale(1→.97) · opacity 1→0</td><td>160 ms</td><td>120 ms</td><td>100 ms (opacity)</td><td>instantánea</td><td><span class="mono">Entrada</span></td><td><span class="chip neu sm"><svg class="ico i12" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16z"/><path class="dot" d="M12 12h.01"/></svg>Real</span></td></tr><tr><td><b>Minimizar ventana</b></td><td>transform: translate + scale hacia el icono del dock · opacity</td><td>280 ms</td><td>200 ms</td><td>100 ms (opacity)</td><td>desaparece al instante; el punto del dock aparece ya</td><td><span class="mono">Estándar</span></td><td><span class="chip neu sm"><svg class="ico i12" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16z"/><path class="dot" d="M12 12h.01"/></svg>Real</span></td></tr><tr><td><b>Cambio de escritorio</b></td><td>transform: translateX de las ventanas (±40 px) · opacity</td><td>320 ms</td><td>240 ms</td><td>120 ms (fundido)</td><td>cambio inmediato; el indicador del escritorio se actualiza ya</td><td><span class="mono">Estándar</span></td><td><span class="chip neu sm"><svg class="ico i12" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16z"/><path class="dot" d="M12 12h.01"/></svg>Real</span></td></tr><tr><td><b>Cambio Orbe ↔ espacio de trabajo</b></td><td>solo las ventanas: saliente opacity→0 + scale(.98); entrante opacity 0→1 + scale(1.02→1). El Orbe no se anima ni se toca</td><td>320 ms</td><td>240 ms</td><td>120 ms (fundido)</td><td>cambio inmediato; el chip del espacio muestra el nuevo estado</td><td><span class="mono">Estándar</span></td><td><span class="chip neu sm"><svg class="ico i12" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16z"/><path class="dot" d="M12 12h.01"/></svg>Real</span></td></tr><tr class="grp"><td colspan="8">Navegación y selección</td></tr><tr><td><b>Paleta / búsqueda (abrir y cerrar)</b></td><td>transform: translateY(-8 px→0) · opacity</td><td>180 ms · 120 ms al cerrar</td><td>140 ms · 100 ms</td><td>100 ms (opacity)</td><td>instantánea</td><td><span class="mono">Salida / Entrada</span></td><td><span class="chip neu sm"><svg class="ico i12" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16z"/><path class="dot" d="M12 12h.01"/></svg>Real</span></td></tr><tr><td><b>Entrar a una carpeta</b></td><td>el contenido: translateX(12 px→0) · opacity; las migas cambian sin animación</td><td>200 ms</td><td>150 ms</td><td>100 ms (opacity)</td><td>instantánea; migas actualizadas ya</td><td><span class="mono">Salida</span></td><td><span class="chip neu sm"><svg class="ico i12" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16z"/><path class="dot" d="M12 12h.01"/></svg>Real</span></td></tr><tr><td><b>Selección de fila o ficha</b></td><td>una capa de selección: opacity 0→1. Nunca se desplaza nada</td><td>100 ms</td><td>100 ms</td><td>100 ms</td><td>instantánea (el foco visible sigue igual)</td><td><span class="mono">Estándar</span></td><td><span class="chip neu sm"><svg class="ico i12" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16z"/><path class="dot" d="M12 12h.01"/></svg>Real</span></td></tr><tr><td><b>Conmutador lista / cuadrícula (ya existe)</b></td><td>crossfade del contenido: opacity; el segmento activo mueve su fondo con translateX</td><td>200 ms</td><td>150 ms</td><td>100 ms (opacity)</td><td>instantáneo</td><td><span class="mono">Estándar</span></td><td><span class="chip neu sm"><svg class="ico i12" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16z"/><path class="dot" d="M12 12h.01"/></svg>Real</span></td></tr><tr><td><b>Escalado del dock (ya existe)</b></td><td>transform: scale(1→1.12) al pasar el cursor; el punto de «abierta» no se mueve</td><td>160 ms</td><td>120 ms</td><td>sin escalado: solo opacity del resalte, 100 ms</td><td>sin escalado; el resalte aparece ya</td><td><span class="mono">Salida</span></td><td><span class="chip neu sm"><svg class="ico i12" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16z"/><path class="dot" d="M12 12h.01"/></svg>Real</span></td></tr><tr class="grp"><td colspan="8">Avisos y estado</td></tr><tr><td><b>Notificación aparece</b></td><td>transform: translateY(-12 px→0) · opacity</td><td>240 ms</td><td>180 ms</td><td>100 ms (opacity)</td><td>aparece ya; la palabra y el icono de estado intactos</td><td><span class="mono">Salida</span></td><td><span class="chip neu sm"><svg class="ico i12" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16z"/><path class="dot" d="M12 12h.01"/></svg>Real</span></td></tr><tr><td><b>Notificación se agrupa</b></td><td>las tarjetas colapsan: translateY + scale(.98) hacia la pila; el contador cambia sin animación</td><td>240 ms</td><td>180 ms</td><td>100 ms (opacity)</td><td>la pila se muestra ya con su contador</td><td><span class="mono">Estándar</span></td><td><span class="chip neu sm"><svg class="ico i12" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16z"/><path class="dot" d="M12 12h.01"/></svg>Real</span></td></tr><tr><td><b>Notificación se retira</b></td><td>transform: translateX(0→24 px) · opacity 1→0</td><td>200 ms</td><td>150 ms</td><td>100 ms (opacity)</td><td>desaparece ya</td><td><span class="mono">Entrada</span></td><td><span class="chip neu sm"><svg class="ico i12" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16z"/><path class="dot" d="M12 12h.01"/></svg>Real</span></td></tr><tr><td><b>Panel de control / Actividad (abrir y cerrar)</b></td><td>transform: translateY(-8 px→0) · opacity</td><td>200 ms</td><td>150 ms</td><td>100 ms (opacity)</td><td>instantáneo</td><td><span class="mono">Salida / Entrada</span></td><td><span class="chip neu sm"><svg class="ico i12" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16z"/><path class="dot" d="M12 12h.01"/></svg>Real</span></td></tr><tr><td><b>Cambio de estado de un dispositivo</b></td><td>pulso ÚNICO: un anillo ya dibujado hace scale(1→1.25) y opacity .6→0. Solo tras confirmación real del bridge; «sin lectura» o error nunca pulsan como éxito</td><td>600 ms</td><td>400 ms</td><td>pulso solo de opacity, 120 ms</td><td>sin pulso: el chip cambia ya; glifo y palabra intactos</td><td><span class="mono">Salida</span></td><td><span class="chip neu sm"><svg class="ico i12" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16z"/><path class="dot" d="M12 12h.01"/></svg>Real</span></td></tr><tr><td><b>Enlace caído</b></td><td>el chip cambia por fundido (opacity); sin pulso ni parpadeo repetido</td><td>160 ms</td><td>120 ms</td><td>100 ms (opacity)</td><td>cambio inmediato</td><td><span class="mono">Estándar</span></td><td><span class="chip neu sm"><svg class="ico i12" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16z"/><path class="dot" d="M12 12h.01"/></svg>Real</span></td></tr><tr><td><b>Enlace recuperado</b></td><td>fundido del chip + un pulso único; nunca un éxito falso: se muestra «en vivo» solo con dato real</td><td>160 ms + pulso 400 ms</td><td>120 ms + pulso 300 ms</td><td>100 ms (opacity)</td><td>cambio inmediato, sin pulso</td><td><span class="mono">Estándar</span></td><td><span class="chip neu sm"><svg class="ico i12" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16z"/><path class="dot" d="M12 12h.01"/></svg>Real</span></td></tr><tr class="grp"><td colspan="8">Disparo real aún inexistente · se diseñan, rotulados «Diseño»</td></tr><tr><td><b>Copia con progreso</b></td><td>la barra avanza con transform: scaleX (origen izquierdo), nunca con width; el porcentaje y la palabra cambian sin animación</td><td>continuo, sin curva decorativa</td><td>continuo</td><td>sin animación de barra: solo el valor</td><td>sin animación: valor y palabra</td><td><span class="mono">Lineal</span></td><td><span class="chip src dsg"><svg class="ico i12" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 4h5M10.5 4v5.2L5.6 17.3A1.9 1.9 0 0 0 7.2 20.2h9.6a1.9 1.9 0 0 0 1.6-2.9L13.5 9.2V4"/></svg>Diseño</span></td></tr><tr><td><b>Diálogo de autorización</b></td><td>transform: scale(.98→1) · opacity; el foco entra en «Rechazar» sin animación</td><td>200 ms</td><td>150 ms</td><td>100 ms (opacity)</td><td>instantáneo; foco igual en «Rechazar»</td><td><span class="mono">Salida</span></td><td><span class="chip src dsg"><svg class="ico i12" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 4h5M10.5 4v5.2L5.6 17.3A1.9 1.9 0 0 0 7.2 20.2h9.6a1.9 1.9 0 0 0 1.6-2.9L13.5 9.2V4"/></svg>Diseño</span></td></tr><tr><td><b>Etapas de Forge</b></td><td>el marcador de etapa activa se desplaza con translateX; sin progreso inventado</td><td>240 ms</td><td>180 ms</td><td>100 ms (opacity)</td><td>el marcador salta ya a la etapa</td><td><span class="mono">Estándar</span></td><td><span class="chip src dsg"><svg class="ico i12" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 4h5M10.5 4v5.2L5.6 17.3A1.9 1.9 0 0 0 7.2 20.2h9.6a1.9 1.9 0 0 0 1.6-2.9L13.5 9.2V4"/></svg>Diseño</span></td></tr></tbody></table></div>
+<div class="code">:root                      { --dur-open: 220ms; --dur-close: 160ms; --dur-pulse: 600ms; --ease-out: cubic-bezier(.16,1,.3,1); }
+[data-motion="balanced"]  { --dur-open: 160ms; --dur-close: 120ms; --dur-pulse: 400ms; }
+[data-motion="quiet"]     { --dur-open: 100ms; --dur-close: 100ms; --dur-pulse: 120ms; }   /* solo opacity */
+[data-motion="reduced"],
+@media (prefers-reduced-motion: reduce) { :root { --dur-open: 0ms; --dur-close: 0ms; --dur-pulse: 0ms; } }</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1920,"height":1960}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -19,6 +19,7 @@
 #include <QPointer>
 #include <QSet>
 #include <QTimer>
+#include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
 #include <QVector3D>
@@ -30,16 +31,21 @@
 
 class LumenGeometry;
 class LumenInstancing;
+class QNetworkReply;
 
 class LumenField final : public QObject
 {
     Q_OBJECT
     /// Drawn only while the orb scene is on screen; nothing is fetched or stepped otherwise.
     Q_PROPERTY(bool active READ active WRITE setActive NOTIFY activeChanged)
+    Q_PROPERTY(int frameIntervalMs READ frameIntervalMs WRITE setFrameIntervalMs NOTIFY budgetChanged)
+    Q_PROPERTY(bool reducedMotion READ reducedMotion WRITE setReducedMotion NOTIFY budgetChanged)
+    Q_PROPERTY(QVariantMap renderBudget READ renderBudget WRITE setRenderBudget NOTIFY budgetChanged)
     Q_PROPERTY(QVariantMap settings READ settings NOTIFY settingsChanged)
     /// Linear colours and light levels the shaders read, derived from the settings.
     Q_PROPERTY(QVariantMap look READ look NOTIFY settingsChanged)
     Q_PROPERTY(QString profile READ profile NOTIFY settingsChanged)
+    Q_PROPERTY(bool comparing READ comparing NOTIFY settingsChanged)
     /// The look presets embedded in the display, by name.
     Q_PROPERTY(QStringList presets READ presets CONSTANT)
     Q_PROPERTY(QString lens READ lens NOTIFY lensChanged)
@@ -66,13 +72,22 @@ class LumenField final : public QObject
     Q_PROPERTY(QVariantList attention READ attention NOTIFY attentionChanged)
 
 public:
-    explicit LumenField(QObject *parent = nullptr);
+    explicit LumenField(QObject *parent = nullptr, QUrl endpoint = {});
 
     bool active() const { return m_active; }
     void setActive(bool active);
+    int frameIntervalMs() const { return m_frameIntervalMs; }
+    void setFrameIntervalMs(int interval);
+    bool reducedMotion() const { return m_reducedMotion; }
+    void setReducedMotion(bool reduced);
+    QVariantMap renderBudget() const { return m_renderBudget; }
+    void setRenderBudget(const QVariantMap &budget);
+    Q_INVOKABLE bool acquireView(QObject *owner);
+    Q_INVOKABLE void releaseView(QObject *owner);
     QVariantMap settings() const { return m_settings; }
     QVariantMap look() const { return m_look; }
     QString profile() const { return m_profile; }
+    bool comparing() const { return !m_saved.isEmpty(); }
     QStringList presets() const;
     QString lens() const { return m_lens; }
     QVariantMap scene() const { return m_sceneInfo; }
@@ -105,6 +120,7 @@ public:
     QString loadProfile(const QString &name);
     Q_INVOKABLE bool applyProfile(const QString &name);
     Q_INVOKABLE void resetProfile();
+    Q_INVOKABLE void toggleCompare();
     Q_INVOKABLE void setLens(const QString &lens);
     Q_INVOKABLE void toggleModule(const QString &id);
     Q_INVOKABLE void collapse(const QString &id);
@@ -126,6 +142,7 @@ public:
 
 signals:
     void activeChanged();
+    void budgetChanged();
     void settingsChanged();
     void lensChanged();
     void sceneChanged();
@@ -187,6 +204,9 @@ private:
     };
 
     void request();
+    void updateTimers();
+    bool ambientAllowed() const;
+    int particleBudget() const;
     void accept(const QByteArray &body);
     void tick();
     void rebuildStatic();
@@ -201,6 +221,11 @@ private:
     void updateCategoryRows();
     void setStatus(const QString &status, const QString &error = {});
     void scheduleRequest(int delayMs = 0);
+    /// What makes a reply the wrong field rather than an older one: lens, what is open,
+    /// the focus and the layout.
+    QString structureKey() const;
+    /// Restarts a frame timer that stopped itself (paused, reduced motion) for one frame.
+    void wake();
     int indexOf(const QString &id) const;
     bool drawn(int index) const;
     float orbScale(int index) const;
@@ -212,6 +237,13 @@ private:
     QVector3D positionAt(int index) const;
 
     QNetworkAccessManager m_network;
+    QUrl m_endpoint;
+    QPointer<QNetworkReply> m_reply;
+    QPointer<QObject> m_viewOwner;
+    quint64 m_queryGeneration = 0;
+    QVariantMap m_renderBudget;
+    int m_frameIntervalMs = 16;
+    bool m_reducedMotion = false;
     QTimer m_frameTimer;
     QTimer m_pollTimer;
     QTimer m_requestDelay;
@@ -223,6 +255,7 @@ private:
     bool m_requestPending = false;
     bool m_requestAgain = false;
     bool m_paused = false;
+    bool m_simulationActive = true;
     bool m_structureDirty = true;
     bool m_positionsDirty = true;
     int m_framesCounted = 0;
@@ -230,6 +263,7 @@ private:
     int m_settled = 0;
 
     QVariantMap m_settings;
+    QVariantMap m_saved;
     QVariantMap m_look;
     QString m_profile;
     QString m_lens = QStringLiteral("architecture");

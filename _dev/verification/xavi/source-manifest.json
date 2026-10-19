@@ -1,0 +1,86 @@
+{
+  "schema": "archie.xavi.source-manifest.v1",
+  "source": "owner-provided extracted archive; application sources remain outside Git",
+  "files": [
+    {
+      "path": "src/main.js",
+      "size": 80240,
+      "sha256": "49a47eeef9852956c75a1b1d00e283a8df785ca4e301286169dc2680f64057c8"
+    },
+    {
+      "path": "src/field.js",
+      "size": 21130,
+      "sha256": "de2f9b48a24fd373962c8dca65b3dfa0d79f911a3f4987753d0e02d64cfd6575"
+    },
+    {
+      "path": "src/visuals.js",
+      "size": 5648,
+      "sha256": "a4c89db632651e2d5a9336fba69595d321fea3a8cc83e6a926c1e801eaa4e0cd"
+    },
+    {
+      "path": "src/scene.js",
+      "size": 75613,
+      "sha256": "56d06dbb402cb830e21c0007970c8e8c0e1de39a466194fcf62217245a326d7c"
+    },
+    {
+      "path": "src/hybrid-materials.js",
+      "size": 8047,
+      "sha256": "e52d9e71dd3cfac28a2f8ffd3555bf4bbad3764e0e9fd1bcca03837d3414840e"
+    },
+    {
+      "path": "src/quality-modes.js",
+      "size": 1612,
+      "sha256": "647693215d574529cbd863328169dd3296afda6234fdb02fd31d391bc6bb3093"
+    },
+    {
+      "path": "src/spatial-continuity.js",
+      "size": 1549,
+      "sha256": "abc7e65c516135380a666aec3a306ae1b884cff1b7f786fd4430f8f51e280a1e"
+    },
+    {
+      "path": "src/visual-presets/catalog.js",
+      "size": 2642,
+      "sha256": "479a8d25fe745ab16fc7df9793146b69e61c867702171ccf9cc687506ea3c09e"
+    },
+    {
+      "path": "src/visual-presets/design.json",
+      "size": 11281,
+      "sha256": "9a38ac77ee44ead87fd7c17c46b5c43f7d2d00653eedebba5a546ae1944b1f89"
+    },
+    {
+      "path": "src/visual-presets/materials.js",
+      "size": 8905,
+      "sha256": "2e1c568c5baf5fc1eefc576028a52ae6f5b18f93325c162ddc6a6e72fe6fb2db"
+    },
+    {
+      "path": "src/visual-presets/gpu-surface-bake.js",
+      "size": 4028,
+      "sha256": "f4c7ea2a3c2884562083d8e015535bc02860d922ca8e26232081b68a42c9f510"
+    },
+    {
+      "path": "src/visual-presets/links.js",
+      "size": 5913,
+      "sha256": "358f0fe78cdf7e64f76f569fcada648b8b54d974fb77837caf368cc513af4750"
+    },
+    {
+      "path": "src/visual-presets/bloom.js",
+      "size": 4194,
+      "sha256": "3d1d6afe899c433a496560f8678e71736623eb2fa554a9dec93b2a79f09eb4d9"
+    },
+    {
+      "path": "src/visual-presets/policy.js",
+      "size": 1378,
+      "sha256": "163e68e8b5814ef4919b75fcf1d91263f5caf8562d2e31084f97c9be84cd0b85"
+    },
+    {
+      "path": "public/textures/hybrid/prism-structure-4k.png",
+      "size": 10522746,
+      "sha256": "2d2d4a210cee5385ac557e82ee254077c2c1b5ab87c56cd649621ccd6b9cc4ab"
+    },
+    {
+      "path": "public/textures/hybrid/prism-surface-4k.png",
+      "size": 15530200,
+      "sha256": "e7518337b261d7bd761592c492ee66eb5845b8bb4f43a5c468d2e8b24e5dfa4e"
+    }
+  ]
+}

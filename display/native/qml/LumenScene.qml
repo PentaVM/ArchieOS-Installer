@@ -13,10 +13,15 @@ import Archie.Observatory
 // settles back. Between events there is only a slow drift of the view.
 Node {
     id: scene
+    required property var controller
+    property bool reducedMotion: false
+    property bool presented: true
 
     property alias camera: lumenCamera
     property alias field: field
     property real aspect: 1.6
+    property real viewportWidth: 1280
+    property real viewportHeight: 800
     property real flash: 0
     // The orbit: yaw and pitch about the target, and a distance.
     property real yaw: 4
@@ -24,16 +29,21 @@ Node {
     property real distance: 900
     property vector3d target: Qt.vector3d(0, 0, 0)
     property real home: 900
-    readonly property var look: lumen.look
-    readonly property var sceneInfo: lumen.scene
+    readonly property var look: scene.controller.look
+    readonly property var sceneInfo: scene.controller.scene
 
     function homeDistance() {
-        const radius = Math.max(lumen.fieldRadius * 0.5, lumen.shellRadius || lumen.fieldRadius)
+        const radius = Math.max(scene.controller.fieldRadius * 0.5, scene.controller.shellRadius || scene.controller.fieldRadius)
         const half = 20 * Math.PI / 180
         return radius * Math.max(3.5, 1.3 / (Math.tan(half) * Math.max(1.0, scene.aspect)))
     }
     function glide(distance, target, duration) {
         travel.stop()
+        if (scene.reducedMotion || !scene.presented) {
+            scene.distance = distance
+            scene.target = target
+            return
+        }
         dolly.to = distance
         pan.to = target
         dolly.duration = duration
@@ -65,9 +75,15 @@ Node {
         NumberAnimation { id: dolly; target: scene; property: "distance"; easing.type: Easing.InOutCubic }
         Vector3dAnimation { id: pan; target: scene; property: "target"; easing.type: Easing.InOutCubic }
     }
+    onReducedMotionChanged: if (reducedMotion && travel.running) {
+        travel.stop()
+        scene.distance = dolly.to
+        scene.target = pan.to
+    }
+    onPresentedChanged: if (!presented) travel.stop()
 
     Connections {
-        target: lumen
+        target: scene.controller
         function onFitRequested() { scene.fit() }
         function onFocusRequested(position) {
             const world = field.mapPositionToScene(position)
@@ -83,7 +99,7 @@ Node {
         }
         // Attention: lean towards what the system is using, then settle back.
         function onAttentionMoved(position, engaged) {
-            if (!!lumen.selection.id)
+            if (!!scene.controller.selection.id)
                 return
             if (engaged) {
                 const world = field.mapPositionToScene(position)
@@ -97,33 +113,33 @@ Node {
     Node {
         position: scene.target
         // A slow drift of the view between events: a few degrees, over about a minute.
-        eulerRotation: Qt.vector3d(scene.pitch + Math.sin(lumen.time * 0.09) * 3.0,
-                                   scene.yaw + Math.sin(lumen.time * 0.05) * 4.0, 0)
+        eulerRotation: Qt.vector3d(scene.pitch + (scene.reducedMotion ? 0 : Math.sin(scene.controller.time * 0.09) * 3.0),
+                                   scene.yaw + (scene.reducedMotion ? 0 : Math.sin(scene.controller.time * 0.05) * 4.0), 0)
         PerspectiveCamera {
             id: lumenCamera
             position: Qt.vector3d(0, 0, scene.distance)
             fieldOfView: 40
-            clipNear: 1
+            clipNear: Number(scene.look.linkStyleId || 0) > 0 ? 0.11 : 1
             clipFar: 20000
         }
     }
 
     Node {
         id: field
-        eulerRotation: Qt.vector3d(0, lumen.spin, 0)
+        eulerRotation: Qt.vector3d(0, scene.controller.spin, 0)
 
         // --- The membrane ---
         Model {
             visible: scene.look.shellOpacity > 0
             geometry: LumenGeometry { id: membraneMesh }
-            Component.onCompleted: lumen.bindLayer("membrane", membraneMesh)
+            Component.onCompleted: scene.controller.bindLayer("membrane", membraneMesh)
             materials: CustomMaterial {
                 shadingMode: CustomMaterial.Unshaded
                 sourceBlend: CustomMaterial.SrcAlpha
                 destinationBlend: CustomMaterial.OneMinusSrcAlpha
                 cullMode: Material.NoCulling
                 depthDrawMode: Material.NeverDepthDraw
-                property real time: lumen.time
+                property real time: scene.controller.time
                 property real alpha: scene.look.shellOpacity
                 property real legacy: scene.look.legacy
                 property vector3d warm: scene.look.warm
@@ -132,17 +148,23 @@ Node {
                 property real think: Number(scene.sceneInfo.think || 0)
                 property real voice: Number(scene.sceneInfo.speak || 0) * Number(scene.sceneInfo.audio || 0)
                 property real flash: scene.flash
+                property int shellKind: Number(scene.look.shellStyleId === undefined ? -1 : scene.look.shellStyleId)
+                property real density: Number(scene.look.shellDensity || 1)
+                property real flow: Number(scene.look.shellFlow || 0)
+                property vector3d shellTint: scene.look.shellTint || scene.look.cool
                 vertexShader: "qrc:/archie/shaders/lumen_shell.vert"
                 fragmentShader: "qrc:/archie/shaders/lumen_shell.frag"
             }
         }
+
+        LineLayer { name: "membraneEdges"; tint: scene.look.cool; alpha: scene.look.shellOpacity * 0.18; visible: Number(scene.look.shellStyleId) === 0 }
 
         // --- Ghost particles: density only, never an entity ---
         Model {
             visible: scene.look.ghostOpacity > 0
             geometry: LumenGeometry { id: ghostQuad }
             instancing: LumenInstancing { id: ghostTable }
-            Component.onCompleted: { lumen.bindLayer("quad", ghostQuad); lumen.bindLayer("ghosts", ghostTable) }
+            Component.onCompleted: { scene.controller.bindLayer("quad", ghostQuad); scene.controller.bindLayer("ghosts", ghostTable) }
             materials: SpriteMaterial {
                 grow: scene.look.ghostSize * 1.3
                 alpha: scene.look.ghostOpacity
@@ -157,40 +179,49 @@ Node {
         LineLayer { name: "semantic"; tint: scene.look.cool; alpha: 0.22; intensity: 1.6; visible: scene.look.links }
         LineLayer { name: "guides"; tint: scene.look.warm; alpha: 0.15; visible: scene.look.guides }
         LineLayer { name: "highlight"; tint: scene.look.warm; alpha: scene.look.highlightOpacity; intensity: 1.8 }
+        LineLayer { name: "pulseRibbons"; tint: scene.look.warm; alpha: 0.8; visible: Number(scene.look.linkStyleId || 0)>0 && scene.look.pulses && Number(scene.look.pulseStyleId || 0)>0 }
 
         // --- Satellites: small beads around each module ---
         Model {
             geometry: LumenGeometry { id: satelliteMesh }
             instancing: LumenInstancing { id: satelliteTable }
-            Component.onCompleted: { lumen.bindLayer("satelliteMesh", satelliteMesh); lumen.bindLayer("satellites", satelliteTable) }
+            Component.onCompleted: { scene.controller.bindLayer("satelliteMesh", satelliteMesh); scene.controller.bindLayer("satellites", satelliteTable) }
             materials: OrbMaterial { facet: 0.2; shapeAmount: 0.12; detail: 0.0 }
         }
 
         // --- Orbs: modules are cut gems, entities polished beads; neither is a plain ball ---
         Model {
-            geometry: LumenGeometry { id: orbMesh }
+            geometry: scene.look.folderStyleId > 0 && scene.look.folderStyleId < 8 ? folderDesignMesh : orbMesh
+            LumenGeometry { id: orbMesh }
+            XaviGeometry { id: folderDesignMesh; style: Number(scene.look.folderStyleId || 0); folder: true }
             instancing: LumenInstancing { id: moduleTable }
-            Component.onCompleted: { lumen.bindLayer("orbMesh", orbMesh); lumen.bindLayer("modules", moduleTable) }
-            materials: OrbMaterial { facet: 0.3; shapeAmount: 0.16; detail: 1.0 }
+            Component.onCompleted: { scene.controller.bindLayer("orbMesh", orbMesh); scene.controller.bindLayer("modules", moduleTable) }
+            materials: scene.look.folderStyleId > 0 ? folderDesignMaterial : originalFolderMaterial
+            OrbMaterial { id: originalFolderMaterial; facet: 0.3; shapeAmount: 0.16; detail: 1.0 }
+            XaviMaterial { id: folderDesignMaterial; designStyle: Number(scene.look.folderStyleId || 0) }
         }
         Model {
-            geometry: LumenGeometry { id: entityMesh }
+            geometry: scene.look.nodeStyleId > 0 && scene.look.nodeStyleId < 8 ? entityDesignMesh : entityMesh
+            LumenGeometry { id: entityMesh }
+            XaviGeometry { id: entityDesignMesh; style: Number(scene.look.nodeStyleId || 0) }
             instancing: LumenInstancing { id: entityTable }
-            Component.onCompleted: { lumen.bindLayer("entityMesh", entityMesh); lumen.bindLayer("entities", entityTable) }
-            materials: OrbMaterial { facet: 0.15; shapeAmount: 0.1; detail: 0.7 }
+            Component.onCompleted: { scene.controller.bindLayer("entityMesh", entityMesh); scene.controller.bindLayer("entities", entityTable) }
+            materials: scene.look.nodeStyleId > 0 ? entityDesignMaterial : originalEntityMaterial
+            OrbMaterial { id: originalEntityMaterial; facet: 0.15; shapeAmount: 0.1; detail: 0.7 }
+            XaviMaterial { id: entityDesignMaterial; designStyle: Number(scene.look.nodeStyleId || 0) }
         }
 
         // --- Glow: a halo per orb, brighter with activity, focus and selection ---
         Model {
             geometry: LumenGeometry { id: moduleHaloQuad }
             instancing: moduleTable
-            Component.onCompleted: lumen.bindLayer("quad", moduleHaloQuad)
+            Component.onCompleted: scene.controller.bindLayer("quad", moduleHaloQuad)
             materials: SpriteMaterial { grow: 2.8; alpha: 0.3 + scene.look.bloomStrength * 0.16; sharpness: 1.8; haloGain: 0.9 }
         }
         Model {
             geometry: LumenGeometry { id: entityHaloQuad }
             instancing: entityTable
-            Component.onCompleted: lumen.bindLayer("quad", entityHaloQuad)
+            Component.onCompleted: scene.controller.bindLayer("quad", entityHaloQuad)
             materials: SpriteMaterial { grow: 3.3; alpha: 0.28 + scene.look.bloomStrength * 0.16; sharpness: 1.7; haloGain: 1.1 }
         }
 
@@ -199,17 +230,17 @@ Node {
             visible: scene.look.pulses
             geometry: LumenGeometry { id: pulseQuad }
             instancing: LumenInstancing { id: pulseTable }
-            Component.onCompleted: { lumen.bindLayer("quad", pulseQuad); lumen.bindLayer("pulses", pulseTable) }
+            Component.onCompleted: { scene.controller.bindLayer("quad", pulseQuad); scene.controller.bindLayer("pulses", pulseTable) }
             materials: SpriteMaterial { grow: 1.0; alpha: 0.83; sharpness: 1.4 }
         }
 
         // --- The selection ---
         Model {
-            visible: lumen.selectionVisible
-            position: lumen.selectionPosition
-            scale: Qt.vector3d(lumen.selectionScale, lumen.selectionScale, lumen.selectionScale)
+            visible: scene.controller.selectionVisible
+            position: scene.controller.selectionPosition
+            scale: Qt.vector3d(scene.controller.selectionScale, scene.controller.selectionScale, scene.controller.selectionScale)
             geometry: LumenGeometry { id: ringMesh }
-            Component.onCompleted: lumen.bindLayer("ring", ringMesh)
+            Component.onCompleted: scene.controller.bindLayer("ring", ringMesh)
             materials: CustomMaterial {
                 shadingMode: CustomMaterial.Unshaded
                 sourceBlend: CustomMaterial.SrcAlpha
@@ -229,8 +260,8 @@ Node {
         property vector3d tint: Qt.vector3d(1, 1, 1)
         property real alpha: 0.2
         property real intensity: 1.0
-        geometry: LumenGeometry { id: lines }
-        Component.onCompleted: lumen.bindLayer(name, lines)
+        geometry: LumenGeometry { id: lines; ribbons: Number(scene.look.linkStyleId || 0) > 0 && layer.name !== "guides" }
+        Component.onCompleted: scene.controller.bindLayer(name, lines)
         materials: CustomMaterial {
             shadingMode: CustomMaterial.Unshaded
             sourceBlend: CustomMaterial.SrcAlpha
@@ -240,8 +271,24 @@ Node {
             property vector3d tint: layer.tint
             property real alpha: layer.alpha
             property real intensity: layer.intensity
-            vertexShader: "qrc:/archie/shaders/lumen_line.vert"
-            fragmentShader: "qrc:/archie/shaders/lumen_line.frag"
+            property int linkStyle: Number(scene.look.linkStyleId || 0)
+            property int pulseStyle: layer.name === "pulseRibbons" && scene.look.pulses ? Number(scene.look.pulseStyleId || 0) : 0
+            property int bloomMode: Number(scene.look.bloomModeId || 0)
+            property real time: scene.controller.time
+            readonly property bool relationFlow: !!scene.controller.selection.id || !!scene.controller.hovered.id
+            property real pulseSpeed: Number(scene.controller.settings.pulseSpeed || 0) * Number((relationFlow ? scene.controller.settings.relationFlowSpeed : scene.controller.settings.ambientFlowSpeed) || 0)
+            property real pulseIntensity: Number(scene.look.energyIntensity || 0) * Number((relationFlow ? scene.controller.settings.relationFlowIntensity : scene.controller.settings.ambientFlowIntensity) || 0)
+            property bool activeLink: layer.name === "highlight" || layer.name === "pulseRibbons" || layer.name === "observed" || layer.name === "semantic"
+            property real focusWeight: layer.name === "highlight" ? 1 : 0
+            property real lineWidth: Number(scene.look.lineWidthPx || 1)
+            property vector2d viewportSize: Qt.vector2d(Math.max(1,scene.viewportWidth),Math.max(1,scene.viewportHeight))
+            property vector3d warm: scene.look.warm
+            property vector3d cool: scene.look.cool
+            property vector3d warmPosition: scene.look.warmPosition
+            property vector3d coolPosition: scene.look.coolPosition
+            property real fieldRadius: scene.controller.fieldRadius
+            vertexShader: lines.ribbons ? "qrc:/archie/shaders/xavi_ribbon.vert" : "qrc:/archie/shaders/lumen_line.vert"
+            fragmentShader: lines.ribbons ? "qrc:/archie/shaders/xavi_ribbon.frag" : "qrc:/archie/shaders/lumen_line.frag"
         }
     }
 
@@ -265,22 +312,90 @@ Node {
         property real facet: 0.5
         property real shapeAmount: 0.35
         property real detail: 1.0
-        property real time: lumen.time
-        property vector3d warm: lumen.look.warm
-        property vector3d cool: lumen.look.cool
-        property vector3d warmLight: lumen.look.warmLight
-        property vector3d coolLight: lumen.look.coolLight
-        property vector3d ambientLight: lumen.look.ambientLight
-        property vector3d warmPosition: lumen.look.warmPosition
-        property vector3d coolPosition: lumen.look.coolPosition
-        property real metalness: lumen.look.metalness
-        property real roughness: lumen.look.roughness
-        property real emissive: lumen.look.emissive
-        property real textureContrast: lumen.look.textureContrast
-        property real textureDepth: lumen.look.textureDepth
+        property real time: scene.controller.time
+        property vector3d warm: scene.controller.look.warm
+        property vector3d cool: scene.controller.look.cool
+        property vector3d warmLight: scene.controller.look.warmLight
+        property vector3d coolLight: scene.controller.look.coolLight
+        property vector3d ambientLight: scene.controller.look.ambientLight
+        property vector3d warmPosition: scene.controller.look.warmPosition
+        property vector3d coolPosition: scene.controller.look.coolPosition
+        property real metalness: scene.controller.look.metalness
+        property real roughness: scene.controller.look.roughness
+        property real emissive: scene.controller.look.emissive
+        property real textureContrast: scene.controller.look.textureContrast
+        property real textureDepth: scene.controller.look.textureDepth
         shadingMode: CustomMaterial.Unshaded
         cullMode: Material.BackFaceCulling
         vertexShader: "qrc:/archie/shaders/lumen_orb.vert"
         fragmentShader: "qrc:/archie/shaders/lumen_orb.frag"
+    }
+
+    // The Qt/GPU boundary is intentional. Source material policy, packed maps and
+    // meshes are Rust; these properties only upload them to the existing renderer.
+    component XaviMaterial: CustomMaterial {
+        property int designStyle: 0
+        property real time: scene.controller.time
+        property vector3d warm: scene.look.warm
+        property vector3d cool: scene.look.cool
+        property vector3d warmPosition: scene.look.warmPosition
+        property vector3d coolPosition: scene.look.coolPosition
+        property real fieldRadius: scene.controller.fieldRadius
+        property real metalness: scene.look.metalness
+        property real roughness: scene.look.roughness
+        property real emissive: scene.look.emissive
+        property real textureDepth: scene.look.textureDepth
+        property real textureContrast: scene.look.textureContrast
+        property real poleMix: Number(scene.look.poleMix || 0)
+        property real glowMaskIntensity: Number(scene.look.glowMaskIntensity || 0)
+        property real detailFrequency: Number(scene.look.detailFrequency || 1)
+        property int bloomMode: Number(scene.look.bloomModeId || 0)
+        property bool selectionActive: !!scene.controller.selection.id
+        property real focusDim: Number(scene.controller.settings.focusDim || 0)
+        property real viewportHeight: scene.viewportHeight
+        property real hybridReady: designStyle > 0 && hybridStructureData.resolution > 0 ? 1 : 0
+        property vector4d hybridParameters: sourceSurface.hybridParameters(designStyle,textureDepth,emissive,textureContrast)
+        readonly property real projectedMaximum: scene.viewportHeight * 2.75 * Number(scene.look.maximumNodeRadius || 4) / Math.max(0.2,scene.distance-scene.controller.fieldRadius)
+        readonly property int hybridResolution: hybridStructureData.chooseResolution(
+            scene.controller.settings.visualTextureTier === "procedural" ? 0 : Number(scene.look.textureResolution || 0),
+            Number(scene.look.qualityId || 0),projectedMaximum)
+        property TextureInput albedoMap: TextureInput {
+            texture: Texture {
+                textureData: XaviSurfaceData { style: designStyle; frequency: detailFrequency; resolution: Math.min(1024, Math.max(32, Number(scene.look.textureResolution || 512))) }
+                generateMipmaps: true
+                minFilter: Texture.Linear
+                mipFilter: Texture.Linear
+                tilingModeHorizontal: Texture.Repeat
+                tilingModeVertical: Texture.Repeat
+            }
+        }
+        property TextureInput surfaceMap: TextureInput {
+            texture: Texture {
+                textureData: XaviSurfaceData { id: sourceSurface; style: designStyle; frequency: detailFrequency; surface: true; resolution: Math.min(1024, Math.max(32, Number(scene.look.textureResolution || 512))) }
+                generateMipmaps: true
+                minFilter: Texture.Linear
+                mipFilter: Texture.Linear
+                tilingModeHorizontal: Texture.Repeat
+                tilingModeVertical: Texture.Repeat
+            }
+        }
+        property TextureInput hybridStructure: TextureInput {
+            texture: Texture {
+                textureData: XaviHybridData { id: hybridStructureData; enabled: designStyle > 0; resolution: hybridResolution }
+                generateMipmaps: true; minFilter: Texture.Linear; mipFilter: Texture.Linear
+                tilingModeHorizontal: Texture.Repeat; tilingModeVertical: Texture.Repeat
+            }
+        }
+        property TextureInput hybridSurface: TextureInput {
+            texture: Texture {
+                textureData: XaviHybridData { enabled: designStyle > 0; surface: true; resolution: hybridResolution }
+                generateMipmaps: true; minFilter: Texture.Linear; mipFilter: Texture.Linear
+                tilingModeHorizontal: Texture.Repeat; tilingModeVertical: Texture.Repeat
+            }
+        }
+        shadingMode: CustomMaterial.Unshaded
+        cullMode: Material.NoCulling
+        vertexShader: "qrc:/archie/shaders/xavi_surface.vert"
+        fragmentShader: "qrc:/archie/shaders/xavi_surface.frag"
     }
 }

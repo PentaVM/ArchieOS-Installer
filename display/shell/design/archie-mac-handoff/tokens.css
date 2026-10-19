@@ -1,0 +1,114 @@
+/* Archie Mac · cristal grafito — tokens de diseño.
+   Tema por defecto: cristal (translúcido + blur). Tema opaco: añade data-surface="opaque" al contenedor raíz
+   (equivalente a la clase .root.opaque de los mockups). Solo hay tema oscuro. */
+
+:root {
+  /* tipografía */
+  --disp: 'Space Grotesk', 'Inter', system-ui, sans-serif;           /* títulos y sobrelíneas */
+  --font: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif; /* texto */
+
+  /* fondo provisional del escritorio (el fondo/esfera real lo adapta el equipo) */
+  --desktop: #07080c;
+
+  /* superficies (cristal) */
+  --bar: rgba(16, 17, 23, .62);   --bar-blur: blur(30px) saturate(1.4);
+  --dock: rgba(20, 21, 28, .55);  --dock-blur: blur(36px);
+  --win: rgba(18, 19, 26, .78);   --win-blur: blur(40px);
+  --side: rgba(26, 27, 36, .66);
+  --panel: rgba(22, 23, 31, .86); --panel-blur: blur(44px);
+
+  /* relieves sobre cualquier superficie */
+  --raised: rgba(255, 255, 255, .05);
+  --hover: rgba(255, 255, 255, .08);
+  --pressed: rgba(255, 255, 255, .11);
+  --hair: rgba(255, 255, 255, .09);   /* líneas finas y bordes */
+  --inner: rgba(255, 255, 255, .06);  /* brillo interior superior */
+  --sel: rgba(111, 200, 245, .16);    /* selección */
+
+  /* texto */
+  --t1: #f2f1ee;   /* principal */
+  --t2: #b9b8c4;   /* secundario */
+  --t3: #8d8c9c;   /* terciario / metadatos */
+  --tdis: #5e5d6b; /* deshabilitado */
+
+  /* acentos */
+  --acc: #6fc8f5;  /* foco, selección, progreso */
+  --arch: #f0bb78; /* "lo hizo Archie" */
+
+  /* estados */
+  --ok: #47d18b;
+  --warn: #f0b429;
+  --bad: #f2626b;
+  --info: #6fe3f5;
+  --unk: #8d8c9c;  /* desconocido / sin lectura (siempre con borde discontinuo) */
+
+  /* dominio (marca en el selector de dominio) */
+  --dom-personal: var(--info); /* círculo */
+  --dom-trabajo: var(--warn);  /* rombo */
+
+  /* categorías de archivo (paleta apta para daltonismo) */
+  --cat-documents: #e69f00;
+  --cat-media: #009e73;
+  --cat-data: #f0e442;
+  --cat-archive: #cc79a7;
+  --cat-executable: #d55e00;
+  --cat-other: #bbbbbb;
+
+  /* iconos del dock (fondo sólido bajo un degradado de 165°: rgba(255,255,255,.10) → rgba(0,0,0,.14)) */
+  --dk-orb: #1b8fa6;
+  --dk-vault: #3b7fd6;
+  --dk-forge: #b87a0b;
+  --dk-sentry: #1f9a62;
+  --dk-stage: #8a5fd6;
+  --dk-settings: #6b7686;
+
+  /* semáforo de ventana */
+  --tl-close: #d9605a;
+  --tl-min: #d9a441;
+  --tl-zoom: #4fb67b;
+  --tl-off: rgba(255, 255, 255, .17); /* ventana inactiva */
+
+  /* radios */
+  --r-window: 14px;
+  --r-panel: 16px;
+  --r-card: 10px;
+  --r-row: 8px;
+  --r-chip: 999px;
+  --r-dock: 22px;
+  --r-dock-icon: 14px;
+
+  /* sombras */
+  --sh-window: inset 0 1px 0 var(--inner), 0 18px 50px rgba(0, 0, 0, .45), 0 2px 6px rgba(0, 0, 0, .25);
+  --sh-panel: inset 0 1px 0 var(--inner), 0 24px 70px rgba(0, 0, 0, .55), 0 2px 8px rgba(0, 0, 0, .3);
+  --sh-dock: inset 0 1px 0 var(--inner), 0 8px 24px rgba(0, 0, 0, .35);
+
+  /* tamaños de barra y dock */
+  --bar-h: 32px;
+  --dock-icon: 56px;
+}
+
+/* Tema opaco: mismas variables, fondos sólidos y sin blur. Úsalo para comprobar legibilidad
+   o como modo de accesibilidad ("reducir transparencia"). */
+[data-surface="opaque"] {
+  --bar: #101117;   --bar-blur: none;
+  --dock: #14151c;  --dock-blur: none;
+  --win: #12131a;   --win-blur: none;
+  --side: #1a1b24;
+  --panel: #16171f; --panel-blur: none;
+  --raised: #22232a;
+  --hover: #2a2b32;
+  --pressed: #31323a;
+  --hair: #2c2d36;
+  --inner: #25262e;
+  --sel: #1f3a4a;
+}
+
+/* Base. Los números siempre tabulares. */
+.archie-root {
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--t1);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}

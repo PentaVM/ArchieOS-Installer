@@ -1,92 +1,94 @@
 import QtQuick
+import QtQuick.Controls
 
-// Activity. Two sections that say where their data comes from:
-//  - TRABAJOS LARGOS: real, the `status.json` of archie-bridges jobs, read by archie-shell-bridge.
-//    There is no cancel button: cancelling writes a file (an action with an effect) and the
-//    shell has no authorised path for it yet.
-//  - Authorization prompt and audit: DESIGN placeholders (no Policy escalation contract exists).
+// Activity, 460 px wide. TRABAJOS LARGOS are real (status.json of archie-bridges via the bridge);
+// Policy review remains unavailable until its typed graphical channel exists.
 Panel {
     id: ac
+    kind: "panel"
     property var bridge
-    fill: Theme.solid
-    width: 440
-    height: content.implicitHeight + 32
-    readonly property var jobs: bridge.jobs
+    width: 460
+    height: Math.min(900, parent ? Math.max(240,parent.height-y-24) : 900, content.implicitHeight + 40)
+    // Merged over full defaults; see SentryPanel.qml's `lan` for why.
+    readonly property var jobs: Object.assign(
+        { state: "not_configured", jobs: [], unreadable: [], skipped: 0 },
+        (bridge && bridge.jobs) || {})
     readonly property var spec: ({
-        starting:  { t: "iniciando",  g: "◌", c: Theme.unknown },
-        running:   { t: "en curso",   g: "◔", c: Theme.info },
-        done:      { t: "listo",      g: "✓", c: Theme.ok },
-        cancelled: { t: "cancelado",  g: "■", c: Theme.unknown },
-        failed:    { t: "falló",      g: "✕", c: Theme.bad }
+        starting:  { t: "iniciando", i: "waiting",  k: "info" },
+        running:   { t: "en curso",  i: "activity", k: "info" },
+        done:      { t: "listo",     i: "done",     k: "ok" },
+        cancelled: { t: "cancelado", i: "cancel",   k: "neutral" },
+        failed:    { t: "falló",     i: "bad",      k: "bad" }
     })
     function ago(ms) { var s = Math.round(ms / 1000); return s < 90 ? s + " s" : (s < 5400 ? Math.round(s / 60) + " min" : Math.round(s / 3600) + " h") }
+    function hhmm(ms) { var d = new Date(ms); return ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2) }
 
-    Column { id: content; x: 16; y: 16; width: parent.width - 32; spacing: 10
-        Text { text: "Actividad"; color: Theme.ink; font.pixelSize: Theme.fsTitle; font.bold: true }
+    component SectionHead: Item {
+        property string title
+        default property alias chips: chipRow.data
+        width: parent ? parent.width : 300; height: 22
+        Text { text: parent.title.toUpperCase(); color: Theme.t3; font.family: Theme.disp; font.pixelSize: 10; font.weight: Font.DemiBold
+            font.letterSpacing: 1.2; anchors.verticalCenter: parent.verticalCenter }
+        Row { id: chipRow; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; spacing: 8 }
+    }
+    component JobCard: Rectangle {
+        id: jc
+        property var job
+        readonly property var s: ac.spec[job.state]
+        width: parent ? parent.width : 300; height: col.implicitHeight + 28
+        color: Theme.raised; border.width: 1; border.color: Theme.hair; radius: Theme.rCard
+        Column { id: col; x: 16; y: 14; width: parent.width - 32; spacing: 9
+            Item { width: parent.width; height: 22
+                Text { text: jc.job.bridge + " · " + jc.job.kind; color: Theme.t1; font.family: Theme.font; font.pixelSize: 13; font.weight: Font.Medium; anchors.verticalCenter: parent.verticalCenter }
+                Chip { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; text: jc.s.t; icon: jc.s.i; tone: jc.s.k } }
+            // a bar only when the job declared a total
+            Rectangle { visible: jc.job.total > 0; width: parent.width; height: 4; radius: 2; color: Theme.track
+                Rectangle { width: parent.width * Math.min(1, jc.job.done / Math.max(1, jc.job.total)); height: parent.height; radius: 2
+                    color: jc.job.state === "done" ? Theme.ok : Theme.acc } }
+            Text { text: (jc.job.total > 0 ? jc.job.done + " de " + jc.job.total : jc.job.done + " iteraciones, sin total declarado")
+                         + " · " + jc.job.workspace + " · " + jc.job.id
+                color: Theme.t2; font.family: Theme.font; font.pixelSize: 12; font.features: { "tnum": 1 } }
+            Rectangle { visible: !!jc.job.error; width: parent.width; height: errT.implicitHeight + 16; radius: Theme.rRow
+                color: Theme.tint(Theme.bad, 0.10); border.width: 1; border.color: Theme.tint(Theme.bad, 0.30)
+                Row { x: 10; y: 8; spacing: 8; width: parent.width - 20
+                    Icon { name: "bad"; size: 14; color: Theme.bad }
+                    Text { id: errT; width: parent.width - 22; text: jc.job.error ? jc.job.error : ""; wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideRight
+                        color: Theme.bad; font.family: Theme.font; font.pixelSize: 12 } } }
+            // Quiet is not stuck: say only what is known.
+            Row { spacing: 6
+                Icon { name: "stale"; size: 12; color: Theme.t3; anchors.verticalCenter: parent.verticalCenter }
+                Text { anchors.verticalCenter: parent.verticalCenter; color: Theme.t3; font.family: Theme.font; font.pixelSize: 11; font.features: { "tnum": 1 }
+                    text: (jc.job.state === "running" || jc.job.state === "starting") ? "sin novedades hace " + ac.ago(jc.job.idle_ms)
+                        : (jc.job.state === "done" ? "terminó a las " : jc.job.state === "cancelled" ? "se canceló a las " : "falló a las ") + ac.hhmm(jc.job.updated_ms) } }
+        }
+    }
 
-        Row { spacing: 8
-            Text { text: "TRABAJOS LARGOS"; color: Theme.dim; font.pixelSize: Theme.fsSmall - 1; font.letterSpacing: 1.2; anchors.verticalCenter: parent.verticalCenter }
-            Chip { text: "REAL · bridge"; tone: Theme.info } }
+    Flickable {
+        objectName:"projectionScroll"; anchors.fill:parent
+        contentWidth:width; contentHeight:content.implicitHeight+40; clip:true
+        boundsBehavior:Flickable.StopAtBounds
+        ScrollBar.vertical:ScrollBar { }
+    Column { id: content; x: 20; y: 20; width: parent.width - 40; spacing: 10
+        Text { text: "Actividad"; color: Theme.t1; font.family: Theme.disp; font.pixelSize: 22; font.weight: Font.DemiBold; font.letterSpacing: -0.33 }
+        NoteBox { visible: ac.jobs.state === "bridge_silent"; width: parent.width; text: "El bridge está en silencio. El historial retenido no acredita el estado actual de los trabajos." }
+        Item { width: 1; height: 2 }
+        SectionHead { title: "Trabajos largos"; SourceChip { bridge: ac.bridge; projection: ({ source: ac.bridge && ac.bridge.link === "fixture" ? "fixture" : ac.jobs.state === "ok" ? "live" : "unavailable", state: ac.jobs.state }) } }
         Text { visible: jobs.state === "not_configured"; width: parent.width; wrapMode: Text.Wrap
-            text: "Sin espacios de trabajo configurados: el bridge no sabe dónde mirar."; color: Theme.soft; font.pixelSize: Theme.fsSmall }
-        Text { visible: jobs.state === "ok" && jobs.jobs.length === 0; text: "Ningún trabajo largo en los espacios configurados."
-            color: Theme.soft; font.pixelSize: Theme.fsSmall }
-        Text { visible: jobs.state === "ok" && jobs.skipped > 0; text: jobs.skipped + " sin leer (estado dañado o fuera del límite)."
-            color: Theme.warn; font.pixelSize: Theme.fsSmall }
+            text: "Sin espacios de trabajo configurados: el bridge no sabe dónde mirar."; color: Theme.t3; font.family: Theme.font; font.pixelSize: 12 }
+        Text { visible: jobs.state === "ok" && jobs.jobs.length === 0; text: "Ningún trabajo largo en los espacios configurados."; color: Theme.t3; font.family: Theme.font; font.pixelSize: 12 }
+        Text { visible: jobs.state === "ok" && jobs.skipped > 0; text: jobs.skipped + " sin leer (estado dañado o fuera del límite)."; color: Theme.warn; font.family: Theme.font; font.pixelSize: 12 }
         Repeater { model: jobs.state === "ok" ? jobs.unreadable : []
-            delegate: Text { width: ac.width - 32; wrapMode: Text.Wrap; text: "No se pudo leer " + modelData[0] + ": " + modelData[1]
-                color: Theme.warn; font.pixelSize: Theme.fsSmall } }
+            delegate: Text { width: content.width; wrapMode: Text.Wrap; text: "No se pudo leer " + modelData[0] + ": " + modelData[1]; color: Theme.warn; font.family: Theme.font; font.pixelSize: 12 } }
+        Repeater { model: jobs.state === "ok" ? jobs.jobs : []; delegate: JobCard { job: modelData } }
+        // cancel is not offered: say so
+        Item { visible: jobs.state === "ok" && jobs.jobs.length > 0; width: parent.width; height: 34
+            DashedRect { anchors.fill: parent; radius: Theme.rRow; color: Theme.hair }
+            Row { x: 12; anchors.verticalCenter: parent.verticalCenter; spacing: 8
+                Icon { name: "lock"; size: 14; color: Theme.t3; anchors.verticalCenter: parent.verticalCenter }
+                Text { text: "Cancelar un trabajo no está disponible desde la shell todavía"; color: Theme.t3; font.family: Theme.font; font.pixelSize: 12; anchors.verticalCenter: parent.verticalCenter } } }
 
-        Repeater { model: jobs.state === "ok" ? jobs.jobs : []
-            delegate: Rectangle { width: ac.width - 32; height: card.implicitHeight + 20; radius: Theme.radius; color: Theme.raised; border.width: 1; border.color: Theme.line
-                readonly property var s: ac.spec[modelData.state]
-                Column { id: card; x: 12; y: 10; width: parent.width - 24; spacing: 5
-                    Row { spacing: 8
-                        Text { text: modelData.bridge + " · " + modelData.kind; color: Theme.ink; font.pixelSize: Theme.fsBody; font.bold: true }
-                        Chip { text: s.t; glyph: s.g; tone: s.c } }
-                    // A bar only when the job declared a total; otherwise the count alone.
-                    Rectangle { visible: modelData.total > 0; width: parent.width; height: 5; radius: 3; color: Theme.bg
-                        Rectangle { width: parent.width * Math.min(1, modelData.done / Math.max(1, modelData.total)); height: parent.height; radius: 3; color: s.c } }
-                    Text { text: (modelData.total > 0 ? modelData.done + " de " + modelData.total : modelData.done + " iteraciones, sin total declarado")
-                                 + "  ·  " + modelData.workspace + "  ·  " + modelData.id
-                        color: Theme.soft; font.pixelSize: Theme.fsSmall }
-                    // Quiet is not stuck: a long iteration writes nothing for a while. Say only what is known.
-                    Text { visible: (modelData.state === "running" || modelData.state === "starting") && modelData.idle_ms > 60000
-                        text: "sin novedades hace " + ac.ago(modelData.idle_ms); color: Theme.dim; font.pixelSize: Theme.fsSmall }
-                    Text { visible: !!modelData.error; width: parent.width; wrapMode: Text.Wrap; text: modelData.error ? modelData.error : ""
-                        color: Theme.bad; font.pixelSize: Theme.fsSmall; maximumLineCount: 3; elide: Text.ElideRight }
-                }
-            } }
-        Text { visible: jobs.state === "ok" && jobs.jobs.length > 0; width: parent.width; wrapMode: Text.Wrap
-            text: "Cancelar un trabajo no está disponible desde la shell todavía."; color: Theme.dim; font.pixelSize: Theme.fsSmall - 1 }
-
-        Rectangle { width: parent.width; height: 1; color: Theme.line }
-
-        // DESIGN: what an authorization prompt will look like once Policy can be asked from here.
-        Row { spacing: 8
-            Text { text: "AUTORIZACIÓN"; color: Theme.dim; font.pixelSize: Theme.fsSmall - 1; font.letterSpacing: 1.2; anchors.verticalCenter: parent.verticalCenter }
-            Chip { text: "DISEÑO · sin contrato"; tone: Theme.warn } }
-        Rectangle { width: parent.width; height: 96; radius: Theme.radius; color: Theme.raised; border.width: 1; border.color: Theme.line
-            Column { x: 12; y: 10; width: parent.width - 24; spacing: 5
-                Row { spacing: 8
-                    Text { text: "Instalar herramienta kicad"; color: Theme.dim; font.pixelSize: Theme.fsBody; font.bold: true }
-                    Chip { text: "ejemplo"; glyph: "!"; tone: Theme.unknown } }
-                Text { text: "Así se pedirá una aprobación; hoy Policy no puede preguntar a la shell."; color: Theme.dim; font.pixelSize: Theme.fsSmall }
-                // Deny is the default focus; nothing is approved implicitly.
-                Row { spacing: 8
-                    Rectangle { width: 92; height: 26; radius: 6; color: "transparent"; border.width: 2; border.color: Theme.dim
-                        Text { anchors.centerIn: parent; text: "Rechazar"; color: Theme.dim; font.pixelSize: Theme.fsSmall } }
-                    Rectangle { width: 150; height: 26; radius: 6; color: "transparent"; border.width: 1; border.color: Theme.line
-                        Text { anchors.centerIn: parent; text: "Revisar detalles…"; color: Theme.dim; font.pixelSize: Theme.fsSmall } } }
-            } }
-        Row { spacing: 8
-            Text { text: "AUDITORÍA"; color: Theme.dim; font.pixelSize: Theme.fsSmall - 1; font.letterSpacing: 1.2; anchors.verticalCenter: parent.verticalCenter }
-            Chip { text: "DISEÑO · ejemplo"; tone: Theme.warn } }
-        Repeater { model: Synthetic.audit
-            delegate: Row { spacing: 8; width: ac.width - 32
-                Text { text: modelData.t; color: Theme.dim; font.pixelSize: Theme.fsSmall; font.features: { "tnum": 1 } }
-                Text { text: modelData.kind === "ok" ? "✓" : modelData.kind === "bad" ? "✕" : "·"; color: Theme.dim; font.pixelSize: Theme.fsSmall }
-                Text { width: parent.width - 70; text: modelData.text; color: Theme.dim; font.pixelSize: Theme.fsSmall; wrapMode: Text.Wrap }
-            } }
+        NoteBox { width: parent.width; icon: "lock"
+            text: "La revisión de Policy y su auditoría todavía no tienen un canal gráfico. No hay operaciones pendientes deducidas desde muestras." }
+    }
     }
 }

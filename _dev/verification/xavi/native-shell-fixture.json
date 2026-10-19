@@ -1,0 +1,13 @@
+{
+  "source":"fixture", "generated_at":1791986400000, "daemon_reachable":true,
+  "staleness_ms":0, "error":null, "status":null, "boot":null,
+  "capabilities":{"iris.perception":["fixture-node"],"cortex.reasoning":["fixture-node"]},
+  "nodes":[], "totals":{"nodes":0,"schedulable_nodes":0,"logical_cores":0,"memory_bytes":0,"accelerator_bytes":0,"accelerators":0},
+  "modules":[
+    {"id":"iris","version":"fixture","state":"loaded","explanation":"Recorded test data; not a running service","dependencies":[]},
+    {"id":"cortex","version":"fixture","state":"loaded","explanation":"Recorded test data; not a running service","dependencies":["iris"]},
+    {"id":"forge","version":"fixture","state":"loaded","explanation":"Recorded test data; not a running worker","dependencies":["cortex"]}
+  ],
+  "load_order":["iris","cortex","forge"], "models":[], "metrics":null,
+  "inspector":{"source":"fixture","state":"ready","reason":null,"generated_at_ms":1791986400000,"providers":[],"cortex_trajectories":[]}
+}

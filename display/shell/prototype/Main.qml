@@ -1,80 +1,198 @@
 import QtQuick
+import "ActionRules.js" as ActionRules
 
-// ArchieOS professional shell: DESIGN PROTOTYPE (phase B). Runs on plain Qt Quick so it can be
-// rendered without Quickshell:   qml Main.qml     (Qt 6.6+)
-// The Quickshell host layer (PanelWindow, layer-shell) is not part of this file and is untested.
-//
-//   Ctrl+K palette   C control center   A activity   G grid/list   M reduced motion
-//   S sentry (red local)   1..4 theme: frost / workspace / signature / synthesis
+// Native desktop surfaces managed locally by Wm. Core, Policy and the external
+// compositor keep their own authority; window state never grants a capability.
 Item {
     id: root
     width: 1920; height: 1080
     property string overlay: ""
+    property string menuName: ""
     focus: true
 
-    Keys.onPressed: function (e) {
-        if (e.key === Qt.Key_Escape) overlay = ""
-        else if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_K) overlay = overlay === "palette" ? "" : "palette"
-        else if (e.key === Qt.Key_C) overlay = overlay === "control" ? "" : "control"
-        else if (e.key === Qt.Key_S) overlay = overlay === "sentry" ? "" : "sentry"
-        else if (e.key === Qt.Key_A) overlay = overlay === "activity" ? "" : "activity"
-        else if (e.key === Qt.Key_G) vault.gridView = !vault.gridView
-        else if (e.key === Qt.Key_M) Theme.reducedMotion = !Theme.reducedMotion
-        else if (e.key === Qt.Key_1) Theme.variant = "frost"
-        else if (e.key === Qt.Key_2) Theme.variant = "workspace"
-        else if (e.key === Qt.Key_3) Theme.variant = "signature"
-        else if (e.key === Qt.Key_4) Theme.variant = "synthesis"
-    }
-
-    Rectangle { anchors.fill: parent
-        gradient: Gradient { GradientStop { position: 0; color: Theme.wall0 } GradientStop { position: 1; color: Theme.wall1 } } }
-
-    // Fed by quickshell/BridgeProcess.qml in the shell, by a recorded frame in tests.
     property alias bridge: bridgeModel
-    // Plain values for tests that cannot reach the model object.
     readonly property string bridgeLink: bridgeModel.link
     readonly property int bridgeRejected: bridgeModel.rejected
-    BridgeModel { id: bridgeModel }
+    readonly property bool opaque: Theme.opaque
+    readonly property var wmState: Wm.st
+    readonly property string wmFront: Wm.front()
+    readonly property var wmOffsets: Wm.off
+    readonly property bool vaultOpen: Wm.isOpen("vault")
 
-    // Test/replay only: a context property `replayFile` (a file URL of JSON lines written by
-    // archie-shell-bridge) is fed through the same ingest() path. Needs QML_XHR_ALLOW_FILE_READ=1.
+    BridgeModel { id: bridgeModel }
+    property string actionNote: ""
+    signal actionDenied(string action, string reason)
+    readonly property bool nativeHost: typeof shellRuntime !== "undefined" && shellRuntime !== null
+    readonly property string hostError: nativeHost ? shellRuntime.error : ""
+    Connections {
+        target: root.nativeHost ? shellRuntime : null
+        function onFrameReady(line) { bridgeModel.ingest(line) }
+    }
+    Binding { target: Theme; property: "runtimeConserve"; value: root.bridge.kernel !== null && ["conserve","headless"].indexOf(root.bridge.kernel.display_budget) >= 0 }
+    Timer { interval: 1000; repeat: true; running: root.visible; onTriggered: bridgeModel.tick() }
+    onOverlayChanged: if (overlay !== "palette" && overlay !== "search") root.forceActiveFocus()
+
+    function handleEscape() { overlay = ""; Demo.orbNav = false; root.forceActiveFocus() }
+    function toggle(name) { overlay = overlay === name ? "" : name }
+    function ingestRecording(line) {
+        var frame
+        try { frame = JSON.parse(line) } catch (e) { return bridgeModel.ingest(line) }
+        if (!frame || typeof frame !== "object") return bridgeModel.ingest(line)
+        frame.link = { state: "fixture" }
+        if (frame.system) frame.system.source = "fixture"
+        for (var field of ["catalog","inspector","workflows"])
+            if (frame[field] && typeof frame[field] === "object") frame[field].source = "fixture"
+        return bridgeModel.ingest(JSON.stringify(frame))
+    }
+    function actionContext() {
+        return { nativeReady: live.ok,
+            stageLauncher: typeof appCatalog !== "undefined" && appCatalog.canLaunch,
+            compositorBlur: false }
+    }
+    // Explicit development replay: recordings cannot present themselves as live.
     property string replayDebug: ""
     Component.onCompleted: {
         replayDebug = typeof replayFile === "undefined" ? "no-context-property" : "file=" + replayFile
         if (typeof replayFile === "undefined" || replayFile === "") return
         var xhr = new XMLHttpRequest()
-        xhr.open("GET", replayFile, false)
-        xhr.send()
+        xhr.open("GET", replayFile, false); xhr.send()
         var lines = xhr.responseText.split(/\r?\n/)
         replayDebug += " status=" + xhr.status + " bytes=" + xhr.responseText.length + " lines=" + lines.length
-        for (var i = 0; i < lines.length; i++) if (lines[i].trim() !== "") bridgeModel.ingest(lines[i])
+        for (var i = 0; i < lines.length; i++) if (lines[i].trim() !== "") root.ingestRecording(lines[i])
     }
 
-    TopBar { id: bar; width: parent.width; overlay: root.overlay; bridge: bridgeModel
-        onToggle: function (n) { root.overlay = root.overlay === n ? "" : n } }
-
-    VaultWindow { id: vault; x: Math.round(parent.width * 0.13); y: Math.round(parent.height * 0.083); width: Math.round(parent.width * 0.615); height: Math.round(parent.height * 0.65) }
-
-    // A second, smaller window shows the Stage as a child window next to Vault (ADR-GUI-002).
-    Panel { x: Math.round(parent.width * 0.76); y: Math.round(parent.height * 0.139); width: Math.round(parent.width * 0.208); height: Math.round(parent.height * 0.278)
-        Rectangle { width: parent.width; height: 34; color: Theme.raised; radius: Theme.radius
-            Text { anchors.centerIn: parent; text: "Stage — apps de Archie"; color: Theme.ink; font.pixelSize: Theme.fsBody } }
-        Column { anchors.centerIn: parent; spacing: 8
-            Chip { text: "Autoridad: Archie"; glyph: "◉"; tone: Theme.accent }
-            Text { text: "Tú ganas el control al tocar el ratón"; color: Theme.soft; font.pixelSize: Theme.fsSmall }
+    function run(id) {
+        if (typeof id !== "string" || !ActionRules.allowed(id, actionContext())) {
+            actionNote = typeof id === "string" ? ActionRules.reason(id, actionContext()) : "Acción no válida"
+            actionDenied(String(id), actionNote)
+            return false
         }
+        actionNote = ""
+        if (id.indexOf("dock.") === 0) { overlay = ""; Wm.dockClick(id.slice(5)); return true }
+        if (id.indexOf("window.") === 0) { overlay = ""; Wm.open(id.slice(7)); return true }
+        if (id.indexOf("overlay.") === 0) {
+            var name = id.slice(8)
+            var windows = { forge: "forge", settings: "set", sentry: "sentry" }
+            if (windows[name]) { overlay = ""; Wm.open(windows[name]) }
+            else overlay = name
+            return true
+        }
+        switch (id) {
+        case "app.orb": overlay = ""; Demo.bare = true; break
+        case "app.vault": case "app.forge": case "app.sentry": case "app.set":
+            overlay = ""; Wm.open(id.slice(4)); break
+        case "app.stage": {
+            var stage = appCatalog.apps.filter(function(a) { return a.available && a.id.indexOf("archie-stage") >= 0 })
+            if (!stage.length) { actionNote = "Stage no está instalado en el catálogo"; actionDenied(id, actionNote); return false }
+            return appCatalog.launch(stage[0].id)
+        }
+        case "win.close": Wm.closeFront(); break
+        case "win.min": Wm.minimizeFront(); break
+        case "win.zoom": Wm.zoomFront(); break
+        case "win.closeAll": Wm.closeAll(); break
+        case "win.minAll": Wm.minimizeAll(); break
+        case "win.showAll": overlay = ""; Wm.showAll(); break
+        case "win.desktop": case "desk.toggle": overlay = ""; Demo.bare = !Demo.bare; break
+        case "vault.newTab": overlay = ""; Wm.open("vault"); vault.newTab(); break
+        case "vault.closeTab": vault.closeTab(vault.tabIndex); break
+        case "vault.sort": vault.toggleSort(); break
+        case "vault.list": vault.gridView = false; break
+        case "vault.grid": vault.gridView = true; break
+        case "theme.motion": Theme.reducedMotion = !Theme.reducedMotion; break
+        case "theme.opaque": Theme.opaque = !Theme.opaque; break
+        case "theme.blur": Theme.blur = !Theme.blur; break
+        case "orb.nav": overlay = ""; Demo.bare = true; Demo.orbNav = !Demo.orbNav; break
+        }
+        return true
     }
 
-    Dock { id: dock; anchors.horizontalCenter: parent.horizontalCenter; y: parent.height - height - 14
-        onLaunched: function (id) { if (id === "sentry") root.overlay = root.overlay === "sentry" ? "" : "sentry" } }
-
-    Item { anchors.fill: parent; visible: root.overlay !== ""
-        MouseArea { anchors.fill: parent; onClicked: root.overlay = "" }
-        ControlCenter { bridge: bridgeModel; visible: root.overlay === "control"; x: parent.width - width - 14; y: Theme.barH + 8 }
-        ActivityCenter { bridge: bridgeModel; visible: root.overlay === "activity"; x: parent.width - width - 14; y: Theme.barH + 8 }
-        SentryPanel { bridge: bridgeModel; visible: root.overlay === "sentry"; x: (parent.width - width) / 2; y: 120 }
-        CommandPalette { visible: root.overlay === "palette"; x: (parent.width - width) / 2; y: 150 }
+    Keys.onPressed: function(e) {
+        if (e.key === Qt.Key_Escape) handleEscape()
+        else if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_K) toggle("palette")
+        else if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_Space) run("orb.nav")
+        else if (overlay === "switcher" && e.key === Qt.Key_Tab) switcher.step(1)
+        else if (overlay === "switcher" && e.key === Qt.Key_Backtab) switcher.step(-1)
+        else if (overlay === "switcher" && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter)) switcher.choose()
+        else if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_T) run("vault.newTab")
+        else if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_W) run((e.modifiers & Qt.ShiftModifier) ? "win.closeAll" : "win.close")
+        else if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_M) run((e.modifiers & Qt.ShiftModifier) ? "win.minAll" : "win.min")
+        else if (e.key === Qt.Key_C) toggle("control")
+        else if (e.key === Qt.Key_S) Wm.toggle("sentry")
+        else if (e.key === Qt.Key_A) toggle("activity")
+        else if (e.key === Qt.Key_G && Wm.isOpen("vault")) vault.gridView = !vault.gridView
+        else if (e.key === Qt.Key_D) run("win.desktop")
+        else if (overlay === "" && Wm.front() === "vault" && e.key === Qt.Key_Down) vault.move(vault.gridView ? 4 : 1)
+        else if (overlay === "" && Wm.front() === "vault" && e.key === Qt.Key_Up) vault.move(vault.gridView ? -4 : -1)
+        else if (overlay === "" && Wm.front() === "vault" && e.key === Qt.Key_Right && vault.gridView) vault.move(1)
+        else if (overlay === "" && Wm.front() === "vault" && e.key === Qt.Key_Left && vault.gridView) vault.move(-1)
+        else if (overlay === "" && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter)) run("vault.open")
+        else if (overlay === "" && e.key === Qt.Key_Backspace) run("vault.up")
+        else if (e.key === Qt.Key_W) toggle("switcher")
+        else if (e.key === Qt.Key_N || e.key === Qt.Key_T) toggle("notif")
+        else if (e.key === Qt.Key_F) Wm.toggle("forge")
+        else if (e.key === Qt.Key_I) toggle("inspector")
+        else if (e.key === Qt.Key_Comma) Wm.toggle("set")
+        else if (e.key === Qt.Key_L) run("overlay.lock")
+        else if (e.key === Qt.Key_X) toggle("workspace")
+        else if (e.key === Qt.Key_Slash) toggle("search")
+        else if (e.key === Qt.Key_V) Demo.next()
+        else if (e.key === Qt.Key_Period) Demo.focusRing = !Demo.focusRing
+        else if (e.key === Qt.Key_H) run("win.desktop")
+        else if (e.key === Qt.Key_P) Theme.motion = Theme.motion === "full" ? "balanced" : Theme.motion === "balanced" ? "quiet" : "full"
+        else if (e.key === Qt.Key_M) Theme.reducedMotion = !Theme.reducedMotion
+        else if (e.key === Qt.Key_O) Theme.opaque = !Theme.opaque
+        else if (e.key === Qt.Key_B) run("theme.blur")
     }
 
-    DesignBanner { x: 14; y: Theme.barH + 8; visible: root.overlay === "" }
+    Background { anchors.fill: parent; nodes: !Demo.orbShow || !live.ok }
+    LiveOrb { id: live; anchors.fill: parent; visible: Demo.orbShow || Demo.orbNav }
+    readonly property string orbDiagnostics:live.diagnostics
+
+    // A separate layer keeps arbitrarily many local raises below menus and overlays.
+    Item { anchors.fill: parent; z: 100
+        WinHost { wid: "vault"; baseX: 88; baseY: vault.gridView ? 92 : 100
+            VaultWindow { id: vault; shown: Wm.isShown("vault"); enterDy: Wm.isMin("vault") ? 160 : 0; enterScale: Wm.isMin("vault") ? 0.8 : 0.96
+                width: Wm.isMax("vault") ? root.width - 80 : 1060; height: Wm.isMax("vault") ? root.height - 154 : gridView ? 840 : 720
+                onCloseRequested: Wm.close("vault") } }
+        WinHost { wid: "stage"; baseX: root.width - 710; baseY: 172
+            StageWindow { shown: Wm.isShown("stage"); enterDy: Wm.isMin("stage") ? 160 : 0; enterScale: Wm.isMin("stage") ? 0.8 : 0.96
+                width: Wm.isMax("stage") ? root.width - 80 : Math.min(600,root.width-32); height: Wm.isMax("stage") ? root.height - 154 : Math.min(400,Math.max(240,root.height-154)) } }
+        WinHost { wid: "forge"; baseX: 460; baseY: 130
+            ForgeWindow { wid: "forge"; bridge: bridgeModel; shown: Wm.isShown("forge"); enterDy: Wm.isMin("forge") ? 160 : 0; enterScale: Wm.isMin("forge") ? 0.8 : 0.96
+                width: Wm.isMax("forge") ? root.width - 80 : Math.min(1000,root.width-32); height: Wm.isMax("forge") ? root.height - 154 : Math.min(600,Math.max(240,root.height-154)) } }
+        WinHost { wid: "set"; baseX: 490; baseY: 140
+            SettingsWindow { wid: "set"; bridge: bridgeModel; shown: Wm.isShown("set"); enterDy: Wm.isMin("set") ? 160 : 0; enterScale: Wm.isMin("set") ? 0.8 : 0.96
+                width: Wm.isMax("set") ? root.width - 80 : Math.min(940,root.width-32); height: Wm.isMax("set") ? root.height - 154 : Math.min(650,Math.max(240,root.height-154)) } }
+        WinHost { wid: "sentry"; baseX: (root.width - 780) / 2; baseY: 110
+            SentryPanel { bridge: bridgeModel; height:Math.min(700,Math.max(240,root.height-154)); shown: Wm.isShown("sentry"); enterDy: Wm.isMin("sentry") ? 160 : 0; enterScale: Wm.isMin("sentry") ? 0.8 : 0.96 } }
+    }
+
+    TopBar { z: 600; width: parent.width; overlay: root.overlay; bridge: bridgeModel; menu: root.overlay === "menu" ? root.menuName : ""
+        app: Wm.frontTitle()
+        onMenuClicked: function(n,x) { if (root.overlay === "menu" && root.menuName === n) root.overlay = ""; else { root.menuName = n; menuDrop.x = x; root.overlay = "menu" } }
+        onToggle: function(n) { root.toggle(n) } }
+    Dock { id: dock; z: 500; anchors.horizontalCenter: parent.horizontalCenter; y: parent.height - height - 14
+        onLaunched: function(id) { root.run(id === "orb" ? "app.orb" : "dock." + id) }
+        onMenuRequested: function(id,cx) { dockMenu.target = id; dockMenu.x = Math.max(8, Math.min(root.width - dockMenu.width - 8, dock.x + cx - dockMenu.width / 2)); root.overlay = "dockmenu" } }
+    Rectangle { visible: Demo.orbNav; z: 700; anchors.horizontalCenter: parent.horizontalCenter; y: 40; width: navTxt.implicitWidth + 28; height: 30; radius: 15
+        MouseArea { anchors.fill: parent; onClicked: Demo.orbNav = false }
+        color: Theme.panel; border.width: 1; border.color: Theme.hair
+        Text { id: navTxt; anchors.centerIn: parent; text: "Navegando la esfera en 3D · Esc o clic aquí para fijar la cámara"; color: Theme.t2; font.family: Theme.font; font.pixelSize: 12 } }
+
+    Item { anchors.fill: parent; z: 1000
+        MouseArea { anchors.fill: parent; enabled: root.overlay !== ""; onClicked: root.overlay = "" }
+        ControlCenter { bridge: bridgeModel; shown: root.overlay === "control"; enterDy: -8; x: root.width - width - 24; y: 44 }
+        ActivityCenter { bridge: bridgeModel; shown: root.overlay === "activity"; enterDy: -8; x: root.width - width - 24; y: 44 }
+        CommandPalette { actionContext: root.actionContext(); onActivated: function(act) { root.overlay = ""; root.run(act) }; shown: root.overlay === "palette"; enterDy: -8; durIn: Theme.durPalette; durOut: Theme.durPaletteClose; x: (root.width - width) / 2; y: 140 }
+        WindowSwitcher { id: switcher; onChosen: function(k) { root.overlay = ""; if (k !== "") root.run("window." + k) }; shown: root.overlay === "switcher"; enterDy: -8; durIn: Theme.durPalette; durOut: Theme.durPaletteClose; x: (root.width - width) / 2; y: 250 }
+        NotificationCenter { bridge: bridgeModel; shown: root.overlay === "notif"; enterDy: -8; x: root.width - width - 24; y: 44 }
+        DockMenu { id: dockMenu; shown: root.overlay === "dockmenu"; y: dock.y - height - 8; onActivated: root.overlay = "" }
+        InspectorPanel { bridge: bridgeModel; shown: root.overlay === "inspector"; enterDy: -8; x: root.width - width - 24; y: 44 }
+        WorkspaceMenu { onChosen: function(w) { if (w === "orb") root.run("app.orb"); root.overlay = "" }; shown: root.overlay === "workspace"; x: Math.max(8, root.width - width - 24); y: 42 }
+        MenuDropdown { id: menuDrop; actionContext: root.actionContext(); vault: vault; name: root.menuName; shown: root.overlay === "menu"; y: 34; enterDy: -6
+            onActivated: function(id) { root.overlay = ""; root.run(id) } }
+        SearchPanel { objectName: "globalSearch"; bridge: bridgeModel; onActivated: function(act) { root.overlay = ""; root.run(act) }; shown: root.overlay === "search"; x: (root.width - width) / 2; y: 140 }
+    }
+    NoteBox { z: 1200; visible: root.actionNote !== ""; text: root.actionNote; icon: "unknown"; x: 24; y: root.height - height - 100; width: Math.min(720,root.width - 48) }
+    NoteBox { z: 1200; visible: root.hostError !== ""; text: "Bridge local: " + root.hostError; icon: "bad"; x: 24; y: 60; width: Math.min(720,root.width - 48) }
 }

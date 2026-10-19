@@ -44,6 +44,7 @@ class ArchieBridge final : public QObject
     // composed Lumenfield scene; this frame is what search looks through.
     Q_PROPERTY(QVariantMap orb READ orb NOTIFY orbChanged)
     Q_PROPERTY(int orbRevision READ orbRevision NOTIFY orbChanged)
+    Q_PROPERTY(bool presented READ presented WRITE setPresented NOTIFY presentedChanged)
 
     // Everything below comes out of `archie::visual::Observatory` rather than from this
     // class. The bridge used to derive positions from a hash of the node name, colours
@@ -57,7 +58,9 @@ class ArchieBridge final : public QObject
     Q_PROPERTY(QVariantMap frame READ frame NOTIFY frameChanged)
 
 public:
-    explicit ArchieBridge(QObject *parent = nullptr);
+    explicit ArchieBridge(QObject *parent = nullptr, bool shellMode = false);
+    bool presented() const { return m_presented; }
+    void setPresented(bool presented);
 
     QVariantMap snapshot() const { return m_snapshot; }
     QVariantMap world() const { return m_world; }
@@ -118,6 +121,7 @@ signals:
     void geoFabricChanged();
     void buildingsChanged();
     void orbChanged();
+    void presentedChanged();
 
 private:
     enum class Projection { Snapshot, World, Kernel, GeoFabric, Orb };
@@ -170,5 +174,7 @@ private:
     int m_orbRevision = 0;
     bool m_orbRequestPending = false;
     bool m_connected = false;
+    bool m_presented = true;
+    qint64 m_kernelReceivedAt = 0;
     float m_earthAngle = 0.0F;
 };

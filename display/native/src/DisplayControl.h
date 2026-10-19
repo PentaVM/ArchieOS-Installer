@@ -21,8 +21,10 @@ class DisplayControl final : public QObject
     Q_PROPERTY(QStringList scenes READ scenes CONSTANT)
 
 public:
-    explicit DisplayControl(LumenField *lumen, QObject *parent = nullptr);
-    bool start();
+    explicit DisplayControl(LumenField *lumen = nullptr, QObject *parent = nullptr, bool shellMode = false);
+    void setShellMode(bool enabled) { m_shellMode = enabled; }
+    bool start(quint16 port = 7668);
+    quint16 port() const { return m_server.serverPort(); }
 
     QStringList scenes() const;
     /// The scene a name opens ("core" is FORGE's old name), or "" when there is none.
@@ -31,12 +33,13 @@ public:
     Q_INVOKABLE QString modeOf(const QString &scene) const;
 
 signals:
-    /// A checked command: `scene` with a scene name, or `preset` once the preset is applied.
-    void commandReceived(const QString &action, const QString &value);
+    /// A checked local view command; presets/cinematics are applied before notification.
+    void commandReceived(const QString &action, const QString &value, bool enabled);
 
 private:
     QByteArray answer(const QByteArray &line);
 
-    LumenField *m_lumen;
+    LumenField *m_lumen = nullptr;
     QTcpServer m_server;
+    bool m_shellMode = false;
 };

@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# The desktop design, as a preview: Xavi's prototype of the shell (top bar, dock, Vault,
-# control centre, activity centre, command palette). Everything it shows is invented and
-# says so on screen. It is connected to nothing; it is here to be looked at and judged.
-#
-#   Ctrl+K palette   C control centre   A activity   G grid or list   M reduced motion
-#   1 2 3 4   Frost, Workspace, Signature, and the proposed synthesis
+# Native desktop through WSLg. --preview explicitly selects synthetic design boards.
 set -euo pipefail
 [ -S /mnt/wslg/runtime-dir/wayland-0 ] || { echo 'archie-design: WSLg is not running, so there is nowhere to show it' >&2; exit 1; }
-sed -n '6,7p' "$0" | sed 's/^# \{0,1\}//' >&2
+export XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir WAYLAND_DISPLAY=wayland-0 QT_QPA_PLATFORM=wayland
+if [[ ${1:-} != --preview ]]; then
+  # Core and displayd keep their own process/authority lifecycle. Opening a design
+  # window cannot start privileged services or replace an existing observer.
+  exec /usr/lib/archie/start-native.sh "$@"
+fi
+shift
 cd /usr/share/archie/shell-prototype
 XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir WAYLAND_DISPLAY=wayland-0 QT_QPA_PLATFORM=wayland QT_QUICK_BACKEND=software \
-  exec /usr/lib/qt6/bin/qml Main.qml
+  exec /usr/lib/qt6/bin/qml Main.qml "$@"

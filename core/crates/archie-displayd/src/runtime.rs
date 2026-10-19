@@ -41,7 +41,7 @@ impl RuntimeInventory {
     pub fn read(&mut self) -> Vec<OrbEntity> {
         #[cfg(not(target_os = "linux"))]
         {
-            return Vec::new();
+            Vec::new()
         }
         #[cfg(target_os = "linux")]
         {

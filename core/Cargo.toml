@@ -57,6 +57,7 @@ members = [
     "crates/archie-lan",
     "crates/archie-sentry",
     "crates/archie-shell-bridge",
+    "crates/archie-lumen-design",
 ]
 
 [workspace.package]

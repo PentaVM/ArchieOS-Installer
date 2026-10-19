@@ -15,7 +15,29 @@ with no overrides. Applying a preset opens Orb. A preset may only set keys that 
 renderer's defaults, with values that pass the same checks as the panel (type, `#rrggbb`
 colours, known layout, numbers inside their range, not clamped): one bad key refuses the whole
 file and the reply says which. Broken preset files are reported when the display starts. HUD
-labels are the `labels` setting, so a preset can hide them; there are no overlay toggles.
+labels are the `labels` setting, so a preset can hide them. Local overlay toggles use
+the same presentation settings and do not change OS authority.
+
+PR41 also preserves its local `cinematic`, `overlay` and shell `panel` controls. The
+eight `polar-*` profiles from Xavi's delivered source are embedded by the Rust
+`archie-lumen-design` static library and join the same validated renderer catalog.
+Qt/QML, GPU shaders and World remain the native host. See
+[`source-port.md`](../../_dev/verification/xavi/source-port.md) for source attribution,
+CPU validation and the explicit visual/hardware fidelity limits.
+
+Build with Cargo plus the existing Qt6/CMake dependencies; CMake builds/links the
+Rust static library automatically. Optional CPU shader checks use Mesa llvmpipe:
+
+```sh
+cmake -S display/native -B build/native -G Ninja -DARCHIE_NATIVE_BUILD_TESTS=ON -DARCHIE_NATIVE_BUILD_SHADER_TESTS=ON
+cmake --build build/native --parallel 2
+QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software ctest --test-dir build/native --output-on-failure
+```
+
+The shader test explicitly selects/verifies software OpenGL itself. It is a synthetic
+rendering test, not a benchmark. ISO/VBox keep their existing launch contract. For a
+WSL Operator image, use that build as `ARCHIE_NATIVE_BUILD_DIR=build/native` when
+packaging; `archie-design --preview` is the explicit synthetic QML preview.
 
 The listener changes only the local view. It cannot run commands, access Stage,
 or write to displayd. If the Observatory is closed, Archie reports that the local

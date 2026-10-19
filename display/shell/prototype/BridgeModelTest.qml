@@ -23,7 +23,7 @@ Item {
         var m = model()
         check("starts waiting", m.link === "waiting" && m.received === false && m.system === null)
 
-        check("accepts a live frame", m.ingest(frame({ state: "live" }, { system: { hostname: "n" } })))
+        check("accepts a live frame", m.ingest(frame({ state: "live" }, { system: { hostname: "n", archieos_version: "0.1", health: "healthy", source: "live", modules_loaded: 0, modules_installed: 0, models_registered: 0, active_tasks: 0, peers: 0, reachable_peers: 0 } })))
         check("live link", m.link === "live" && m.system.hostname === "n")
 
         check("fixture is never live", m.ingest(frame({ state: "fixture" })) && m.link === "fixture")
@@ -48,7 +48,7 @@ Item {
         check("lan defaults to not_configured", l.lan.state === "not_configured")
         l.ingest(frame({ state: "live" }, { lan: { state: "missing", path: "/p" } }))
         check("lan missing is passed through", l.lan.state === "missing" && l.lan.path === "/p")
-        l.ingest(frame({ state: "live" }, { lan: { state: "ok", total: 1, devices: [{ name: "d" }], stale: false, age_seconds: 5 } }))
+        l.ingest(frame({ state: "live" }, { lan: { state: "ok", scanned_unix: 1, total: 1, devices: [{ name: "d", address: "192.0.2.1", class: null, manufacturer: "", model: "", services: [], seen_by: [], state: {} }], stale: false, age_seconds: 5 } }))
         check("lan ok carries devices", l.lan.state === "ok" && l.lan.devices[0].name === "d")
         l.ingest(frame({ state: "live" }))
         check("a frame without lan resets it to not_configured", l.lan.state === "not_configured")
@@ -56,8 +56,10 @@ Item {
         // Long jobs: read-only list; running count includes starting jobs only.
         var j = model()
         check("jobs default to not_configured", j.jobs.state === "not_configured" && j.runningJobs === 0)
-        j.ingest(frame({ state: "live" }, { jobs: { state: "ok", skipped: 0, unreadable: [], jobs: [
-            { id: "a", state: "running" }, { id: "b", state: "starting" }, { id: "c", state: "done" }, { id: "d", state: "failed" } ] } }))
+        var jobs = [{ id: "a", state: "running" }, { id: "b", state: "starting" }, { id: "c", state: "done" }, { id: "d", state: "failed" }].map(function(x) {
+            return Object.assign({ workspace: "w", bridge: "freecad", kind: "sweep", done: 0, total: 1, started_ms: 0, updated_ms: 1, idle_ms: 0, error: null }, x)
+        })
+        j.ingest(frame({ state: "live" }, { jobs: { state: "ok", skipped: 0, unreadable: [], jobs: jobs } }))
         check("running jobs counted", j.jobs.state === "ok" && j.runningJobs === 2)
 
         // Silence: three polls (2 s each) without a frame means the bridge is gone.
