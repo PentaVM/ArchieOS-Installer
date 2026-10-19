@@ -55,6 +55,8 @@ Item {
             id: scene
             controller: viewport.controller
             aspect: view.width / Math.max(1, view.height)
+            viewportWidth: view.width
+            viewportHeight: view.height
             reducedMotion: viewport.reducedMotion || !viewport.controller.renderBudget.ambientMotion
             presented: viewport.presented
         }

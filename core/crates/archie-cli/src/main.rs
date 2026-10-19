@@ -5,8 +5,6 @@
 //!
 //! Every command accepts `--json` for machine consumption.
 
-mod visual;
-
 use archie_core::control::{
     request_over, ControlRequest, ControlResponse, CortexTrajectoryView, DeviceOperationView,
     DeviceView, ModelView, ModuleView, PeerView, ProviderView, StatusView, TotalsView,
@@ -18,6 +16,8 @@ use clap::{Parser, Subcommand};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Stdio};
+
+mod visual;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -309,15 +309,15 @@ enum Command {
         #[command(subcommand)]
         command: SpeechCommand,
     },
+    /// Control the Observatory: scenes and look presets (no overlays).
+    Visual {
+        #[command(subcommand)]
+        command: visual::VisualCommand,
+    },
     /// Test the local audio bridge.
     Voice {
         #[command(subcommand)]
         command: VoiceCommand,
-    },
-    /// Control the native display through its local allowlisted channel.
-    Visual {
-        #[command(subcommand)]
-        command: visual::VisualCommand,
     },
     /// Inspect professional tool adapters.
     Tools {
@@ -577,7 +577,6 @@ impl Command {
             | Self::Vault { .. }
             | Self::Speech { .. }
             | Self::Voice { .. }
-            | Self::Visual { .. }
             | Self::Tools { .. }
             | Self::Workspace { .. }
             | Self::Iris { .. } => return None,
@@ -667,7 +666,9 @@ impl Command {
             | Self::SentryNotices { .. }
             | Self::WandaIngest { .. }
             | Self::WandaWatch { .. }
-            | Self::VaultDocs { .. } => return None,
+            | Self::VaultDocs { .. }
+            // Answered by the display in `main`, before any daemon request is built.
+            | Self::Visual { .. } => return None,
         })
     }
 }
@@ -733,7 +734,6 @@ fn read_bounded(path: &Path, maximum: u64) -> Result<Vec<u8>, String> {
 async fn local_command(command: &Command, root: &Path, json: bool) -> std::process::ExitCode {
     use archie_workstation::harness::{HarnessKind, HarnessSpec};
     match command {
-        Command::Visual { command } => visual::run(command).await,
         Command::Doctor => {
             let checks = archie_workstation::doctor();
             if json {
@@ -1119,6 +1119,10 @@ fn enrol(paths: &StatePaths, owner_key: Option<&str>, json: bool) -> std::proces
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
+
+    if let Command::Visual { command } = &cli.command {
+        return visual::run(command, cli.json).await;
+    }
 
     let paths = match &cli.root {
         Some(root) => StatePaths::rooted(root),

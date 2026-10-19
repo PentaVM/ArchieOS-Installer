@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cstring>
+#include <cmath>
+#include <numbers>
 #include <limits>
 
 namespace {
@@ -34,6 +36,24 @@ void LumenGeometry::bound(const std::vector<float> &vertices, int stride)
 
 void LumenGeometry::setLines(const std::vector<float> &points)
 {
+    m_lines = points;
+    if (m_ribbons) {
+        std::vector<float> vertices;
+        std::vector<std::uint32_t> indices;
+        vertices.reserve(points.size() / 6 * 40);
+        indices.reserve(points.size());
+        for (std::size_t k = 0; k + 5 < points.size(); k += 6) {
+            const auto first = static_cast<std::uint32_t>(vertices.size() / 10);
+            const float seed=std::fmod(float(k/6)*0.61803398875F,1.F);
+            for (const auto uv : {std::pair{0.F,0.F},std::pair{1.F,0.F},std::pair{0.F,1.F},std::pair{1.F,1.F}})
+                vertices.insert(vertices.end(), {points[k],points[k+1],points[k+2],points[k+3],points[k+4],points[k+5],uv.first,uv.second,seed,0.F});
+            indices.insert(indices.end(), {first,first+1,first+2,first+2,first+1,first+3});
+        }
+        setTinted(vertices,indices);
+        // Endpoint B is in the normal channel; include both endpoints in culling.
+        bound(points,3);
+        return;
+    }
     clear();
     if (points.size() >= 6) {
         setStride(3 * sizeof(float));
@@ -45,18 +65,43 @@ void LumenGeometry::setLines(const std::vector<float> &points)
     update();
 }
 
+void LumenGeometry::setRibbons(bool enabled)
+{
+    if (enabled == m_ribbons) return;
+    m_ribbons = enabled;
+    const auto points = m_lines;
+    setLines(points);
+    emit ribbonsChanged();
+}
+
 void LumenGeometry::setSolid(const std::vector<float> &vertices, const std::vector<std::uint32_t> &indices)
+{
+    // Preserve every original position, normal and index. The original/category
+    // fallback also supplies spherical UVs for Xavi's matte-ceramic material.
+    std::vector<float> textured;
+    textured.reserve(vertices.size()/6*8);
+    for(std::size_t k=0;k+5<vertices.size();k+=6){
+        textured.insert(textured.end(),vertices.begin()+k,vertices.begin()+k+6);
+        const float u=std::atan2(vertices[k+2],-vertices[k])/(2*std::numbers::pi_v<float>)+.5F;
+        const float v=.5F-std::atan2(-vertices[k+1],std::hypot(vertices[k],vertices[k+2]))/std::numbers::pi_v<float>;
+        textured.insert(textured.end(),{u,v});
+    }
+    setTextured(textured,indices);
+}
+
+void LumenGeometry::setTextured(const std::vector<float> &vertices, const std::vector<std::uint32_t> &indices)
 {
     clear();
     if (!vertices.empty() && !indices.empty()) {
-        setStride(6 * sizeof(float));
+        setStride(8 * sizeof(float));
         setPrimitiveType(PrimitiveType::Triangles);
         addAttribute(Attribute::PositionSemantic, 0, Attribute::F32Type);
         addAttribute(Attribute::NormalSemantic, 3 * sizeof(float), Attribute::F32Type);
+        addAttribute(Attribute::TexCoord0Semantic, 6 * sizeof(float), Attribute::F32Type);
         addAttribute(Attribute::IndexSemantic, 0, Attribute::U32Type);
         setVertexData(bytes(vertices.data(), vertices.size() * sizeof(float)));
         setIndexData(bytes(indices.data(), indices.size() * sizeof(std::uint32_t)));
-        bound(vertices, 6);
+        bound(vertices, 8);
     }
     update();
 }

@@ -15,6 +15,7 @@
 #include <QCommandLineParser>
 #include <QScreen>
 #include <QEvent>
+#include <QtQuick3D/qquick3d.h>
 
 #include <cstdlib>
 
@@ -51,6 +52,10 @@ int main(int argc, char *argv[])
     QQuickStyle::setStyle(QStringLiteral("Basic"));
 
     QGuiApplication app(argc, argv);
+    QSurfaceFormat::setDefaultFormat(QQuick3D::idealSurfaceFormat());
+    LumenField lumen;
+    AppCatalog appCatalog;
+    DisplayControl displayControl(&lumen);
     QCommandLineParser arguments;
     arguments.addHelpOption();
     arguments.addOption(QCommandLineOption(QStringLiteral("shell"), QStringLiteral("Open the native Archie desktop shell.")));
@@ -63,7 +68,7 @@ int main(int argc, char *argv[])
         QStringLiteral("path"), QStringLiteral("/archie/workspaces")));
     arguments.addOption(QCommandLineOption(QStringLiteral("render-check"),QStringLiteral("Write one real Qt frame to a new PNG and exit."),QStringLiteral("path")));
     arguments.addOption(QCommandLineOption(QStringLiteral("screen"), QStringLiteral("Full-screen display number (one-based)."), QStringLiteral("number"), QStringLiteral("1")));
-    arguments.addOption(QCommandLineOption(QStringLiteral("scene"), QStringLiteral("Initial observatory scene: orb, forge, or world."), QStringLiteral("name"), QStringLiteral("orb")));
+    arguments.addOption(QCommandLineOption(QStringLiteral("scene"), QStringLiteral("Initial observatory scene: ") + displayControl.scenes().join(QStringLiteral(", ")) + QLatin1Char('.'), QStringLiteral("name"), displayControl.scenes().front()));
     arguments.addOption(QCommandLineOption(QStringLiteral("lens"), QStringLiteral("Initial orb lens: architecture, folders, or entities."), QStringLiteral("name"), QStringLiteral("architecture")));
     arguments.process(app);
     const bool shellMode = arguments.isSet(QStringLiteral("shell"));
@@ -74,9 +79,7 @@ int main(int argc, char *argv[])
     }
     ArchieBridge bridge(nullptr, shellMode);
     bridge.setPresented(false);
-    LumenField lumen;
-    AppCatalog appCatalog;
-    DisplayControl displayControl(nullptr, shellMode);
+    displayControl.setShellMode(shellMode);
     ShellRuntime shellRuntime(arguments.value(QStringLiteral("shell-bridge")),
         arguments.value(QStringLiteral("lan-file")), arguments.value(QStringLiteral("workspaces-root")));
     QQmlApplicationEngine engine;
@@ -93,19 +96,15 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().front());
     if (window) new PresentationTracker(window, &bridge);
-    const QString scene = arguments.value(QStringLiteral("scene")).toLower();
-    if (!shellMode && scene == QStringLiteral("orb")) {
-        engine.rootObjects().front()->setProperty("scene", QStringLiteral("orb"));
-        bridge.requestMode(QStringLiteral("cerebra"));
-    } else if (!shellMode && (scene == QStringLiteral("forge") || scene == QStringLiteral("core"))) {
-        // CORE became FORGE; the old name still opens it.
-        engine.rootObjects().front()->setProperty("scene", QStringLiteral("forge"));
-        bridge.requestMode(QStringLiteral("cerebra"));
-    } else if (!shellMode && scene == QStringLiteral("world")) {
-        engine.rootObjects().front()->setProperty("scene", QStringLiteral("world"));
-        bridge.requestMode(QStringLiteral("watcher"));
-    } else if (!shellMode) {
-        qWarning("archie-display: unknown initial scene %s; using ORB", qPrintable(scene));
+    if (!shellMode) {
+        QString scene = displayControl.sceneNamed(arguments.value(QStringLiteral("scene")));
+        if (scene.isEmpty()) {
+            qWarning("archie-display: unknown initial scene %s; using %s",
+                     qPrintable(arguments.value(QStringLiteral("scene"))), qPrintable(displayControl.scenes().front()));
+            scene = displayControl.scenes().front();
+        }
+        engine.rootObjects().front()->setProperty("scene", scene);
+        bridge.requestMode(displayControl.modeOf(scene));
     }
     bool screenNumberOk = false;
     const int screenNumber = arguments.value(QStringLiteral("screen")).toInt(&screenNumberOk);

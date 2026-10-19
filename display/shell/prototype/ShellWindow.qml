@@ -14,9 +14,11 @@ Window {
     // The profile goes through LiveOrb, which applies the preset and then the look chosen in
     // Settings (grade, brightness, nodes...). Applying it to lumen directly here as well
     // reset those settings to the preset's defaults after the look had been applied.
-    function applyVisualProfile(value) {
+    function applyVisualProfile(value, alreadyApplied) {
+        if (typeof lumen !== "undefined") Demo.nativeProfiles=lumen.presets
         var index=Demo.orbProfiles.indexOf(value)
         if (index<0) return false
+        Demo.orbAcceptedProfile=alreadyApplied ? value : ""
         if (Demo.orbProfile===index) Demo.orbProfileChanged()
         else Demo.orbProfile=index
         Demo.orbShow=true; Demo.bare=true
@@ -30,7 +32,7 @@ Window {
                 else if (value==="forge") desktop.run("app.forge")
                 else if (value==="world") { desktop.actionNote="World sigue disponible en Observatory; no se convierte en una vista ficticia." }
             } else if (action==="cinematic" || action==="preset") {
-                window.applyVisualProfile(value)
+                window.applyVisualProfile(value,true)
             } else if (action==="overlay" && typeof lumen !== "undefined") {
                 if (value==="hud") Demo.orbHud=enabled
                 else lumen.setSetting(value,enabled)

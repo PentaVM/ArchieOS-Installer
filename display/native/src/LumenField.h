@@ -46,6 +46,8 @@ class LumenField final : public QObject
     Q_PROPERTY(QVariantMap look READ look NOTIFY settingsChanged)
     Q_PROPERTY(QString profile READ profile NOTIFY settingsChanged)
     Q_PROPERTY(bool comparing READ comparing NOTIFY settingsChanged)
+    /// The look presets embedded in the display, by name.
+    Q_PROPERTY(QStringList presets READ presets CONSTANT)
     Q_PROPERTY(QString lens READ lens NOTIFY lensChanged)
     Q_PROPERTY(QVariantMap scene READ scene NOTIFY sceneChanged)
     Q_PROPERTY(QVariantList modules READ modules NOTIFY sceneChanged)
@@ -86,6 +88,7 @@ public:
     QVariantMap look() const { return m_look; }
     QString profile() const { return m_profile; }
     bool comparing() const { return !m_saved.isEmpty(); }
+    QStringList presets() const;
     QString lens() const { return m_lens; }
     QVariantMap scene() const { return m_sceneInfo; }
     QVariantList modules() const { return m_modules; }
@@ -113,7 +116,9 @@ public:
     /// "guides" take a LumenGeometry.
     Q_INVOKABLE void bindLayer(const QString &name, QObject *target);
     Q_INVOKABLE void setSetting(const QString &key, const QVariant &value);
-    Q_INVOKABLE void applyProfile(const QString &name);
+    /// Applies a preset whole, or changes nothing; returns why not, or "" once applied.
+    QString loadProfile(const QString &name);
+    Q_INVOKABLE bool applyProfile(const QString &name);
     Q_INVOKABLE void resetProfile();
     Q_INVOKABLE void toggleCompare();
     Q_INVOKABLE void setLens(const QString &lens);
@@ -250,6 +255,7 @@ private:
     bool m_requestPending = false;
     bool m_requestAgain = false;
     bool m_paused = false;
+    bool m_simulationActive = true;
     bool m_structureDirty = true;
     bool m_positionsDirty = true;
     int m_framesCounted = 0;
@@ -259,7 +265,7 @@ private:
     QVariantMap m_settings;
     QVariantMap m_saved;
     QVariantMap m_look;
-    QString m_profile = QStringLiteral("field");
+    QString m_profile;
     QString m_lens = QStringLiteral("architecture");
     QSet<QString> m_expanded;
     QSet<QString> m_hiddenCategories;

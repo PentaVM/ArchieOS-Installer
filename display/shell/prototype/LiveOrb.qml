@@ -4,8 +4,8 @@ import QtQuick
 // previews keep their desktop background without importing native types.
 Item {
     id: lv
-    readonly property var nativeController: typeof lumen === "undefined" ? null : lumen
-    readonly property var nativeBridge: typeof archieBridge === "undefined" ? null : archieBridge
+    property var nativeController: typeof lumen === "undefined" ? null : lumen
+    property var nativeBridge: typeof archieBridge === "undefined" ? null : archieBridge
     readonly property bool nativeAvailable: nativeController !== null && nativeBridge !== null
     readonly property bool loaded: viewport.status === Loader.Ready
     readonly property bool ok: nativeAvailable && loaded
@@ -20,6 +20,7 @@ Item {
     property bool reducedMotion: Theme.reducedMotion || !Theme.spatial
     property color backgroundColor: Theme.desktop
     property var originalGrade: ({})
+    property var changedLook: ({})
 
     function loadNative() {
         if (!nativeAvailable) return
@@ -28,20 +29,29 @@ Item {
         })
     }
     function applyProfile() {
-        if (!nativeAvailable) return
+        if (!nativeController) return
+        Demo.nativeProfiles=nativeController.presets || []
         const profiles = Demo.orbProfiles
-        nativeController.applyProfile(profiles[Math.max(0, Math.min(profiles.length - 1, Demo.orbProfile))])
+        const wanted=profiles[Math.max(0, Math.min(profiles.length - 1, Demo.orbProfile))]
+        const accepted=Demo.orbAcceptedProfile===wanted && nativeController.profile===wanted
+        Demo.orbAcceptedProfile=""
+        if (!accepted && !nativeController.applyProfile(wanted)) return
         originalGrade={}
         applyLook()
     }
-    function applyLook() {
-        if (!nativeAvailable) return
-        nativeController.setSetting("exposure", [1.6, 2.2, 2.8][Demo.orbBrightI])
-        nativeController.setSetting("pulses", Demo.orbActI > 0)
-        nativeController.setSetting("pulseSpeed", [0, 0.2, 0.33, 0.7][Demo.orbActI])
-        nativeController.setSetting("rotate", Demo.orbSpin)
-        nativeController.setSetting("visibleLimit", [60,120,220,360,420][Demo.orbNodesI])
-        nativeController.setSetting("ambient", Demo.orbDust)
+    function applyLook(changed) {
+        if (!nativeController) return
+        if (changed) { var next=Object.assign({},changedLook); next[changed]=true; changedLook=next }
+        const sourceProfile=String(nativeController.profile).indexOf("polar-")===0
+        function wanted(key) { return !sourceProfile || changedLook[key]===true }
+        if (wanted("brightness")) nativeController.setSetting("exposure", [1.6, 2.2, 2.5][Demo.orbBrightI])
+        if (wanted("activity")) {
+            nativeController.setSetting("pulses", Demo.orbActI > 0)
+            nativeController.setSetting("pulseSpeed", [0, 0.2, 0.33, 0.7][Demo.orbActI])
+        }
+        if (wanted("rotation")) nativeController.setSetting("rotate", Demo.orbSpin)
+        if (wanted("nodes")) nativeController.setSetting("visibleLimit", [60,120,220,360,420][Demo.orbNodesI])
+        if (wanted("ambient")) nativeController.setSetting("ambient", Demo.orbDust)
         if (!Object.keys(originalGrade).length) {
             var settings=nativeController.settings, saved={}
             for (var key in settings)
@@ -50,6 +60,7 @@ Item {
         }
         var cold=["#40bfe5","#71aeee","#41c9b8","#83bfd6","#9da8ef","#58c8e9","#78b9e7","#73bbc5"]
         var vivid=["#00b5e8","#e0a500","#00c58f","#9bd225","#b68be8","#f07764","#6499ee","#86c5c0"], i=0
+        if (!wanted("grade")) return
         for (var key in originalGrade) {
             var value=originalGrade[key]
             if (Demo.orbGradeI===1) value=key==="accentWarm" ? "#71c5ef" : key==="accentCool" ? "#42cfcf" : cold[(i++)%cold.length]
@@ -57,7 +68,7 @@ Item {
             nativeController.setSetting(key,value)
         }
     }
-    Component.onCompleted: { loadNative(); applyProfile() }
+    Component.onCompleted: { if(nativeController)Demo.nativeProfiles=nativeController.presets || []; loadNative(); applyProfile() }
     onNativeAvailableChanged: loadNative()
 
     Loader {
@@ -82,11 +93,11 @@ Item {
     Connections {
         target: Demo
         function onOrbProfileChanged() { lv.applyProfile() }
-        function onOrbBrightIChanged() { lv.applyLook() }
-        function onOrbActIChanged() { lv.applyLook() }
-        function onOrbSpinChanged() { lv.applyLook() }
-        function onOrbNodesIChanged() { lv.applyLook() }
-        function onOrbDustChanged() { lv.applyLook() }
-        function onOrbGradeIChanged() { lv.applyLook() }
+        function onOrbBrightIChanged() { lv.applyLook("brightness") }
+        function onOrbActIChanged() { lv.applyLook("activity") }
+        function onOrbSpinChanged() { lv.applyLook("rotation") }
+        function onOrbNodesIChanged() { lv.applyLook("nodes") }
+        function onOrbDustChanged() { lv.applyLook("ambient") }
+        function onOrbGradeIChanged() { lv.applyLook("grade") }
     }
 }

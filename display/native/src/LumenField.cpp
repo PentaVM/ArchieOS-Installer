@@ -1,8 +1,10 @@
 #include "LumenField.h"
 
 #include "LumenGeometry.h"
+#include "XaviDesignBridge.h"
 
 #include <QColor>
+#include <QDir>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -18,6 +20,7 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <optional>
 
 namespace lumen = archie::visual::lumen;
 using archie::visual::Vec3;
@@ -96,32 +99,26 @@ QVariantMap defaults()
         {QStringLiteral("guides"), false}, {QStringLiteral("links"), true},
         {QStringLiteral("pulses"), true}, {QStringLiteral("bloom"), true},
         {QStringLiteral("physics"), true}, {QStringLiteral("rotate"), true},
-        {QStringLiteral("pauseOnInspect"), true},
+        {QStringLiteral("pauseOnInspect"), true}, {QStringLiteral("labels"), true},
     };
     for (const auto &c : categoryTable)
         s.insert(QStringLiteral("color") + QLatin1String(c.key), QString::fromLatin1(c.colour));
+    // Source appearance defaults extend the existing OS model. The OS keeps its
+    // density ceiling and semantic category palette; source file scanning is absent.
+    const auto delivered = xaviDefaults();
+    for (auto it = delivered.begin(); it != delivered.end(); ++it) {
+        if (it.key() == QLatin1String("visibleLimit")) continue;
+        const auto current = s.value(it.key());
+        if (current.typeId() == QMetaType::Int || it.key() == QLatin1String("textureResolution")
+            || it.key() == QLatin1String("captureWidth"))
+            s.insert(it.key(), it.value().toInt());
+        else s.insert(it.key(), it.value());
+    }
     return s;
 }
 
 QVariantMap profileOverrides(const QString &name)
 {
-    if (name == QLatin1String("sphere") || name == QLatin1String("orb") || name == QLatin1String("neural")) {
-        QFile file(QStringLiteral(":/archie/presets/") + name + QStringLiteral(".json"));
-        if (!file.open(QIODevice::ReadOnly)) return {};
-        const auto parsed = QJsonDocument::fromJson(file.readAll());
-        if (!parsed.isObject()) return {};
-        const auto values = parsed.object().value(QStringLiteral("settings")).toObject().toVariantMap();
-        const auto original = defaults();
-        QVariantMap valid;
-        for (auto it=values.begin(); it!=values.end(); ++it) {
-            const auto existing=original.value(it.key());
-            if (!existing.isValid()) continue;
-            if (existing.typeId()==QMetaType::Int) valid.insert(it.key(),it.value().toInt());
-            else if (existing.typeId()==QMetaType::Double) valid.insert(it.key(),it.value().toDouble());
-            else if (existing.typeId()==it.value().typeId()) valid.insert(it.key(),it.value());
-        }
-        return valid;
-    }
     if (name == QLatin1String("crown"))
         return {{QStringLiteral("categoryPull"), 0.58}, {QStringLiteral("hierarchyPull"), 0.42},
                 {QStringLiteral("radialLayers"), 0.77}, {QStringLiteral("scale"), 1.12},
@@ -179,10 +176,147 @@ constexpr Range ranges[] = {
     {"ambientSize", 0.1, 2}, {"ghostOpacity", 0, 0.6}, {"linkOpacity", 0, 0.25},
     {"linkBudget", 0, 2000}, {"highlightOpacity", 0, 1}, {"highlightBudget", 10, 500},
     {"reaction", 0, 500}, {"reach", 5, 180}, {"spring", 1, 60}, {"damping", 0.5, 0.98},
-    {"rotationSpeed", 0, 2}, {"pulseSpeed", 0, 1}, {"bloomStrength", 0, 2},
+    {"rotationSpeed", 0, 2}, {"pulseSpeed", 0, 2}, {"bloomStrength", 0, 2},
     {"bloomRadius", 0, 1}, {"bloomThreshold", 0, 1}, {"exposure", 0.4, 2.5},
     {"ambientLight", 0, 2}, {"warmLight", 0, 40000}, {"coolLight", 0, 30000},
+    {"shellDensity", 0.25, 2}, {"shellFlow", 0, 2}, {"textureResolution", 256, 4096},
+    {"colorVariation", 0, 2}, {"focusDim", 0, 0.95}, {"energyWidth", 0.2, 2}, {"energyIntensity", 0, 2},
+    {"ambientFlowIntensity", 0, 2}, {"ambientFlowSpeed", 0, 2},
+    {"relationFlowIntensity", 0, 2}, {"relationFlowSpeed", 0, 2},
+    {"pixelRatio", 0.5, 3}, {"captureWidth", 1024, 3840},
+    {"visualPoleColorMix", 0, 1}, {"visualGlowMaskIntensity", 0, 2},
+    {"visualLineWidthPx", 0.5, 4}, {"visualDetailFrequency", 0.1, 3},
 };
+
+const QStringList layoutModes{QStringLiteral("regions"), QStringLiteral("legacy")};
+
+/// How a value outside its range is treated: the panel's sliders are clamped to it, a
+/// preset file that leaves it is wrong and is refused.
+enum class Bounds { Clamp, Strict };
+
+/// The one check every setting passes, whoever sets it: the key must be one defaults()
+/// has, the value of its type, a colour a `#rrggbb`, a layout one the model knows and a
+/// number finite and in range. Returns the value to store, or an invalid QVariant with
+/// `reason` saying why not.
+QVariant validated(const QString &key, const QVariant &current, const QVariant &value, Bounds bounds,
+                   QString &reason)
+{
+    const auto refuse = [&](const QString &why) {
+        reason = key + QStringLiteral(": ") + why;
+        return QVariant();
+    };
+    const bool strict = bounds == Bounds::Strict;
+    if (!current.isValid())
+        return refuse(QStringLiteral("not a setting"));
+    if (current.typeId() == QMetaType::Bool) {
+        if (strict && value.typeId() != QMetaType::Bool)
+            return refuse(QStringLiteral("expected true or false"));
+        return value.toBool();
+    }
+    if (current.typeId() == QMetaType::QString) {
+        if (strict && value.typeId() != QMetaType::QString)
+            return refuse(QStringLiteral("expected text"));
+        const QString text = value.toString().trimmed().toLower();
+        if (key == QLatin1String("layoutMode")) {
+            if (!layoutModes.contains(text))
+                return refuse(QStringLiteral("expected ") + layoutModes.join(QStringLiteral(" or ")));
+        } else if (const auto choices = xaviChoices(key); !choices.isEmpty()) {
+            if (!choices.contains(text))
+                return refuse(QStringLiteral("expected ") + choices.join(QStringLiteral(" or ")));
+        } else if (!lumen::parse_hex(text.toStdString())) {
+            return refuse(QStringLiteral("expected a #rrggbb colour"));
+        }
+        return text;
+    }
+    const int type = value.typeId();
+    if (strict && type != QMetaType::Double && type != QMetaType::Int && type != QMetaType::LongLong)
+        return refuse(QStringLiteral("expected a number"));
+    bool ok = false;
+    double number = value.toDouble(&ok);
+    if (!ok || !std::isfinite(number))
+        return refuse(QStringLiteral("expected a finite number"));
+    const bool whole = current.typeId() == QMetaType::Int;
+    if (strict && whole && number != std::floor(number))
+        return refuse(QStringLiteral("expected a whole number"));
+    for (const auto &range : ranges) {
+        if (key != QLatin1String(range.key))
+            continue;
+        if (strict && (number < range.low || number > range.high))
+            return refuse(QStringLiteral("outside %1..%2").arg(range.low).arg(range.high));
+        number = std::clamp(number, range.low, range.high);
+    }
+    return whole ? QVariant(static_cast<int>(std::lround(number))) : QVariant(number);
+}
+
+/// Look presets are the JSON files embedded under :/archie/presets (presets/*.json in the
+/// source tree): a file is a preset, and its name is the file's. They are selected from the
+/// CLI or the voice (`archie visual preset <name>`). Cinematics and overlay switches
+/// remain separate commands. `field` is the original "Regiones vivas", with no overrides.
+const QString presetDirectory = QStringLiteral(":/archie/presets");
+const QString basePreset = QStringLiteral("field");
+
+QStringList presetNames()
+{
+    static const QStringList names = [] {
+        QStringList out;
+        const auto files = QDir(presetDirectory).entryList({QStringLiteral("*.json")}, QDir::Files, QDir::Name);
+        for (const QString &file : files)
+            out.append(file.chopped(5));
+        for (const QString &name : xaviPresetNames())
+            if (!out.contains(name)) out.append(name);
+        return out;
+    }();
+    return names;
+}
+
+/// The settings a preset gives: defaults() with the file's overrides on top. The file is
+/// read whole and checked before anything is used; one bad key or value refuses all of it.
+std::optional<QVariantMap> readPreset(const QString &name, QString &reason)
+{
+    if (!presetNames().contains(name)) {
+        reason = QStringLiteral("unknown preset ") + name;
+        return std::nullopt;
+    }
+    QJsonObject overrides;
+    if (const auto delivered = xaviPreset(name)) {
+        overrides = QJsonObject::fromVariantMap(*delivered);
+    } else {
+        QFile file(presetDirectory + QLatin1Char('/') + name + QStringLiteral(".json"));
+        if (!file.open(QIODevice::ReadOnly)) {
+            reason = QStringLiteral("preset ") + name + QStringLiteral(" is unreadable");
+            return std::nullopt;
+        }
+        QJsonParseError parse{};
+        const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parse);
+        if (parse.error != QJsonParseError::NoError || !document.isObject()) {
+            reason = QStringLiteral("preset ") + name + QStringLiteral(" is not a JSON object");
+            return std::nullopt;
+        }
+        const QJsonObject root = document.object();
+        if (root.contains(QStringLiteral("name")) && root.value(QStringLiteral("name")).toString() != name) {
+            reason = QStringLiteral("preset ") + name + QStringLiteral(" calls itself ")
+                     + root.value(QStringLiteral("name")).toString();
+            return std::nullopt;
+        }
+        if (!root.value(QStringLiteral("settings")).isObject()) {
+            reason = QStringLiteral("preset ") + name + QStringLiteral(" has no settings object");
+            return std::nullopt;
+        }
+        overrides = root.value(QStringLiteral("settings")).toObject();
+    }
+    QVariantMap settings = defaults();
+    for (auto it = overrides.begin(); it != overrides.end(); ++it) {
+        QString why;
+        const QVariant next =
+            validated(it.key(), settings.value(it.key()), it.value().toVariant(), Bounds::Strict, why);
+        if (!next.isValid()) {
+            reason = QStringLiteral("preset ") + name + QStringLiteral(": ") + why;
+            return std::nullopt;
+        }
+        settings.insert(it.key(), next);
+    }
+    return settings;
+}
 
 QVector3D toQ(const Vec3 &v) { return QVector3D(v.x, v.y, v.z); }
 Vec3 toV(const QVector3D &v) { return Vec3{v.x(), v.y(), v.z()}; }
@@ -273,6 +407,15 @@ LumenField::LumenField(QObject *parent, QUrl endpoint)
     connect(this, &LumenField::settingsChanged, this, &LumenField::updateTimers);
     connect(this, &LumenField::sceneChanged, this, &LumenField::updateTimers);
     connect(this, &LumenField::selectionChanged, this, &LumenField::updateTimers);
+    // A broken preset file is found when the display starts, not when someone asks for it.
+    for (const QString &name : presetNames()) {
+        QString reason;
+        if (!readPreset(name, reason))
+            qWarning("archie-display: %s", qPrintable(reason));
+    }
+    if (!presetNames().contains(basePreset))
+        qWarning("archie-display: the base preset %s is not embedded", qPrintable(basePreset));
+    m_profile = basePreset;
     updateLook();
     updateCategoryRows();
     setStatus(QStringLiteral("ESPERANDO EL CAMPO"));
@@ -305,6 +448,7 @@ void LumenField::updateTimers()
         m_pollTimer.stop();
         return;
     }
+    m_simulationActive = true;
     m_frameTimer.start(m_frameIntervalMs);
     m_pollTimer.start();
     m_clock.restart();
@@ -353,6 +497,7 @@ void LumenField::setRenderBudget(const QVariantMap &budget)
     // Frame summaries also carry camera/history state. Only budget changes can
     // rebuild decoration; advancing those unrelated fields is not a new budget.
     const QVariantMap normalized{
+        {QStringLiteral("tier"), budget.value(QStringLiteral("tier"), QStringLiteral("normal"))},
         {QStringLiteral("frameIntervalMs"), budget.value(QStringLiteral("frameIntervalMs"), 16)},
         {QStringLiteral("maxVisibleNodes"), budget.value(QStringLiteral("maxVisibleNodes"), 420)},
         {QStringLiteral("maxParticles"), budget.value(QStringLiteral("maxParticles"), 2000)},
@@ -408,6 +553,8 @@ void LumenField::bindLayer(const QString &name, QObject *target)
             geometry->setSolid(meshVertices(mesh), mesh.indices);
         } else if (name == QLatin1String("quad")) {
             geometry->setQuad();
+        } else if (name == QLatin1String("membrane") || name == QLatin1String("membraneEdges")) {
+            rebuildMembrane();
         }
     }
     m_structureDirty = true;
@@ -427,31 +574,9 @@ bool LumenField::flag(const char *key) const
 void LumenField::setSetting(const QString &key, const QVariant &value)
 {
     const QVariant current = m_settings.value(key);
-    if (!current.isValid())
-        return;
-    QVariant next;
-    if (current.typeId() == QMetaType::Bool) {
-        next = value.toBool();
-    } else if (current.typeId() == QMetaType::QString) {
-        const QString text = value.toString().trimmed();
-        if (key == QLatin1String("layoutMode")) {
-            if (text != QLatin1String("regions") && text != QLatin1String("legacy"))
-                return;
-        } else if (!lumen::parse_hex(text.toStdString())) {
-            return;
-        }
-        next = text.toLower();
-    } else {
-        bool ok = false;
-        double number = value.toDouble(&ok);
-        if (!ok || !std::isfinite(number))
-            return;
-        for (const auto &range : ranges)
-            if (key == QLatin1String(range.key))
-                number = std::clamp(number, range.low, range.high);
-        next = current.typeId() == QMetaType::Int ? QVariant(static_cast<int>(std::lround(number))) : QVariant(number);
-    }
-    if (next == current)
+    QString reason;
+    const QVariant next = validated(key, current, value, Bounds::Clamp, reason);
+    if (!next.isValid() || next == current)
         return;
     m_settings.insert(key, next);
     updateLook();
@@ -462,7 +587,9 @@ void LumenField::setSetting(const QString &key, const QVariant &value)
     if (shapeKeys.contains(key))
         scheduleRequest(140);
     if (key.startsWith(QLatin1String("color")) || key == QLatin1String("accentWarm")
-        || key == QLatin1String("shellScale") || key == QLatin1String("shell"))
+        || key == QLatin1String("accentCool") || key == QLatin1String("shellScale")
+        || key == QLatin1String("shellStyle") || key == QLatin1String("shellDensity")
+        || key == QLatin1String("shellTint") || key == QLatin1String("shell"))
         rebuildMembrane();
     if (key == QLatin1String("ambient") || key == QLatin1String("ambientCount"))
         rebuildGhosts();
@@ -476,13 +603,45 @@ void LumenField::setSetting(const QString &key, const QVariant &value)
     emit settingsChanged();
 }
 
-void LumenField::applyProfile(const QString &name)
+QStringList LumenField::presets() const
 {
+    return presetNames();
+}
+
+QString LumenField::loadProfile(const QString &name)
+{
+    QString reason;
+    const std::optional<QVariantMap> settings = readPreset(name, reason);
+    if (!settings)
+        return reason;
     m_saved.clear();
-    m_profile = profileOverrides(name).isEmpty() && name != QLatin1String("field") ? QStringLiteral("field") : name;
+    m_profile = name;
+    m_settings = *settings;
+    updateLook();
+    updateCategoryRows();
+    rebuildMembrane();
+    rebuildGhosts();
+    m_structureDirty = true;
+    m_positionsDirty = true;
+    scheduleRequest(0);
+    emit settingsChanged();
+    return {};
+}
+
+bool LumenField::applyProfile(const QString &name)
+{
+    const QVariantMap cinematic = profileOverrides(name);
+    if (cinematic.isEmpty()) {
+        const QString reason = loadProfile(name);
+        if (!reason.isEmpty())
+            qWarning("archie-display: %s", qPrintable(reason));
+        return reason.isEmpty();
+    }
+    // Legacy camera looks remain separate from the file-backed preset catalog.
+    m_saved.clear();
+    m_profile = name;
     m_settings = defaults();
-    const QVariantMap overrides = profileOverrides(m_profile);
-    for (auto it = overrides.begin(); it != overrides.end(); ++it)
+    for (auto it = cinematic.begin(); it != cinematic.end(); ++it)
         m_settings.insert(it.key(), it.value());
     updateLook();
     updateCategoryRows();
@@ -492,6 +651,7 @@ void LumenField::applyProfile(const QString &name)
     m_positionsDirty = true;
     scheduleRequest(0);
     emit settingsChanged();
+    return true;
 }
 
 void LumenField::resetProfile()
@@ -710,6 +870,7 @@ QString LumenField::structureKey() const
 
 void LumenField::wake()
 {
+    m_simulationActive = true;
     if (m_active && m_frameIntervalMs > 0 && !m_frameTimer.isActive()) {
         m_clock.restart();
         m_frameTimer.start(m_frameIntervalMs);
@@ -892,7 +1053,40 @@ void LumenField::updateLook()
     const lumen::Rgb cool = hex("accentCool");
     const lumen::Rgb ambient = lumen::to_linear(lumen::Rgb{0xa6 / 255.0F, 0xb8 / 255.0F, 0xba / 255.0F});
     const float scale = std::max(0.5F, m_fieldRadius / 180.0F);
+    const auto bloomMode = m_settings.value(QStringLiteral("visualBloomMode")).toString();
+    const int bloomModeId = bloomMode == QLatin1String("selection") ? 1 : bloomMode == QLatin1String("polar") ? 2
+                           : bloomMode == QLatin1String("off") ? 3 : 0;
+    float maximumNodeRadius = std::max(0.3F, number("nodeSize"));
+    for (std::size_t i = 0; i < m_nodes.size(); ++i)
+        if (drawn(static_cast<int>(i))) maximumNodeRadius = std::max(maximumNodeRadius, orbScale(static_cast<int>(i)));
+    const auto sceneProfile = m_sceneInfo.value(QStringLiteral("profile")).toString();
+    int qualityId = sceneProfile == QLatin1String("low") ? 2 : sceneProfile == QLatin1String("balanced") ? 1 : 0;
+    const auto tier = m_renderBudget.value(QStringLiteral("tier")).toString();
+    if (tier == QLatin1String("conserve") || tier == QLatin1String("headless")
+        || !m_renderBudget.value(QStringLiteral("postProcessing"), false).toBool()
+        || !m_renderBudget.value(QStringLiteral("ambientMotion"), true).toBool())
+        qualityId = 2;
+    else if (m_frameIntervalMs >= 33)
+        qualityId = std::max(1, qualityId);
     m_look = {
+        {QStringLiteral("maximumNodeRadius"), maximumNodeRadius},
+        {QStringLiteral("qualityId"), qualityId},
+        {QStringLiteral("shellStyleId"), m_settings.value(QStringLiteral("layoutMode")).toString() == QLatin1String("legacy") ? -1 : xaviChoices(QStringLiteral("shellStyle")).indexOf(m_settings.value(QStringLiteral("shellStyle")).toString())},
+        {QStringLiteral("shellDensity"), number("shellDensity")},
+        {QStringLiteral("shellFlow"), number("shellFlow")},
+        {QStringLiteral("shellTint"), rgb(hex("shellTint"))},
+        {QStringLiteral("nodeStyleId"), xaviStyle(m_settings.value(QStringLiteral("visualNodeStyle")).toString())},
+        {QStringLiteral("folderStyleId"), xaviStyle(m_settings.value(QStringLiteral("visualFolderStyle")).toString())},
+        {QStringLiteral("linkStyleId"), xaviLink(m_settings.value(QStringLiteral("visualLinkStyle")).toString())},
+        {QStringLiteral("pulseStyleId"), xaviPulse(m_settings.value(QStringLiteral("visualPulseStyle")).toString())},
+        {QStringLiteral("bloomModeId"), bloomModeId},
+        {QStringLiteral("poleMix"), number("visualPoleColorMix")},
+        {QStringLiteral("glowMaskIntensity"), number("visualGlowMaskIntensity")},
+        {QStringLiteral("lineWidthPx"), number("visualLineWidthPx")},
+        {QStringLiteral("detailFrequency"), number("visualDetailFrequency")},
+        {QStringLiteral("textureResolution"), number("textureResolution")},
+        {QStringLiteral("energyIntensity"), number("energyIntensity")},
+        {QStringLiteral("fieldRadius"), m_fieldRadius},
         {QStringLiteral("background"), QColor(m_settings.value(QStringLiteral("background")).toString())},
         {QStringLiteral("warm"), rgb(warm)},
         {QStringLiteral("cool"), rgb(cool)},
@@ -915,7 +1109,7 @@ void LumenField::updateLook()
         {QStringLiteral("links"), flag("links")},
         {QStringLiteral("pulses"), flag("pulses") && ambientAllowed() && particleBudget() > 0},
         {QStringLiteral("guides"), flag("guides")},
-        {QStringLiteral("bloom"), flag("bloom") && m_renderBudget.value(QStringLiteral("postProcessing"), false).toBool()},
+        {QStringLiteral("bloom"), flag("bloom") && bloomModeId != 3 && m_renderBudget.value(QStringLiteral("postProcessing"), false).toBool()},
         {QStringLiteral("bloomStrength"), number("bloomStrength")},
         {QStringLiteral("bloomRadius"), number("bloomRadius")},
         {QStringLiteral("bloomThreshold"), number("bloomThreshold")},
@@ -1201,15 +1395,38 @@ void LumenField::rebuildMembrane()
         return;
     std::vector<Vec3> points;
     std::vector<lumen::Rgb> colours;
+    std::vector<XaviShellNode> shellNodes;
     for (std::size_t i = 0; i < m_nodes.size(); ++i) {
         if (m_nodes[i].kind == QLatin1String("root") || !drawn(static_cast<int>(i)))
             continue;
         points.push_back(toV(m_nodes[i].anchor));
         colours.push_back(colourOf(m_nodes[i].category));
+        const auto color=colours.back();
+        shellNodes.push_back({points.back(),{color.r,color.g,color.b},m_nodes[i].branch});
     }
     const auto warm = lumen::to_linear(lumen::parse_hex(m_settings.value(QStringLiteral("accentWarm")).toString().toStdString())
                                            .value_or(lumen::Rgb{0.9F, 0.7F, 0.5F}));
     const bool legacyLayout = m_settings.value(QStringLiteral("layoutMode")).toString() == QLatin1String("legacy");
+    const auto edges=m_geometry.value(QStringLiteral("membraneEdges"));
+    if(!legacyLayout){
+        const auto parse=[this](const char *key){const auto c=lumen::to_linear(lumen::parse_hex(m_settings.value(QLatin1String(key)).toString().toStdString()).value_or(lumen::Rgb{.5F,.7F,.8F}));return Vec3{c.r,c.g,c.b};};
+        const int kind=xaviChoices(QStringLiteral("shellStyle")).indexOf(m_settings.value(QStringLiteral("shellStyle")).toString());
+        std::vector<float> vertices;std::vector<std::uint32_t> indices;
+        if(xaviShell(kind,shellNodes,m_fieldRadius,number("shellDensity"),number("shellScale"),
+            Vec3{warm.r,warm.g,warm.b},parse("accentCool"),parse("shellTint"),vertices,indices,m_shellRadius)){
+            target->setTinted(vertices,indices);
+            if(edges){
+                std::vector<float> lines;
+                if(kind==0)for(std::size_t k=0;k+2<indices.size();k+=3)for(int j=0;j<3;++j){
+                    const auto a=std::size_t(indices[k+j])*10,b=std::size_t(indices[k+(j+1)%3])*10;
+                    lines.insert(lines.end(),{vertices[a],vertices[a+1],vertices[a+2],vertices[b],vertices[b+1],vertices[b+2]});
+                }
+                edges->setLines(lines);
+            }
+            return;
+        }
+    }
+    if(edges)edges->setLines({});
     const auto shell = lumen::membrane(points, colours, warm, m_fieldRadius, legacyLayout, number("shellScale"));
     m_shellRadius = shell.radius;
     target->setTinted(shell.vertices, shell.indices);
@@ -1320,6 +1537,9 @@ void LumenField::updateLayers()
             flags += 1.0F;
         if (node.id == m_hoveredId)
             flags += 2.0F;
+        const bool designMaterial=xaviStyle(m_settings.value(node.branch?QStringLiteral("visualFolderStyle"):QStringLiteral("visualNodeStyle")).toString())>0;
+        if(designMaterial && (node.id==m_selected || std::find(m_highlightNodes.begin(),m_highlightNodes.end(),at)!=m_highlightNodes.end()))
+            flags+=32.0F;
         const QVector4D data(std::max(node.activity, node.uncertainty * 0.3F), attentionOf(at), flags,
                              static_cast<float>(seedOf(node.id) & 1023U) / 1023.0F);
         if (node.branch) {
@@ -1356,7 +1576,7 @@ void LumenField::updateLayers()
     if (const auto g = m_geometry.value(QStringLiteral("fibres")); g)
         g->setLines(fibres);
 
-    const bool curved = m_lens != QLatin1String("entities");
+    const bool curved = m_lens != QLatin1String("entities") && xaviLink(m_settings.value(QStringLiteral("visualLinkStyle")).toString())==0;
     std::vector<float> backbone;
     for (const int i : m_backbone)
         appendCurve(backbone, positionAt(m_nodes[static_cast<std::size_t>(i)].parentIndex), positionAt(i), curved ? 5 : 1, false);
@@ -1368,7 +1588,7 @@ void LumenField::updateLayers()
         appendCurve(highlight, positionAt(m_nodes[static_cast<std::size_t>(i)].parentIndex), positionAt(i), curved ? 9 : 1, false);
     for (const int r : m_highlightRelations) {
         const Edge &edge = m_relations[static_cast<std::size_t>(r)];
-        appendCurve(highlight, positionAt(edge.source), positionAt(edge.target), 9, false);
+        appendCurve(highlight, positionAt(edge.source), positionAt(edge.target), curved ? 9 : 1, false);
     }
     if (const auto g = m_geometry.value(QStringLiteral("highlight")); g)
         g->setLines(highlight);
@@ -1379,7 +1599,7 @@ void LumenField::updateLayers()
         if (!drawn(edge.source) || !drawn(edge.target))
             continue;
         const bool isObserved = edge.kind == QLatin1String("observed");
-        appendCurve(isObserved ? observed : semantic, positionAt(edge.source), positionAt(edge.target), 9, !isObserved);
+        appendCurve(isObserved ? observed : semantic, positionAt(edge.source), positionAt(edge.target), curved ? 9 : 1, !isObserved && curved);
     }
     if (const auto g = m_geometry.value(QStringLiteral("observed")); g)
         g->setLines(observed);
@@ -1396,22 +1616,31 @@ void LumenField::updateLayers()
 
 void LumenField::updatePulses()
 {
+    const bool designLinks=xaviLink(m_settings.value(QStringLiteral("visualLinkStyle")).toString())>0;
+    if(const auto ribbon=m_geometry.value(QStringLiteral("pulseRibbons"));ribbon){
+        std::vector<float> lines;
+        if(designLinks && flag("pulses") && ambientAllowed() && particleBudget()>0)
+            for(const auto &[from,to]:m_pulseLinks)if(drawn(from)&&drawn(to))appendCurve(lines,positionAt(from),positionAt(to),1,false);
+        ribbon->setLines(lines);
+    }
     const auto table = m_tables.value(QStringLiteral("pulses"));
     if (!table)
         return;
     QByteArray data;
     int count = 0;
-    if (flag("pulses") && ambientAllowed() && particleBudget() > 0) {
+    if (!designLinks && flag("pulses") && ambientAllowed() && particleBudget() > 0) {
         const auto warm = lumen::to_linear(lumen::parse_hex(m_settings.value(QStringLiteral("accentWarm")).toString().toStdString())
                                                .value_or(lumen::Rgb{0.9F, 0.7F, 0.5F}));
-        const float speed = number("pulseSpeed");
+        const bool relation=!m_selected.isEmpty()||!m_hoveredId.isEmpty();
+        const float speed = number("pulseSpeed")*number(relation?"relationFlowSpeed":"ambientFlowSpeed");
         for (std::size_t a = 0; a < m_pulseLinks.size(); ++a) {
             const auto [from, to] = m_pulseLinks[a];
             if (!drawn(from) || !drawn(to))
                 continue;
             const float phase = std::fmod(m_pulseTime * speed + static_cast<float>(a) * 0.113F, 1.0F);
             const QVector3D p = positionAt(from) + (positionAt(to) - positionAt(from)) * phase;
-            entry(data, p, number("nodeSize") * 0.9F, warm, 1.0F, QVector4D(phase, 0, 0, 0));
+            const float intensity=number("energyIntensity")*number(relation?"relationFlowIntensity":"ambientFlowIntensity");
+            entry(data, p, number("nodeSize") * number("energyWidth") * 1.3F, warm, std::clamp(intensity,0.0F,1.0F), QVector4D(phase, 0, 0, 0));
             ++count;
         }
     }
@@ -1428,7 +1657,7 @@ void LumenField::tick()
         if (flag("rotate") && !inspecting)
             m_spin = std::fmod(m_spin + dt * number("rotationSpeed") * 0.1F * 57.29578F, 360.0F);
     }
-    if (flag("physics") && !m_paused && ambientAllowed()) {
+    if (flag("physics") && !m_paused && ambientAllowed() && m_simulationActive) {
         lumen::Motion motion;
         motion.reaction = number("reaction");
         motion.reach = number("reach");
@@ -1444,8 +1673,9 @@ void LumenField::tick()
         std::optional<Vec3> pointer;
         if (const int h = indexOf(m_hoveredId); h >= 0)
             pointer = m_bodies[static_cast<std::size_t>(h)].position;
-        if (lumen::step(m_bodies, pointer, dt, motion))
-            m_positionsDirty = true;
+        const unsigned changes = xaviStep(m_bodies, pointer, dt, motion);
+        if ((changes & 1U) != 0) m_positionsDirty = true;
+        m_simulationActive = (changes & 2U) != 0;
     } else if (!flag("physics") || !ambientAllowed()) {
         for (lumen::Body &body : m_bodies) {
             if (!(body.position == body.anchor)) {

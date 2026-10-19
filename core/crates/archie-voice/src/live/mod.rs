@@ -59,10 +59,27 @@ botella, no nombres exactos: no inventes qué es exactamente algo. Si te pregunt
 no está en lo que ya averiguaste, usa la herramienta identify; para datos de internet, \
 web_search. Lo que ya averiguaste no lo digas si nadie lo pregunta ni responde lo que te \
 preguntaron. Nunca digas quién es una persona por su cara ni la busques: eso necesita su \
-permiso. Puedes cambiar la vista del Observatory con observatory_scene, la cinemática del orbe con orb_cinematic y sus capas visuales con orb_overlay cuando la persona lo pida. No inventes datos que no tienes. Si lo que oíste es un fragmento sin sentido o solo tu nombre, no lo repitas: pregunta en pocas palabras qué necesita, o quédate callado.";
+permiso. Puedes cambiar la vista del Observatory con observatory_scene, el aspecto del orbe \
+con orb_preset, su cinemática con orb_cinematic y sus capas visuales con orb_overlay, o abrir \
+un panel local con shell_panel cuando la persona lo pida. Estos cambios son solo visuales: \
+no cambian inferencia ni permisos y no ejecutan operaciones del sistema. No inventes datos \
+que no tienes. Si lo que oíste es un fragmento sin sentido o solo tu nombre, no lo repitas: \
+pregunta en pocas palabras qué necesita, o quédate callado.";
 
-/// The tools a live session adds: looking closer, and reading the web.
-pub fn tools() -> Vec<ToolDefinition> {
+/// A string parameter limited to the names the running display reported. When the display
+/// was not reachable at start-up the names are not known here, so the parameter is free and
+/// the display itself refuses an unknown one.
+fn display_names(names: Option<&[String]>) -> serde_json::Value {
+    match names {
+        Some(names) if !names.is_empty() => json!({"type": "string", "enum": names}),
+        _ => json!({"type": "string"}),
+    }
+}
+
+/// The tools a live session adds: looking closer, reading the web, remembering, and the
+/// Observatory's views and presets as the running display lists them (`catalog`), plus
+/// bounded native presentation controls.
+pub fn tools(catalog: Option<&archie_orb::control::Catalog>) -> Vec<ToolDefinition> {
     vec![
         ToolDefinition {
             name: "identify".into(),
@@ -102,11 +119,20 @@ pub fn tools() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "observatory_scene".into(),
-            description: "Cambia la vista principal del Observatory cuando la persona lo pide: Orb, Forge o World.".into(),
+            description: "Cambia la vista principal del Observatory cuando la persona lo pide.".into(),
             parameters: json!({
                 "type": "object",
-                "properties": {"scene": {"type": "string", "enum": ["orb", "forge", "world"]}},
+                "properties": {"scene": display_names(catalog.map(|c| c.scenes.as_slice()))},
                 "required": ["scene"]
+            }),
+        },
+        ToolDefinition {
+            name: "orb_preset".into(),
+            description: "Cambia el aspecto del orbe con uno de los presets del Observatory y abre Orb. field es la vista original (Regiones vivas).".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {"preset": display_names(catalog.map(|c| c.presets.as_slice()))},
+                "required": ["preset"]
             }),
         },
         ToolDefinition {
@@ -114,7 +140,7 @@ pub fn tools() -> Vec<ToolDefinition> {
             description: "Cambia la cinemática del orbe y abre Orb. field es la vista original; crown, atlas y dense son variaciones.".into(),
             parameters: json!({
                 "type": "object",
-                "properties": {"profile": {"type": "string", "enum": ["field", "crown", "atlas", "dense"]}},
+                "properties": {"profile": {"type": "string", "enum": archie_orb::control::CINEMATICS}},
                 "required": ["profile"]
             }),
         },
@@ -124,23 +150,62 @@ pub fn tools() -> Vec<ToolDefinition> {
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "overlay": {"type": "string", "enum": ["hud", "shell", "ambient", "guides", "links", "pulses", "bloom"]},
+                    "overlay": {"type": "string", "enum": archie_orb::control::OVERLAYS},
                     "state": {"type": "string", "enum": ["on", "off"]}
                 },
                 "required": ["overlay", "state"]
             }),
         },
         ToolDefinition {
-            name: "orb_preset".into(),
-            description: "Aplica un preset visual al Orbe nativo: field, sphere, orb o neural. No cambia inferencia ni permisos.".into(),
-            parameters: json!({"type":"object", "properties":{"preset":{"type":"string","enum":["field","sphere","orb","neural"]}}, "required":["preset"]}),
-        },
-        ToolDefinition {
             name: "shell_panel".into(),
             description: "Abre un panel local del escritorio nativo: inspector, settings, sentry, activity, notifications, search o forge. No ejecuta operaciones del sistema.".into(),
-            parameters: json!({"type":"object", "properties":{"panel":{"type":"string","enum":["forge","inspector","settings","sentry","activity","notifications","search"]}}, "required":["panel"]}),
+            parameters: json!({"type":"object", "properties":{"panel":{"type":"string","enum": archie_orb::control::PANELS}}, "required":["panel"]}),
         },
     ]
+}
+
+#[cfg(test)]
+mod tool_tests {
+    use super::*;
+
+    #[test]
+    fn display_catalog_controls_scene_and_preset_enums_without_duplicate_tools() {
+        let catalog = archie_orb::control::Catalog {
+            scenes: vec!["new-scene".into()],
+            presets: vec!["new-preset".into()],
+        };
+        let definitions = tools(Some(&catalog));
+        let mut names = std::collections::HashSet::new();
+        for definition in &definitions {
+            assert!(
+                names.insert(definition.name.as_str()),
+                "duplicate {}",
+                definition.name
+            );
+        }
+        for (name, parameter, expected) in [
+            ("observatory_scene", "scene", json!(["new-scene"])),
+            ("orb_preset", "preset", json!(["new-preset"])),
+        ] {
+            let tool = definitions.iter().find(|tool| tool.name == name).unwrap();
+            assert_eq!(tool.parameters["properties"][parameter]["enum"], expected);
+        }
+        for name in ["orb_cinematic", "orb_overlay", "shell_panel"] {
+            assert!(names.contains(name));
+        }
+    }
+
+    #[test]
+    fn an_unavailable_display_keeps_scene_and_preset_names_open() {
+        let definitions = tools(None);
+        for (name, parameter) in [("observatory_scene", "scene"), ("orb_preset", "preset")] {
+            let tool = definitions.iter().find(|tool| tool.name == name).unwrap();
+            assert_eq!(
+                tool.parameters["properties"][parameter],
+                json!({"type": "string"})
+            );
+        }
+    }
 }
 
 /// What the page is sent.
@@ -305,6 +370,9 @@ impl Senses {
             "observatory_scene" => {
                 Some(visual_command("scene", arguments["scene"].as_str().unwrap_or(""), None).await)
             }
+            "orb_preset" => Some(
+                visual_command("preset", arguments["preset"].as_str().unwrap_or(""), None).await,
+            ),
             "orb_cinematic" => Some(
                 visual_command(
                     "cinematic",
@@ -312,9 +380,6 @@ impl Senses {
                     None,
                 )
                 .await,
-            ),
-            "orb_preset" => Some(
-                visual_command("preset", arguments["preset"].as_str().unwrap_or(""), None).await,
             ),
             "shell_panel" => {
                 Some(visual_command("panel", arguments["panel"].as_str().unwrap_or(""), None).await)
