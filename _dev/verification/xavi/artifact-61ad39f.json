@@ -1,0 +1,39 @@
+{
+  "source_sha": "61ad39fe470d216f4e20ed8c9eb4e3819a5d2ac3",
+  "artifact": "ArchieOS-Bonsai2-9B-Xavi-61ad39f.wsl",
+  "bytes": 11250696964,
+  "sha256": "3634e03a50e9f36ecc2f0b29208c1dc6dcfc3dfa9d2879867b0b12e9579e5dab",
+  "validation": {
+    "gzip_crc": "pass",
+    "windows_copy_sha256": "pass",
+    "clean_legacy_wsl_import": "pass",
+    "imported_source_overlay": "pass",
+    "imported_payload_hashes": 15,
+    "piper_cpu_synthesis": {
+      "status": "pass",
+      "sample_rate_hz": 22050,
+      "audio_frames": 23808,
+      "elapsed_seconds": 1.193,
+      "speaker_playback": false
+    },
+    "llm_server_started_in_import_test": false,
+    "gpu_jobs_started_in_import_test": 0,
+    "temporary_verification_distro": "removed after identity/path and absent-session-state checks",
+    "modern_double_click_installation": "unverified; constructor is WSL2.2.4; requires WSL2.4.4+"
+  },
+  "hosting": {
+    "github_release_id": 416918011,
+    "github_release_draft": true,
+    "external_upload": "blocked: no authenticated write login",
+    "requested_account": "PentaVM",
+    "app_connection": "read-repos/read-mcp/jobs; no repo write scope",
+    "cli_authentication": "not logged in at inspection",
+    "configured_huggingface_git_credential": false
+  },
+  "limits": [
+    "No modern double-click, GPU, ISO, VBox, IRIS action or pixel-parity certification.",
+    "Piper waveform synthesis is not a microphone/speaker hardware test.",
+    "The full-prompt CPU Bonsai smoke took257.883s; no interactive-latency promise.",
+    "No training adapter, training corpus, account key or personal node state was bundled."
+  ]
+}
