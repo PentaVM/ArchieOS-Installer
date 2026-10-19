@@ -24,11 +24,15 @@
   "hosting": {
     "github_release_id": 416918011,
     "github_release_draft": true,
-    "external_upload": "blocked: no authenticated write login",
-    "requested_account": "PentaVM",
-    "app_connection": "read-repos/read-mcp/jobs; no repo write scope",
-    "cli_authentication": "not logged in at inspection",
-    "configured_huggingface_git_credential": false
+    "external_upload": "uploaded; remote LFS size and SHA-256 verified",
+    "account": "PentaVM",
+    "private": true,
+    "repository": "PentaVM/ArchieOS-Bonsai2-9B-WSL",
+    "commit": "eea2dfd2ea63e48e47d53063403f64caad661681",
+    "download_url": "https://huggingface.co/PentaVM/ArchieOS-Bonsai2-9B-WSL/resolve/eea2dfd2ea63e48e47d53063403f64caad661681/ArchieOS-Bonsai2-9B-Xavi-61ad39f.wsl?download=true",
+    "remote_bytes": 11250696964,
+    "remote_sha256": "3634e03a50e9f36ecc2f0b29208c1dc6dcfc3dfa9d2879867b0b12e9579e5dab",
+    "credential_handling": "user-provided token used in memory; no token included in artifact, Git, or receipts"
   },
   "limits": [
     "No modern double-click, GPU, ISO, VBox, IRIS action or pixel-parity certification.",
