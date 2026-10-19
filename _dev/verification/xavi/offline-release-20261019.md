@@ -26,10 +26,12 @@ release linking to it. The draft is416918011, tag
 
 ## Validation actually performed
 
-- Python packaging tests:7 pass on Linux;4 pass/3 platform skips on Windows. They use
+- Python packaging tests:9 pass on Linux;6 pass/3 platform skips on Windows. They use
   tiny files and establish packaging behavior only, never model quality/hardware.
   Stubbed OOBE boundary tests prove a runtime/port failure preserves installation,
   while an invalid payload still fails OOBE; they do not certify Windows installation.
+  The current source overlay is compared against the image before compression,
+  including `archie-design`; an inherited legacy preview launcher was caught and replaced.
 - Voice library:51 pass. New CLI timeout test passes without default features and
   with native speech. Default90s preserved; explicit waits limited to1..900s.
 - Current source builds completed, including native speech and packaged CLI tools.

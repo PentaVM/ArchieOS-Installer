@@ -6,6 +6,8 @@ output=$(realpath -m "${2:?usage: package-offline.sh CLEAN_ROOTFS OUTPUT.wsl}")
 [[ "$rootfs" != / && -f "$rootfs/usr/share/archie/offline/payload.json" ]]
 [[ "$output" == *.wsl && ! -e "$output" && ! -e "$output.partial" ]]
 case "$output" in "$rootfs"/*) echo 'output must be outside the image' >&2; exit 64;; esac
+repo_root=$(realpath "$(dirname "$0")/../..")
+python3 "$repo_root/scripts/wsl/validate-offline-overlay.py" "$repo_root/distro/wsl-operator/rootfs" "$rootfs"
 [[ ! -e "$rootfs/home/archie/.local/state" && ! -e "$rootfs/home/archie/.config" ]]
 [[ ! -e "$rootfs/home/archie/.cache/huggingface/token" ]]
 [[ ! -s "$rootfs/etc/machine-id" ]]

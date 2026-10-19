@@ -68,4 +68,21 @@ class OfflineBundle(unittest.TestCase):
         result = self.run_oobe('exit 9')
         self.assertNotEqual(result.returncode, 0)
 
+    def test_stale_launcher_in_image_is_rejected(self):
+        spec = importlib.util.spec_from_file_location('overlay', pathlib.Path(__file__).with_name('validate-offline-overlay.py'))
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        overlay = self.root / 'source'; path = overlay / 'usr/bin/archie-design'
+        path.parent.mkdir(parents=True); path.write_text('native entry')
+        target = self.root / 'usr/bin/archie-design'; target.parent.mkdir(parents=True); target.write_text('old preview')
+        with self.assertRaisesRegex(ValueError, 'archie-design'):
+            module.verify_overlay(overlay, self.root)
+
+    def test_current_launcher_in_image_is_accepted(self):
+        spec = importlib.util.spec_from_file_location('overlay', pathlib.Path(__file__).with_name('validate-offline-overlay.py'))
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        overlay = self.root / 'source'; path = overlay / 'usr/bin/archie-design'
+        path.parent.mkdir(parents=True); path.write_text('native entry')
+        target = self.root / 'usr/bin/archie-design'; target.parent.mkdir(parents=True); target.write_text('native entry')
+        module.verify_overlay(overlay, self.root)
+
 if __name__ == '__main__': unittest.main()

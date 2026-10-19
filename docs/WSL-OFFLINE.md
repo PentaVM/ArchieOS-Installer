@@ -6,7 +6,7 @@ y runtimes incluidos. No requiere descargar pesos durante la instalación.
 
 Requiere Windows con WSLg y **WSL2.4.4 o posterior**, que proporciona el instalador
 de archivos `.wsl` por doble clic. WSL es un componente de Windows y debe estar
-instalado previamente. Reserva al menos30GB libres para la distribución y8GB de
+instalado previamente. Reserva al menos40GB libres para la distribución y8GB de
 RAM para WSL. El tamaño final de descarga figura en el release.
 
 1. Descarga el `.wsl` completo desde el enlace externo del release.
