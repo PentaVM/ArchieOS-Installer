@@ -882,9 +882,16 @@ fn the_live_installer_is_explicit_and_does_not_replace_the_observatory() {
 #[test]
 fn the_renderer_is_a_native_compiled_gpu_client_not_a_web_app() {
     let renderer = display_unit("archie-display.service");
+    let exec = renderer
+        .get("ExecStart")
+        .map(String::as_str)
+        .unwrap_or_default();
+    let mut words = exec.split_whitespace();
+    assert_eq!(words.next(), Some("/usr/bin/archie-display"));
+    // The native shell, fed by the read-only bridge the image ships; no other argument.
     assert_eq!(
-        renderer.get("ExecStart").map(String::as_str),
-        Some("/usr/bin/archie-display")
+        words.collect::<Vec<_>>(),
+        ["--shell", "--shell-bridge", "/usr/bin/archie-shell-bridge"]
     );
 
     let native = repo_root().join("display/native");

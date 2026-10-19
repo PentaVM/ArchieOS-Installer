@@ -26,6 +26,7 @@ pub mod persistent;
 pub mod style;
 
 use crate::conversation::{Moment, VoiceOut};
+use crate::visual::visual_command;
 use archie_model_runtime::ToolDefinition;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
@@ -58,7 +59,12 @@ botella, no nombres exactos: no inventes qué es exactamente algo. Si te pregunt
 no está en lo que ya averiguaste, usa la herramienta identify; para datos de internet, \
 web_search. Lo que ya averiguaste no lo digas si nadie lo pregunta ni responde lo que te \
 preguntaron. Nunca digas quién es una persona por su cara ni la busques: eso necesita su \
-permiso. Puedes cambiar la vista del Observatory con observatory_scene, el aspecto del orbe con orb_preset cuando la persona lo pida. No inventes datos que no tienes. Si lo que oíste es un fragmento sin sentido o solo tu nombre, no lo repitas: pregunta en pocas palabras qué necesita, o quédate callado.";
+permiso. Puedes cambiar la vista del Observatory con observatory_scene, el aspecto del orbe \
+con orb_preset, su cinemática con orb_cinematic y sus capas visuales con orb_overlay, o abrir \
+un panel local con shell_panel cuando la persona lo pida. Estos cambios son solo visuales: \
+no cambian inferencia ni permisos y no ejecutan operaciones del sistema. No inventes datos \
+que no tienes. Si lo que oíste es un fragmento sin sentido o solo tu nombre, no lo repitas: \
+pregunta en pocas palabras qué necesita, o quédate callado.";
 
 /// A string parameter limited to the names the running display reported. When the display
 /// was not reachable at start-up the names are not known here, so the parameter is free and
@@ -71,7 +77,8 @@ fn display_names(names: Option<&[String]>) -> serde_json::Value {
 }
 
 /// The tools a live session adds: looking closer, reading the web, remembering, and the
-/// Observatory's views and presets as the running display lists them (`catalog`).
+/// Observatory's views and presets as the running display lists them (`catalog`), plus
+/// bounded native presentation controls.
 pub fn tools(catalog: Option<&archie_orb::control::Catalog>) -> Vec<ToolDefinition> {
     vec![
         ToolDefinition {
@@ -128,22 +135,76 @@ pub fn tools(catalog: Option<&archie_orb::control::Catalog>) -> Vec<ToolDefiniti
                 "required": ["preset"]
             }),
         },
+        ToolDefinition {
+            name: "orb_cinematic".into(),
+            description: "Cambia la cinemática del orbe y abre Orb. field es la vista original; crown, atlas y dense son variaciones.".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {"profile": {"type": "string", "enum": archie_orb::control::CINEMATICS}},
+                "required": ["profile"]
+            }),
+        },
+        ToolDefinition {
+            name: "orb_overlay".into(),
+            description: "Enciende o apaga una capa visual del orbe. hud controla los textos; shell la membrana; ambient las partículas; guides las guías; links las conexiones; pulses las señales; bloom el brillo.".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "overlay": {"type": "string", "enum": archie_orb::control::OVERLAYS},
+                    "state": {"type": "string", "enum": ["on", "off"]}
+                },
+                "required": ["overlay", "state"]
+            }),
+        },
+        ToolDefinition {
+            name: "shell_panel".into(),
+            description: "Abre un panel local del escritorio nativo: inspector, settings, sentry, activity, notifications, search o forge. No ejecuta operaciones del sistema.".into(),
+            parameters: json!({"type":"object", "properties":{"panel":{"type":"string","enum": archie_orb::control::PANELS}}, "required":["panel"]}),
+        },
     ]
 }
 
-async fn visual_command(action: &str, value: &str) -> String {
-    use archie_orb::control::{self, ControlError};
-    let applied = match action {
-        "scene" => control::scene(value).await,
-        "preset" => control::preset(value).await,
-        _ => Err(ControlError::Refused(format!("unknown action {action}"))),
-    };
-    match applied {
-        Ok(()) => format!("Observatory actualizado: {action} {value}."),
-        Err(ControlError::Refused(reason)) => {
-            format!("El Observatory rechazó ese cambio visual: {reason}.")
+#[cfg(test)]
+mod tool_tests {
+    use super::*;
+
+    #[test]
+    fn display_catalog_controls_scene_and_preset_enums_without_duplicate_tools() {
+        let catalog = archie_orb::control::Catalog {
+            scenes: vec!["new-scene".into()],
+            presets: vec!["new-preset".into()],
+        };
+        let definitions = tools(Some(&catalog));
+        let mut names = std::collections::HashSet::new();
+        for definition in &definitions {
+            assert!(
+                names.insert(definition.name.as_str()),
+                "duplicate {}",
+                definition.name
+            );
         }
-        Err(_) => "No pude cambiar el Observatory: la ventana local no responde.".into(),
+        for (name, parameter, expected) in [
+            ("observatory_scene", "scene", json!(["new-scene"])),
+            ("orb_preset", "preset", json!(["new-preset"])),
+        ] {
+            let tool = definitions.iter().find(|tool| tool.name == name).unwrap();
+            assert_eq!(tool.parameters["properties"][parameter]["enum"], expected);
+        }
+        for name in ["orb_cinematic", "orb_overlay", "shell_panel"] {
+            assert!(names.contains(name));
+        }
+    }
+
+    #[test]
+    fn an_unavailable_display_keeps_scene_and_preset_names_open() {
+        let definitions = tools(None);
+        for (name, parameter) in [("observatory_scene", "scene"), ("orb_preset", "preset")] {
+            let tool = definitions.iter().find(|tool| tool.name == name).unwrap();
+            assert_eq!(
+                tool.parameters["properties"][parameter],
+                json!({"type": "string"})
+            );
+        }
     }
 }
 
@@ -307,11 +368,34 @@ impl Senses {
                 arguments["tier"].as_str().unwrap_or("t4"),
             )),
             "observatory_scene" => {
-                Some(visual_command("scene", arguments["scene"].as_str().unwrap_or("")).await)
+                Some(visual_command("scene", arguments["scene"].as_str().unwrap_or(""), None).await)
             }
-            "orb_preset" => {
-                Some(visual_command("preset", arguments["preset"].as_str().unwrap_or("")).await)
+            "orb_preset" => Some(
+                visual_command("preset", arguments["preset"].as_str().unwrap_or(""), None).await,
+            ),
+            "orb_cinematic" => Some(
+                visual_command(
+                    "cinematic",
+                    arguments["profile"].as_str().unwrap_or(""),
+                    None,
+                )
+                .await,
+            ),
+            "shell_panel" => {
+                Some(visual_command("panel", arguments["panel"].as_str().unwrap_or(""), None).await)
             }
+            "orb_overlay" => Some(
+                visual_command(
+                    "overlay",
+                    arguments["overlay"].as_str().unwrap_or(""),
+                    match arguments["state"].as_str() {
+                        Some("on") => Some(true),
+                        Some("off") => Some(false),
+                        _ => None,
+                    },
+                )
+                .await,
+            ),
             _ => None,
         }
     }

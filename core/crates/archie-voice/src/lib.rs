@@ -41,6 +41,8 @@ pub mod piper;
 pub mod rvc;
 pub mod segment;
 pub mod tools;
+#[cfg(any(feature = "live", test))]
+mod visual;
 pub mod voice;
 pub mod wav;
 

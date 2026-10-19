@@ -1,6 +1,6 @@
 # Cinemáticas y movimiento
 
-Estado: **diseño; casi nada implementado.** En el prototipo sólo existe el escalado del dock al pasar el ratón (120 ms, `OutCubic`) y los tokens de duración con `reducedMotion`. Cada fila siguiente es una **especificación**, no una animación existente.
+Estado: **diseño; implementado sólo lo que tiene disparo en el prototipo.** Los cuatro perfiles y sus duraciones son tokens de `Theme.qml` (segunda entrega de Claude Design, `MOVIMIENTO.md`); se aplican al aparecer y desaparecer paneles, ventanas, avisos y diálogos, al dock y al conmutador lista/cuadrícula. Las filas del catálogo siguiente son **especificación propia anterior**, no reconciliada con la tabla del paquete (la vigente para el aspecto); sus disparos reales siguen sin existir.
 
 Regla del handoff: una cinemática explica causalidad y estado; no sustituye al feedback operativo ni se dispara por temporizador.
 
@@ -43,3 +43,7 @@ Animaciones de Qt Quick (`Behavior`, `NumberAnimation`, `Transition`) sobre `tra
 ## Medición pendiente (no hay números)
 
 p50/p95/p99 de tiempo de fotograma, jank, RAM/VRAM, latencia entrada→pantalla aproximada y consumo en reposo, en 1080p/1440p y con IRIS ocupando la GPU (RTX 3070 8 GB). Objetivo a probar, no resultado: 60 FPS estables en 1080p, 120 Hz si compositor y hardware lo permiten. Los presupuestos de la tabla son propuestos hasta tener línea base.
+
+## Nota sobre el diseño Archie Mac
+
+El paquete trae ahora su tabla de movimiento (`display/shell/design/archie-mac-handoff/MOVIMIENTO.md`): cuatro perfiles (Full, Balanced, Quiet, Movimiento reducido), sólo `transform` y `opacity`, curvas Salida/Entrada/Estándar y un pulso único para cambios de estado. Está volcada en `Theme.qml` (`motion`, `durOpen`, `durPanel`, `durPulse`, `easeOut`…). Perfil por omisión: Balanced (decisión 10 abierta). Qt anima `Translate`, `scale` y `opacity` con `Behavior`; no hay blur ni sombra animados. Medición real pendiente.

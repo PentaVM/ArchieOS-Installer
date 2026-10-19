@@ -25,6 +25,7 @@ ApplicationWindow {
     readonly property color amber: "#f0b429"
     readonly property color red: "#f2626b"
     property string scene: "orb"
+    property bool orbHudVisible: true
     property var selection: null
 
     // The scenes and the mode each runs in are DisplayControl's; the CLI and the voice ask
@@ -38,9 +39,15 @@ ApplicationWindow {
 
     Connections {
         target: displayControl
-        // Both arrive checked; a preset is already applied by the time it is announced.
-        function onCommandReceived(action, value) {
-            root.changeScene(action === "preset" ? "orb" : value)
+        function onCommandReceived(action, value, enabled) {
+            if (action === "scene") root.changeScene(value)
+            else if (action === "preset" || action === "cinematic") {
+                // DisplayControl applies and validates the look before notifying us.
+                root.changeScene("orb")
+            } else if (action === "overlay") {
+                if (value === "hud") root.orbHudVisible = enabled
+                else lumen.setSetting(value, enabled)
+            }
         }
     }
 
@@ -110,8 +117,9 @@ ApplicationWindow {
 
     // Only the scene on screen does work: the orb fetches and steps while it is shown,
     // FORGE watches /proc while it is shown, and neither costs anything otherwise.
-    Binding { target: lumen; property: "active"; value: root.scene === "orb" }
-    Binding { target: appCatalog; property: "active"; value: root.scene === "forge" }
+    Binding { target: lumen; property: "active"; value: root.scene === "orb" && archieBridge.presented }
+    Binding { target: lumen; property: "renderBudget"; value: archieBridge.frame }
+    Binding { target: appCatalog; property: "active"; value: root.scene === "forge" && archieBridge.presented }
 
     // A real event (a new snapshot, a changed machine condition) flashes the orb's
     // membrane once. It never loops: nothing moves without something having happened.
@@ -528,7 +536,7 @@ ApplicationWindow {
                         // meant to avoid. The orb's bloom is the design's: its strength,
                         // radius and threshold are the operator's settings, and it goes off
                         // with the rest of the budget.
-                        glowEnabled: !root.budgetReduced() && (root.scene !== "orb" || lumen.look.bloom)
+                        glowEnabled: !!archieBridge.frame.postProcessing && (root.scene !== "orb" || lumen.look.bloom)
                         glowStrength: root.scene === "orb" ? 0.9 + lumen.look.bloomRadius * 0.6 : 0.85
                         glowIntensity: root.scene === "orb" ? lumen.look.bloomStrength * 1.3 : 0.28
                         glowBloom: root.scene === "orb" ? lumen.look.bloomRadius * 0.5 : 0.18
@@ -719,6 +727,9 @@ ApplicationWindow {
                     // The orb: the TFOG graph, composed and drawn the Lumenfield way.
                     LumenScene {
                         id: lumenScene
+                        controller: lumen
+                        reducedMotion: !archieBridge.frame.ambientMotion
+                        presented: archieBridge.presented && root.scene === "orb"
                         visible: root.scene === "orb"
                         aspect: view.width / Math.max(1, view.height)
                         flash: root.eventFlash
@@ -784,9 +795,10 @@ ApplicationWindow {
                 }
 
                 OrbHud {
+                    controller: lumen
                     anchors.fill: parent
                     visible: root.scene === "orb"
-                    labelsVisible: lumen.settings.labels
+                    labelsVisible: root.orbHudVisible && lumen.settings.labels
                     view: view
                     orbScene: lumenScene
                 }

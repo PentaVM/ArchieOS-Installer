@@ -1,0 +1,11 @@
+[package]
+name = "archie-lumen-design"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+description = "Pure Rust port of XaviCottier's delivered Lumenfield visual design"
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]

@@ -2,7 +2,7 @@
 
 Estado: **Fase B.** Cobertura visual real: 5 de las 15 superficies del handoff (marcadas ▣). Las demás sólo tienen especificación textual. Capturas reproducibles en `docs/gui/screenshots/` (1080p y 1440p, Qt 6.12 software, datos sintéticos rotulados). Todas las pantallas deben soportar: estado vacío, error, `offline` (daemon caído), `degraded` y `stale` con edad del dato; teclado completo; foco visible; salida segura (`Esc`); Reduced Motion.
 
-Mapa de capturas: `01-frost`, `02-workspace`, `03-signature`, `04-synthesis` (lista), `05-synthesis-grid`, `06-synthesis-palette`, `07-synthesis-control`, `08-synthesis-activity`, y `*-1440p`.
+Mapa de capturas: `11` a `32` son referencias históricas de diseño; `33-native-orb-fixture.png` y `34-native-light-beta.png` verifican el host nativo nuevo con fuente fixture. Ver `NATIVE_INTEGRATION.md` y la bitácora del 15 de octubre para capacidades y límites actuales.
 
 | # | Superficie | Cobertura | Backlog | Notas de diseño |
 |---|---|---|---|---|
@@ -51,3 +51,11 @@ Capturas `C-*` en `screenshots/`: `C-real-daemon-unreachable` (trama **real**: `
 - **Sentry Center (superficie 11)** pasa de texto a render: capturas `S-real-lan-missing` (trama real: el inventario no existe en este equipo), `S-synthetic-lan-inventory` y `S-synthetic-lan-stale` (bridge real sobre un inventario sintético). Pasivo, sin acciones.
 - **Actividad (superficie 6)**: los trabajos largos son reales; capturas `A-synthetic-jobs` (bridge real sobre un espacio de trabajo sintético) y `A-real-daemon-unreachable` (sin espacios configurados). Cancelar no se ofrece.
 - Cobertura visual: 6 de 15 superficies renderizadas; con datos reales en parte: barra superior, centro de control, Sentry y actividad.
+
+## Actualización: diseño Archie Mac
+
+Las capturas de `screenshots/` y su nomenclatura se sustituyeron por las del diseño Archie Mac (ver `DESIGN_ARCHIE_MAC.md`); los nombres `0x-synthesis`, `C-*`, `S-*` y `A-*` de arriba corresponden al diseño anterior y están en el historial de git. Las posiciones y tamaños de ventanas y paneles son ahora las del diseño.
+
+## Actualización: segunda entrega de Claude Design
+
+Renderizadas ahora, rotuladas «Diseño · datos de ejemplo»: Alt-Tab (8), notificaciones y diálogo de autorización (6), Forge (10), inspector IRIS/Cortex (12), Ajustes (13), bloqueo/arranque/instalador (14), selector de espacio y hueco del Orbe (15) y búsqueda (9). Con las anteriores, **las 15 superficies tienen render**; ninguna de las nuevas tiene datos reales detrás. Detalle, estados y decisiones abiertas en `DESIGN_ARCHIE_MAC.md` §8. Capturas `screenshots/11` a `28`.

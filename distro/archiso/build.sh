@@ -60,9 +60,9 @@ fi
 
 export CARGO_TARGET_DIR="${cargo_target}"
 cargo build --locked --release --manifest-path "${repo_root}/core/Cargo.toml" \
-  -p archie-installer -p archie-state -p archied -p archie-cli -p archie-displayd -p archie-worldd -p archie-executord -p archie-task-runner -p archie-model-runtime -p archie-rem -p archie-lan -p archie-sentry
+  -p archie-installer -p archie-state -p archied -p archie-cli -p archie-displayd -p archie-shell-bridge -p archie-worldd -p archie-executord -p archie-task-runner -p archie-model-runtime -p archie-rem -p archie-lan -p archie-sentry
 
-for binary in archie-map-fetch archie-install archie archied archie-db archie-displayd archie-worldd archie-executord archie-task-runner archie-infer archie-ask archie-rem archie-lan archie-netwatch archie-print; do
+for binary in archie-map-fetch archie-install archie archied archie-db archie-displayd archie-shell-bridge archie-worldd archie-executord archie-task-runner archie-infer archie-ask archie-rem archie-lan archie-netwatch archie-print; do
   file "${cargo_target}/release/${binary}" | grep -q 'ELF 64-bit.*x86-64' || {
     echo "archieos-build: ${binary} is not a Linux x86-64 ELF release binary" >&2
     exit 65
@@ -133,6 +133,8 @@ install -Dm644 "${repo_root}/distro/rem/rem.toml" "${stage}/airootfs/etc/archie/
 install -Dm644 "${repo_root}/distro/rem/archie-rem.service" "${stage}/airootfs/etc/systemd/system/archie-rem.service"
 install -Dm644 "${repo_root}/distro/installer/archie-wizard.desktop" "${stage}/airootfs/usr/share/applications/archie-wizard.desktop"
 install -Dm644 "${repo_root}/distro/installer/archie-installer.service" "${stage}/airootfs/etc/systemd/system/archie-installer.service"
+install -Dm755 "${cargo_target}/release/archie-shell-bridge" \
+  "${stage}/airootfs/usr/bin/archie-shell-bridge"
 install -Dm755 "${native_build}/archie-display" \
   "${stage}/airootfs/usr/bin/archie-display"
 install -Dm755 "${cortex_build}/archie-cortexd" \
@@ -243,7 +245,7 @@ for forbidden in .git target _legacy tests screenshots secrets; do
 done
 if find "${stage}/airootfs/usr/bin" -type f \
   ! -name archie ! -name archied ! -name archie-db ! -name archie-displayd ! -name archie-worldd ! -name archie-cortexd \
-  ! -name archie-display ! -name archie-executord ! -name archie-task-runner \
+  ! -name archie-display ! -name archie-shell-bridge ! -name archie-executord ! -name archie-task-runner \
   ! -name archie-sentry ! -name archie-install ! -name archie-wizard ! -name archie-map-fetch ! -name archie-infer ! -name archie-ask ! -name archie-rem ! -name archie-lan ! -name archie-netwatch ! -name archie-print ! -name archie-wizard-session \
   -print -quit | grep -q .; then
   echo "archieos-build: unexpected staged Archie binary" >&2

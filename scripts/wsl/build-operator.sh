@@ -27,6 +27,9 @@ nemo_sdk=${NEMO_SDK:?NEMO_SDK is the installed NeMo-Speech.cpp SDK}
 # It runs Bonsai, the optional reasoning model on the machine (archie-local).
 llama=${LLAMA:?LLAMA is the directory holding the built llama-server and its libraries}
 bin=${BIN:?BIN is the cargo release directory}
+# Reuse the ISO/native build by default; this script packages, never starts the GUI.
+native_display=${ARCHIE_DISPLAY_BIN:-${ARCHIE_NATIVE_BUILD_DIR:-${XDG_CACHE_HOME:-${HOME}/.cache}/archieos/native-display}/archie-display}
+[[ -x "$native_display" ]] || { echo "build-operator: build display/native first (or set ARCHIE_DISPLAY_BIN)" >&2; exit 69; }
 # ARCHIE_WSL_WORK_DIR: where the root is assembled, when /var/tmp has no room for 5 GB.
 work_dir=${ARCHIE_WSL_WORK_DIR:-/var/tmp/archieos-wsl-operator}
 rootfs=$work_dir/rootfs
@@ -48,7 +51,7 @@ conf=()
 # libpulse is the microphone and the speaker, through WSLg; dbus and at-spi2-core let
 # the voice read what an application shows.
 pacstrap "${conf[@]}" -K "$rootfs" base ca-certificates curl jq python firefox mesa \
-  qt6-base qt6-declarative qt6-wayland ttf-dejavu libpulse dbus at-spi2-core
+  qt6-base qt6-declarative qt6-quick3d qt6-wayland ttf-dejavu libpulse dbus at-spi2-core
 rm -rf "${rootfs:?}/var/cache/pacman/pkg"/*
 # MLT and FFmpeg for the video bridge, which needs no window, and Kdenlive to edit in the
 # Stage. ARCHIE_OPERATOR_APPS= (empty) leaves Kdenlive out, about 1.5 GB lighter; it is
@@ -65,9 +68,11 @@ install -m 0755 "$stage" "$rootfs/usr/bin/archie-stage"
 # archie-bridges and archie-mcp-server serve the video bridge: timelines rendered by MLT
 # without a window, each with a project Kdenlive opens.
 for binary in archie-arena-live archie-stage-cli archie-ask archie-lan archie-netwatch archie-print archie-sentry-probe \
-  archie-bridges archie-mcp-server archie-voice archie-shell-bridge; do
+  archie-bridges archie-mcp-server archie-voice archie archie-displayd archie-worldd archie-shell-bridge; do
   install -m 0755 "$bin/$binary" "$rootfs/usr/bin/$binary"
 done
+install -m 0755 "$native_display" "$rootfs/usr/bin/archie-display"
+install -Dm 0755 "$repo_root/display/shell/start-native.sh" "$rootfs/usr/lib/archie/start-native.sh"
 install -Dm 0755 "$llama/llama-server" "$rootfs/opt/archie/llama/bin/llama-server"
 install -d "$rootfs/opt/archie/llama/lib"
 cp -a "$llama"/*.so* "$rootfs/opt/archie/llama/lib/"
@@ -81,7 +86,8 @@ install -Dm 0755 "$repo_root/display/stage/run-archie.sh" "$rootfs/usr/lib/archi
 install -Dm 0755 "$repo_root/scripts/models/piper-json-bridge.py" "$rootfs/usr/lib/archie/piper-json-bridge.py"
 install -Dm 0755 "$repo_root/scripts/models/install-piper-voices.sh" "$rootfs/usr/lib/archie/install-piper-voices"
 install -Dm 0644 "$repo_root/core/crates/archie-stage/policy/apps.toml" "$rootfs/usr/share/archie/stage/apps.toml"
-# The desktop design, to look at: Xavi's prototype, which draws invented data.
+# Explicit --preview retains the original design boards. Default archie-design opens
+# the native renderer and its read-only bridge, reporting unavailable sources honestly.
 install -d "$rootfs/usr/share/archie/shell-prototype"
 cp -a "$repo_root/display/shell/prototype/." "$rootfs/usr/share/archie/shell-prototype/"
 
@@ -120,7 +126,7 @@ rm -rf "$rootfs/var/cache/pacman/pkg"/* "$rootfs/var/log"/* "$rootfs/usr/share/d
 
 # Every binary finds its libraries inside the image, or the image is not shipped.
 for binary in archie-stage archie-arena-live archie-stage-cli archie-ask archie-lan archie-netwatch archie-print \
-  archie-bridges archie-mcp-server archie-voice; do
+  archie-bridges archie-mcp-server archie-voice archie archie-display archie-displayd archie-worldd archie-shell-bridge; do
   if arch-chroot "$rootfs" ldd "/usr/bin/$binary" | grep -q 'not found'; then
     echo "build-operator: $binary lacks a library in the image" >&2
     arch-chroot "$rootfs" ldd "/usr/bin/$binary" | grep 'not found' >&2

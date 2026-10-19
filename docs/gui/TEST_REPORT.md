@@ -1,3 +1,10 @@
+# Estado actual de integración
+
+Resultados y pendientes actuales: [bitácora del host nativo](BITACORA_NATIVE_2026-10-15.md).
+El informe que sigue conserva la evidencia histórica por fases; no describe por sí solo el estado final del PR.
+
+---
+
 # Informe de pruebas
 
 Estado: **línea base de la Fase A.** Este PR no contiene aún código de GUI, así que no hay pruebas de GUI que informar. Se registra qué se pudo y qué no se pudo ejecutar para que nadie confunda "no corrió" con "pasó".
@@ -80,3 +87,23 @@ Casos negativos: nadie escucha (`displayd_offline`), respuesta que no cumple el 
 **Regresión del workspace:** **1 938 pasan** (1 900 + 38), **1 falla** (la misma previa de `INDEX.md`), 78 ignoradas. Sin regresiones.
 
 **No ejecutado:** `archie-lan` contra una red real (generaría tráfico SSDP/mDNS en la red del dueño y sus dispositivos acabarían en los fixtures: no se hizo), un `archie-bridges run-job` real, Quickshell, Linux. Estados: `GUI-SENTRY-001` `INTEGRATED`; `GUI-BRIDGE-002` `IN_PROGRESS` (no hay cancelación).
+
+## Rediseño visual Archie Mac (Claude Design)
+
+Sin cambios en Rust ni en el modelo de datos. `BridgeModelTest.qml`: 21 comprobaciones, 0 fallos. Las 10 pantallas del prototipo y dos a 1440p cargan con 0 avisos de QML (Qt 6.12, render por software). Verificación visual: **contra el código de los mockups, no contra una imagen del diseño** (el paquete declara que no se renderizó nunca y sus `.dc.html` no se pueden abrir sin su runtime). Defectos hallados al renderizar y corregidos: texto que se transparentaba a través de paneles sin desenfoque (ahora `Theme.blur`), barra de progreso de la cola pegada al texto, texto del resumen del sistema que se salía de su caja y falta de aire bajo los chips del centro de control. No verificado: Quickshell, desenfoque real, lectores de pantalla, rendimiento. Ver `DESIGN_ARCHIE_MAC.md` §4–5.
+
+## Segunda entrega de diseño (8 superficies, movimiento)
+
+- `BridgeModelTest.qml`: 21 comprobaciones, 0 fallos (el modelo de datos no se tocó).
+- Render por software (Qt 6.12, PySide6, `offscreen`) de las 8 superficies nuevas y de sus seis estados, más Vault, paleta y escritorio: **0 mensajes de QML**. Se compararon el escritorio y Vault en cuadrícula con las capturas anteriores: sólo difiere el chip de enlace, porque las anteriores se hicieron con una trama reproducida.
+- **No se probó**: que las animaciones se vean y duren como la tabla de movimiento (sólo se comprobó que cargan sin errores); Quickshell; desenfoque real; lectores de pantalla; rendimiento. 
+- `SurfacesTest.qml` (nuevo, sin QtTest): 83 comprobaciones, 0 fallos. Construye cada superficie de ejemplo en sus seis estados con tamaño real; exige que las muestras se rotulen «Diseño», que «Permitir» siga deshabilitado con su motivo, que «vacío» no dibuje filas inventadas, que «offline» nunca diga «en vivo», que el estado interno de IRIS no se dibuje en ningún estado y que los cuatro perfiles de movimiento tengan las duraciones del paquete. No prueba el aspecto ni que las animaciones se vean bien. Ejecutado con PySide6 (software, `offscreen`); con `qml` en Linux no está verificado.
+
+## Ventanas, sistema básico y esfera (14 oct)
+
+- `WmTest.qml` (nuevo, sin QtTest): 44 comprobaciones, 0 fallos. Estado inicial, abrir, subir al frente, minimizar y restaurar, clics del dock (abre, minimiza el del frente, sube el de atrás), teclas (abre/cierra), cerrar olvida posición y zoom, todas a la vez, acciones sobre la ventana del frente sin ventanas, la lista del selector, y el arrastre sin salir de pantalla; además las luces y el punto del dock siguen el estado.
+- `SurfacesTest.qml`: 83/83 (el selector dice «contenido de ejemplo»; el centro de notificaciones descarta una, todas y restaura los ejemplos). `BridgeModelTest.qml`: 21/21.
+- Recorrido con eventos **reales** de ratón y teclado sobre `Main.qml` (arnés fuera del repo): abrir con `H`, arrastrar Vault, minimizar con la luz amarilla, restaurar con el dock, ampliar con la luz verde, cerrar Stage con la luz roja, `Ctrl+M`, `D`, `Ctrl+Mayús+W`, menú del dock, selector con `Tab`+`↵`. Los resultados coinciden con el estado esperado.
+- Dos fallos encontrados por ese recorrido y corregidos: (1) la ventana nunca aparecía (su visibilidad dependía de la de su hijo), (2) un `DragHandler` sobre la barra de título se tragaba los clics de las luces.
+- Barrido de todas las superficies (14) sin mensajes de QML.
+- **No se probó**: rendimiento con varias ventanas abiertas; Quickshell; otro equipo; Linux. La captura repetida de la ventana con la esfera (`grabWindow`) pierde el contexto WebGL: las imágenes con esfera se toman una por arranque.

@@ -900,7 +900,7 @@ fn entity_entries(
             .cmp(&tree.raw[*b].depth)
             .then_with(|| tree.raw[*a].id.cmp(&tree.raw[*b].id))
     });
-    order.truncate(LUMEN_MODULE_LIMIT.max(limit));
+    order.truncate(LUMEN_MODULE_LIMIT.min(limit));
     let kept: BTreeSet<usize> = order.iter().copied().collect();
     order
         .into_iter()
@@ -1153,8 +1153,8 @@ fn project(value: &[f32; DIMS]) -> [f32; 3] {
     out
 }
 
-fn golden(index: usize, count: usize) -> [f32; 3] {
-    let z = 1.0 - 2.0 * (index as f32 + 0.5) / count.max(1) as f32;
+fn golden(index: usize, fraction: f32) -> [f32; 3] {
+    let z = 1.0 - 2.0 * fraction;
     let angle = index as f32 * GOLDEN_ANGLE;
     let ring = (1.0 - z * z).max(0.0).sqrt();
     normalize([angle.cos() * ring, angle.sin() * ring, z])
@@ -1245,6 +1245,15 @@ fn layout(entries: &[Entry], shape: &LumenShape, total: usize) -> Placed {
         top
     };
     let region: HashMap<usize, usize> = top.iter().enumerate().map(|(r, &i)| (i, r)).collect();
+    // Give each branch its share of the sphere rather than an equal polar slot.
+    let total_mass = top.iter().map(|&i| subtree[i]).sum::<usize>().max(1) as f32;
+    let mut region_fraction = vec![0.5; count];
+    let mut allocated_mass = 0.0;
+    for &i in &top {
+        let mass = subtree[i] as f32;
+        region_fraction[i] = (allocated_mass + mass * 0.5) / total_mass;
+        allocated_mass += mass;
+    }
     let mut direction = vec![[0.0_f32, 0.0, 1.0]; count];
     let mut placed = vec![false; count];
     let mut queue: VecDeque<usize> = roots.iter().copied().collect();
@@ -1262,8 +1271,12 @@ fn layout(entries: &[Entry], shape: &LumenShape, total: usize) -> Placed {
             placed[i] = true;
             let entry = &entries[i];
             let mut centered = signature[i];
+            let centroid_weight = match shape.layout {
+                LumenLayout::Legacy => 0.62,
+                LumenLayout::Regions => 1.0,
+            };
             for d in 0..DIMS {
-                centered[d] -= centroid[d] * 0.62;
+                centered[d] -= centroid[d] * centroid_weight;
             }
             let mut semantic = project(&centered);
             if let Some(model) = entry.direction {
@@ -1291,14 +1304,17 @@ fn layout(entries: &[Entry], shape: &LumenShape, total: usize) -> Placed {
                     },
                 ),
                 LumenLayout::Regions if parent_is_root => blend(
-                    golden(region.get(&i).copied().unwrap_or(k), top.len()),
+                    golden(region.get(&i).copied().unwrap_or(k), region_fraction[i]),
                     data,
                     shape.category_pull * 0.26,
                 ),
                 LumenLayout::Regions => {
                     let mass = subtree[parent] as f32;
                     let width = (mass.ln_1p() / (count.max(2) as f32).ln_1p()).min(1.0);
-                    let cohesion = (shape.hierarchy_pull * (1.0 - width * 0.45)).max(0.12);
+                    let mass_share = (mass / count.saturating_sub(1).max(1) as f32).min(1.0);
+                    let cohesion =
+                        (shape.hierarchy_pull * (1.0 - width * 0.45) * (1.0 - mass_share.sqrt()))
+                            .max(0.12);
                     blend(data, parent_direction, cohesion)
                 }
             };
@@ -1502,6 +1518,127 @@ mod tests {
         scene.nodes.iter().map(|n| n.id.as_str()).collect()
     }
 
+    fn layout_entry(id: &str, parent: Option<&str>, depth: u32, branch: bool) -> Entry {
+        Entry {
+            id: id.into(),
+            name: "same".into(),
+            parent: parent.map(Into::into),
+            kind: if parent.is_none() {
+                LumenKind::Root
+            } else {
+                LumenKind::Entity
+            },
+            branch,
+            category: LumenCategory::Processes,
+            role: String::new(),
+            depth,
+            size: 0.5,
+            member_count: 1,
+            direction: None,
+            source: None,
+            members: Vec::new(),
+        }
+    }
+
+    fn assert_direction(actual: [f32; 3], expected: [f32; 3]) {
+        assert!(
+            length(sub(normalize(actual), expected)) < 1e-5,
+            "{actual:?} vs {expected:?}"
+        );
+    }
+
+    #[test]
+    fn regions_allocate_top_level_latitudes_by_subtree_mass() {
+        let mut entries = vec![
+            layout_entry("root", None, 0, true),
+            layout_entry("big", Some("root"), 1, true),
+            layout_entry("medium", Some("root"), 1, true),
+            layout_entry("small", Some("root"), 1, false),
+        ];
+        for i in 0..6 {
+            entries.push(layout_entry(&format!("big-{i}"), Some("big"), 2, false));
+        }
+        for i in 0..2 {
+            entries.push(layout_entry(
+                &format!("medium-{i}"),
+                Some("medium"),
+                2,
+                false,
+            ));
+        }
+        let shape = LumenShape {
+            category_pull: 0.0,
+            radial_layers: 0.85,
+            ..LumenShape::default()
+        };
+        let positions = layout(&entries, &shape, 1000);
+        // Eleven descendants occupy shares 7/11, 3/11 and 1/11, at their mass midpoints.
+        for (index, expected_z) in [
+            (1, 1.0 - 7.0 / 11.0),
+            (2, 1.0 - 17.0 / 11.0),
+            (3, 1.0 - 21.0 / 11.0),
+        ] {
+            assert!((normalize(positions.at[index])[2] - expected_z).abs() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn regions_remove_shared_signature_and_loosen_a_dominant_branch() {
+        let entries = vec![
+            layout_entry("root", None, 0, true),
+            layout_entry("branch", Some("root"), 1, true),
+            layout_entry("leaf", Some("branch"), 2, false),
+        ];
+        let seed = fnv("leaf");
+        let jitter = normalize([
+            (seed & 255) as f32 / 127.5 - 1.0,
+            ((seed >> 8) & 255) as f32 / 127.5 - 1.0,
+            ((seed >> 16) & 255) as f32 / 127.5 - 1.0,
+        ]);
+        // With just one leaf its entire signature is the centroid. A branch owning all
+        // descendants gets only the source's 0.12 minimum hierarchy pull, at any setting.
+        for hierarchy_pull in [0.0, 0.59, 1.0] {
+            let shape = LumenShape {
+                hierarchy_pull,
+                ..LumenShape::default()
+            };
+            let positions = layout(&entries, &shape, 1000);
+            assert_direction(
+                positions.at[2],
+                blend(jitter, normalize(positions.at[1]), 0.12),
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_retains_partial_centroid_and_hierarchy_composition() {
+        let entries = vec![
+            layout_entry("root", None, 0, true),
+            layout_entry("branch", Some("root"), 1, true),
+            layout_entry("leaf", Some("branch"), 2, false),
+        ];
+        let shape = LumenShape {
+            layout: LumenLayout::Legacy,
+            ..LumenShape::default()
+        };
+        let positions = layout(&entries, &shape, 1000);
+        let seed = fnv("leaf");
+        let jitter = normalize([
+            (seed & 255) as f32 / 127.5 - 1.0,
+            ((seed >> 8) & 255) as f32 / 127.5 - 1.0,
+            ((seed >> 16) & 255) as f32 / 127.5 - 1.0,
+        ]);
+        let retained = token(&entries[2], 2).map(|v| v * 0.38);
+        let data = normalize(add(
+            scale3(project(&retained), 0.2 + shape.category_pull * 0.55),
+            scale3(jitter, 0.42 + (1.0 - shape.category_pull) * 0.9),
+        ));
+        assert_direction(
+            positions.at[2],
+            blend(data, normalize(positions.at[1]), shape.hierarchy_pull),
+        );
+    }
+
     #[test]
     fn architecture_folds_modules_and_groups_leaves_by_category() {
         let scene = compose(&frame(), &LumenView::default());
@@ -1690,6 +1827,17 @@ mod tests {
         assert_eq!(
             LumenView::from_query("&&=&lens=nonsense"),
             LumenView::default()
+        );
+    }
+
+    #[test]
+    fn entity_lens_respects_requested_node_budget() {
+        let view = LumenView::from_query("lens=entities&limit=12");
+        let scene = compose(&frame(), &view);
+        assert!(
+            scene.nodes.len() <= 12,
+            "{} nodes exceed requested budget",
+            scene.nodes.len()
         );
     }
 }
