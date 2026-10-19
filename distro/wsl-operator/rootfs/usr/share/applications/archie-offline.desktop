@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=ArchieOS
+Comment=Bonsai local y escritorio Archie
+Exec=archie-offline --background
+Icon=applications-system
+Terminal=false
+Categories=System;

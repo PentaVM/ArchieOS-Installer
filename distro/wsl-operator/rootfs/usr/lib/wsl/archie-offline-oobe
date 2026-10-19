@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# No pre-created node, database, passwords, API keys or user data enter the image.
+install -d -o archie -g archie -m 0700 /home/archie/.local/state
+# Generate a machine-local package-manager key, never clone the builder's key.
+pacman-key --init
+exec runuser -u archie -- /usr/bin/archie-offline --background

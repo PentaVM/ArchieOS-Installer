@@ -141,6 +141,19 @@ fn run(mut args: Vec<String>, offset: Option<time::UtcOffset>) -> Result<ExitCod
     }
 }
 
+// CPU-only local models can need more time for cold prompt prefill. The caller
+// chooses a bounded wait; the default transport and response-size limit stay intact.
+fn request_timeout(value: Option<&str>) -> Result<Duration, String> {
+    let seconds = value
+        .unwrap_or("90")
+        .parse::<u64>()
+        .map_err(|_| "--timeout-seconds is a whole number from 1 to 900".to_string())?;
+    if !(1..=900).contains(&seconds) {
+        return Err("--timeout-seconds is a whole number from 1 to 900".into());
+    }
+    Ok(Duration::from_secs(seconds))
+}
+
 fn asking(
     mut args: Vec<String>,
     offset: Option<time::UtcOffset>,
@@ -152,6 +165,7 @@ fn asking(
     // launcher that starts a conversation need not know.
     let set = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
     let local = take(&mut args, "--endpoint").or_else(|| set("ARCHIE_VOICE_ENDPOINT"));
+    let timeout = request_timeout(take(&mut args, "--timeout-seconds").as_deref())?;
     let model = take(&mut args, "--model")
         .or_else(|| set("ARCHIE_VOICE_MODEL"))
         .unwrap_or_else(|| "nvidia/Nemotron-3_5-Lightning".into());
@@ -194,6 +208,8 @@ fn asking(
         None => ProviderEndpoint::nebius("https://api.tokenfactory.nebius.com/v1"),
         Some(url) => ProviderEndpoint::nvidia_nim(url, Locality::Local),
     }
+    .map_err(|error| error.to_string())?
+    .with_limits(timeout, 8 * 1024 * 1024)
     .map_err(|error| error.to_string())?;
     let client = InferenceClient::new(endpoint).map_err(|error| error.to_string())?;
     let source = NebiusSource::new(
@@ -236,6 +252,28 @@ fn asking(
         cognitive,
         clock: clock(offset),
     })
+}
+
+#[cfg(test)]
+mod timeout_tests {
+    use super::*;
+
+    #[test]
+    fn voice_timeout_keeps_default_and_accepts_bounded_cpu_wait() {
+        assert_eq!(request_timeout(None).unwrap(), Duration::from_secs(90));
+        assert_eq!(
+            request_timeout(Some("600")).unwrap(),
+            Duration::from_secs(600)
+        );
+        assert_eq!(request_timeout(Some("1")).unwrap(), Duration::from_secs(1));
+        assert_eq!(
+            request_timeout(Some("900")).unwrap(),
+            Duration::from_secs(900)
+        );
+        for bad in ["0", "901", "-1", "inf", "", "18446744073709551616"] {
+            assert!(request_timeout(Some(bad)).is_err(), "accepted {bad:?}");
+        }
+    }
 }
 
 fn ask(mut asking: Asking) -> Result<ExitCode, String> {
