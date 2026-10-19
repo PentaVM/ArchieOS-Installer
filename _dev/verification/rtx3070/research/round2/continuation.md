@@ -236,3 +236,11 @@ Owner follow-up19-oct: idle is empty queue, not absent data. See
 485–721fulltokens at seed17, all fit4096 but only10variants fit512. All retain
 pending-human; no queue edits or GPU submitted. Review/admit existing tranche,
 check gold-before-choice and compare matched exposure before adding volume.
+
+Owner-proposed HF sources19-oct: see `../round7/source-review-20261019.md`
+and CPU source receipt. Full psychology JSON9846rows:6579unique normalized
+queries,3267repeat occurrences, one professional-role instruction, no declared
+license/card or causal-family targets. Podcast163speaker/text segments from one
+episode, no declared license in card. No raw corpus admission or GPU queue edits;
+preserve episode/family groups and resolve provenance before adaptation. PR41
+design was merged before this source assessment; Sentry/Wanda stack not merged.
