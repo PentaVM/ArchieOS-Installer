@@ -228,3 +228,11 @@ receipt. FANToM base final12832items disponible; G3think512 en realidadbudget204
 Pack2-v2 belief39.66%, no98.2%; diferencias de artefactos/transcript no resueltas.
 No se reinició/tocó ejecución ni otros PR. Addendum de Claude y PR38 enlazan
 informe. Próximo tick revisar adopción/nueva evidencia, no repetir esta auditoría.
+
+Owner follow-up19-oct: idle is empty queue, not absent data. See
+`../round6/data-handoff-20261019.md` and native CPU fit receipt. G4 completed
+204 retained self traces and307updates on2524train examples, max_minutes;
+32-item probe choices unchanged. Existing20families/80variants now measured
+485–721fulltokens at seed17, all fit4096 but only10variants fit512. All retain
+pending-human; no queue edits or GPU submitted. Review/admit existing tranche,
+check gold-before-choice and compare matched exposure before adding volume.
