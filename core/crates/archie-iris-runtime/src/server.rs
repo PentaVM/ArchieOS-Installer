@@ -12,7 +12,7 @@ use crate::preprocess::decode;
 use crate::rem::{recorded_samples, Recording};
 use crate::Error;
 use axum::body::Bytes;
-use axum::extract::{Query, State};
+use axum::extract::{DefaultBodyLimit, Query, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
@@ -375,4 +375,40 @@ pub fn router(service: Service) -> Router {
             ),
         )
         .with_state(state)
+        .layer(frame_body_limit())
+}
+
+fn frame_body_limit() -> DefaultBodyLimit {
+    DefaultBodyLimit::max(MAX_FRAME_BYTES)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn frame_extraction_accepts_eight_mib_but_rejects_larger_bodies() {
+        let app = Router::new()
+            .route(
+                "/frame",
+                post(|body: Bytes| async move { body.len().to_string() }),
+            )
+            .layer(frame_body_limit());
+        for (size, status) in [
+            (3 * 1024 * 1024, StatusCode::OK),
+            (MAX_FRAME_BYTES, StatusCode::OK),
+            (MAX_FRAME_BYTES + 1, StatusCode::PAYLOAD_TOO_LARGE),
+        ] {
+            let request = Request::builder()
+                .uri("/frame")
+                .method("POST")
+                .body(Body::from(vec![0u8; size]))
+                .unwrap();
+            let response = app.clone().oneshot(request).await.unwrap();
+            assert_eq!(response.status(), status, "body size {size}");
+        }
+    }
 }

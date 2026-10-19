@@ -135,8 +135,12 @@ for mode in all 'phrases&phrases=person,cup,phone,screen'; do
 done
 ```
 
-Frames per second in the live voice are about `1000 / focused latency`, with one open
-look every `--iris-sweep-ms`.
+The live voice processes one inference request at a time and keeps only the newest
+waiting frame. `--iris-sweep-ms` starts after an open look finishes, leaving room
+for focused looks even when CPU inference takes longer than that interval.
+`--iris-timeout-seconds` defaults to60 and accepts1–900; connection establishment
+is separately bounded to at most5seconds. This is a request limit, not a measured
+throughput or latency guarantee. Both frame endpoints accept at most8MiB.
 
 ## Not ported yet
 

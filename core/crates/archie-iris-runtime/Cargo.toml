@@ -26,3 +26,6 @@ axum = { workspace = true, features = ["query", "json"] }
 jpeg-decoder.workspace = true
 png.workspace = true
 zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

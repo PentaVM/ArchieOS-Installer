@@ -245,8 +245,8 @@ pub fn spool_window(
     if !valid_identifier(sample_id) {
         return Err(Error::Refused("experience_identifier_invalid".into()));
     }
-    let h = now_canvas.height as usize;
-    let w = now_canvas.width as usize;
+    let h = now_canvas.height;
+    let w = now_canvas.width;
     let recent_ages: Vec<f64> = recent_frames.iter().map(|(_, t)| round4(now - t)).collect();
     let compacted_ages: Vec<f64> = compacted_frames
         .iter()

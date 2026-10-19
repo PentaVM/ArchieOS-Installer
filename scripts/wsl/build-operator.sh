@@ -183,4 +183,4 @@ if (( $(stat -c %s "$out_dir/ArchieOS-Operator.wsl") > 1900 * 1024 * 1024 )); th
   rm "$out_dir/ArchieOS-Operator.wsl"
 fi
 cp "$repo_root/scripts/wsl/install-operator.ps1" "$out_dir/install-archie-operator.ps1"
-du -sh "$out_dir/ArchieOS-Operator.wsl"
+du -sh "$out_dir"/ArchieOS-Operator.wsl*

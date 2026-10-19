@@ -626,7 +626,7 @@ async fn see(senses: Arc<Senses>, eyes: IrisEyes, mut sweep: Sweep) {
         let look = sweep.next(asked);
         match eyes.look(frame, &look).await {
             Ok(scene) => {
-                sweep.observe(&look, &scene, asked);
+                sweep.observe(&look, &scene, Instant::now());
                 let clip_scenes = senses.cache_scene(&scene);
                 let (seen, recalled, held_events) = {
                     let mut memory = senses.memory.lock().expect("memory lock");

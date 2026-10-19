@@ -29,7 +29,7 @@
 //! archie-voice live --grade public --asr-model … --voice-engine magpie --tts-model …
 //!              --codec-model … --tts-tokenizer … [--listen-language auto]
 //!              [--tts-language es-US] [--tts-english en-US] [--port 8770]
-//!              [--iris http://127.0.0.1:8765] [--iris-sweep-ms 2000] [--curiosity 40] [--always] [--headphones]
+//!              [--iris http://127.0.0.1:8765] [--iris-sweep-ms 2000] [--iris-timeout-seconds 60] [--curiosity 40] [--always] [--headphones]
 //! ```
 //!
 //! Built with `--features live`. Finding out what an object is uses a vision model on
@@ -641,6 +641,7 @@ struct LiveFlags {
     iris: String,
     /// Milliseconds between IRIS's open looks; frames in between follow what it found.
     iris_sweep_ms: u64,
+    iris_timeout_seconds: u64,
     tts_english: String,
     curiosity: u32,
     /// An offline ASR model (Parakeet TDT) that hears each finished utterance again, whole.
@@ -663,6 +664,16 @@ fn live_flags(args: &mut Vec<String>) -> Result<LiveFlags, String> {
             .transpose()?
             .unwrap_or(8770),
         iris: take(args, "--iris").unwrap_or_else(|| "http://127.0.0.1:8765".into()),
+        iris_timeout_seconds: take(args, "--iris-timeout-seconds")
+            .map(|value| {
+                value
+                    .parse::<u64>()
+                    .ok()
+                    .filter(|seconds| (1..=900).contains(seconds))
+                    .ok_or("--iris-timeout-seconds must be from 1 to 900")
+            })
+            .transpose()?
+            .unwrap_or(60),
         iris_sweep_ms: take(args, "--iris-sweep-ms")
             .map(|n| {
                 n.parse::<u64>()
@@ -858,7 +869,11 @@ fn live(asking: Asking, speech: SpeechFlags, flags: LiveFlags) -> Result<ExitCod
         }
     );
     let senses = live::Senses::new(audio_in, identifier, researcher, rate, flags.curiosity);
-    let eyes = eyes::IrisEyes::new(&flags.iris, 0.35)?;
+    let eyes = eyes::IrisEyes::with_timeout(
+        &flags.iris,
+        0.35,
+        std::time::Duration::from_secs(flags.iris_timeout_seconds),
+    )?;
     let sweep = eyes::Sweep::new(std::time::Duration::from_millis(flags.iris_sweep_ms));
     {
         let senses = senses.clone();
@@ -1321,4 +1336,29 @@ fn descriptor(
         required_accelerator_bytes: None,
         labels,
     })
+}
+
+#[cfg(test)]
+mod iris_timeout_tests {
+    use super::*;
+
+    #[test]
+    fn iris_cpu_timeout_is_bounded_and_configurable() {
+        assert_eq!(live_flags(&mut vec![]).unwrap().iris_timeout_seconds, 60);
+        for seconds in ["1", "60", "900"] {
+            let mut args = vec!["--iris-timeout-seconds".into(), seconds.into()];
+            assert_eq!(
+                live_flags(&mut args)
+                    .unwrap()
+                    .iris_timeout_seconds
+                    .to_string(),
+                seconds
+            );
+            assert!(args.is_empty());
+        }
+        for invalid in ["0", "901", "-1", "infinite", "18446744073709551616"] {
+            let mut args = vec!["--iris-timeout-seconds".into(), invalid.into()];
+            assert!(live_flags(&mut args).is_err());
+        }
+    }
 }

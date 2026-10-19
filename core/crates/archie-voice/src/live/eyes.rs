@@ -74,9 +74,9 @@ impl Look {
 }
 
 /// When to look openly and when to follow. An open look every `every`; in between, the
-/// frames are read for what that look found. Something that enters the frame between two
-/// open looks is noticed at the next one, at most `every` later. `every` zero is an open
-/// look on every frame, as before.
+/// frames are read for what that look found. The interval starts when an open look
+/// finishes; inference time also contributes to detection delay. `every` zero is
+/// an open look on every frame, as before.
 #[derive(Debug, Clone)]
 pub struct Sweep {
     every: Duration,
@@ -112,7 +112,7 @@ impl Sweep {
         if *look != Look::Open {
             return;
         }
-        self.last_open = Some(now);
+        self.last_open = Some(scene.at.map_or(now, |finished| finished.max(now)));
         let mut seen: Vec<&Seen> = scene.seen.iter().collect();
         seen.sort_by(|a, b| b.score.total_cmp(&a.score));
         self.tracked.clear();
@@ -138,8 +138,17 @@ pub struct IrisEyes {
 impl IrisEyes {
     /// `url` is the service root, e.g. `http://127.0.0.1:8765`.
     pub fn new(url: &str, threshold: f32) -> Result<Self, String> {
+        Self::with_timeout(url, threshold, Duration::from_secs(60))
+    }
+
+    /// Bounded request time, configurable for CPU inference without infinite waits.
+    pub fn with_timeout(url: &str, threshold: f32, timeout: Duration) -> Result<Self, String> {
+        if !(Duration::from_secs(1)..=Duration::from_secs(900)).contains(&timeout) {
+            return Err("IRIS timeout must be from 1 to 900 seconds".into());
+        }
         let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(5))
+            .timeout(timeout)
+            .connect_timeout(Duration::from_secs(5).min(timeout))
             .build()
             .map_err(|e| e.to_string())?;
         Ok(Self {
@@ -339,6 +348,28 @@ pub fn faces(scene: &Scene) -> Vec<[f32; 4]> {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn cpu_look_can_take_longer_than_five_seconds() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 4096];
+            socket.read(&mut request).await.unwrap();
+            tokio::time::sleep(Duration::from_secs(6)).await;
+            let body = r#"{"detections":[],"image_size":[1,1],"step":1}"#;
+            let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+            let _ = socket.write_all(response.as_bytes()).await;
+        });
+        let result = IrisEyes::new(&url, 0.35)
+            .unwrap()
+            .look(Arc::new(vec![0]), &Look::Open)
+            .await;
+        server.await.unwrap();
+        assert!(result.is_ok(), "CPU inference was cut off: {result:?}");
+    }
+
     fn scene(items: &[(&str, f32, [f32; 4])]) -> Scene {
         Scene {
             seen: items
@@ -395,11 +426,12 @@ mod tests {
         let start = Instant::now();
         let mut sweep = Sweep::new(Duration::from_millis(2000));
         assert_eq!(sweep.next(start), Look::Open);
-        let found = scene(&[
+        let mut found = scene(&[
             ("cup", 0.5, [0.0, 0.0, 10.0, 10.0]),
             ("laptop", 0.9, [0.0, 0.0, 10.0, 10.0]),
             ("cup", 0.8, [20.0, 20.0, 30.0, 30.0]),
         ]);
+        found.at = Some(start);
         sweep.observe(&Look::Open, &found, start);
         let later = start + Duration::from_millis(500);
         assert_eq!(
@@ -417,6 +449,18 @@ mod tests {
         let mut always = Sweep::new(Duration::ZERO);
         always.observe(&Look::Open, &found, start);
         assert_eq!(always.next(later), Look::Open);
+    }
+
+    #[test]
+    fn slow_open_inference_leaves_time_for_a_focused_look() {
+        let started = Instant::now();
+        let finished = started + Duration::from_secs(31);
+        let mut found = scene(&[("cup", 0.9, [0.0, 0.0, 10.0, 10.0])]);
+        found.at = Some(finished);
+        let mut sweep = Sweep::new(Duration::from_secs(2));
+        sweep.observe(&Look::Open, &found, started);
+        assert!(matches!(sweep.next(finished), Look::Focused(_)));
+        assert_eq!(sweep.next(finished + Duration::from_secs(2)), Look::Open);
     }
 
     #[test]
