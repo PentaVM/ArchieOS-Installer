@@ -254,28 +254,6 @@ fn asking(
     })
 }
 
-#[cfg(test)]
-mod timeout_tests {
-    use super::*;
-
-    #[test]
-    fn voice_timeout_keeps_default_and_accepts_bounded_cpu_wait() {
-        assert_eq!(request_timeout(None).unwrap(), Duration::from_secs(90));
-        assert_eq!(
-            request_timeout(Some("600")).unwrap(),
-            Duration::from_secs(600)
-        );
-        assert_eq!(request_timeout(Some("1")).unwrap(), Duration::from_secs(1));
-        assert_eq!(
-            request_timeout(Some("900")).unwrap(),
-            Duration::from_secs(900)
-        );
-        for bad in ["0", "901", "-1", "inf", "", "18446744073709551616"] {
-            assert!(request_timeout(Some(bad)).is_err(), "accepted {bad:?}");
-        }
-    }
-}
-
 fn ask(mut asking: Asking) -> Result<ExitCode, String> {
     asking.cognitive.set_context(asking.clock.clone());
     let started = Instant::now();
@@ -1349,4 +1327,26 @@ fn descriptor(
         required_accelerator_bytes: None,
         labels,
     })
+}
+
+#[cfg(test)]
+mod timeout_tests {
+    use super::*;
+
+    #[test]
+    fn voice_timeout_keeps_default_and_accepts_bounded_cpu_wait() {
+        assert_eq!(request_timeout(None).unwrap(), Duration::from_secs(90));
+        assert_eq!(
+            request_timeout(Some("600")).unwrap(),
+            Duration::from_secs(600)
+        );
+        assert_eq!(request_timeout(Some("1")).unwrap(), Duration::from_secs(1));
+        assert_eq!(
+            request_timeout(Some("900")).unwrap(),
+            Duration::from_secs(900)
+        );
+        for bad in ["0", "901", "-1", "inf", "", "18446744073709551616"] {
+            assert!(request_timeout(Some(bad)).is_err(), "accepted {bad:?}");
+        }
+    }
 }
