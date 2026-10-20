@@ -401,12 +401,15 @@ impl RouterAdmin {
     }
     /// Returns the existing adapter, for the Core Intent/Policy/lease pipeline.
     /// Enrollment trust becomes strict here; sudo-read never grants sudo writes.
+    /// `protected_macs` are the owner's devices a block may never touch (this host,
+    /// the router itself): the same list the Core's sentry config gives the adapter.
     pub async fn core_adapter(
         &self,
         edge: &str,
         adapter: &str,
         resource: &str,
         lan_client: Ipv4Addr,
+        protected_macs: Vec<String>,
     ) -> Result<RouterAdapter, AdapterError> {
         let mut pinned = self.config.clone();
         pinned.trust_first_use = false;
@@ -425,6 +428,7 @@ impl RouterAdmin {
                 control_url: None,
                 lan_client,
                 ssh: Some(pinned.ssh),
+                protected_macs,
             },
             capabilities,
             runner,

@@ -317,9 +317,21 @@ async fn enrollment_trust_is_explicit_and_core_handoff_uses_strict_trust() {
             "router",
             "gateway",
             "192.168.1.107".parse().unwrap(),
+            vec!["de:ad:be:ef:00:01".into()],
         )
         .await
         .unwrap();
+    // A malformed protected device list is refused rather than ignored.
+    assert!(admin
+        .core_adapter(
+            "edge",
+            "router",
+            "gateway",
+            "192.168.1.107".parse().unwrap(),
+            vec!["not-a-mac".into()],
+        )
+        .await
+        .is_err());
     let calls = runner.calls.lock().unwrap();
     let first_policy = |a: &Vec<String>| {
         a.iter()

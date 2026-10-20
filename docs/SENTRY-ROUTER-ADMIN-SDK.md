@@ -72,8 +72,9 @@ let session = RouterAdmin::connect(cfg, Arc::new(ProcessRunner::default())).awai
 let access = session.report();
 let interfaces = session.read(ReadKind::Interfaces).await?;
 // Optional adapter handoff to Core's existing Intent/Policy/lease pipeline:
+// protected_macs: devices a DeviceBlock may never touch (this host, the router).
 let adapter = session.core_adapter("local", "router", "gateway",
-    "192.168.1.107".parse()?).await?;
+    "192.168.1.107".parse()?, vec!["aa:bb:cc:dd:ee:01".into()]).await?;
 ```
 
 The library does not persist passwords or read private-key contents into reports.

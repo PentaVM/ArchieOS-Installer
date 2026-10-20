@@ -74,6 +74,7 @@ async fn openwrt_uses_existing_typed_wifi_command_and_readback() {
             control_url: None,
             lan_client: LAN_CLIENT,
             ssh: Some(ssh_config()),
+            protected_macs: vec![],
         },
         capabilities,
         runner.clone(),
