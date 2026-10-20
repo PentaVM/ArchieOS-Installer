@@ -11,6 +11,7 @@ pub mod decision;
 pub mod graph;
 pub mod runtime;
 pub mod server;
+pub mod social;
 pub mod store;
 pub mod types;
 

@@ -7,6 +7,8 @@ fn failure_text_is_bounded_before_it_can_enter_the_voice_floor() {
         model: None,
         state: "unavailable".into(),
         reason: Some("é".repeat(10_000)),
+        quick: None,
+        refined: None,
     };
     assert!(response.speech_text().chars().count() <= 1200);
 }

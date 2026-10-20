@@ -43,6 +43,7 @@ fn config(dir: &Path) -> WandaConfig {
         quality_tier: 50,
         deep_quality_tier: 80,
         retention_hours: 168,
+        lncm: None,
     }
 }
 fn event(id: &str) -> WandaEvent {

@@ -23,6 +23,7 @@ async fn authenticated_owner_view_and_voice_share_the_same_loopback_service() {
         quality_tier: 50,
         deep_quality_tier: 80,
         retention_hours: 168,
+        lncm: None,
     })
     .unwrap();
     let token = std::fs::read_to_string(owner).unwrap();

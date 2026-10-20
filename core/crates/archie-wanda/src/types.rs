@@ -136,15 +136,51 @@ pub struct Recommendation {
     pub review_condition: String,
 }
 
+/// State 2 of the local expert: the long answer, refined from the draft and the social state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Refined {
+    pub plan: Option<String>,
+    pub answer: String,
+    /// Capitalised words the expert wrote that are no one known and appear nowhere in the
+    /// context. When any is present the answer is not spoken.
+    pub unverified_names: Vec<String>,
+    pub seconds: f32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryResponse {
     pub recommendations: Vec<Recommendation>,
     pub model: Option<String>,
     pub state: String,
     pub reason: Option<String>,
+    /// State 1 of the local expert: an immediate yes/no (or "cannot know") with its confidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quick: Option<archie_wanda_lncm::QuickAnswer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refined: Option<Refined>,
 }
+/// Below this, state 1 is not said aloud: an unsure "yes" is worse than none.
+pub const QUICK_CONFIDENCE: f32 = 0.6;
 impl QueryResponse {
     pub fn speech_text(&self) -> String {
+        let mut spoken = Vec::new();
+        if let Some(quick) = self
+            .quick
+            .as_ref()
+            .filter(|q| q.confidence >= QUICK_CONFIDENCE)
+        {
+            spoken.push(quick.text.clone());
+        }
+        if let Some(refined) = self
+            .refined
+            .as_ref()
+            .filter(|r| r.unverified_names.is_empty() && !r.answer.trim().is_empty())
+        {
+            spoken.push(refined.answer.clone());
+        }
+        if !spoken.is_empty() {
+            return spoken.join(" ").chars().take(1200).collect();
+        }
         let text = self
             .recommendations
             .iter()

@@ -18,6 +18,7 @@ pub struct WandaStore {
     config: WandaConfig,
     operator_digest: [u8; 32],
     sources: Vec<(SourceBinding, [u8; 32])>,
+    lncm: Option<std::sync::Arc<crate::social::LncmRuntime>>,
 }
 impl std::fmt::Debug for WandaStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -81,11 +82,24 @@ impl WandaStore {
                 "owner and source tokens must differ".into(),
             ));
         }
+        // A configured expert must open, and every file of it must match its manifest;
+        // otherwise Wanda refuses to start rather than serve weights nobody measured.
+        let lncm = match &config.lncm {
+            Some(binding) => Some(std::sync::Arc::new(crate::social::LncmRuntime::load(
+                binding,
+            )?)),
+            None => None,
+        };
         Ok(Self {
             config,
             operator_digest,
             sources,
+            lncm,
         })
+    }
+    /// The local expert, when one is configured.
+    pub fn lncm(&self) -> Option<&crate::social::LncmRuntime> {
+        self.lncm.as_deref()
     }
     /// Runs Vault and filesystem work off the async runtime. The Vault lock waits up to
     /// seconds for another process, and persisting fsyncs; neither may hold a runtime

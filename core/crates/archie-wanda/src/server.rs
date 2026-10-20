@@ -156,6 +156,19 @@ impl Service {
             self.settle(&domain, generation, result.as_ref().ok(), now)
                 .await;
         }
+        // The local expert reads what arrived since the last tick into each domain's state.
+        if self.store.lncm().is_some() {
+            for domain in self.store.domains() {
+                let Ok(_permit) = self.inference.try_acquire() else {
+                    return;
+                };
+                let now = now_ms();
+                let _ = self
+                    .store
+                    .blocking(move |store| crate::social::read_new(store, &domain, now))
+                    .await;
+            }
+        }
     }
 }
 pub fn router(store: WandaStore) -> Router {
@@ -167,6 +180,8 @@ pub fn router_with_service(service: Arc<Service>) -> Router {
         .route("/v1/query", post(query))
         .route("/v1/view", get(view))
         .route("/v1/domains", get(domains))
+        .route("/v1/people", get(people))
+        .route("/v1/people/edit", post(edit_person))
         .route("/", get(index))
         .route("/index.html", get(index))
         .route("/styles.css", get(css))
@@ -364,6 +379,57 @@ async fn view(
         sources,
         pending_events,
     }))
+}
+async fn people(
+    State(service): State<Arc<Service>>,
+    headers: HeaderMap,
+    Query(request): Query<ViewRequest>,
+) -> Result<Json<serde_json::Value>, WandaError> {
+    owner(&service, &headers)?;
+    let domain = request.domain;
+    let now = now_ms();
+    let people = service
+        .store
+        .blocking(move |store| crate::social::people(store, &domain, now))
+        .await?;
+    Ok(Json(serde_json::json!({"people": people})))
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EditRequest {
+    domain: ContextDomain,
+    person: String,
+    #[serde(default)]
+    key: Option<String>,
+    action: crate::social::EditAction,
+}
+async fn edit_person(
+    State(service): State<Arc<Service>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<serde_json::Value>, WandaError> {
+    owner(&service, &headers)?;
+    let request: EditRequest = json(&headers, &body)?;
+    // The reader holds this permit while it updates a state; an edit waits its turn.
+    let _permit = service
+        .inference
+        .try_acquire()
+        .map_err(|_| WandaError::Busy)?;
+    let now = now_ms();
+    let changed = service
+        .store
+        .blocking(move |store| {
+            crate::social::edit(
+                store,
+                &request.domain,
+                &request.person,
+                request.key.as_deref(),
+                request.action,
+                now,
+            )
+        })
+        .await?;
+    Ok(Json(serde_json::json!({"changed": changed})))
 }
 async fn domains(
     State(service): State<Arc<Service>>,

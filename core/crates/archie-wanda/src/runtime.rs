@@ -30,6 +30,8 @@ pub fn unavailable(state: &str, reason: &str) -> QueryResponse {
         model: None,
         state: state.into(),
         reason: Some(reason.into()),
+        quick: None,
+        refined: None,
     }
 }
 
@@ -212,14 +214,7 @@ fn prepare(
     }))
 }
 
-pub async fn query(
-    store: &WandaStore,
-    domain: &ContextDomain,
-    question: &str,
-    deep: bool,
-    now_ms: i64,
-) -> Result<QueryResponse, WandaError> {
-    store.require_domain(domain)?;
+fn validate_question(question: &str) -> Result<(), WandaError> {
     if question.trim().is_empty()
         || question.chars().count() > 2000
         || question
@@ -228,6 +223,69 @@ pub async fn query(
     {
         return Err(WandaError::InvalidEvent("invalid_question"));
     }
+    Ok(())
+}
+
+/// Answers the owner. A question that shows signs of a crisis is not interpreted at all; any
+/// other is answered by the reasoning model through Cerebra, then, when a local expert is
+/// configured and the question is social, given state 1 and state 2 from the domain's state.
+pub async fn query(
+    store: &WandaStore,
+    domain: &ContextDomain,
+    question: &str,
+    deep: bool,
+    now_ms: i64,
+) -> Result<QueryResponse, WandaError> {
+    store.require_domain(domain)?;
+    validate_question(question)?;
+    if archie_wanda_lncm::safety::crisis(question).is_some() {
+        let lang = store.lncm().map_or(archie_wanda_lncm::Lang::Es, |l| l.lang);
+        return Ok(unavailable(
+            "crisis",
+            archie_wanda_lncm::safety::crisis_message(lang),
+        ));
+    }
+    let response = query_model(store, domain, question, deep, now_ms).await?;
+    enrich(store, domain, question, response, now_ms).await
+}
+
+/// Adds the local expert's states 1 and 2. The expert's failure never fails the query.
+async fn enrich(
+    store: &WandaStore,
+    domain: &ContextDomain,
+    question: &str,
+    mut response: QueryResponse,
+    now_ms: i64,
+) -> Result<QueryResponse, WandaError> {
+    if store.lncm().is_none() {
+        return Ok(response);
+    }
+    let draft = response
+        .recommendations
+        .first()
+        .map(|r| format!("{} {}", r.explanation, r.suggestion));
+    let (scope, question) = (domain.clone(), question.to_owned());
+    let result = store
+        .blocking(move |store| {
+            // Bring the state up to date first; a failed read leaves the last good state.
+            let _ = crate::social::read_new(store, &scope, now_ms);
+            crate::social::answer(store, &scope, &question, draft.as_deref(), now_ms)
+        })
+        .await;
+    if let Ok(Some((quick, refined))) = result {
+        response.quick = quick;
+        response.refined = refined;
+    }
+    Ok(response)
+}
+
+async fn query_model(
+    store: &WandaStore,
+    domain: &ContextDomain,
+    question: &str,
+    deep: bool,
+    now_ms: i64,
+) -> Result<QueryResponse, WandaError> {
     let quality = if deep {
         store.config().deep_quality_tier
     } else {
@@ -329,5 +387,7 @@ pub async fn query(
         model: Some(answer.model.to_string()),
         state: "ready".into(),
         reason: None,
+        quick: None,
+        refined: None,
     })
 }

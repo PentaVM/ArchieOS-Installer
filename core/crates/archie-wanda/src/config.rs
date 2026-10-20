@@ -39,6 +39,46 @@ fn deep_quality() -> u8 {
 fn retention() -> u16 {
     168
 }
+fn cpu() -> String {
+    "cpu".into()
+}
+fn half() -> f32 {
+    0.5
+}
+fn owner_label() -> String {
+    "Yo".into()
+}
+
+/// Wanda's local expert (LNCM). Optional: without it Wanda works as before.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LncmBinding {
+    /// A checkpoint directory written by `archie-wanda-lncm`.
+    pub dir: PathBuf,
+    /// `cpu`, or `cuda:N` when built with CUDA.
+    #[serde(default = "cpu")]
+    pub device: String,
+    #[serde(default)]
+    pub lang: Option<archie_wanda_lncm::Lang>,
+    /// Adapter per context domain; a domain without one uses the shared weights.
+    #[serde(default)]
+    pub adapters: BTreeMap<ContextDomain, String>,
+    /// Below this probability a question is not treated as social.
+    #[serde(default = "half")]
+    pub gate_threshold: f32,
+    /// Below this probability a chunk of conversation is not interpreted.
+    #[serde(default = "half")]
+    pub update_threshold: f32,
+    /// How the owner is named in the state the expert reads.
+    #[serde(default = "owner_label")]
+    pub owner_label: String,
+}
+impl std::fmt::Debug for LncmBinding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("LncmBinding(redacted)")
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WandaConfig {
@@ -54,6 +94,8 @@ pub struct WandaConfig {
     pub deep_quality_tier: u8,
     #[serde(default = "retention")]
     pub retention_hours: u16,
+    #[serde(default)]
+    pub lncm: Option<LncmBinding>,
 }
 impl std::fmt::Debug for WandaConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -109,6 +151,9 @@ impl WandaConfig {
                 resolve(base, path);
             }
         }
+        if let Some(lncm) = &mut config.lncm {
+            resolve(base, &mut lncm.dir);
+        }
         config.validate()?;
         Ok(config)
     }
@@ -156,6 +201,25 @@ impl WandaConfig {
             #[cfg(windows)]
             let key = key.to_lowercase();
             if !graphs.insert(key) {
+                return Err(invalid());
+            }
+        }
+        if let Some(lncm) = &self.lncm {
+            let device_ok = lncm.device == "cpu"
+                || lncm
+                    .device
+                    .strip_prefix("cuda:")
+                    .is_some_and(|n| n.parse::<usize>().is_ok());
+            if !usable(&lncm.dir)
+                || !device_ok
+                || !(0.0..=1.0).contains(&lncm.gate_threshold)
+                || !(0.0..=1.0).contains(&lncm.update_threshold)
+                || !bounded_id(&lncm.owner_label)
+                || lncm.owner_label.len() > 128
+                || lncm.adapters.iter().any(|(domain, name)| {
+                    !domains.contains(domain) || !archie_wanda_lncm::model::adapter_name_valid(name)
+                })
+            {
                 return Err(invalid());
             }
         }

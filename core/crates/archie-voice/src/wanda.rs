@@ -128,6 +128,10 @@ impl WandaVoice {
         )
         .await
         {
+            // The crisis rule's fixed message is said as it is, never framed as a proposal.
+            Ok(Ok(response)) if response.state == "crisis" => {
+                response.speech_text().chars().take(1200).collect()
+            }
             Ok(Ok(response)) => bounded_answer(&response.speech_text()),
             Ok(Err(_)) => {
                 "No pude consultar Wanda. Revisa el servicio local y sus permisos.".into()
