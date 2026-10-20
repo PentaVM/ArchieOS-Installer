@@ -63,6 +63,22 @@ pub enum Disclosure {
     },
 }
 
+/// How a chat request (potentially streaming with tools) is to be asked.
+#[derive(Debug)]
+pub enum ChatDisclosure {
+    /// As it is, of models on the operator's own machines.
+    Kept {
+        models: Vec<ModelId>,
+        request: crate::ToolChatRequest,
+    },
+    /// Veiled, of models that disclose to a third party.
+    Veiled {
+        models: Vec<ModelId>,
+        request: crate::ToolChatRequest,
+        unveil: archie_vault::veil::Unveil,
+    },
+}
+
 /// The answer to a private question, with what may be written down about how it was got.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PrivateAnswer {
@@ -215,6 +231,195 @@ impl Routed {
         };
         let models = self.candidates(&outgoing)?;
         Ok(Disclosure::Veiled { models, veiled })
+    }
+
+    /// Decides how a tool chat request may be asked, veiling text for cloud models.
+    pub fn disclose_chat(
+        &self,
+        request: &crate::ToolChatRequest,
+        privacy: PrivacyGrade,
+        role: ModelRole,
+        veil: &Veil,
+    ) -> Result<ChatDisclosure, RoutedError> {
+        if privacy == PrivacyGrade::Secret {
+            return Err(RoutedError::Withheld("secret data reaches no model".into()));
+        }
+
+        let mut total_chars = 0;
+        for msg in &request.messages {
+            match msg {
+                crate::ToolChatMessage::System(t) | crate::ToolChatMessage::User(t) => {
+                    total_chars += t.len();
+                }
+                crate::ToolChatMessage::Assistant { content, .. } => {
+                    if let Some(c) = content {
+                        total_chars += c.len();
+                    }
+                }
+                crate::ToolChatMessage::Tool { content, .. } => {
+                    total_chars += content.len();
+                }
+            }
+        }
+        let input_tokens = (total_chars / 3).max(1) as u32;
+
+        let routing_req = RoutingRequest::new(privacy, input_tokens, request.max_tokens)
+            .requiring(role.capability());
+        let outcome = self.router.route(&self.registry, &routing_req);
+        let mut eligible: Vec<_> = outcome
+            .considered()
+            .iter()
+            .filter(|c| c.is_eligible())
+            .collect();
+        eligible.sort_by(|a, b| b.score.total_cmp(&a.score));
+
+        let callable: Vec<ModelId> = eligible
+            .into_iter()
+            .filter(|candidate| {
+                self.registry
+                    .get(&candidate.model)
+                    .and_then(|descriptor| ProviderEndpoint::for_model(descriptor).ok())
+                    .is_some_and(|endpoint| endpoint.is_configured())
+            })
+            .map(|candidate| candidate.model.clone())
+            .collect();
+
+        if callable.is_empty() {
+            return Err(RoutedError::NoModel(outcome.explain()));
+        }
+
+        let own: Vec<ModelId> = callable
+            .iter()
+            .filter(|m| {
+                self.registry
+                    .get(m)
+                    .is_some_and(|d| d.locality != Locality::Cloud)
+            })
+            .cloned()
+            .collect();
+
+        if !own.is_empty() {
+            return Ok(ChatDisclosure::Kept {
+                models: own,
+                request: request.clone(),
+            });
+        }
+
+        if privacy > PrivacyGrade::Sensitive {
+            return Err(RoutedError::Withheld(
+                "restricted data does not leave this machine, and no model on it can answer".into(),
+            ));
+        }
+
+        let mut text_ptrs = Vec::new();
+        for msg in &request.messages {
+            match msg {
+                crate::ToolChatMessage::System(t) | crate::ToolChatMessage::User(t) => {
+                    text_ptrs.push(t.as_str());
+                }
+                crate::ToolChatMessage::Assistant { content, .. } => {
+                    if let Some(c) = content {
+                        text_ptrs.push(c.as_str());
+                    }
+                }
+                crate::ToolChatMessage::Tool { content, .. } => {
+                    text_ptrs.push(content.as_str());
+                }
+            }
+        }
+
+        let veiled = veil.cover(&text_ptrs);
+        let residue = veiled.residue();
+        if !residue.is_empty() {
+            return Err(RoutedError::Withheld(format!(
+                "the veil left {} sensitive value(s) uncovered: {}",
+                residue.len(),
+                kinds(&residue)
+            )));
+        }
+
+        let mut veiled_iter = veiled.texts.into_iter();
+        let mut new_messages = Vec::with_capacity(request.messages.len());
+        let mut system_found = false;
+
+        for msg in &request.messages {
+            match msg {
+                crate::ToolChatMessage::System(_) => {
+                    let mut s = veiled_iter.next().unwrap_or_default();
+                    if !system_found {
+                        s.push_str(STAND_INS);
+                        system_found = true;
+                    }
+                    new_messages.push(crate::ToolChatMessage::System(s));
+                }
+                crate::ToolChatMessage::User(_) => {
+                    new_messages.push(crate::ToolChatMessage::User(
+                        veiled_iter.next().unwrap_or_default(),
+                    ));
+                }
+                crate::ToolChatMessage::Assistant {
+                    content,
+                    tool_calls,
+                } => {
+                    let new_content = if content.is_some() {
+                        veiled_iter.next()
+                    } else {
+                        None
+                    };
+                    new_messages.push(crate::ToolChatMessage::Assistant {
+                        content: new_content,
+                        tool_calls: tool_calls.clone(),
+                    });
+                }
+                crate::ToolChatMessage::Tool { call_id, .. } => {
+                    new_messages.push(crate::ToolChatMessage::Tool {
+                        call_id: call_id.clone(),
+                        content: veiled_iter.next().unwrap_or_default(),
+                    });
+                }
+            }
+        }
+        if !system_found {
+            new_messages.insert(
+                0,
+                crate::ToolChatMessage::System(STAND_INS.trim_start().to_string()),
+            );
+        }
+
+        let public_routing_req =
+            RoutingRequest::new(PrivacyGrade::Public, input_tokens, request.max_tokens)
+                .requiring(role.capability());
+        let public_outcome = self.router.route(&self.registry, &public_routing_req);
+        let mut public_eligible: Vec<_> = public_outcome
+            .considered()
+            .iter()
+            .filter(|c| c.is_eligible())
+            .collect();
+        public_eligible.sort_by(|a, b| b.score.total_cmp(&a.score));
+
+        let cloud_models: Vec<ModelId> = public_eligible
+            .into_iter()
+            .filter(|candidate| {
+                self.registry
+                    .get(&candidate.model)
+                    .and_then(|descriptor| ProviderEndpoint::for_model(descriptor).ok())
+                    .is_some_and(|endpoint| endpoint.is_configured())
+            })
+            .map(|candidate| candidate.model.clone())
+            .collect();
+
+        if cloud_models.is_empty() {
+            return Err(RoutedError::NoModel(public_outcome.explain()));
+        }
+
+        let mut veiled_req = request.clone();
+        veiled_req.messages = new_messages;
+
+        Ok(ChatDisclosure::Veiled {
+            models: cloud_models,
+            request: veiled_req,
+            unveil: veiled.unveil,
+        })
     }
 
     /// Asks a question that may hold what a third party must not see. See the module's

@@ -24,17 +24,22 @@
 //! confidence; the persona tells it not to guess, and the context gives it no reason to.
 
 use crate::segment::{Segmenter, Spoken};
+use archie_model_runtime::routed::{ChatDisclosure, Routed, RoutedError};
 use archie_model_runtime::{
-    InferenceClient, StreamEvent, ToolCall, ToolChatMessage, ToolChatRequest, ToolDefinition,
+    provider_model_id, InferenceClient, ProviderEndpoint, StreamEvent, StreamUnveiler, ToolCall,
+    ToolChatMessage, ToolChatRequest, ToolDefinition,
 };
 use archie_speech::{
     validate_request, CancelReason, CognitiveError, CognitiveEvent, CognitiveModelAdapter,
     CognitiveRequest, ResponseGate, ResponseSegment, SpeechBudget, SpeechToolIntentCandidate,
     SpokenContentSource,
 };
-use archie_types::{ModelDescriptor, PrivacyGrade};
+use archie_types::{ModelDescriptor, ModelRole, PrivacyGrade};
+use archie_vault::Veil;
 use std::collections::VecDeque;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 /// Something the transport reports while a turn is running.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,6 +58,156 @@ pub struct TurnStream {
 /// Starts a stream for a request. The real one asks Nebius; a test replays a recording.
 pub trait TurnSource {
     fn start(&mut self, request: ToolChatRequest) -> TurnStream;
+}
+
+/// Asks whichever model the router chooses, preferring local models and veiling text for cloud.
+pub struct RoutedSource {
+    routed: Arc<Routed>,
+    privacy: PrivacyGrade,
+    role: ModelRole,
+    veil: Arc<Veil>,
+    timeout: Duration,
+    runtime: tokio::runtime::Handle,
+}
+
+impl RoutedSource {
+    pub fn new(
+        routed: Arc<Routed>,
+        privacy: PrivacyGrade,
+        role: ModelRole,
+        veil: Arc<Veil>,
+        timeout: Duration,
+        runtime: tokio::runtime::Handle,
+    ) -> Self {
+        Self {
+            routed,
+            privacy,
+            role,
+            veil,
+            timeout,
+            runtime,
+        }
+    }
+}
+
+impl TurnSource for RoutedSource {
+    fn start(&mut self, request: ToolChatRequest) -> TurnStream {
+        let (send, updates) = mpsc::channel();
+        let routed = self.routed.clone();
+        let veil = self.veil.clone();
+        let privacy = self.privacy;
+        let role = self.role;
+        let timeout = self.timeout;
+
+        let task = self.runtime.spawn(async move {
+            match routed.disclose_chat(&request, privacy, role, &veil) {
+                Err(RoutedError::Withheld(reason)) => {
+                    let refusal = match privacy {
+                        PrivacyGrade::Secret => {
+                            "No puedo responder a esto porque los datos son secretos y no deben comunicarse a ningún modelo."
+                        }
+                        _ => {
+                            "No puedo responder a esto porque los datos son confidenciales y no hay un modelo local en este equipo disponible."
+                        }
+                    };
+                    let _ = send.send(Update::Event(StreamEvent::Text(refusal.to_string())));
+                    let _ = send.send(Update::Event(StreamEvent::Finished {
+                        reason: Some(format!("withheld: {reason}")),
+                    }));
+                }
+                Err(RoutedError::NoModel(reason)) => {
+                    let _ = send.send(Update::Failed(format!("no model may answer: {reason}")));
+                }
+                Err(err) => {
+                    let _ = send.send(Update::Failed(err.to_string()));
+                }
+                Ok(disclosure) => {
+                    let (models, req, unveil_opt) = match disclosure {
+                        ChatDisclosure::Kept { models, request } => (models, request, None),
+                        ChatDisclosure::Veiled {
+                            models,
+                            request,
+                            unveil,
+                        } => (models, request, Some(unveil)),
+                    };
+
+                    let started = Instant::now();
+                    let mut last_error = String::from("no model answered");
+                    let mut succeeded = false;
+
+                    for model_id in models {
+                        let left = timeout.saturating_sub(started.elapsed());
+                        if left.is_zero() {
+                            last_error = "request timed out".into();
+                            break;
+                        }
+                        let Some(desc) = routed.registry().get(&model_id) else {
+                            continue;
+                        };
+                        let Ok(endpoint) = ProviderEndpoint::for_model(desc) else {
+                            continue;
+                        };
+                        let endpoint = match endpoint.with_limits(left, 8 * 1024 * 1024) {
+                            Ok(e) => e,
+                            Err(e) => {
+                                last_error = e.to_string();
+                                continue;
+                            }
+                        };
+                        let Ok(client) = InferenceClient::new(endpoint) else {
+                            continue;
+                        };
+
+                        let mut model_req = req.clone();
+                        if let Ok(p_id) = provider_model_id(desc) {
+                            model_req.model = p_id.to_string();
+                        }
+
+                        let mut unveiler = StreamUnveiler::new(unveil_opt.clone());
+                        let events_tx = send.clone();
+                        let mut any_received = false;
+
+                        let effective_grade = if unveil_opt.is_some() {
+                            PrivacyGrade::Public
+                        } else {
+                            privacy
+                        };
+
+                        let result = client
+                            .chat_stream(desc, effective_grade, &model_req, |ev| {
+                                any_received = true;
+                                for processed_ev in unveiler.feed(ev) {
+                                    let _ = events_tx.send(Update::Event(processed_ev));
+                                }
+                            })
+                            .await;
+
+                        match result {
+                            Ok(()) => {
+                                succeeded = true;
+                                break;
+                            }
+                            Err(err) => {
+                                last_error = format!("{model_id}: {err}");
+                                if any_received {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if !succeeded {
+                        let _ = send.send(Update::Failed(last_error));
+                    }
+                }
+            }
+        });
+
+        TurnStream {
+            updates,
+            stop: Box::new(move || task.abort()),
+        }
+    }
 }
 
 /// Asks a Nemotron model on Nebius, on a runtime the caller owns.

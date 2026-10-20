@@ -1,12 +1,19 @@
-//! Asking a model on Nebius Token Factory, with pictures: the one door the arena's deciding,
+//! Asking a model through the router and the veil, with fallback: the one door the arena's deciding,
 //! judging and reflecting go through.
 
+use archie_model_runtime::routed::{Question, Routed, RoutedError};
+use archie_types::{ModelRole, PrivacyGrade};
+use archie_vault::Veil;
 use serde_json::json;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub struct Nebius {
+    routed: Option<Arc<Routed>>,
+    veil: Arc<Veil>,
+    grade: PrivacyGrade,
     http: reqwest::Client,
-    key: String,
+    key: Option<String>,
 }
 
 /// What a model answered, and how long it took.
@@ -21,13 +28,43 @@ pub struct Answer {
 impl Nebius {
     /// On `NEBIUS_TOKEN_FACTORY_KEY`, the conversation's own key.
     pub fn from_environment() -> Result<Self, String> {
-        let key = std::env::var("NEBIUS_TOKEN_FACTORY_KEY")
-            .map_err(|_| "NEBIUS_TOKEN_FACTORY_KEY is not set")?;
+        Self::from_environment_with_routing(None, PrivacyGrade::Public)
+    }
+
+    /// Loads models from `models_dir` (or `ARCHIE_MODELS_DIR`, or `/etc/archie/models`),
+    /// routing questions and veiling private text.
+    pub fn from_environment_with_routing(
+        models_dir: Option<&str>,
+        grade: PrivacyGrade,
+    ) -> Result<Self, String> {
+        let key = std::env::var("NEBIUS_TOKEN_FACTORY_KEY").ok();
+        let http = reqwest::Client::builder()
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        let dir = models_dir
+            .map(str::to_string)
+            .or_else(|| std::env::var("ARCHIE_MODELS_DIR").ok())
+            .unwrap_or_else(|| "/etc/archie/models".into());
+
+        let routed = if std::path::Path::new(&dir).is_dir() {
+            Routed::from_dir(&dir).ok().map(Arc::new)
+        } else {
+            None
+        };
+
+        if routed.is_none() && key.is_none() {
+            return Err(
+                "neither models directory nor NEBIUS_TOKEN_FACTORY_KEY is available".into(),
+            );
+        }
+
         Ok(Self {
-            http: reqwest::Client::builder()
-                .build()
-                .map_err(|e| e.to_string())?,
-            key: key.trim().to_string(),
+            routed,
+            veil: Arc::new(Veil::new()),
+            grade,
+            http,
+            key,
         })
     }
 
@@ -42,6 +79,54 @@ impl Nebius {
         max_tokens: u32,
         timeout: Duration,
     ) -> Result<Answer, String> {
+        if images.is_empty() {
+            if let Some(routed) = &self.routed {
+                let question = Question {
+                    role: ModelRole::ReasoningWorker,
+                    privacy: self.grade,
+                    system,
+                    user: text,
+                    image: None,
+                    max_tokens,
+                    timeout,
+                };
+                match routed.ask_private(&question, &self.veil).await {
+                    Ok(ans) => {
+                        return Ok(Answer {
+                            model: ans.answered.model.to_string(),
+                            text: ans.answered.text,
+                            seconds: ans.answered.seconds,
+                            completion_tokens: ans.answered.completion_tokens,
+                        });
+                    }
+                    Err(RoutedError::Withheld(why)) => {
+                        return Err(format!("withheld by privacy rules: {why}"));
+                    }
+                    Err(RoutedError::NoModel(why)) => {
+                        if self.key.is_none() {
+                            return Err(format!("no model may answer: {why}"));
+                        }
+                    }
+                    Err(err) => {
+                        if self.key.is_none() {
+                            return Err(err.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        // When images are present or when direct provider endpoint is used with key:
+        let key = match &self.key {
+            Some(k) => k,
+            None => {
+                return Err(
+                    "NEBIUS_TOKEN_FACTORY_KEY is not set and no model on this machine answered"
+                        .into(),
+                );
+            }
+        };
+
         let mut content = vec![json!({"type": "text", "text": text})];
         content.extend(
             images
@@ -63,7 +148,7 @@ impl Nebius {
             let response = self
                 .http
                 .post("https://api.tokenfactory.nebius.com/v1/chat/completions")
-                .bearer_auth(&self.key)
+                .bearer_auth(key)
                 .timeout(left)
                 .json(&body)
                 .send()

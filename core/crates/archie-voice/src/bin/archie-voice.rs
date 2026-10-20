@@ -59,15 +59,19 @@
 //! model client refuses anything else before it leaves the machine. The credential comes
 //! from `NEBIUS_TOKEN_FACTORY_KEY` and is never printed.
 
-use archie_model_runtime::{InferenceClient, ProviderEndpoint};
+use archie_model_runtime::routed::Routed;
+use archie_model_runtime::ProviderEndpoint;
+use archie_registry::ModelRegistry;
 use archie_speech::{CognitiveEvent, CognitiveModelAdapter, CognitiveRequest, SpeechBudget};
 use archie_types::{
-    Availability, Capability, DataRetention, Locality, ModelDescriptor, ModelId, PrivacyGrade,
-    ProviderKind, TokenCost,
+    Availability, Capability, DataRetention, Locality, ModelDescriptor, ModelId, ModelRole,
+    PrivacyGrade, ProviderKind, TokenCost,
 };
-use archie_voice::{tools, NebiusSource, NemotronCognitive};
+use archie_vault::Veil;
+use archie_voice::{tools, NemotronCognitive, RoutedSource};
 use std::collections::BTreeMap;
 use std::process::ExitCode;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 fn main() -> ExitCode {
@@ -100,7 +104,7 @@ struct Asking {
     budget: SpeechBudget,
     grade: PrivacyGrade,
     runtime: tokio::runtime::Runtime,
-    cognitive: NemotronCognitive<NebiusSource>,
+    cognitive: NemotronCognitive<RoutedSource>,
     clock: String,
 }
 
@@ -204,18 +208,31 @@ fn asking(
         .enable_all()
         .build()
         .map_err(|error| error.to_string())?;
-    let endpoint = match &local {
-        None => ProviderEndpoint::nebius("https://api.tokenfactory.nebius.com/v1"),
-        Some(url) => ProviderEndpoint::nvidia_nim(url, Locality::Local),
+    let models_dir = take(&mut args, "--models")
+        .or_else(|| set("ARCHIE_MODELS_DIR"))
+        .unwrap_or_else(|| "/etc/archie/models".into());
+    let mut registry = if std::path::Path::new(&models_dir).is_dir() {
+        ModelRegistry::load_from_dir(&models_dir).unwrap_or_default()
+    } else {
+        ModelRegistry::new()
+    };
+    if let Some(url) = &local {
+        let desc = descriptor(&model, "voice", false, PrivacyGrade::Restricted, Some(url))?;
+        let _ = registry.register(desc);
+    } else if !registry.iter().any(|m| {
+        m.display_name == model || m.labels.get("provider-model").is_some_and(|p| p == &model)
+    }) {
+        let desc = descriptor(&model, "voice", true, PrivacyGrade::Public, None)?;
+        let _ = registry.register(desc);
     }
-    .map_err(|error| error.to_string())?
-    .with_limits(timeout, 8 * 1024 * 1024)
-    .map_err(|error| error.to_string())?;
-    let client = InferenceClient::new(endpoint).map_err(|error| error.to_string())?;
-    let source = NebiusSource::new(
-        client,
-        descriptor(&model, "voice", local.is_none(), grade)?,
+    let routed = Arc::new(Routed::new(registry));
+    let veil = Arc::new(Veil::new());
+    let source = RoutedSource::new(
+        routed,
         grade,
+        ModelRole::CognitiveResponse,
+        veil,
+        timeout,
         runtime.handle().clone(),
     );
     let mut cognitive = NemotronCognitive::new(
@@ -295,7 +312,7 @@ struct Step {
 }
 
 /// Reads one step to its end, printing what a voice would say as it arrives.
-fn listen(cognitive: &mut NemotronCognitive<NebiusSource>, started: Instant) -> Step {
+fn listen(cognitive: &mut NemotronCognitive<RoutedSource>, started: Instant) -> Step {
     let mut step = Step {
         intents: Vec::new(),
         first_piece: None,
@@ -442,7 +459,13 @@ fn connect(
             Some(url) => ProviderEndpoint::nvidia_nim(url, Locality::Local),
         }
         .map_err(|error| error.to_string())?;
-        let descriptor = descriptor(model, "look", cloud, asking.grade)?;
+        let descriptor = descriptor(
+            model,
+            "look",
+            cloud,
+            asking.grade,
+            flags.ground_endpoint.as_deref(),
+        )?;
         let locality = descriptor.locality;
         let client =
             LocateAnythingClient::new(endpoint, descriptor).map_err(|error| error.to_string())?;
@@ -1306,9 +1329,13 @@ fn descriptor(
     role: &str,
     cloud: bool,
     grade: PrivacyGrade,
+    endpoint: Option<&str>,
 ) -> Result<ModelDescriptor, String> {
     let mut labels = BTreeMap::new();
     labels.insert("provider-model".to_string(), provider_model.to_string());
+    if let Some(url) = endpoint {
+        labels.insert("base-url".to_string(), url.to_string());
+    }
     let sanitized: String = provider_model
         .chars()
         .take(96)
@@ -1338,7 +1365,11 @@ fn descriptor(
         context_window: 32_000,
         // A grounding model that reasons before it answers needs room for one box.
         max_output_tokens: if role == "look" { 512 } else { 400 },
-        capabilities: vec![Capability::known("compute.inference")],
+        capabilities: vec![
+            Capability::known("compute.inference"),
+            Capability::parse("cognition.response").expect("valid capability"),
+            Capability::parse("cognition.reasoning").expect("valid capability"),
+        ],
         max_privacy_grade: if cloud { PrivacyGrade::Public } else { grade },
         retention: if cloud {
             DataRetention::Unknown

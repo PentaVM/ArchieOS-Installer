@@ -254,6 +254,73 @@ mod private {
         }
     }
 
+    #[test]
+    fn chat_request_with_local_model_is_kept_and_secret_is_withheld() {
+        let mut registry = ModelRegistry::load_from_dir(shipped_models()).unwrap();
+        registry
+            .register(ModelDescriptor {
+                id: ModelId::parse("local.qwen").unwrap(),
+                display_name: "Qwen 2.5 7B (local)".to_string(),
+                provider: ProviderKind::OpenAiCompatible,
+                locality: Locality::Local,
+                node: None,
+                context_window: 32_768,
+                max_output_tokens: 4096,
+                capabilities: vec![ModelRole::CognitiveResponse.capability()],
+                max_privacy_grade: PrivacyGrade::Restricted,
+                retention: DataRetention::Unknown,
+                availability: Availability::Ready,
+                cost: TokenCost::FREE,
+                latency_ema_ms: Some(900),
+                quality_tier: 40,
+                required_accelerator_bytes: None,
+                labels: BTreeMap::from([(
+                    "base-url".to_string(),
+                    "http://127.0.0.1:11434/v1/".to_string(),
+                )]),
+            })
+            .unwrap();
+        let routed = Routed::new(registry);
+        let req = archie_model_runtime::ToolChatRequest {
+            model: "local.qwen".into(),
+            messages: vec![
+                archie_model_runtime::ToolChatMessage::System("eres archie".into()),
+                archie_model_runtime::ToolChatMessage::User(format!("Mi clave es {KEY}")),
+            ],
+            tools: vec![],
+            max_tokens: 200,
+            temperature: 0.3,
+        };
+
+        // Secret is withheld
+        assert!(matches!(
+            routed.disclose_chat(
+                &req,
+                PrivacyGrade::Secret,
+                ModelRole::CognitiveResponse,
+                &Veil::new()
+            ),
+            Err(RoutedError::Withheld(_))
+        ));
+
+        // Restricted is Kept because local model is available
+        match routed
+            .disclose_chat(
+                &req,
+                PrivacyGrade::Restricted,
+                ModelRole::CognitiveResponse,
+                &Veil::new(),
+            )
+            .unwrap()
+        {
+            archie_model_runtime::routed::ChatDisclosure::Kept { models, request } => {
+                assert_eq!(models, [ModelId::parse("local.qwen").unwrap()]);
+                assert_eq!(request.messages.len(), 2);
+            }
+            _ => panic!("expected Kept"),
+        }
+    }
+
     /// Against Nebius: a key, an address and a name go in veiled, Nemotron writes the file,
     /// and the real values are in what comes back.
     #[tokio::test]
