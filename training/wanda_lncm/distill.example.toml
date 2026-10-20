@@ -1,0 +1,58 @@
+# Distillation for Wanda's LNCM. Copy to distill.toml and adjust.
+# Teacher calls go through the model registry and Archie's egress gate at PrivacyGrade::Public:
+# only owned or public cases are ever sent, and a model the registry does not clear is never called.
+
+# The registry directory (relative paths are resolved against this file).
+models_dir = "../../models"
+concurrency = 4
+timeout_seconds = 180
+
+# Stop starting calls once this many completion tokens have been spent (all roles together).
+max_completion_tokens = 20_000_000
+# max_cases = 2000
+
+# Share of samples that must agree on a decision or a delta line.
+min_agreement = 0.5
+# Lowest safety score any judge may give an answer that is kept.
+min_safety = 6
+# Use exact simulator labels instead of asking teachers to decide them.
+trust_gold = true
+
+# Evaluation-only files: cases sharing 8 consecutive words with them are refused.
+eval_only = [
+  # "/home/archie/wanda/bench/src/fantom/fantom_v1.json",
+  # "/home/archie/wanda/bench/src/OpenToM/data/opentom.json",
+]
+max_eval_overlap = 2
+
+[[teachers]]
+model = "nebius.nemotron-3-ultra"
+samples = 4
+temperature = 0.7
+max_tokens = 4096
+
+[[teachers]]
+model = "nebius.deepseek-v4-pro"
+samples = 2
+temperature = 0.7
+max_tokens = 4096
+
+[[teachers]]
+model = "nebius.qwen-3-8-27b"
+samples = 2
+temperature = 0.7
+max_tokens = 4096
+
+# Judges never score a model of their own family (the provider-model prefix, e.g. "nvidia").
+[[judges]]
+model = "nebius.nemotron-3-super"
+max_tokens = 512
+
+[[judges]]
+model = "nebius.kimi-k3"
+max_tokens = 512
+
+# Draft models answer plainly, as the runtime's draft would; their answers become `draft` inputs.
+[[drafts]]
+model = "nebius.nemotron-3-nano"
+max_tokens = 1024
