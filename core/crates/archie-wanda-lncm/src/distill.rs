@@ -95,6 +95,13 @@ pub struct DistillConfig {
     /// Stop starting calls once this many completion tokens were spent, across all roles.
     #[serde(default)]
     pub max_completion_tokens: Option<u64>,
+    /// Hard spending limit in US dollars, at the registry's prices, across every run that
+    /// shares the ledger. A call starts only if its worst case still fits.
+    #[serde(default)]
+    pub max_cost_usd: Option<f64>,
+    /// Where every call's tokens and cost are appended. Required with `max_cost_usd`.
+    #[serde(default)]
+    pub ledger: Option<PathBuf>,
     /// Share of samples that must agree on a decision or a delta line.
     #[serde(default = "half")]
     pub min_agreement: f32,
@@ -120,6 +127,11 @@ impl DistillConfig {
         if config.models_dir.is_relative() {
             config.models_dir = base.join(&config.models_dir);
         }
+        if let Some(ledger) = &mut config.ledger {
+            if ledger.is_relative() {
+                *ledger = base.join(&*ledger);
+            }
+        }
         for p in &mut config.eval_only {
             if p.is_relative() {
                 *p = base.join(&*p);
@@ -142,6 +154,10 @@ impl DistillConfig {
             || !(5..=3600).contains(&self.timeout_seconds)
             || !(0.0..=1.0).contains(&self.min_agreement)
             || self.min_safety > 10
+            || self
+                .max_cost_usd
+                .is_some_and(|c| !(0.0..=100_000.0).contains(&c))
+            || (self.max_cost_usd.is_some() && self.ledger.is_none())
             || uses.into_iter().any(bad_use)
         {
             return Err(LncmError::Config("distillation config out of range".into()));
@@ -212,6 +228,43 @@ pub struct Sample {
     pub rubric: Option<Rubric>,
     pub completion_tokens: u64,
     pub seconds: f32,
+    #[serde(default)]
+    pub prompt_tokens: u64,
+    /// Millionths of a US dollar, at the registry's prices.
+    #[serde(default)]
+    pub cost_micros: u64,
+}
+
+/// One call's spend, as appended to the ledger.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LedgerEntry {
+    pub model: String,
+    pub role: Role,
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    pub cost_micros: u64,
+}
+
+/// Total spend recorded in a ledger, in millionths of a dollar.
+pub fn ledger_total(path: &Path) -> Result<u64> {
+    if !path.exists() {
+        return Ok(0);
+    }
+    let entries: Vec<LedgerEntry> = read_jsonl(path, 50_000_000)?;
+    Ok(entries.iter().map(|e| e.cost_micros).sum())
+}
+
+/// Cost in millionths of a dollar of a call, from prices in millionths per million tokens.
+pub fn cost_micros(
+    prompt_tokens: u64,
+    completion_tokens: u64,
+    input_price: u64,
+    output_price: u64,
+) -> u64 {
+    let total = u128::from(prompt_tokens) * u128::from(input_price)
+        + u128::from(completion_tokens) * u128::from(output_price);
+    total.div_ceil(1_000_000).min(u128::from(u64::MAX)) as u64
 }
 
 impl Sample {
@@ -462,6 +515,8 @@ struct Callable {
     family: String,
     descriptor: ModelDescriptor,
     provider_model: String,
+    input_price: u64,
+    output_price: u64,
 }
 
 fn resolve(registry: &ModelRegistry, id: &str) -> Result<Callable> {
@@ -487,6 +542,8 @@ fn resolve(registry: &ModelRegistry, id: &str) -> Result<Callable> {
     Ok(Callable {
         id: id.to_string(),
         family,
+        input_price: descriptor.cost.input_micros_per_mtok,
+        output_price: descriptor.cost.output_micros_per_mtok,
         descriptor,
         provider_model,
     })
@@ -499,7 +556,7 @@ async fn ask(
     temperature: f32,
     max_tokens: u32,
     timeout: Duration,
-) -> Result<(String, u64)> {
+) -> Result<(String, u64, u64)> {
     let endpoint = ProviderEndpoint::for_model(&model.descriptor)
         .and_then(|e| e.with_limits(timeout, 8 * 1024 * 1024))
         .map_err(|e| LncmError::Model(e.to_string()))?;
@@ -529,7 +586,10 @@ async fn ask(
         .first()
         .map(|c| c.message.content.clone())
         .unwrap_or_default();
-    Ok((text, response.usage.map_or(0, |u| u.completion_tokens)))
+    let (prompt, completion) = response
+        .usage
+        .map_or((0, 0), |u| (u.prompt_tokens, u.completion_tokens));
+    Ok((text, prompt, completion))
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -542,6 +602,9 @@ pub struct RunReport {
     pub refused: BTreeMap<String, usize>,
     pub not_started_budget: usize,
     pub completion_tokens: u64,
+    /// Spent by this run, and recorded in the ledger before it, in millionths of a dollar.
+    pub cost_micros: u64,
+    pub ledger_before_micros: u64,
 }
 
 struct Job {
@@ -722,6 +785,18 @@ impl Runner {
         let writer = Arc::new(tokio::sync::Mutex::new(out.to_path_buf()));
         let spent = Arc::new(AtomicU64::new(0));
         let budget = self.config.max_completion_tokens;
+        let before = match &self.config.ledger {
+            Some(path) => ledger_total(path)?,
+            None => 0,
+        };
+        report.ledger_before_micros = before;
+        let cost_limit = self
+            .config
+            .max_cost_usd
+            .map(|usd| (usd * 1_000_000.0) as u64);
+        // Spent so far (ledger included) plus the worst case of every call in flight.
+        let committed = Arc::new(AtomicU64::new(before));
+        let ledger = Arc::new(tokio::sync::Mutex::new(self.config.ledger.clone()));
         let timeout = Duration::from_secs(self.config.timeout_seconds);
         let cases: Arc<Vec<Case>> = Arc::new(cases.to_vec());
         let mut tasks = tokio::task::JoinSet::new();
@@ -739,11 +814,32 @@ impl Runner {
                 report.not_started_budget += 1;
                 continue;
             }
-            let (cases, writer, spent) = (cases.clone(), writer.clone(), spent.clone());
+            let (system, user) = prompts(&cases[job.case], job.role, job.judged_parsed.as_ref());
+            // Worst case: a generous token estimate of the prompt and every output token allowed.
+            let worst = cost_micros(
+                (system.len() + user.len()) as u64 / 2 + 64,
+                u64::from(job.max_tokens),
+                job.model.input_price,
+                job.model.output_price,
+            );
+            if let Some(limit) = cost_limit {
+                let now = committed.load(Ordering::SeqCst);
+                if now.saturating_add(worst) > limit {
+                    report.not_started_budget += 1;
+                    continue;
+                }
+                committed.fetch_add(worst, Ordering::SeqCst);
+            }
+            let (cases, writer, spent, committed, ledger) = (
+                cases.clone(),
+                writer.clone(),
+                spent.clone(),
+                committed.clone(),
+                ledger.clone(),
+            );
             tasks.spawn(async move {
                 let _permit = permit;
                 let case = &cases[job.case];
-                let (system, user) = prompts(case, job.role, job.judged_parsed.as_ref());
                 let started = Instant::now();
                 let mut last_error = String::new();
                 for attempt in 0..3u32 {
@@ -760,8 +856,31 @@ impl Runner {
                     )
                     .await
                     {
-                        Ok((text, tokens)) => {
+                        Ok((text, prompt_tokens, tokens)) => {
                             spent.fetch_add(tokens, Ordering::Relaxed);
+                            let cost = cost_micros(
+                                prompt_tokens,
+                                tokens,
+                                job.model.input_price,
+                                job.model.output_price,
+                            );
+                            if cost_limit.is_some() {
+                                // Swap the reservation for what was really spent.
+                                committed.fetch_add(cost, Ordering::SeqCst);
+                                committed.fetch_sub(worst, Ordering::SeqCst);
+                            }
+                            if let Some(path) = ledger.lock().await.as_ref() {
+                                crate::data::append_jsonl(
+                                    path,
+                                    &LedgerEntry {
+                                        model: job.model.id.clone(),
+                                        role: job.role,
+                                        prompt_tokens,
+                                        completion_tokens: tokens,
+                                        cost_micros: cost,
+                                    },
+                                )?;
+                            }
                             let (parsed, rubric) = match job.role {
                                 Role::Teacher => (parse_answer(case, &text), None),
                                 Role::Draft => {
@@ -791,22 +910,29 @@ impl Runner {
                                 rubric,
                                 completion_tokens: tokens,
                                 seconds: started.elapsed().as_secs_f32(),
+                                prompt_tokens,
+                                cost_micros: cost,
                             };
                             let path = writer.lock().await;
                             crate::data::append_jsonl(&path, &sample)?;
-                            return Ok::<(bool, u64), LncmError>((ok, tokens));
+                            return Ok::<(bool, u64, u64), LncmError>((ok, tokens, cost));
                         }
                         Err(e) => last_error = e.to_string(),
                     }
+                }
+                // Nothing was spent that the provider reported; release the reservation.
+                if cost_limit.is_some() {
+                    committed.fetch_sub(worst, Ordering::SeqCst);
                 }
                 Err(LncmError::Model(last_error))
             });
         }
         while let Some(joined) = tasks.join_next().await {
             match joined {
-                Ok(Ok((ok, tokens))) => {
+                Ok(Ok((ok, tokens, cost))) => {
                     report.completed += 1;
                     report.completion_tokens += tokens;
+                    report.cost_micros += cost;
                     if !ok {
                         report.unparsed += 1;
                     }
@@ -1099,6 +1225,8 @@ mod tests {
             rubric: None,
             completion_tokens: 10,
             seconds: 1.0,
+            prompt_tokens: 0,
+            cost_micros: 0,
         }
     }
 

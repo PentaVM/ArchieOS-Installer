@@ -11,6 +11,36 @@ B=target/release/archie-wanda-lncm
 
 Design and invariants: [`docs/WANDA-LNCM.md`](../../docs/WANDA-LNCM.md).
 
+## 0. One command on the owner's PC (Windows + WSL, RTX 3070)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File training\wanda_lncm\train-local.ps1 -BudgetUsd 22
+```
+
+It reads the key from the `*nebius*api*.txt` file on the desktop (process environment only:
+never printed, written or committed), checks it against Token Factory, builds with CUDA when
+`nvcc` is present, generates the data, imports the `tomgen` tranches it finds, distils under a
+**hard dollar limit** (70 % teachers, 5 % drafts, the rest judges; a call starts only if its
+worst case still fits, and the ledger makes the limit hold across reruns), pauses the Bonsai2
+worker through its `hold` file, and trains with a thermal pause at 83 °C (resume at 72 °C).
+`touch <checkpoint>/STOP` stops cleanly; rerunning the same command resumes every stage.
+In WSL directly: `training/wanda_lncm/train-local.sh` (same knobs as environment variables).
+
+At the registry's prices, ~$22 buys roughly 600–900 composed cases with four teacher answers,
+drafts and judging; decisions and state updates come from exact simulator labels for free. The
+ledger total uses registry prices: Nebius's invoice is authoritative.
+
+### What "frontier level in this area" means here
+
+The target is to match the teachers on this narrow task at a fraction of their latency, not to
+be a general model. It is measured, not assumed:
+- `eval` reports decision accuracy and calibration on exact labels, and char-F1 of state 2
+  against the selected teacher answers on held-out cases (how close the student is to the
+  teachers' best).
+- FANToM and OpenToM stay evaluation-only and are run with the existing harness in
+  `training/wanda_bonsai2`, naming the checkpoint and protocol.
+A result is only a claim when both come from a named checkpoint on a named device.
+
 ## 1. Data
 
 Owned synthetic worlds (Spanish and English, exact labels for every task):
@@ -46,7 +76,8 @@ $B distill select --config distill.toml --cases data/synth/cases.jsonl \
 ```
 
 Every step appends as it goes and skips what is done on a rerun. `max_completion_tokens` caps
-spend. Cost ≈ cases × samples × tokens per answer: start with a few thousand cases and measure.
+spend in tokens and `max_cost_usd` (with `ledger`) caps it in dollars across reruns. Cost ≈
+cases × samples × tokens per answer: start with a few thousand cases and measure.
 
 Selection: an exact label wins when the simulator knows it; otherwise decisions need a
 majority, delta lines must recur across samples, and composed answers need the best mean

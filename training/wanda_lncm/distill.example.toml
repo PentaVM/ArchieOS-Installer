@@ -9,6 +9,9 @@ timeout_seconds = 180
 
 # Stop starting calls once this many completion tokens have been spent (all roles together).
 max_completion_tokens = 20_000_000
+# Hard dollar limit at the registry's prices, across every run sharing the ledger.
+max_cost_usd = 22.0
+ledger = "ledger.jsonl"
 # max_cases = 2000
 
 # Share of samples that must agree on a decision or a delta line.

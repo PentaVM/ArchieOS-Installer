@@ -205,6 +205,12 @@ struct Common {
     /// Task mix for the generator and adapters: gate=0.1,update=0.3,decide=0.3,compose=0.3
     #[arg(long)]
     mix: Option<String>,
+    /// Pause when the GPU reaches this temperature (°C), read with nvidia-smi.
+    #[arg(long)]
+    max_gpu_temp: Option<u32>,
+    /// Resume when it is back at or below this temperature.
+    #[arg(long, default_value_t = 72)]
+    resume_gpu_temp: u32,
 }
 
 #[derive(Subcommand)]
@@ -253,6 +259,11 @@ fn options(c: &Common) -> TrainOptions {
         eval_limit: c.eval_limit,
         seed: c.seed,
         resume: !c.no_resume,
+        thermal: c.max_gpu_temp.map(|hot| train::Thermal {
+            hot_c: hot,
+            cool_c: c.resume_gpu_temp.min(hot.saturating_sub(1)),
+            every: 20,
+        }),
         ..Default::default()
     }
 }

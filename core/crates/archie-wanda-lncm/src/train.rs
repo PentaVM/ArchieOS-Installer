@@ -54,6 +54,81 @@ pub struct TrainOptions {
     pub resume: bool,
     /// Development examples per task used by periodic evaluation.
     pub eval_limit: usize,
+    /// Pause on a hot GPU (read with `nvidia-smi`) until it cools.
+    #[serde(default)]
+    pub thermal: Option<Thermal>,
+}
+
+/// A consumer card that overheats is paused between steps rather than throttled or lost.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct Thermal {
+    /// Pause at this temperature (°C) or above.
+    pub hot_c: u32,
+    /// Resume at this temperature or below.
+    pub cool_c: u32,
+    /// Check every this many steps.
+    pub every: u64,
+}
+
+/// The hottest GPU's temperature, if `nvidia-smi` answers.
+pub fn gpu_temperature() -> Option<u32> {
+    let out = std::process::Command::new("nvidia-smi")
+        .args([
+            "--query-gpu=temperature.gpu",
+            "--format=csv,noheader,nounits",
+        ])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.trim().parse::<u32>().ok())
+        .max()
+}
+
+/// The file whose presence stops a stage cleanly at its next step (after a save).
+pub const STOP_FILE: &str = "STOP";
+
+/// Waits while the GPU is hot. Returns `true` when a stop was requested.
+fn pause_or_stop(dir: &Path, opts: &TrainOptions, step_no: u64) -> Result<bool> {
+    if dir.join(STOP_FILE).exists() {
+        return Ok(true);
+    }
+    let Some(t) = opts.thermal else {
+        return Ok(false);
+    };
+    if t.every == 0 || step_no % t.every != 0 {
+        return Ok(false);
+    }
+    let Some(mut temperature) = gpu_temperature() else {
+        return Ok(false);
+    };
+    if temperature < t.hot_c {
+        return Ok(false);
+    }
+    log(
+        dir,
+        serde_json::json!({"thermal": "pause", "step": step_no, "celsius": temperature}),
+    )?;
+    let paused = Instant::now();
+    while temperature > t.cool_c {
+        std::thread::sleep(std::time::Duration::from_secs(15));
+        if dir.join(STOP_FILE).exists() {
+            return Ok(true);
+        }
+        temperature = gpu_temperature().unwrap_or(0);
+    }
+    log(
+        dir,
+        serde_json::json!({"thermal": "resume", "step": step_no, "celsius": temperature, "paused_s": paused.elapsed().as_secs()}),
+    )?;
+    Ok(false)
+}
+
+fn stopped(stage: &str, step_no: u64) -> LncmError {
+    LncmError::Data(format!("{stage} stopped at step {step_no} by the {STOP_FILE} file; it was saved, remove the file and run the same command to resume"))
 }
 
 impl Default for TrainOptions {
@@ -70,6 +145,7 @@ impl Default for TrainOptions {
             seed: 1,
             resume: true,
             eval_limit: 200,
+            thermal: None,
         }
     }
 }
@@ -379,6 +455,10 @@ pub fn train_tokenizer(
     let mut usage: Vec<Vec<u32>> = vec![vec![0; config.codebook_size]; levels];
     let started = Instant::now();
     for step_no in start..opts.steps {
+        if pause_or_stop(dir, opts, step_no)? {
+            save_varmap(dir, &map, VQ_FILE, "tokenizer", step_no)?;
+            return Err(stopped("tokenizer", step_no));
+        }
         opt.set_learning_rate(learning_rate(opts, step_no));
         let rows: Vec<Vec<u32>> = (0..opts.batch)
             .map(|_| train.choose(&mut rng).expect("nonempty").clone())
@@ -796,6 +876,10 @@ pub fn train_generator(
         serde_json::json!({"stage": "generator", "start": start, "skipped_examples": skipped, "parameters": config.parameters()}),
     )?;
     for step_no in start..opts.steps {
+        if pause_or_stop(dir, opts, step_no)? {
+            save_varmap(dir, &map, GENERATOR_FILE, "generator", step_no)?;
+            return Err(stopped("generator", step_no));
+        }
         opt.set_learning_rate(learning_rate(opts, step_no));
         let task = draw_task(&pools, mix, &mut rng)
             .ok_or_else(|| LncmError::Data("no task to draw".into()))?;
@@ -903,6 +987,10 @@ pub fn train_adapter(
     };
     let pad = codec.special(crate::Special::Pad);
     for step_no in start..opts.steps {
+        if pause_or_stop(dir, opts, step_no)? {
+            save_varmap(dir, &map, &file, &stage, step_no)?;
+            return Err(stopped(&stage, step_no));
+        }
         opt.set_learning_rate(learning_rate(opts, step_no));
         let Some(task) = draw_task(&pools, mix, &mut rng) else {
             return Err(LncmError::Data(format!(
@@ -1262,6 +1350,15 @@ pub fn samples(model: &Lncm, examples: &[Example], n: usize) -> Result<Vec<serde
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stop_file_stops_and_no_thermal_config_never_waits() {
+        let dir = tempfile::tempdir().unwrap();
+        let opts = TrainOptions::default();
+        assert!(!pause_or_stop(dir.path(), &opts, 0).unwrap());
+        std::fs::write(dir.path().join(STOP_FILE), "").unwrap();
+        assert!(pause_or_stop(dir.path(), &opts, 0).unwrap());
+    }
 
     #[test]
     fn schedule_warms_up_then_decays() {

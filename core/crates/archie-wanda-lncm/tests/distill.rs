@@ -48,8 +48,8 @@ availability = "ready"
 quality_tier = 50
 
 [cost]
-input_micros_per_mtok = 0
-output_micros_per_mtok = 0
+input_micros_per_mtok = 1000000
+output_micros_per_mtok = 3000000
 
 [labels]
 base-url = "{base}"
@@ -128,6 +128,8 @@ async fn teaches_drafts_judges_and_selects() {
         drafts: vec![use_("local.draft-c", 1)],
         max_cases: None,
         max_completion_tokens: None,
+        max_cost_usd: Some(1.0),
+        ledger: Some(tmp.path().join("ledger.jsonl")),
         min_agreement: 0.5,
         min_safety: 6,
         eval_only: vec![],
@@ -158,6 +160,12 @@ async fn teaches_drafts_judges_and_selects() {
     assert_eq!(report.completed, 6);
     assert_eq!(report.unparsed, 0);
     assert_eq!(report.completion_tokens, 42);
+    // 10 prompt and 7 completion tokens at $1 and $3 per million: 31 millionths a call.
+    assert_eq!(report.cost_micros, 6 * 31);
+    assert_eq!(
+        distill::ledger_total(&tmp.path().join("ledger.jsonl")).unwrap(),
+        6 * 31
+    );
     let again = runner.teach(&cases, &teachers).await.unwrap();
     assert_eq!(again.already_done, 6);
     assert_eq!(again.completed, 0);
@@ -171,6 +179,21 @@ async fn teaches_drafts_judges_and_selects() {
         judged.completed, 2,
         "both compose samples are judged by another family"
     );
+
+    // A budget that cannot cover one call's worst case starts nothing, across runs.
+    let spent = distill::ledger_total(&tmp.path().join("ledger.jsonl")).unwrap();
+    let tight = Runner::new(DistillConfig {
+        max_cost_usd: Some((spent + 1000) as f64 / 1_000_000.0),
+        ..config.clone()
+    })
+    .unwrap();
+    let starved = tight
+        .teach(&cases, &tmp.path().join("more.jsonl"))
+        .await
+        .unwrap();
+    assert_eq!(starved.completed, 0);
+    assert_eq!(starved.not_started_budget, 6);
+    assert_eq!(starved.ledger_before_micros, spent);
 
     let mut all: Vec<Sample> = Vec::new();
     for p in [&teachers, &drafts, &judges] {
