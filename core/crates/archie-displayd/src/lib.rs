@@ -27,7 +27,10 @@ pub use geofabric::GeoFabricSnapshot;
 pub use http::{Request, Response};
 pub use kernel::{Availability, KernelService, KernelSnapshot, ZoneView};
 pub use orb::OrbService;
-pub use snapshot::{DisplaySnapshot, SnapshotSource};
+pub use snapshot::{
+    CatalogSnapshot, DisplaySnapshot, InspectorSnapshot, ProjectionSource, ProjectionState,
+    SnapshotSource, WorkflowSnapshot,
+};
 pub use world::{LanDeviceEntity, LanSource, WorldDataSource, WorldService, WorldSnapshot};
 
 use archie_state::StatePaths;
@@ -102,6 +105,9 @@ impl Observatory {
     /// itself as current.
     pub fn from_fixture(mut snapshot: DisplaySnapshot) -> Self {
         snapshot.source = SnapshotSource::Fixture;
+        if let Some(inspector) = snapshot.inspector.as_mut() {
+            inspector.source = ProjectionSource::Fixture;
+        }
         Self {
             bridge: Bridge::new(StatePaths::system()),
             cache: Arc::new(RwLock::new(None)),
@@ -245,9 +251,35 @@ impl Observatory {
         }
     }
 
-    /// Dispatch one request.
+    /// Dispatch one request the transport already admitted: `http::serve` answers anything
+    /// but GET with 405 before a route is chosen.
     pub async fn route(&self, request: Request) -> Response {
         match request.path.as_str() {
+            "/api/inspector" => {
+                let view = self.current().await.inspector_view();
+                match serde_json::to_vec(&view) {
+                    Ok(body) => Response::json(body),
+                    Err(_) => Response::not_found(),
+                }
+            }
+            "/api/workflows" => {
+                let frame = self.current_orb().await;
+                let view = WorkflowSnapshot {
+                    source: if self.is_fixture() {
+                        ProjectionSource::Fixture
+                    } else {
+                        ProjectionSource::Live
+                    },
+                    state: ProjectionState::Ready,
+                    reason: None,
+                    generated_at_ms: frame.generated_at_ms,
+                    workflows: frame.workflows,
+                };
+                match serde_json::to_vec(&view) {
+                    Ok(body) => Response::json(body),
+                    Err(_) => Response::not_found(),
+                }
+            }
             "/api/snapshot" => {
                 let snapshot = self.current().await;
                 match serde_json::to_vec(&snapshot) {
@@ -358,6 +390,115 @@ mod tests {
     use archie_types::Timestamp;
     use std::collections::BTreeMap;
 
+    #[tokio::test]
+    async fn inspector_is_cached_read_only_and_fixture_marked() {
+        let observatory = Observatory::from_fixture(fixture());
+        let response = observatory
+            .route(Request {
+                method: "GET".into(),
+                path: "/api/inspector".into(),
+                query: String::new(),
+            })
+            .await;
+        assert_eq!(response.status, 200, "the inspector projection must exist");
+        let view: serde_json::Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(view["source"], "fixture");
+        assert_eq!(view["state"], "unavailable");
+        assert!(view["reason"].as_str().is_some());
+        assert_eq!(view["providers"], serde_json::json!([]));
+        assert_eq!(view["cortex_trajectories"], serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn workflows_report_observation_absence_and_fixture_source() {
+        let observatory = Observatory::from_fixture(fixture());
+        let response = observatory
+            .route(Request {
+                method: "GET".into(),
+                path: "/api/workflows".into(),
+                query: String::new(),
+            })
+            .await;
+        assert_eq!(response.status, 200);
+        let view: serde_json::Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(view["source"], "fixture");
+        assert_eq!(view["state"], "ready");
+        let lanes = view["workflows"].as_array().unwrap();
+        assert_eq!(lanes.len(), 4);
+        for lane in lanes {
+            assert_eq!(lane["observed"], false);
+            assert_eq!(lane["active"], false);
+            assert_eq!(lane["phase"], "waiting");
+            assert!(lane["age_ms"].is_null());
+        }
+        assert!(
+            view.get("nodes").is_none(),
+            "no mesh or context in the workflow feed"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_nested_inspector_recording_cannot_claim_to_be_live() {
+        let mut recording = fixture();
+        recording.inspector = Some(InspectorSnapshot {
+            source: ProjectionSource::Live,
+            state: ProjectionState::Ready,
+            reason: None,
+            generated_at_ms: 10,
+            ..InspectorSnapshot::unavailable("")
+        });
+        let observatory = Observatory::from_fixture(recording);
+        let snapshot = observatory.current().await;
+        assert_eq!(
+            snapshot.inspector.as_ref().unwrap().source,
+            ProjectionSource::Fixture
+        );
+        assert_eq!(snapshot.inspector_view().source, ProjectionSource::Fixture);
+    }
+
+    #[test]
+    fn each_inspector_half_answers_for_itself() {
+        let mut inspector = InspectorSnapshot {
+            providers_state: Some(ProjectionState::Ready),
+            trajectories_state: Some(ProjectionState::Unavailable),
+            trajectories_reason: Some("cortex-trajectories projection unavailable".into()),
+            ..InspectorSnapshot::unavailable("")
+        };
+        inspector.settle();
+        assert_eq!(inspector.state, ProjectionState::Unavailable);
+        assert_eq!(
+            inspector.reason.as_deref(),
+            Some("cortex-trajectories projection unavailable")
+        );
+        assert_eq!(inspector.providers_state, Some(ProjectionState::Ready));
+
+        // archied goes away: the half that held data is stale, the other keeps its reason.
+        let mut snapshot = fixture();
+        snapshot.daemon_reachable = false;
+        snapshot.inspector = Some(inspector);
+        let view = snapshot.inspector_view();
+        assert_eq!(view.providers_state, Some(ProjectionState::Stale));
+        assert_eq!(view.trajectories_state, Some(ProjectionState::Unavailable));
+        assert_eq!(
+            view.trajectories_reason.as_deref(),
+            Some("cortex-trajectories projection unavailable")
+        );
+        assert_eq!(view.state, ProjectionState::Unavailable);
+    }
+
+    #[test]
+    fn a_newer_inspector_field_does_not_break_the_snapshot() {
+        let mut snapshot = serde_json::to_value(fixture()).unwrap();
+        snapshot["inspector"] = serde_json::json!({
+            "source": "live", "state": "ready", "reason": null, "generated_at_ms": 1,
+            "providers": [{"id": "p", "title": "P", "capability": "c", "status": "ok",
+                "records": [], "known_gaps": [], "added_later": true}],
+            "cortex_trajectories": [], "added_later": {"any": "shape"}
+        });
+        let parsed: DisplaySnapshot = serde_json::from_value(snapshot).unwrap();
+        assert_eq!(parsed.inspector.unwrap().providers[0].id, "p");
+    }
+
     fn fixture() -> DisplaySnapshot {
         DisplaySnapshot {
             // Claim to be live; `from_fixture` must override this.
@@ -375,6 +516,7 @@ mod tests {
             load_order: Vec::new(),
             models: Vec::new(),
             metrics: None,
+            inspector: None,
         }
     }
 

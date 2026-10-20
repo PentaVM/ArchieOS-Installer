@@ -28,8 +28,27 @@ pub struct Catalog {
     pub presets: Vec<String>,
 }
 
+/// Legacy camera framings; these do not replace the display's preset catalog.
+pub const CINEMATICS: [&str; 4] = ["field", "crown", "atlas", "dense"];
+/// Presentation layers that can be switched on and off.
+pub const OVERLAYS: [&str; 7] = [
+    "hud", "shell", "ambient", "guides", "links", "pulses", "bloom",
+];
+/// Local panels supported by the native shell.
+pub const PANELS: [&str; 7] = [
+    "forge",
+    "inspector",
+    "settings",
+    "sentry",
+    "activity",
+    "notifications",
+    "search",
+];
+
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum ControlError {
+    #[error("`{action} {value}` is not a visual command the display accepts")]
+    Invalid { action: String, value: String },
     #[error("the Observatory is not listening on {ADDRESS}: {0}")]
     Unreachable(String),
     #[error("the Observatory did not answer within {}ms", TIMEOUT.as_millis())]
@@ -38,6 +57,26 @@ pub enum ControlError {
     Refused(String),
     #[error("the Observatory answered something unexpected: {0}")]
     Malformed(String),
+}
+
+/// Check presentation command shape; scene and preset membership belongs to the display.
+pub fn valid(action: &str, value: &str, enabled: Option<bool>) -> bool {
+    match action {
+        "scene" | "preset" => {
+            !value.trim().is_empty()
+                && value.len() <= 128
+                && !value
+                    .chars()
+                    .any(|c| c.is_control() || c == '/' || c == '\\')
+                && value != "."
+                && value != ".."
+                && enabled.is_none()
+        }
+        "cinematic" => CINEMATICS.contains(&value) && enabled.is_none(),
+        "panel" => PANELS.contains(&value) && enabled.is_none(),
+        "overlay" => OVERLAYS.contains(&value) && enabled.is_some(),
+        _ => false,
+    }
 }
 
 async fn exchange(request: &Value) -> Result<String, ControlError> {
@@ -80,6 +119,21 @@ fn parse_catalog(reply: &str) -> Result<Catalog, ControlError> {
     serde_json::from_str(reply).map_err(|error| ControlError::Malformed(error.to_string()))
 }
 
+/// Send a bounded presentation command; the display validates its current capabilities.
+pub async fn send(action: &str, value: &str, enabled: Option<bool>) -> Result<(), ControlError> {
+    if !valid(action, value, enabled) {
+        return Err(ControlError::Invalid {
+            action: action.chars().take(64).collect(),
+            value: value.chars().take(64).collect(),
+        });
+    }
+    let mut request = json!({"action": action, "value": value});
+    if let Some(enabled) = enabled {
+        request["enabled"] = json!(enabled);
+    }
+    outcome(&exchange(&request).await?)
+}
+
 /// The scenes and presets the running display accepts.
 pub async fn catalog() -> Result<Catalog, ControlError> {
     parse_catalog(&exchange(&json!({"action": "list"})).await?)
@@ -98,6 +152,36 @@ pub async fn preset(name: &str) -> Result<(), ControlError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn presentation_controls_preserve_dynamic_scene_and_preset_names() {
+        assert!(valid("scene", "future-scene", None));
+        assert!(valid("preset", "future-preset", None));
+        for name in CINEMATICS {
+            assert!(valid("cinematic", name, None));
+        }
+        for name in OVERLAYS {
+            assert!(valid("overlay", name, Some(false)));
+            assert!(!valid("overlay", name, None));
+        }
+        assert!(valid("panel", "inspector", None));
+        assert!(!valid("panel", "execute", None));
+        assert!(!valid("preset", "../crown", None));
+        assert!(!valid("preset", "", None));
+        assert!(!valid("scene", "orb\n", None));
+    }
+
+    #[tokio::test]
+    async fn invalid_controls_are_rejected_before_connecting() {
+        assert!(matches!(
+            send("panel", "execute", None).await,
+            Err(ControlError::Invalid { .. })
+        ));
+        assert!(matches!(
+            send("overlay", "hud", None).await,
+            Err(ControlError::Invalid { .. })
+        ));
+    }
 
     #[test]
     fn replies_are_read_as_the_display_writes_them() {

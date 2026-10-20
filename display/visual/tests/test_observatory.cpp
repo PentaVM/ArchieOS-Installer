@@ -1771,6 +1771,24 @@ void a_kernel_reader_that_keeps_answering_keeps_its_tier() {
     CHECK_EQ(frame.tier_reason, TierReason::PressureIdle);
 }
 
+void visibility_alone_is_not_a_kernel_reading() {
+    CASE("a screen coming and going does not invent telemetry");
+
+    Observatory untouched{};
+    untouched.ingest_snapshot(snapshot_of({module_record("m", "loaded")}), 0, 0);
+    const Frame expected = untouched.tick(100);
+
+    Observatory observatory{};
+    observatory.ingest_snapshot(snapshot_of({module_record("m", "loaded")}), 0, 0);
+    observatory.set_display_present(false, 0);
+    CHECK_EQ(observatory.tick(0).tier, RenderTier::Headless);
+    observatory.set_display_present(true, 100);
+    const Frame shown = observatory.tick(100);
+    CHECK_BECAUSE(shown.tier == expected.tier && shown.tier_reason == expected.tier_reason,
+                  "before any kernel reply the tier is the one for no telemetry, not one "
+                  "earned by an empty reading stamped as fresh");
+}
+
 void an_austere_tier_is_not_relaxed_by_silence() {
     CASE("losing contact with a saturated machine does not mean it recovered");
 
@@ -2237,6 +2255,7 @@ int main() {
     a_clock_that_goes_backwards_does_not_make_data_younger();
     the_render_tier_backs_off_when_telemetry_goes_quiet();
     a_kernel_reader_that_keeps_answering_keeps_its_tier();
+    visibility_alone_is_not_a_kernel_reading();
     an_austere_tier_is_not_relaxed_by_silence();
     nothing_is_inspected_until_somebody_asks();
     inspecting_a_module_carries_what_the_payload_said_about_it();

@@ -1,5 +1,5 @@
 [Unit]
-Description=ArchieOS native 3D observatory
+Description=ArchieOS native desktop and 3D observatory
 Documentation=file:/usr/share/doc/archie-os/RFC-006-DISPLAY-ISOLATION.md
 # The display is a client of the bridge. If the bridge is down the renderer still starts
 # and shows an honest disconnected state rather than refusing to run.
@@ -36,9 +36,9 @@ TTYVHangup=yes
 TTYVTDisallocate=yes
 
 # Native Qt Quick 3D executable. EGLFS talks directly to DRM/KMS: no browser, HTML,
-# JavaScript runtime, Electron, desktop environment, compositor or window manager.
+# browser JavaScript runtime, Electron, compositor or window manager. QML runs in Qt.
 # QML and the NASA texture are compiled into the ELF at build time.
-ExecStart=/usr/bin/archie-display
+ExecStart=/usr/bin/archie-display --shell --shell-bridge /usr/bin/archie-shell-bridge
 
 Restart=always
 RestartSec=3s

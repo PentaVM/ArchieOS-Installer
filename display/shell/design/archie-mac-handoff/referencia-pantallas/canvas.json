@@ -1,0 +1,438 @@
+{
+  "v": 3,
+  "createdOnFiles": {
+    "v": 1,
+    "at": "2026-10-12T08:14:11Z"
+  },
+  "title": "Archie Mac · Rediseño de la shell",
+  "launch": {
+    "view": "canvas"
+  },
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1920,
+      "h": 1080,
+      "title": "1 · Escritorio completo",
+      "radius": 0
+    },
+    "Componentes.dc.html": {
+      "x": 4000,
+      "y": 0,
+      "w": 1920,
+      "h": 3400,
+      "title": "7 · Hoja de componentes",
+      "radius": 0
+    },
+    "Vault-cuadricula.dc.html": {
+      "x": 0,
+      "y": 1200,
+      "w": 1920,
+      "h": 1080,
+      "title": "2 · Vault en cuadrícula",
+      "radius": 0
+    },
+    "Centro-sin-respuesta.dc.html": {
+      "x": 0,
+      "y": 2400,
+      "w": 1920,
+      "h": 1080,
+      "title": "3a · Centro de control, archied no responde",
+      "radius": 0
+    },
+    "Centro-en-vivo.dc.html": {
+      "x": 0,
+      "y": 3600,
+      "w": 1920,
+      "h": 1080,
+      "title": "3b · Centro de control, en vivo",
+      "radius": 0
+    },
+    "Actividad.dc.html": {
+      "x": 2000,
+      "y": 1200,
+      "w": 1920,
+      "h": 1080,
+      "title": "4 · Actividad con trabajos largos",
+      "radius": 0
+    },
+    "Sentry-dispositivos.dc.html": {
+      "x": 2000,
+      "y": 2400,
+      "w": 1920,
+      "h": 1080,
+      "title": "5a · Sentry, red local con dispositivos",
+      "radius": 0
+    },
+    "Sentry-sin-escaner.dc.html": {
+      "x": 2000,
+      "y": 3600,
+      "w": 1920,
+      "h": 1080,
+      "title": "5b · Sentry, el escáner aún no ha corrido",
+      "radius": 0
+    },
+    "Paleta.dc.html": {
+      "x": 2000,
+      "y": 4800,
+      "w": 1920,
+      "h": 1080,
+      "title": "6 · Paleta de comandos abierta",
+      "radius": 0
+    },
+    "Opaca.dc.html": {
+      "x": 2000,
+      "y": 0,
+      "w": 1920,
+      "h": 1080,
+      "title": "8 · Escritorio completo, versión opaca",
+      "radius": 0
+    },
+    "Movimiento.dc.html": {
+      "x": 6200,
+      "y": 0,
+      "w": 1920,
+      "h": 1960,
+      "title": "9 · Tabla de movimiento (Diseño)",
+      "radius": 0
+    },
+    "Decisiones.dc.html": {
+      "x": 8200,
+      "y": 0,
+      "w": 1920,
+      "h": 1380,
+      "title": "10 · Decisiones para el dueño",
+      "radius": 0
+    },
+    "S01-alttab.dc.html": {
+      "x": 6200,
+      "y": 2200,
+      "w": 1920,
+      "h": 1080,
+      "title": "S1 · Alt-Tab / vista general · 1920×1080",
+      "radius": 0
+    },
+    "S01-alttab-2560.dc.html": {
+      "x": 8200,
+      "y": 2200,
+      "w": 2560,
+      "h": 1440,
+      "title": "S1 · Alt-Tab / vista general · 2560×1440",
+      "radius": 0
+    },
+    "S01-alttab-estados.dc.html": {
+      "x": 10840,
+      "y": 2200,
+      "w": 1920,
+      "h": 2828,
+      "title": "S1 · Alt-Tab / vista general · todos los estados",
+      "radius": 0
+    },
+    "S02-notificaciones.dc.html": {
+      "x": 6200,
+      "y": 5148,
+      "w": 1920,
+      "h": 1080,
+      "title": "S2 · Notificaciones · 1920×1080",
+      "radius": 0
+    },
+    "S02-notificaciones-2560.dc.html": {
+      "x": 8200,
+      "y": 5148,
+      "w": 2560,
+      "h": 1440,
+      "title": "S2 · Notificaciones · 2560×1440",
+      "radius": 0
+    },
+    "S02-notificaciones-estados.dc.html": {
+      "x": 10840,
+      "y": 5148,
+      "w": 1920,
+      "h": 2380,
+      "title": "S2 · Notificaciones · todos los estados",
+      "radius": 0
+    },
+    "S03-forge.dc.html": {
+      "x": 6200,
+      "y": 7648,
+      "w": 1920,
+      "h": 1080,
+      "title": "S3 · Forge · 1920×1080",
+      "radius": 0
+    },
+    "S03-forge-2560.dc.html": {
+      "x": 8200,
+      "y": 7648,
+      "w": 2560,
+      "h": 1440,
+      "title": "S3 · Forge · 2560×1440",
+      "radius": 0
+    },
+    "S03-forge-estados.dc.html": {
+      "x": 10840,
+      "y": 7648,
+      "w": 1920,
+      "h": 2829,
+      "title": "S3 · Forge · todos los estados",
+      "radius": 0
+    },
+    "S04-inspector.dc.html": {
+      "x": 6200,
+      "y": 10597,
+      "w": 1920,
+      "h": 1080,
+      "title": "S4 · Inspector IRIS / Cortex · 1920×1080",
+      "radius": 0
+    },
+    "S04-inspector-2560.dc.html": {
+      "x": 8200,
+      "y": 10597,
+      "w": 2560,
+      "h": 1440,
+      "title": "S4 · Inspector IRIS / Cortex · 2560×1440",
+      "radius": 0
+    },
+    "S04-inspector-estados.dc.html": {
+      "x": 10840,
+      "y": 10597,
+      "w": 1920,
+      "h": 2566,
+      "title": "S4 · Inspector IRIS / Cortex · todos los estados",
+      "radius": 0
+    },
+    "S05-ajustes.dc.html": {
+      "x": 6200,
+      "y": 13283,
+      "w": 1920,
+      "h": 1080,
+      "title": "S5 · Ajustes · 1920×1080",
+      "radius": 0
+    },
+    "S05-ajustes-2560.dc.html": {
+      "x": 8200,
+      "y": 13283,
+      "w": 2560,
+      "h": 1440,
+      "title": "S5 · Ajustes · 2560×1440",
+      "radius": 0
+    },
+    "S05-ajustes-estados.dc.html": {
+      "x": 10840,
+      "y": 13283,
+      "w": 1920,
+      "h": 2401,
+      "title": "S5 · Ajustes · todos los estados",
+      "radius": 0
+    },
+    "S06-bloqueo.dc.html": {
+      "x": 6200,
+      "y": 15804,
+      "w": 1920,
+      "h": 1080,
+      "title": "S6 · Bloqueo y arranque · 1920×1080",
+      "radius": 0
+    },
+    "S06-bloqueo-2560.dc.html": {
+      "x": 8200,
+      "y": 15804,
+      "w": 2560,
+      "h": 1440,
+      "title": "S6 · Bloqueo y arranque · 2560×1440",
+      "radius": 0
+    },
+    "S06-bloqueo-estados.dc.html": {
+      "x": 10840,
+      "y": 15804,
+      "w": 1920,
+      "h": 1761,
+      "title": "S6 · Bloqueo y arranque · todos los estados",
+      "radius": 0
+    },
+    "S07-coexistencia.dc.html": {
+      "x": 6200,
+      "y": 17685,
+      "w": 1920,
+      "h": 1080,
+      "title": "S7 · Coexistencia con el Orbe · 1920×1080",
+      "radius": 0
+    },
+    "S07-coexistencia-2560.dc.html": {
+      "x": 8200,
+      "y": 17685,
+      "w": 2560,
+      "h": 1440,
+      "title": "S7 · Coexistencia con el Orbe · 2560×1440",
+      "radius": 0
+    },
+    "S07-coexistencia-estados.dc.html": {
+      "x": 10840,
+      "y": 17685,
+      "w": 1920,
+      "h": 1334,
+      "title": "S7 · Coexistencia con el Orbe · todos los estados",
+      "radius": 0
+    },
+    "S08-busqueda.dc.html": {
+      "x": 6200,
+      "y": 19245,
+      "w": 1920,
+      "h": 1080,
+      "title": "S8 · Búsqueda · 1920×1080",
+      "radius": 0
+    },
+    "S08-busqueda-2560.dc.html": {
+      "x": 8200,
+      "y": 19245,
+      "w": 2560,
+      "h": 1440,
+      "title": "S8 · Búsqueda · 2560×1440",
+      "radius": 0
+    },
+    "S08-busqueda-estados.dc.html": {
+      "x": 10840,
+      "y": 19245,
+      "w": 1920,
+      "h": 2198,
+      "title": "S8 · Búsqueda · todos los estados",
+      "radius": 0
+    },
+    "Main-2560.dc.html": {
+      "x": 6200,
+      "y": 21763,
+      "w": 2560,
+      "h": 1440,
+      "title": "1 · Escritorio completo · 2560×1440",
+      "radius": 0
+    },
+    "Vault-cuadricula-2560.dc.html": {
+      "x": 8840,
+      "y": 21763,
+      "w": 2560,
+      "h": 1440,
+      "title": "2 · Vault en cuadrícula · 2560×1440",
+      "radius": 0
+    },
+    "Centro-sin-respuesta-2560.dc.html": {
+      "x": 11480,
+      "y": 21763,
+      "w": 2560,
+      "h": 1440,
+      "title": "3a · Centro de control, archied no responde · 2560×1440",
+      "radius": 0
+    },
+    "Centro-en-vivo-2560.dc.html": {
+      "x": 6200,
+      "y": 23323,
+      "w": 2560,
+      "h": 1440,
+      "title": "3b · Centro de control, en vivo · 2560×1440",
+      "radius": 0
+    },
+    "Actividad-2560.dc.html": {
+      "x": 8840,
+      "y": 23323,
+      "w": 2560,
+      "h": 1440,
+      "title": "4 · Actividad con trabajos largos · 2560×1440",
+      "radius": 0
+    },
+    "Sentry-dispositivos-2560.dc.html": {
+      "x": 11480,
+      "y": 23323,
+      "w": 2560,
+      "h": 1440,
+      "title": "5a · Sentry, red local con dispositivos · 2560×1440",
+      "radius": 0
+    },
+    "Sentry-sin-escaner-2560.dc.html": {
+      "x": 6200,
+      "y": 24883,
+      "w": 2560,
+      "h": 1440,
+      "title": "5b · Sentry, el escáner aún no ha corrido · 2560×1440",
+      "radius": 0
+    },
+    "Paleta-2560.dc.html": {
+      "x": 8840,
+      "y": 24883,
+      "w": 2560,
+      "h": 1440,
+      "title": "6 · Paleta de comandos abierta · 2560×1440",
+      "radius": 0
+    },
+    "Opaca-2560.dc.html": {
+      "x": 11480,
+      "y": 24883,
+      "w": 2560,
+      "h": 1440,
+      "title": "8 · Escritorio completo, versión opaca · 2560×1440",
+      "radius": 0
+    }
+  },
+  "order": [
+    "Main.dc.html",
+    "Componentes.dc.html",
+    "Vault-cuadricula.dc.html",
+    "Centro-sin-respuesta.dc.html",
+    "Centro-en-vivo.dc.html",
+    "Actividad.dc.html",
+    "Sentry-dispositivos.dc.html",
+    "Sentry-sin-escaner.dc.html",
+    "Paleta.dc.html",
+    "Opaca.dc.html",
+    "Movimiento.dc.html",
+    "Decisiones.dc.html",
+    "S01-alttab.dc.html",
+    "S01-alttab-2560.dc.html",
+    "S01-alttab-estados.dc.html",
+    "S02-notificaciones.dc.html",
+    "S02-notificaciones-2560.dc.html",
+    "S02-notificaciones-estados.dc.html",
+    "S03-forge.dc.html",
+    "S03-forge-2560.dc.html",
+    "S03-forge-estados.dc.html",
+    "S04-inspector.dc.html",
+    "S04-inspector-2560.dc.html",
+    "S04-inspector-estados.dc.html",
+    "S05-ajustes.dc.html",
+    "S05-ajustes-2560.dc.html",
+    "S05-ajustes-estados.dc.html",
+    "S06-bloqueo.dc.html",
+    "S06-bloqueo-2560.dc.html",
+    "S06-bloqueo-estados.dc.html",
+    "S07-coexistencia.dc.html",
+    "S07-coexistencia-2560.dc.html",
+    "S07-coexistencia-estados.dc.html",
+    "S08-busqueda.dc.html",
+    "S08-busqueda-2560.dc.html",
+    "S08-busqueda-estados.dc.html",
+    "Main-2560.dc.html",
+    "Vault-cuadricula-2560.dc.html",
+    "Centro-sin-respuesta-2560.dc.html",
+    "Centro-en-vivo-2560.dc.html",
+    "Actividad-2560.dc.html",
+    "Sentry-dispositivos-2560.dc.html",
+    "Sentry-sin-escaner-2560.dc.html",
+    "Paleta-2560.dc.html",
+    "Opaca-2560.dc.html"
+  ],
+  "notes": {
+    "titulo": {
+      "x": 0,
+      "y": -300,
+      "text": "Archie Mac · rediseño visual de la shell",
+      "kind": "title1",
+      "maxW": 5920
+    },
+    "nuevo": {
+      "x": 6200,
+      "y": -300,
+      "text": "Lo que faltaba · superficies, movimiento, decisiones y 2560×1440",
+      "kind": "title1",
+      "maxW": 9000
+    }
+  },
+  "designSystems": []
+}

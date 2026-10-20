@@ -84,6 +84,11 @@ async fn a_recording_is_never_presented_as_live_even_if_it_says_reachable() {
     let _ = stop.send(true);
 
     assert_eq!(frame.link, Link::Fixture);
+    let wire = serde_json::to_value(&frame).unwrap();
+    assert_eq!(wire["catalog"]["source"], "fixture");
+    assert_eq!(wire["inspector"]["source"], "fixture");
+    assert_eq!(wire["workflows"]["source"], "fixture");
+    assert_eq!(wire["workflows"]["workflows"][0]["observed"], false);
 }
 
 #[test]
@@ -100,6 +105,10 @@ fn nothing_listening_is_displayd_offline() {
         frame.link
     );
     assert!(frame.system.is_none() && frame.kernel.is_none());
+    let wire = serde_json::to_value(&frame).unwrap();
+    assert_eq!(wire["catalog"], serde_json::Value::Null);
+    assert_eq!(wire["inspector"]["source"], "unavailable");
+    assert_eq!(wire["workflows"]["state"], "unavailable");
 }
 
 /// A one-shot peer that answers whatever it is asked with `reply`.
@@ -237,14 +246,21 @@ fn a_reachable_live_snapshot_maps_status_fields_and_is_live() {
     snapshot.error = None;
     snapshot.staleness_ms = 0;
     snapshot.status = Some(status);
+    let mut old_server = serde_json::to_value(&snapshot).unwrap();
+    old_server.as_object_mut().unwrap().remove("inspector");
     let addr = routed_peer(vec![(
         "/api/snapshot",
-        serde_json::to_vec(&snapshot).unwrap(),
+        serde_json::to_vec(&old_server).unwrap(),
     )]);
 
     let frame = poll(&Client::new(addr).unwrap());
 
     assert_eq!(frame.link, Link::Live);
+    let wire = serde_json::to_value(&frame).unwrap();
+    assert_eq!(wire["catalog"]["daemon_reachable"], true);
+    assert_eq!(wire["catalog"]["source"], "live");
+    assert_eq!(wire["inspector"]["state"], "unavailable");
+    assert_eq!(wire["workflows"]["state"], "unavailable");
     let system = frame.system.expect("status was served");
     assert_eq!(system.hostname, "archie-node");
     assert_eq!(system.modules_loaded, 3);

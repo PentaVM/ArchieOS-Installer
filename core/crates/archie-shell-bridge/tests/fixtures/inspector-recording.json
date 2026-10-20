@@ -1,0 +1,24 @@
+{
+  "source": "fixture",
+  "generated_at": 1,
+  "daemon_reachable": true,
+  "staleness_ms": 0,
+  "error": null,
+  "status": null,
+  "boot": null,
+  "capabilities": {},
+  "nodes": [],
+  "totals": {"nodes": 0, "schedulable_nodes": 0, "logical_cores": 0, "memory_bytes": 0, "accelerator_bytes": 0, "accelerators": 0},
+  "modules": [],
+  "load_order": [],
+  "models": [],
+  "metrics": null,
+  "inspector": {
+    "source": "fixture",
+    "state": "ready",
+    "reason": null,
+    "generated_at_ms": 1,
+    "providers": [{"id": "world.fixture", "title": "Recorded provider", "capability": "world.fixture", "status": "no-credentials", "records": ["observation"], "known_gaps": []}],
+    "cortex_trajectories": [{"trajectory_id": "fixture-trajectory", "correction_kind": "context", "source_graph_snapshot_id": "before", "resulting_graph_snapshot_id": "after", "selected_context_count": 2, "omitted_candidate_count": 1, "model_id": "fixture-model", "payload_sha256_fingerprint": "abcd1234", "captured_at": 1}]
+  }
+}

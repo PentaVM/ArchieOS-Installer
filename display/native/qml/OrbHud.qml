@@ -6,19 +6,25 @@ import QtQuick
 // saying what Archie is doing and what it is using.
 Item {
     id: hud
+    required property var controller
+    property bool navigationEnabled: true
 
     required property var view
     required property var orbScene
     property bool labelsVisible: true
+    property color textColor: "#e9edf3"
+    property color secondaryColor: "#c9ced8"
+    property color mutedColor: "#8b93a1"
+    property color errorColor: "#c98a8a"
 
     function pickAt(x, y) {
         const near = hud.view.mapTo3DScene(Qt.vector3d(x, y, 0))
         const far = hud.view.mapTo3DScene(Qt.vector3d(x, y, 4000))
         const field = hud.orbScene.field
-        return lumen.pick(field.mapPositionFromScene(near), field.mapPositionFromScene(far))
+        return hud.controller.pick(field.mapPositionFromScene(near), field.mapPositionFromScene(far))
     }
 
-    readonly property var s: lumen.scene
+    readonly property var s: hud.controller.scene
     readonly property string mode: Number(s.speak || 0) > 0.05 ? "Hablando"
                                    : Number(s.think || 0) > 0.05 ? "Pensando"
                                    : Number(s.listen || 0) > 0.05 ? "Escuchando" : "En reposo"
@@ -27,22 +33,25 @@ Item {
 
     HoverHandler {
         id: hover
+        enabled: hud.visible
         onPointChanged: hoverDelay.restart()
-        onHoveredChanged: if (!hovered) lumen.hover("")
+        onHoveredChanged: if (!hovered) hud.controller.hover("")
     }
     Timer {
         id: hoverDelay
         interval: 40
-        onTriggered: lumen.hover(hover.hovered ? hud.pickAt(hover.point.position.x, hover.point.position.y) : "")
+        onTriggered: hud.controller.hover(hover.hovered ? hud.pickAt(hover.point.position.x, hover.point.position.y) : "")
     }
 
     MouseArea {
         anchors.fill: parent
+        enabled: hud.visible
         property point last
         property point origin
         property bool moved: false
         onPressed: function (mouse) { last = Qt.point(mouse.x, mouse.y); origin = last; moved = false }
         onPositionChanged: function (mouse) {
+            if (!hud.navigationEnabled) return
             if (Math.abs(mouse.x - origin.x) + Math.abs(mouse.y - origin.y) > 5)
                 moved = true
             if (moved) {
@@ -54,25 +63,26 @@ Item {
         onClicked: function (mouse) {
             if (moved) return
             const id = hud.pickAt(mouse.x, mouse.y)
-            if (id.length > 0) lumen.select(id)
-            else lumen.clearSelection()
+            if (id.length > 0) hud.controller.select(id)
+            else hud.controller.clearSelection()
         }
         onDoubleClicked: function (mouse) {
             const id = hud.pickAt(mouse.x, mouse.y)
-            if (id.length > 0) lumen.toggleModule(id)
+            if (id.length > 0) hud.controller.toggleModule(id)
         }
         onWheel: function (wheel) {
+            if (!hud.navigationEnabled) { wheel.accepted=false; return }
             hud.orbScene.approach(Math.pow(0.88, wheel.angleDelta.y / 120))
         }
     }
 
     // A name beside the pointer, nothing more.
     Text {
-        visible: hud.labelsVisible && !!lumen.hovered.id && hover.hovered
+        visible: hud.labelsVisible && !!hud.controller.hovered.id && hover.hovered
         x: Math.min(parent.width - width - 12, hover.point.position.x + 18)
         y: Math.max(12, hover.point.position.y - 26)
-        text: lumen.hovered.name || ""
-        color: "#e9edf3"
+        text: hud.controller.hovered.name || ""
+        color: hud.textColor
         font.pixelSize: 13
         font.weight: Font.Medium
         style: Text.Raised
@@ -92,7 +102,7 @@ Item {
             width: 7; height: 7; radius: 3.5
             color: hud.modeColour
             SequentialAnimation on opacity {
-                running: hud.mode !== "En reposo"
+                running: hud.visible && hud.labelsVisible && !hud.controller.reducedMotion && hud.mode !== "En reposo"
                 loops: 3
                 NumberAnimation { to: 0.35; duration: 700; easing.type: Easing.InOutSine }
                 NumberAnimation { to: 1.0; duration: 700; easing.type: Easing.InOutSine }
@@ -101,16 +111,16 @@ Item {
         Text {
             anchors.verticalCenter: parent.verticalCenter
             text: hud.mode
-            color: "#c9ced8"
+            color: hud.secondaryColor
             font.pixelSize: 13
             font.weight: Font.Medium
             font.letterSpacing: 0.3
         }
         Text {
             anchors.verticalCenter: parent.verticalCenter
-            visible: lumen.attention.length > 0
-            text: "·  " + lumen.attention.slice(0, 3).map(function (a) { return a.name }).join("  ·  ")
-            color: "#8b93a1"
+            visible: hud.controller.attention.length > 0
+            text: "·  " + hud.controller.attention.slice(0, 3).map(function (a) { return a.name }).join("  ·  ")
+            color: hud.mutedColor
             font.pixelSize: 13
         }
     }
@@ -119,9 +129,9 @@ Item {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 14
-        visible: hud.labelsVisible && lumen.error.length > 0
+        visible: hud.labelsVisible && hud.controller.error.length > 0
         text: "Sin conexión con el observador del sistema"
-        color: "#c98a8a"
+        color: hud.errorColor
         font.pixelSize: 11
     }
 }

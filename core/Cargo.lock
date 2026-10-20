@@ -352,6 +352,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "archie-lumen-design"
+version = "0.1.0"
+
+[[package]]
 name = "archie-mcp"
 version = "0.1.0"
 dependencies = [
