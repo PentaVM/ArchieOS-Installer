@@ -18,6 +18,9 @@ Item {
     property color errorColor: "#c98a8a"
     property int frameIntervalMs: Number(bridge.frame.frameIntervalMs === undefined ? 16 : bridge.frame.frameIntervalMs)
     readonly property bool presented: viewport.visible && bridge.presented && viewport.width > 0 && viewport.height > 0
+    // The hologram's grade is the look itself and costs one full-screen pass, so it runs
+    // whenever the view draws; the governor's post-processing switch keeps the bloom.
+    readonly property bool graded: !!controller.look.graded
     property bool ownsController: false
 
     Component.onCompleted: ownsController = controller.acquireView(viewport)
@@ -36,13 +39,26 @@ Item {
         environment: ExtendedSceneEnvironment {
             backgroundMode: SceneEnvironment.Color
             clearColor: viewport.backgroundColor
-            antialiasingMode: Number(viewport.bridge.frame.msaaSamples || 0) > 0
+            // The hologram is thousands of one-pixel additive filaments: multisampling
+            // changes how much light each one adds, so it stays off while the grade runs
+            // (as in the Observatory window), and the picture is the same on every budget.
+            antialiasingMode: Number(viewport.bridge.frame.msaaSamples || 0) > 0 && !viewport.graded
                 && viewport.controller.scene.profile !== "low" ? SceneEnvironment.MSAA : SceneEnvironment.NoAA
             antialiasingQuality: Number(viewport.bridge.frame.msaaSamples || 0) >= 4
                 ? SceneEnvironment.VeryHigh : SceneEnvironment.High
-            tonemapMode: SceneEnvironment.TonemapModeFilmic
+            // Xavi's sphere was tone mapped as Three.js does (ACES) before its CSS grade.
+            tonemapMode: viewport.graded ? SceneEnvironment.TonemapModeAces : SceneEnvironment.TonemapModeFilmic
+            // Under the hologram, the same finishing as the Observatory window. It also keeps
+            // the post chain running, so the light of thousands of additive filaments sums
+            // in HDR and is tone mapped once; without it each line is tone mapped on its
+            // own and the dense centre clips to white.
+            vignetteEnabled: viewport.graded
+            vignetteStrength: 0.35
+            ditheringEnabled: viewport.graded
             exposure: viewport.controller.look.exposure
-            glowEnabled: !!viewport.bridge.frame.postProcessing && viewport.controller.look.bloom
+            // Under the hologram's grade the glow is the grade's own, so it looks the same
+            // whether or not the budget allows this chain.
+            glowEnabled: !!viewport.bridge.frame.postProcessing && viewport.controller.look.bloom && !viewport.graded
             glowStrength: 0.9 + viewport.controller.look.bloomRadius * 0.6
             glowIntensity: viewport.controller.look.bloomStrength * 1.3
             glowBloom: viewport.controller.look.bloomRadius * 0.5
@@ -51,6 +67,10 @@ Item {
             glowHDRScale: 2.0
             glowQualityHigh: Number(viewport.bridge.frame.msaaSamples || 0) >= 4
         }
+        // The hologram's grade over the finished frame, as the CSS filter Xavi's shell laid
+        // over the sphere's canvas.
+        layer.enabled: viewport.graded
+        layer.effect: HologramGrade { look: viewport.controller.look; postProcessing: !!viewport.bridge.frame.postProcessing }
         LumenScene {
             id: scene
             controller: viewport.controller

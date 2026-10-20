@@ -25,6 +25,11 @@ Qt/QML, GPU shaders and World remain the native host. See
 [`source-port.md`](../../_dev/verification/xavi/source-port.md) for source attribution,
 CPU validation and the explicit visual/hardware fidelity limits.
 
+`holograma` and `holograma-calido` are Xavi's desktop sphere: the content sphere lists a
+folder read-only (Rust, `fieldSource: content`) and draws it with his hologram grade,
+rings, projector and labels. `--preset holograma --content-root <dir>` opens it; see
+[`content-sphere.md`](../../_dev/verification/xavi/content-sphere.md).
+
 Build with Cargo plus the existing Qt6/CMake dependencies; CMake builds/links the
 Rust static library automatically. Optional CPU shader checks use Mesa llvmpipe:
 

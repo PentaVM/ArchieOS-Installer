@@ -8,9 +8,10 @@ Preserve Core, Cortex/Cerebra, IRIS, Orbe, Policy, leases and the existing autho
 boundaries. Voice is the main interaction. Audit existing implementations before
 adding replacements. Keep personal and work domains separate.
 
-The professional Quickshell/Vault GUI and WSL generation are owned by Claude/Xavi.
-Do not take over that work or overwrite their uncommitted files. The GUI handoff is
-context for integration, not authorization to execute its tasks here.
+The professional Quickshell/Vault GUI, the neural sphere and WSL generation have two
+authors: Xavi (`ByXavi270` / `XaviCottier`) for the design and PentaVM for the native
+implementation in Rust/C++. Credit both. Do not overwrite their uncommitted files. The
+GUI handoff is context for integration; implementation work on it is PentaVM's to direct.
 
 Integrate completed branches using their changes relative to main, preserve other
 agents' worktrees, test the affected paths and record context/results in `_dev`.

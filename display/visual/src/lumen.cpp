@@ -516,4 +516,109 @@ Guides guides(float field_radius) {
     return out;
 }
 
+Vec3 filament(const Vec3& a, const Vec3& b, float phase, std::uint32_t seed) noexcept {
+    const Vec3 d = sub(b, a);
+    const float span = length(d);
+    if (span <= 0.0F) {
+        return a;
+    }
+    // Two directions across the link, and a bend along each, from the seed.
+    const Vec3 along{d.x / span, d.y / span, d.z / span};
+    const Vec3 helper = std::abs(along.y) < 0.9F ? Vec3{0.0F, 1.0F, 0.0F} : Vec3{1.0F, 0.0F, 0.0F};
+    Vec3 side{along.y * helper.z - along.z * helper.y, along.z * helper.x - along.x * helper.z,
+              along.x * helper.y - along.y * helper.x};
+    const float sl = length(side);
+    side = Vec3{side.x / sl, side.y / sl, side.z / sl};
+    const Vec3 up{along.y * side.z - along.z * side.y, along.z * side.x - along.x * side.z,
+                  along.x * side.y - along.y * side.x};
+    // A gentle C-shaped sweep, both bends to the same side: chained links then read as
+    // one long strand flowing out of the centre, not a zigzag.
+    const float turn = avalanche(seed) * kTau;
+    const float sweep = (0.10F + avalanche(seed * 3U + 1U) * 0.16F) * span;
+    const float first = sweep;
+    const float second = sweep * (0.55F + avalanche(seed * 7U + 2U) * 0.35F);
+    const Vec3 across{side.x * std::cos(turn) + up.x * std::sin(turn), side.y * std::cos(turn) + up.y * std::sin(turn),
+                      side.z * std::cos(turn) + up.z * std::sin(turn)};
+    const auto at = [&](float t, float bend) {
+        return Vec3{a.x + d.x * t + across.x * bend, a.y + d.y * t + across.y * bend, a.z + d.z * t + across.z * bend};
+    };
+    const Vec3 c1 = at(1.0F / 3.0F, first);
+    const Vec3 c2 = at(2.0F / 3.0F, second);
+    const float t = std::clamp(phase, 0.0F, 1.0F);
+    const float u = 1.0F - t;
+    const float w0 = u * u * u;
+    const float w1 = 3.0F * u * u * t;
+    const float w2 = 3.0F * u * t * t;
+    const float w3 = t * t * t;
+    return Vec3{a.x * w0 + c1.x * w1 + c2.x * w2 + b.x * w3, a.y * w0 + c1.y * w1 + c2.y * w2 + b.y * w3,
+                a.z * w0 + c1.z * w1 + c2.z * w2 + b.z * w3};
+}
+
+namespace {
+
+/// A circle of `radius` about `centre`, tilted by `pitch` about X then `roll` about Z,
+/// as segments; ticks point outwards in the ring's plane every `tick_step` segments.
+void ring(std::vector<Vec3>& out, const Vec3& centre, float radius, float pitch, float roll, int segments,
+          int tick_step, float tick, float major_tick) {
+    const auto place = [&](float angle, float r) {
+        const Vec3 flat{std::cos(angle) * r, 0.0F, std::sin(angle) * r};
+        const Vec3 x{flat.x, flat.y * std::cos(pitch) - flat.z * std::sin(pitch),
+                     flat.y * std::sin(pitch) + flat.z * std::cos(pitch)};
+        return Vec3{centre.x + x.x * std::cos(roll) - x.y * std::sin(roll),
+                    centre.y + x.x * std::sin(roll) + x.y * std::cos(roll), centre.z + x.z};
+    };
+    for (int s = 0; s < segments; ++s) {
+        const float a0 = static_cast<float>(s) / static_cast<float>(segments) * kTau;
+        const float a1 = static_cast<float>(s + 1) / static_cast<float>(segments) * kTau;
+        out.push_back(place(a0, radius));
+        out.push_back(place(a1, radius));
+        if (tick_step > 0 && s % tick_step == 0) {
+            const bool major = (s / tick_step) % 5 == 0;
+            out.push_back(place(a0, radius));
+            out.push_back(place(a0, radius + (major ? major_tick : tick)));
+        }
+    }
+}
+
+}  // namespace
+
+HoloFrame holo_frame(float radius) {
+    HoloFrame out;
+    if (!(radius > 0.0F) || !std::isfinite(radius)) {
+        return out;
+    }
+    const float degree = std::numbers::pi_v<float> / 180.0F;
+    // Two orbit rings, wider than the sphere, tilted against each other.
+    ring(out.rings, Vec3{0.0F, -0.12F * radius, 0.0F}, 1.17F * radius, 4.0F * degree, -9.0F * degree, 360, 2,
+         0.028F * radius, 0.055F * radius);
+    ring(out.rings, Vec3{0.0F, -0.04F * radius, 0.0F}, 1.06F * radius, -10.0F * degree, 6.0F * degree, 240, 0, 0.0F,
+         0.0F);
+    // The dotted rim: short dashes over the sphere, densest where it is seen edge-on.
+    const int dots = 1800;
+    for (int i = 0; i < dots; ++i) {
+        const float z = 1.0F - 2.0F * (static_cast<float>(i) + 0.5F) / static_cast<float>(dots);
+        const float azimuth = static_cast<float>(i) * kGoldenAngle;
+        const float r = std::sqrt(std::max(0.0F, 1.0F - z * z));
+        const Vec3 p{std::cos(azimuth) * r * radius, z * radius, std::sin(azimuth) * r * radius};
+        const Vec3 t{-std::sin(azimuth), 0.0F, std::cos(azimuth)};
+        const float half = 0.0035F * radius;
+        out.rings.push_back(Vec3{p.x - t.x * half, p.y, p.z - t.z * half});
+        out.rings.push_back(Vec3{p.x + t.x * half, p.y, p.z + t.z * half});
+    }
+    // The projector: a base well below the sphere, its inner ring, and the cone of light.
+    const float base = -1.62F * radius;
+    ring(out.rings, Vec3{0.0F, base, 0.0F}, 1.02F * radius, 0.0F, 0.0F, 240, 2, 0.03F * radius, 0.06F * radius);
+    ring(out.rings, Vec3{0.0F, base, 0.0F}, 0.6F * radius, 0.0F, 0.0F, 160, 0, 0.0F, 0.0F);
+    const int rays = 96;
+    for (int i = 0; i < rays; ++i) {
+        const float angle = static_cast<float>(i) / static_cast<float>(rays) * kTau;
+        out.beam.push_back(Vec3{std::cos(angle) * 0.6F * radius, base, std::sin(angle) * 0.6F * radius});
+        out.beam.push_back(Vec3{std::cos(angle) * 0.92F * radius, -0.42F * radius, std::sin(angle) * 0.92F * radius});
+    }
+    // The core's beam, from the centre down into the projector.
+    out.core.push_back(Vec3{0.0F, 0.0F, 0.0F});
+    out.core.push_back(Vec3{0.0F, base, 0.0F});
+    return out;
+}
+
 }  // namespace archie::visual::lumen

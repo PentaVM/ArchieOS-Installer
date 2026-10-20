@@ -10,7 +10,8 @@
 // profiles and the before/after comparison, and it answers picking.
 //
 // It reads; it never writes. The only request it makes is a GET for a view, and nothing
-// the operator does here reaches Policy, Stage or any producer.
+// the operator does here reaches Policy, Stage or any producer. The content sphere (Xavi's
+// desktop) instead lists one folder, read-only and bounded, through archie-lumen-design.
 
 #include <QElapsedTimer>
 #include <QHash>
@@ -70,6 +71,9 @@ class LumenField final : public QObject
     /// What the system is using right now, most engaged first: nodes with focus, voice,
     /// a Stage action or high activity. Each entry has id, name, category and score.
     Q_PROPERTY(QVariantList attention READ attention NOTIFY attentionChanged)
+    /// The folder the content sphere lists when `fieldSource` is "content" (Xavi's
+    /// desktop drew ArchieOS's own files). Read-only: nothing under it is opened.
+    Q_PROPERTY(QString contentRoot READ contentRoot WRITE setContentRoot NOTIFY contentRootChanged)
 
 public:
     explicit LumenField(QObject *parent = nullptr, QUrl endpoint = {});
@@ -109,6 +113,11 @@ public:
     QString error() const { return m_error; }
     bool loaded() const { return !m_nodes.empty(); }
     QVariantList attention() const { return m_attentionRows; }
+    QString contentRoot() const { return m_contentRoot; }
+    void setContentRoot(const QString &root);
+    /// Where the content sphere's top-level folders are now, for the HUD to label them:
+    /// id, name and position in the field's own coordinates, largest first, at most 24.
+    Q_INVOKABLE QVariantList labelAnchors() const;
 
     /// Hands a QML-created buffer to a layer: "modules", "entities", "satellites",
     /// "ghosts", "pulses" take a LumenInstancing; "orbMesh", "satelliteMesh", "quad",
@@ -162,6 +171,7 @@ signals:
     void attentionMoved(const QVector3D &position, bool engaged);
     /// A new field arrived from nothing: its orbs project out of the centre.
     void projectionStarted();
+    void contentRootChanged();
 
 private:
     struct Node {
@@ -204,6 +214,10 @@ private:
     };
 
     void request();
+    /// The content sphere's request: lists contentRoot off the GUI thread (Rust) and
+    /// hands the scene to accept() like a reply from archie-displayd.
+    void requestContent();
+    bool contentSource() const;
     void updateTimers();
     bool ambientAllowed() const;
     int particleBudget() const;
@@ -307,6 +321,12 @@ private:
     QVector3D m_selectionPosition;
     float m_selectionScale = 1.0F;
     bool m_selectionVisible = false;
+
+    QString m_contentRoot;
+    /// When the content sphere last listed its folder; it lists again every few seconds
+    /// so new files appear, or at once when its shape or bounds change.
+    QElapsedTimer m_contentClock;
+    bool m_contentDirty = true;
 
     QHash<QString, QPointer<LumenInstancing>> m_tables;
     QHash<QString, QPointer<LumenGeometry>> m_geometry;
