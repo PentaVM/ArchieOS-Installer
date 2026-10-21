@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.20)
+project(archie_wanda_prefix LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+add_executable(archie-wanda-prefix prefix_export.cpp)
+target_include_directories(archie-wanda-prefix PRIVATE "${PRISM_HEADERS}/include" "${PRISM_HEADERS}/ggml/include")
+target_link_directories(archie-wanda-prefix PRIVATE "${PRISM_RUNTIME}")
+target_link_libraries(archie-wanda-prefix PRIVATE llama ggml ggml-base)

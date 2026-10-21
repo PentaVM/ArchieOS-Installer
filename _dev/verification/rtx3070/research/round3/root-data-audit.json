@@ -1,0 +1,60 @@
+{
+  "candidate_sha256": "557cea647e785de1ae64778b03ffa0260b31fe66ca747618b152557d4eabd8bd",
+  "scope": "root CPU schema/invariance/baseline checks, no model inference or semantic quality proof",
+  "families": 4,
+  "examples": 16,
+  "domains": {
+    "work": 2,
+    "personal": 2
+  },
+  "family_ids": [
+    "r3-agencia-salida",
+    "r3-alias-fecha",
+    "r3-asesor-incentivo",
+    "r3-dueto-confirmacion"
+  ],
+  "baselines": {
+    "all": {
+      "n": 16,
+      "correct": {
+        "longest": 5,
+        "shortest": 3,
+        "always_A": 6
+      }
+    },
+    "clean": {
+      "n": 4,
+      "correct": {
+        "longest": 1,
+        "shortest": 1,
+        "always_A": 1
+      }
+    },
+    "noise": {
+      "n": 4,
+      "correct": {
+        "longest": 1,
+        "shortest": 1,
+        "always_A": 1
+      }
+    },
+    "cosmetic": {
+      "n": 4,
+      "correct": {
+        "longest": 2,
+        "shortest": 1,
+        "always_A": 2
+      }
+    },
+    "counterfactual": {
+      "n": 4,
+      "correct": {
+        "longest": 1,
+        "shortest": 0,
+        "always_A": 2
+      }
+    }
+  },
+  "human_review": "pending",
+  "cuda_used": false
+}

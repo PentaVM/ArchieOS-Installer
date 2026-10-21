@@ -469,3 +469,29 @@ windows it was never taught is in `models/reflex/README.md`. Production UI/camer
 adapters, OCR/grounding providers, real labelled benchmarks and Nebius cloud training
 remain unvalidated. No private frames, audio, transcripts or biometric examples are
 retained.
+
+### Wanda's local expert (LNCM)
+
+- Added `archie-wanda-lncm` ([docs/WANDA-LNCM.md](docs/WANDA-LNCM.md)): a small next-concept
+  model (Hazy Research's NCM, arXiv:2610.14162) with low-rank adapters per context domain,
+  written in Rust on candle. A multiscale residual VQ-VAE turns text into coarse-to-fine
+  codes; a prefix-LM generator predicts every level in one parallel pass. It answers social
+  questions in two states: a decision head with abstention and calibrated confidence first,
+  then a planned long answer whose names are checked against the people it may name.
+- Added a persistent social state per domain: exact exposure (who was present for which
+  message, who was told), expectations about each person as decayed Beta counts capped at
+  0.95 unless the person declared them, moods and reply latency. Conversations of any length
+  are read in chunks with constant memory; a model's interpretation enters only as delta
+  lines validated against the chunk.
+- Added the data and training side: owned Spanish/English synthetic worlds with exact labels,
+  import of the Python `tomgen` tranches, and multi-teacher distillation (Nemotron, DeepSeek,
+  Qwen, Kimi on Nebius Token Factory) through the existing egress gate at Public grade, with
+  private-shape and benchmark-overlap refusal, draft → expert pairs and cross-family judging.
+  Training stages (BPE codec, tokenizer, generator, adapters, calibration, evaluation) are
+  resumable and record data and weight digests in a manifest that serving verifies.
+- Wanda's service reads new conversation events into the Vault-held state, returns states 1
+  and 2 with its answers, lets the owner see, confirm, retract or forget what it expects of
+  someone, and answers any sign of crisis with a fixed message instead of a model.
+- Verified on CPU by tests: a full tiny training and serving run, tamper refusal, and
+  distillation against loopback stand-ins. No trained checkpoint is shipped and no accuracy,
+  benchmark or GPU latency is claimed.

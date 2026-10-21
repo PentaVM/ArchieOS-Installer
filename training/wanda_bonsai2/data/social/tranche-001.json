@@ -1,0 +1,643 @@
+[
+{
+  "family_id": "f001-entrega-colega", "domain": "work", "split": "train", "stratum": "workplace",
+  "causal_variables": ["plazo", "compromisos_previos", "observabilidad"],
+  "people": {"P1": "Ana"}, "renamed": {"P1": "Marta"},
+  "objective": "Entregar el informe el viernes sin deteriorar la colaboración con {P1}.",
+  "horizon": "esta semana",
+  "situation": "{P1} debe enviarte hoy su sección del informe.",
+  "evidence": [
+    ["incumple", "{P1} se retrasó en dos entregas este mes."],
+    ["corte", "Hay un corte eléctrico programado en la zona de {P1} hasta las 18:00."],
+    ["ya_veo", "A tu recordatorio, {P1} sólo respondió «ya veo»."]
+  ],
+  "noise": [["enfado", "En otro chat alguien insultó al equipo de ventas por un error ajeno."]],
+  "options": {
+    "A": {"action": "Esperar sin escribir hasta el viernes.", "consequence": "Puedes descubrir el retraso sin margen.", "relational_cost": "Nulo ahora; alto si el plazo falla."},
+    "B": {"action": "Pedir hora de envío y ofrecer un plan B si el corte lo impide.", "consequence": "Aclara el plazo y deja margen.", "relational_cost": "Bajo; es apoyo práctico."},
+    "C": {"action": "Reprocharle sus retrasos por escrito con copia al jefe.", "consequence": "Quizá acelera, pero escala el conflicto.", "relational_cost": "Alto; erosiona la confianza."}
+  },
+  "selected": "B",
+  "justification": "Los retrasos [incumple] y el corte [corte] hacen probable otro retraso, pero «ya veo» [ya_veo] no prueba desinterés; (B) asegura hora y alternativa sin escalar.",
+  "missing_information": ["Hora a la que {P1} puede enviar."],
+  "competing_explanations": ["«Ya veo» puede ser un acuse breve sin conexión, no desinterés."],
+  "revision_conditions": ["Si {P1} no responde antes de las 19:00, redactar la sección sin su aporte."],
+  "counterfactual": {
+    "replace_evidence": {"corte": "Ayer {P1} envió un borrador completo y confirmó la versión final para hoy."},
+    "selected": "A", "changes": "action",
+    "justification": "Con el borrador completo ya recibido [corte] el riesgo de plazo es bajo; insistir (B) o reprochar (C) añade coste sin beneficio, así que esperar (A) basta.",
+    "missing_information": ["Si el borrador cubre todos los apartados."],
+    "revision_conditions": ["Si el jueves no llega la versión final, pedirla con hora concreta."]
+  },
+  "provenance": {"kind": "owned-synthetic", "author": "claude-opus-5-5", "review": "pending-human"}
+},
+{
+  "family_id": "f002-descuento-cliente", "domain": "work", "split": "train", "stratum": "sales",
+  "causal_variables": ["objetivo_margen", "informacion_oculta", "relacion_recurrente"],
+  "people": {"P1": "Javier"}, "renamed": {"P1": "Rodrigo"},
+  "objective": "Renovar con {P1} manteniendo el margen; cerrar hoy no es prioritario.",
+  "horizon": "renovación trimestral",
+  "situation": "{P1}, cliente recurrente, cuestiona tu presupuesto.",
+  "evidence": [
+    ["rival", "{P1} dice que un competidor ofrece un 20 % menos, sin compartir el alcance."],
+    ["historial", "{P1} renovó tres años seguidos y valoró vuestro soporte."],
+    ["elogio", "{P1} añadió «sois los mejores, de verdad» con tres emojis."]
+  ],
+  "noise": [["feria", "Un proveedor anuncia una feria del sector el mes próximo."]],
+  "options": {
+    "A": {"action": "Igualar ya el precio del competidor.", "consequence": "Cierras hoy perdiendo margen sin verificar.", "relational_cost": "Bajo, pero fija un precedente."},
+    "B": {"action": "Pedir el alcance de la oferta rival y comparar partida a partida.", "consequence": "Verificas si la rebaja es comparable antes de ceder.", "relational_cost": "Bajo; trato profesional."},
+    "C": {"action": "Presionar con una oferta que caduca esta tarde.", "consequence": "Fuerzas decisión arriesgando la renovación.", "relational_cost": "Medio; puede sentirse manipulado."}
+  },
+  "selected": "B",
+  "justification": "La rebaja [rival] no tiene alcance verificable y tu objetivo es margen; el historial [historial] da tiempo para comparar (B). El elogio [elogio] no cambia el valor de la oferta.",
+  "missing_information": ["Alcance y servicios incluidos en la oferta rival."],
+  "competing_explanations": ["La cifra puede ser táctica de negociación o una oferta real menos completa."],
+  "revision_conditions": ["Si el alcance es equivalente, contraofertar sin bajar del suelo de margen."],
+  "counterfactual": {
+    "replace_evidence": {"historial": "Necesitas liquidez inmediata y aceptaste un margen mínimo que una rebaja del 20 % aún respeta."},
+    "selected": "A", "changes": "action",
+    "justification": "Con necesidad de liquidez y el suelo de margen respetado [historial], ceder (A) cumple el objetivo actual; verificar (B) retrasa el cobro y presionar (C) arriesga la venta.",
+    "missing_information": ["Si la cifra final queda sobre el suelo acordado."],
+    "revision_conditions": ["Si {P1} pide más del 20 %, volver a verificar el alcance."]
+  },
+  "provenance": {"kind": "owned-synthetic", "author": "claude-opus-5-5", "review": "pending-human"}
+},
+{
+  "family_id": "f003-credito-reunion", "domain": "work", "split": "train", "stratum": "workplace",
+  "causal_variables": ["reputacion", "observabilidad", "poder"],
+  "people": {"P1": "Sergio", "P2": "Laura"}, "renamed": {"P1": "Óscar", "P2": "Elena"},
+  "objective": "Que {P2}, tu directora, sepa que el análisis fue tuyo, sin abrir una guerra con {P1}.",
+  "horizon": "evaluación de desempeño en un mes",
+  "situation": "En la reunión, {P1} presentó tu análisis como propio delante de {P2}.",
+  "evidence": [
+    ["correo", "Tienes el correo donde enviaste el análisis a {P1} hace una semana."],
+    ["pregunta", "{P2} pidió ampliar el análisis para el lunes."],
+    ["costumbre", "Otros compañeros comentan que {P1} ya hizo algo parecido antes."]
+  ],
+  "noise": [["comida", "Después de la reunión alguien propuso comida japonesa para el viernes."]],
+  "options": {
+    "A": {"action": "Acusar a {P1} delante del equipo.", "consequence": "Visibiliza la autoría con escándalo público.", "relational_cost": "Alto con {P1} y riesgo de parecer conflictivo."},
+    "B": {"action": "Enviar tú la ampliación a {P2} citando tu correo original.", "consequence": "Demuestra autoría con evidencia y entrega valor.", "relational_cost": "Bajo; no acusa a nadie."},
+    "C": {"action": "Callar y dejar que {P1} haga la ampliación.", "consequence": "Pierdes visibilidad ante la evaluación.", "relational_cost": "Nulo ahora; resentimiento acumulado."}
+  },
+  "selected": "B",
+  "justification": "Tu correo [correo] prueba la autoría y la ampliación pedida [pregunta] es la ocasión natural de mostrarlo a {P2} (B). Los comentarios [costumbre] son rumor y no justifican acusar en público.",
+  "missing_information": ["Si {P2} sabe quién preparó el análisis."],
+  "competing_explanations": ["{P1} pudo presentar en nombre del equipo sin intención de apropiarse."],
+  "revision_conditions": ["Si {P1} repite la conducta, hablarlo en privado con {P2} con los correos."],
+  "counterfactual": {
+    "replace_evidence": {"pregunta": "{P2} ya asignó la ampliación a {P1} y la evaluación cierra mañana."},
+    "selected": "A", "changes": "action",
+    "justification": "Con la ampliación asignada a {P1} y la evaluación mañana [pregunta], no queda ocasión discreta; aclarar la autoría ahora con el correo [correo] (A) es lo único que llega a tiempo, aunque el coste relacional sea alto.",
+    "missing_information": ["Si puedes hablar con {P2} antes del cierre en privado."],
+    "revision_conditions": ["Si {P2} acepta reunirse hoy en privado, preferir esa vía a la exposición pública."]
+  },
+  "provenance": {"kind": "owned-synthetic", "author": "claude-opus-5-5", "review": "pending-human"}
+},
+{
+  "family_id": "f004-jefe-fin-de-semana", "domain": "work", "split": "train", "stratum": "workplace",
+  "causal_variables": ["poder", "compromisos_previos", "objetivo_usuario"],
+  "people": {"P1": "Ramón"}, "renamed": {"P1": "Andrés"},
+  "objective": "Asistir a la boda de tu hermano el sábado conservando la confianza de {P1}, tu jefe.",
+  "horizon": "este fin de semana",
+  "situation": "{P1} te pide trabajar el sábado para cerrar una propuesta.",
+  "evidence": [
+    ["aviso", "Avisaste de la boda hace dos meses y {P1} lo aprobó por escrito."],
+    ["propuesta", "La propuesta vence el lunes a las 9:00."],
+    ["tono", "{P1} escribió «cuento contigo» sin preguntar disponibilidad."]
+  ],
+  "noise": [["gimnasio", "Tu gimnasio cierra el domingo por obras."]],
+  "options": {
+    "A": {"action": "Cancelar la boda y trabajar el sábado.", "consequence": "Cumples con {P1} renunciando a tu objetivo.", "relational_cost": "Alto con tu familia."},
+    "B": {"action": "Recordar el permiso aprobado y ofrecer avanzar el viernes y revisar el domingo.", "consequence": "Protege la boda y cubre el plazo.", "relational_cost": "Bajo; muestras compromiso."},
+    "C": {"action": "No contestar hasta el lunes.", "consequence": "{P1} queda sin plan para la propuesta.", "relational_cost": "Alto; parece abandono."}
+  },
+  "selected": "B",
+  "justification": "El permiso aprobado [aviso] respalda tu ausencia y el plazo del lunes [propuesta] admite trabajo el viernes y el domingo (B). «Cuento contigo» [tono] es presión, no un cambio del acuerdo.",
+  "missing_information": ["Qué partes de la propuesta requieren tu trabajo."],
+  "competing_explanations": ["{P1} puede haber olvidado el permiso, no ignorarlo."],
+  "revision_conditions": ["Si {P1} confirma que sólo tú puedes hacerlo el sábado, negociar unas horas por la mañana."]
+  ,
+  "counterfactual": {
+    "replace_evidence": {"aviso": "Nunca avisaste de la boda; {P1} se entera ahora."},
+    "selected": "B", "changes": "confidence",
+    "justification": "Sin permiso previo [aviso] tu posición es más débil, pero ofrecer el viernes y el domingo para el plazo [propuesta] (B) sigue protegiendo ambos objetivos; reconoce el aviso tardío.",
+    "missing_information": ["Si {P1} acepta trabajo fuera del sábado."],
+    "revision_conditions": ["Si {P1} rechaza la alternativa, decidir según la prioridad familiar que fijaste."]
+  },
+  "provenance": {"kind": "owned-synthetic", "author": "claude-opus-5-5", "review": "pending-human"}
+},
+{
+  "family_id": "f005-mediacion-compas", "domain": "work", "split": "development", "stratum": "workplace",
+  "causal_variables": ["testimonio_contradictorio", "poder", "observabilidad"],
+  "people": {"P1": "Diego", "P2": "Nuria"}, "renamed": {"P1": "Tomás", "P2": "Irene"},
+  "objective": "Que tu equipo vuelva a cooperar en el proyecto sin perder a ninguno de los dos.",
+  "horizon": "dos semanas",
+  "situation": "{P1} y {P2} se acusan mutuamente de bloquear el proyecto; tú coordinas.",
+  "evidence": [
+    ["version1", "{P1} dice que {P2} no responde sus mensajes."],
+    ["version2", "{P2} dice que {P1} cambia los requisitos cada día."],
+    ["registro", "El historial de tareas muestra tres cambios de requisitos de {P1} esta semana."]
+  ],
+  "noise": [["cumple", "Mañana es el cumpleaños de alguien de contabilidad."]],
+  "options": {
+    "A": {"action": "Dar la razón a {P1} por antigüedad.", "consequence": "Cierra la disputa sin resolver la causa.", "relational_cost": "Alto con {P2}."},
+    "B": {"action": "Reunir a ambos con el historial y fijar un proceso para cambios de requisitos.", "consequence": "Ataca la causa observable con datos.", "relational_cost": "Medio; incómodo pero justo."},
+    "C": {"action": "Separarlos en proyectos distintos.", "consequence": "Evita el roce y retrasa el proyecto.", "relational_cost": "Bajo ahora; pierde colaboración."}
+  },
+  "selected": "B",
+  "justification": "Las acusaciones [version1] y [version2] son testimonios; el historial [registro] respalda los cambios frecuentes, así que un proceso de cambios con ambos (B) ataca la causa verificable.",
+  "missing_information": ["Si hay mensajes de {P1} sin respuesta de {P2}."],
+  "competing_explanations": ["Los cambios pueden venir del cliente y {P1} sólo los transmite."],
+  "revision_conditions": ["Si los cambios venían del cliente, renegociar el alcance con el cliente."],
+  "counterfactual": {
+    "replace_evidence": {"registro": "El historial no muestra cambios de requisitos y sí cinco mensajes de {P1} sin respuesta."},
+    "selected": "B", "changes": "rationale",
+    "justification": "Ahora el historial [registro] respalda a {P1}: el problema es de respuesta, no de requisitos; reunirlos con los datos (B) sigue siendo lo adecuado, pero el proceso debe fijar tiempos de respuesta.",
+    "missing_information": ["Por qué {P2} no respondió esos mensajes."],
+    "revision_conditions": ["Si {P2} tiene sobrecarga real, redistribuir tareas antes de exigir tiempos."]
+  },
+  "provenance": {"kind": "owned-synthetic", "author": "claude-opus-5-5", "review": "pending-human"}
+},
+{
+  "family_id": "f006-feedback-rendimiento", "domain": "work", "split": "train", "stratum": "workplace",
+  "causal_variables": ["situacion_personal", "plazo", "relacion_jerarquica"],
+  "people": {"P1": "Pablo"}, "renamed": {"P1": "Hugo"},
+  "objective": "Recuperar el rendimiento de {P1}, tu reportado, este trimestre sin perderlo.",
+  "horizon": "trimestre",
+  "situation": "{P1} entrega tarde y con errores desde hace un mes.",
+  "evidence": [
+    ["antes", "Durante dos años {P1} fue de los mejores del equipo."],
+    ["padre", "{P1} comentó de pasada que su padre está hospitalizado."],
+    ["cliente", "Un cliente se quejó ayer de un error de {P1}."]
+  ],
+  "noise": [["parking", "Recursos humanos cambia las plazas de aparcamiento el mes que viene."]],
+  "options": {
+    "A": {"action": "Abrir un expediente formal de bajo rendimiento.", "consequence": "Documenta pero ignora la causa probable.", "relational_cost": "Alto; puede romper la confianza."},
+    "B": {"action": "Hablar en privado, reconocer la situación y acordar ajustes temporales con fechas.", "consequence": "Ataca la causa y fija expectativas.", "relational_cost": "Bajo; refuerza la lealtad."},
+    "C": {"action": "No decir nada y corregir tú sus errores.", "consequence": "Te sobrecargas y el problema sigue.", "relational_cost": "Nulo ahora; frustración luego."}
+  },
+  "selected": "B",
+  "justification": "El historial [antes] y la hospitalización [padre] sugieren una causa temporal; la queja [cliente] exige actuar ya, así que acordar ajustes con fechas (B) equilibra rendimiento y retención.",
+  "missing_information": ["Cuánto durará la situación familiar de {P1}."],
+  "competing_explanations": ["El bajón puede deberse también a desmotivación laboral."],
+  "revision_conditions": ["Si tras el plazo acordado no mejora, formalizar un plan de mejora."],
+  "counterfactual": {
+    "replace_evidence": {"padre": "{P1} dijo que está buscando otro trabajo y que aquí ya no aprende nada."},
+    "selected": "B", "changes": "rationale",
+    "justification": "Sin causa temporal y con intención de irse [padre], hablar en privado (B) sigue siendo lo mejor, pero centrado en crecimiento y expectativas claras; un expediente acelera la salida.",
+    "missing_information": ["Qué cambio de rol podría retener a {P1}."],
+    "revision_conditions": ["Si {P1} confirma que se va, planificar el traspaso de sus clientes."]
+  },
+  "provenance": {"kind": "owned-synthetic", "author": "claude-opus-5-5", "review": "pending-human"}
+},
+{
+  "family_id": "f007-rumor-despidos", "domain": "work", "split": "train", "stratum": "workplace",
+  "causal_variables": ["fiabilidad_fuente", "incertidumbre", "coste_accion"],
+  "people": {"P1": "Carmen"}, "renamed": {"P1": "Beatriz"},
+  "objective": "Proteger tu estabilidad laboral sin dañar tu reputación interna.",
+  "horizon": "próximos tres meses",
+  "situation": "{P1} te cuenta que habrá despidos en tu departamento.",
+  "evidence": [
+    ["fuente", "{P1} dice haberlo oído en la cafetería, sin nombres ni fechas."],
+    ["resultados", "La empresa publicó beneficios récord la semana pasada."],
+    ["contratos", "Recursos humanos abrió dos vacantes en tu departamento."]
+  ],
+  "noise": [["lluvia", "Se ha roto un paraguas en la entrada y nadie lo recoge."]],
+  "options": {
+    "A": {"action": "Renunciar y buscar otro empleo de inmediato.", "consequence": "Actúas sobre un rumor no verificado.", "relational_cost": "Medio; sorprende al equipo."},
+    "B": {"action": "Actualizar tu CV con discreción y preguntar a tu jefe por los planes del área.", "consequence": "Te preparas sin depender del rumor.", "relational_cost": "Bajo."},
+    "C": {"action": "Difundir el rumor para que el equipo presione.", "consequence": "Crea alarma sin base.", "relational_cost": "Alto; te asocia al rumor."}
+  },
+  "selected": "B",
+  "justification": "El rumor [fuente] es vago y los beneficios [resultados] y vacantes [contratos] apuntan a expansión; prepararte con discreción y preguntar (B) cubre el riesgo sin actuar sobre algo no verificado.",
+  "missing_information": ["Planes de presupuesto del área para el próximo trimestre."],
+  "competing_explanations": ["Puede haber reestructuración de funciones sin despidos netos."],
+  "revision_conditions": ["Si hay comunicación oficial de reestructuración, activar la búsqueda."],
+  "counterfactual": {
+    "replace_evidence": {"contratos": "Recursos humanos congeló todas las contrataciones y canceló las dos vacantes."},
+    "selected": "B", "changes": "confidence",
+    "justification": "La congelación [contratos] hace el rumor [fuente] más plausible; prepararte y preguntar (B) sigue siendo adecuado, con más urgencia en el CV.",
+    "missing_information": ["Motivo oficial de la congelación."],
+    "revision_conditions": ["Si se confirman despidos en tu área, empezar entrevistas activamente."]
+  },
+  "provenance": {"kind": "owned-synthetic", "author": "claude-opus-5-5", "review": "pending-human"}
+},
+{
+  "family_id": "f008-pedir-aumento", "domain": "work", "split": "train", "stratum": "sales",
+  "causal_variables": ["alternativa_negociacion", "timing", "poder"],
+  "people": {"P1": "Isabel"}, "renamed": {"P1": "Patricia"},
+  "objective": "Conseguir una subida mínima del 10 % este año.",
+  "horizon": "revisión salarial anual",
+  "situation": "Tienes reunión con {P1}, tu directora, para hablar de tu salario.",
+  "evidence": [
+    ["oferta", "Tienes una oferta escrita de otra empresa con un 15 % más."],
+    ["proyecto", "Acabas de cerrar el proyecto más rentable del año."],
+    ["presupuesto", "{P1} comentó que el presupuesto de subidas está ajustado."]
+  ],
+  "noise": [["curso", "Un curso de inglés ofrece matrícula gratuita en noviembre."]],
+  "options": {
+    "A": {"action": "Pedir un 10 % sin mencionar alternativas.", "consequence": "Puede quedarse por debajo de tu valor.", "relational_cost": "Bajo."},
+    "B": {"action": "Anclar en un 15 % apoyándote en el proyecto y mencionar con calma la oferta externa.", "consequence": "Maximiza la subida con argumentos verificables.", "relational_cost": "Medio; firmeza profesional."},
+    "C": {"action": "Amenazar con irte si no igualan la oferta hoy.", "consequence": "Puede funcionar o forzar tu salida.", "relational_cost": "Alto; rompe la confianza."}
+  },
+  "selected": "B",
+  "justification": "La oferta escrita [oferta] es una alternativa real y el proyecto [proyecto] justifica valor; anclar alto (B) deja margen ante el presupuesto ajustado [presupuesto] para llegar al 10 % mínimo.",
+  "missing_information": ["Banda salarial de tu puesto en la empresa."],
+  "competing_explanations": ["El presupuesto ajustado puede ser una táctica para rebajar expectativas."],
+  "revision_conditions": ["Si ofrecen menos del 10 %, valorar seriamente la oferta externa."],
+  "counterfactual": {
+    "replace_evidence": {"oferta": "No tienes ninguna oferta externa y el mercado para tu perfil está saturado."},
+    "selected": "A", "changes": "action",
+    "justification": "Sin alternativa real [oferta] mencionar ofertas sería un farol arriesgado; pedir el 10 % apoyado en el proyecto [proyecto] (A) es la petición creíble.",
+    "missing_information": ["Si la empresa ofrece compensaciones no salariales."],
+    "revision_conditions": ["Si rechazan el 10 %, pedir un calendario escrito de revisión en seis meses."]
+  },
+  "provenance": {"kind": "owned-synthetic", "author": "claude-opus-5-5", "review": "pending-human"}
+},
+{
+  "family_id": "f009-correo-director", "domain": "work", "split": "development", "stratum": "workplace",
+  "causal_variables": ["ambiguedad", "ansiedad", "informacion_faltante"],
+  "people": {"P1": "Alberto"}, "renamed": {"P1": "Gonzalo"},
+  "objective": "Llegar preparado a la conversación con {P1} sin ansiedad innecesaria.",
+  "horizon": "mañana",
+  "situation": "{P1}, el director, te escribe: «¿Hablamos mañana a las 10?».",
+  "evidence": [
+    ["mensaje", "El mensaje de {P1} no indica el tema."],
+    ["calendario", "{P1} ha enviado mensajes idénticos a otros tres compañeros hoy."],
+    ["proyecto", "Tu proyecto va según lo previsto."]
+  ],
+  "noise": [["ascensor", "El ascensor del tercer piso estará en mantenimiento."]],
+  "options": {
+    "A": {"action": "Confirmar la hora y preguntar si debes preparar algo.", "consequence": "Obtienes contexto y llegas preparado.", "relational_cost": "Nulo; es profesional."},
+    "B": {"action": "Suponer que te despiden y preparar tu salida.", "consequence": "Actúas sobre una suposición sin base.", "relational_cost": "Bajo, pero gasto emocional alto."},
+    "C": {"action": "Pedirle que te adelante ahora el tema por escrito con insistencia.", "consequence": "Puede incomodar sin necesidad.", "relational_cost": "Medio; parece ansiedad."}
+  },
+  "selected": "A",
+  "justification": "El mensaje [mensaje] es ambiguo, pero el envío a otros compañeros [calendario] y tu proyecto en marcha [proyecto] sugieren una ronda rutinaria; confirmar y preguntar qué preparar (A) da contexto sin dramatizar.",
+  "missing_information": ["Tema de la reunión."],
+  "competing_explanations": ["Puede ser una reorganización que afecte a varios equipos."],
+  "revision_conditions": ["Si {P1} indica que es confidencial, preparar preguntas sobre tu rol."],
+  "counterfactual": {
+    "replace_evidence": {"calendario": "Recursos humanos estará presente en la reunión, según la invitación."},
+    "selected": "A", "changes": "confidence",
+    "justification": "La presencia de recursos humanos [calendario] eleva la probabilidad de un tema formal; confirmar y preguntar qué preparar (A) sigue siendo correcto, llevando tus logros documentados.",
+    "missing_information": ["Si la reunión es individual o colectiva."],
+    "revision_conditions": ["Si se trata de tu puesto, pedir las condiciones por escrito antes de aceptar nada."]
+  },
+  "provenance": {"kind": "owned-synthetic", "author": "claude-opus-5-5", "review": "pending-human"}
+},
+{
+  "family_id": "f010-anclaje-salario", "domain": "work", "split": "train", "stratum": "sales",
+  "causal_variables": ["anclaje", "informacion_asimetrica", "alternativa_negociacion"],
+  "people": {"P1": "Mónica"}, "renamed": {"P1": "Raquel"},
+  "objective": "Cerrar la contratación de un desarrollador sénior por debajo de 60.000 €.",
+  "horizon": "esta semana",
+  "situation": "{P1}, la candidata, te pregunta cuál es el rango salarial del puesto.",
+  "evidence": [
+    ["mercado", "El rango de mercado para el perfil es de 52.000 a 65.000 €."],
+    ["otras", "{P1} mencionó que está en otros dos procesos avanzados."],
+    ["encaje", "El equipo técnico la valoró como la mejor candidata del proceso."]
+  ],
+  "noise": [["oficina", "Han cambiado las plantas del recibidor de la oficina."]],
+  "options": {
+    "A": {"action": "Dar el máximo de 65.000 € para asegurarla.", "consequence": "Superas tu presupuesto sin necesidad.", "relational_cost": "Bajo."},
+    "B": {"action": "Proponer 54.000-58.000 € destacando proyecto y crecimiento, con margen para negociar.", "consequence": "Ancla dentro de tu objetivo con margen.", "relational_cost": "Bajo si es honesto."},
+    "C": {"action": "Negarte a dar cifras hasta la oferta final.", "consequence": "Puede perderla frente a procesos más claros.", "relational_cost": "Medio; parece opaco."}
+  },
+  "selected": "B",
+  "justification": "Con un mercado de hasta 65.000 € [mercado] y otros procesos [otras], un rango concreto (B) mantiene el interés y ancla por debajo del límite; su valoración [encaje] justifica margen si negocia.",
+  "missing_information": ["Expectativa salarial de {P1}."],
+  "competing_explanations": ["Los otros procesos pueden ser menos avanzados de lo que dice."],
+  "revision_conditions": ["Si {P1} presenta una oferta escrita superior, revisar el presupuesto con dirección."],
+  "counterfactual": {
+    "replace_evidence": {"otras": "{P1} tiene una oferta escrita de 62.000 € que vence mañana."},
+    "selected": "A", "changes": "action",
+    "justification": "Con una oferta escrita de 62.000 € que vence mañana [otras] y siendo la mejor candidata [encaje], ofrecer por encima (A) es lo único que la retiene; el objetivo de 60.000 € ya no es alcanzable.",
+    "missing_information": ["Si dirección aprueba superar el límite."],
+    "revision_conditions": ["Si dirección no lo aprueba, pasar a la segunda candidata."]
+  },
+  "provenance": {"kind": "owned-synthetic", "author": "claude-opus-5-5", "review": "pending-human"}
+},
+{
+  "family_id": "f011-exclusiva-cliente", "domain": "work", "split": "train", "stratum": "sales",
+  "causal_variables": ["dependencia", "poder", "horizonte"],
+  "people": {"P1": "Fernando"}, "renamed": {"P1": "Ignacio"},
+  "objective": "Crecer de forma sostenible sin depender de un único cliente.",
+  "horizon": "dos años",
+  "situation": "{P1}, tu mayor cliente, exige exclusividad a cambio de duplicar pedidos.",
+  "evidence": [
+    ["peso", "{P1} ya supone el 45 % de tu facturación."],
+    ["contrato", "El contrato propuesto puede rescindirse con un mes de aviso por su parte."],
+    ["otros", "Dos clientes medianos están negociando ampliar pedidos contigo."]
+  ],
+  "noise": [["logo", "Tu diseñadora propone renovar el logo."]],
+  "options": {
+    "A": {"action": "Aceptar la exclusividad.", "consequence": "Duplicas ingresos con dependencia extrema.", "relational_cost": "Bajo con {P1}; cierras puertas."},
+    "B": {"action": "Contraproponer más volumen sin exclusividad o exclusividad con penalización por rescisión.", "consequence": "Reduce el riesgo de dependencia.", "relational_cost": "Medio; negociación dura."},
+    "C": {"action": "Rechazar y reducir pedidos de {P1}.", "consequence": "Pierdes ingresos hoy.", "relational_cost": "Alto con {P1}."}
+  },
+  "selected": "B",
+  "justification": "Con un 45 % de dependencia [peso] y rescisión a un mes [contrato] la exclusividad es frágil; los otros clientes [otros] dan alternativa para exigir protección (B).",
+  "missing_information": ["Cuánto valora {P1} tu servicio frente a alternativas."],
+  "competing_explanations": ["{P1} puede necesitar exclusividad por un motivo competitivo legítimo."],
+  "revision_conditions": ["Si {P1} acepta penalización de 12 meses, aceptar la exclusividad."],
+  "counterfactual": {
+    "replace_evidence": {"contrato": "El contrato propuesto es a cinco años con penalización fuerte por rescisión anticipada."},
+    "selected": "A", "changes": "action",
+    "justification": "Un contrato de cinco años con penalización [contrato] neutraliza gran parte del riesgo de dependencia [peso]; aceptar (A) asegura crecimiento estable.",
+    "missing_information": ["Solvencia financiera de {P1}."],
+    "revision_conditions": ["Si la solvencia de {P1} es dudosa, exigir garantías antes de firmar."]
+  },
+  "provenance": {"kind": "owned-synthetic", "author": "claude-opus-5-5", "review": "pending-human"}
+},
+{
+  "family_id": "f012-proveedor-tarde", "domain": "work", "split": "train", "stratum": "sales",
+  "causal_variables": ["dependencia", "historial", "coste_cambio"],
+  "people": {"P1": "Luis"}, "renamed": {"P1": "Marcos"},
+  "objective": "Recibir el material a tiempo para tu lanzamiento del día 20.",
+  "horizon": "dos semanas",
+  "situation": "{P1}, tu proveedor, avisa de un retraso de una semana.",
+  "evidence": [
+    ["unico", "{P1} es el único proveedor homologado para esa pieza."],
+    ["historial", "En cinco años es el primer retraso de {P1}."],
+    ["penal", "El contrato prevé penalización por retraso."]
+  ],
+  "noise": [["navidad", "Un compañero ya pregunta por la cena de Navidad."]],
+  "options": {
+    "A": {"action": "Aplicar la penalización de inmediato.", "consequence": "Recuperas dinero, no tiempo.", "relational_cost": "Alto con tu único proveedor."},
+    "B": {"action": "Pedir una entrega parcial urgente y reservar la penalización como palanca.", "consequence": "Puede salvar el lanzamiento.", "relational_cost": "Bajo; colaborativo pero firme."},
+    "C": {"action": "Buscar otro proveedor desde cero.", "consequence": "La homologación tarda más que el retraso.", "relational_cost": "Alto con {P1}."}
+  },
+  "selected": "B",
+  "justification": "Al ser proveedor único [unico] con buen historial [historial], conviene cooperar: entrega parcial urgente (B) apunta al objetivo real, guardando la penalización [penal] como palanca.",
+  "missing_information": ["Causa del retraso y si es parcialmente evitable."],
+  "competing_explanations": ["El retraso puede venir de un subproveedor de {P1}."],
+  "revision_conditions": ["Si no hay entrega parcial posible, retrasar el lanzamiento y aplicar la penalización."],
+  "counterfactual": {
+    "replace_evidence": {"unico": "Hay otro proveedor homologado que puede entregar en cinco días."},
+    "selected": "C", "changes": "action",
+    "justification": "Con un proveedor alternativo homologado que entrega en cinco días [unico], cambiar (C) asegura el lanzamiento; la relación con {P1} importa menos que la fecha.",
+    "missing_information": ["Precio y fiabilidad del proveedor alternativo."],
+    "revision_conditions": ["Si el alternativo no confirma por escrito, volver a la entrega parcial con {P1}."]
+  },
+  "provenance": {"kind": "owned-synthetic", "author": "claude-opus-5-5", "review": "pending-human"}
+},
+{
+  "family_id": "f013-lo-tengo-que-pensar", "domain": "work", "split": "development", "stratum": "sales",
+  "causal_variables": ["objecion_oculta", "presion", "informacion_faltante"],
+  "people": {"P1": "Rosa"}, "renamed": {"P1": "Silvia"},
+  "objective": "Cerrar la venta del software con {P1} este mes sin perder su confianza.",
+  "horizon": "este mes",
+  "situation": "Tras la demo, {P1} dice: «Lo tengo que pensar».",
+  "evidence": [
+    ["interes", "{P1} pidió dos veces el precio de la licencia anual."],
+    ["socio", "{P1} mencionó que su socio controla el presupuesto."],
+    ["gesto", "{P1} miró el reloj al final de la demo."]
+  ],
+  "noise": [["cafe", "En la sala había un café recién hecho."]],
+  "options": {
+    "A": {"action": "Insistir en cerrar hoy con un descuento.", "consequence": "Puede cerrar o espantar.", "relational_cost": "Medio; presión."},
+    "B": {"action": "Preguntar qué necesita decidir y proponer una demo breve con su socio.", "consequence": "Saca la objeción real y al decisor.", "relational_cost": "Bajo."},
+    "C": {"action": "Esperar a que {P1} llame.", "consequence": "La venta puede enfriarse.", "relational_cost": "Nulo."}
+  },
+  "selected": "B",
+  "justification": "El interés en el precio [interes] es real y el decisor es el socio [socio]; preguntar y sumar al socio (B) ataca la objeción probable. Mirar el reloj [gesto] no permite inferir desinterés.",
+  "missing_information": ["Criterios de decisión del socio."],
+  "competing_explanations": ["«Lo tengo que pensar» puede ocultar una objeción de precio."],
+  "revision_conditions": ["Si el socio rechaza el presupuesto, ofrecer un plan mensual."],
+  "counterfactual": {
+    "replace_evidence": {"socio": "{P1} es la única responsable de presupuesto y su trimestre fiscal cierra hoy."},
+    "selected": "A", "changes": "action",
+    "justification": "Si {P1} decide sola y el presupuesto caduca hoy [socio], un incentivo para cerrar hoy (A) alinea su interés con el tuyo; esperar haría perder el presupuesto.",
+    "missing_information": ["Si el descuento queda dentro de tu margen."],
+    "revision_conditions": ["Si duda aun con el incentivo, agendar seguimiento para el próximo trimestre."]
+  },
+  "provenance": {"kind": "owned-synthetic", "author": "claude-opus-5-5", "review": "pending-human"}
+},
+{
+  "family_id": "f014-alquiler-escasez", "domain": "personal", "split": "train", "stratum": "sales",
+  "causal_variables": ["escasez_real", "alternativa_negociacion", "urgencia"],
+  "people": {"P1": "Gloria"}, "renamed": {"P1": "Amparo"},
+  "objective": "Alquilar un piso cerca del trabajo por no más de 900 € al mes.",
+  "horizon": "este mes",
+  "situation": "{P1}, la propietaria, pide 950 € por un piso que te encaja.",
+  "evidence": [
+    ["visitas", "{P1} dice que hay otras cinco personas interesadas."],
+    ["anuncio", "El anuncio lleva publicado tres meses."],
+    ["solvencia", "Puedes aportar nómina fija y seis meses de fianza."]
+  ],
+  "noise": [["vecino", "Un vecino toca la guitarra los sábados por la tarde."]],
+  "options": {
+    "A": {"action": "Aceptar 950 € por miedo a perderlo.", "consequence": "Superas tu presupuesto.", "relational_cost": "Nulo."},
+    "B": {"action": "Ofrecer 880 € destacando tu solvencia y fecha de entrada inmediata.", "consequence": "Puedes cerrar dentro de presupuesto.", "relational_cost": "Bajo."},
+    "C": {"action": "Descartar el piso.", "consequence": "Pierdes una opción que encaja.", "relational_cost": "Nulo."}
+  },
+  "selected": "B",
+  "justification": "Tres meses publicado [anuncio] contradice la alta demanda declarada [visitas]; tu solvencia [solvencia] es una ventaja real para ofrecer por debajo (B).",
+  "missing_information": ["Si hay ofertas firmes de otros interesados."],
+  "competing_explanations": ["Los interesados pueden existir pero no tener garantías."],
+  "revision_conditions": ["Si {P1} rechaza, subir hasta 900 € como máximo."],
+  "counterfactual": {
+    "replace_evidence": {"anuncio": "El anuncio se publicó ayer y ya hay una oferta firme por 950 €."},
+    "selected": "C", "changes": "action",
+    "justification": "Con una oferta firme por 950 € [anuncio] ofrecer menos no competirá y aceptar supera tu límite; descartar (C) respeta tu presupuesto.",
+    "missing_information": ["Si hay pisos similares por 900 € en la zona."],
+    "revision_conditions": ["Si la oferta firme cae, ofrecer 900 € con tu solvencia."]
+  },
+  "provenance": {"kind": "owned-synthetic", "author": "claude-opus-5-5", "review": "pending-human"}
+},
+{
+  "family_id": "f015-escasez-propia", "domain": "work", "split": "train", "stratum": "persuasion",
+  "causal_variables": ["veracidad_escasez", "reputacion", "relacion_recurrente"],
+  "people": {"P1": "Esteban"}, "renamed": {"P1": "Víctor"},
+  "objective": "Vender las plazas restantes de tu taller y mantener clientes recurrentes.",
+  "horizon": "dos semanas",
+  "situation": "Quedan plazas en tu taller y {P1}, cliente habitual, duda.",
+  "evidence": [
+    ["plazas", "Quedan 3 de 20 plazas y el taller es en diez días."],
+    ["repite", "{P1} ha asistido a cuatro talleres tuyos."],
+    ["duda", "{P1} dice que no sabe si tendrá tiempo."]
+  ],
+  "noise": [["foto", "Un asistente subió fotos del último taller."]],
+  "options": {
+    "A": {"action": "Decirle que quedan 3 plazas y ofrecer reservar una 48 horas sin compromiso.", "consequence": "Escasez real comunicada y facilidad de decisión.", "relational_cost": "Bajo; honesto."},
+    "B": {"action": "Decirle que sólo queda una plaza para presionar.", "consequence": "Puede cerrar hoy.", "relational_cost": "Alto si descubre la exageración."},
+    "C": {"action": "No mencionar plazas y esperar.", "consequence": "Puede quedarse sin plaza o no decidirse.", "relational_cost": "Nulo."}
+  },
+  "selected": "A",
+  "justification": "La escasez es real [plazas] y {P1} es recurrente [repite]: comunicarla y reservar sin compromiso (A) resuelve la duda de tiempo [duda] sin arriesgar la relación con una exageración verificable.",
+  "missing_information": ["Qué fechas le encajan a {P1}."],
+  "competing_explanations": ["La duda puede ser de precio, no de tiempo."],
+  "revision_conditions": ["Si la duda es de precio, ofrecer pago fraccionado."],
+  "counterfactual": {
+    "replace_evidence": {"repite": "{P1} es un desconocido que llegó por un anuncio y no repetirá."},
+    "selected": "A", "changes": "confidence",
+    "justification": "Sin relación previa [repite] el coste reputacional de exagerar baja, pero la escasez real [plazas] ya es un argumento suficiente; (A) sigue siendo efectivo y sin riesgo.",
+    "missing_information": ["Si {P1} compara con otros talleres."],
+    "revision_conditions": ["Si quedan plazas a tres días, ofrecer un incentivo de última hora."]
+  },
+  "provenance": {"kind": "owned-synthetic", "author": "claude-opus-5-5", "review": "pending-human"}
+},
+{
+  "family_id": "f016-amigo-impuntual", "domain": "personal", "split": "train", "stratum": "friendship",
+  "causal_variables": ["peticion_explicita", "patron", "objetivo_usuario"],
+  "people": {"P1": "Raúl"}, "renamed": {"P1": "Álvaro"},
+  "objective": "Que tus quedadas con {P1} sean fiables sin perder la amistad.",
+  "horizon": "próximos meses",
+  "situation": "{P1} llegó tarde a las últimas cuatro quedadas.",
+  "evidence": [
+    ["pide", "{P1} te pidió ayer que le digas con sinceridad qué piensas de su impuntualidad."],
+    ["patron", "Las cuatro veces avisó con menos de diez minutos."],
+    ["turno", "{P1} cambió a turnos rotativos hace dos meses."]
+  ],
+  "noise": [["serie", "Estáis viendo la misma serie y vais por el capítulo cinco."]],
+  "options": {
+    "A": {"action": "Decirle que no pasa nada y que eres flexible.", "consequence": "No resuelve el patrón que te pidió valorar.", "relational_cost": "Bajo hoy; desgaste acumulado."},
+    "B": {"action": "Darle tu opinión concreta y proponer quedar según su turno con aviso de una hora.", "consequence": "Responde a su petición y ajusta el plan a su causa probable.", "relational_cost": "Bajo; sinceridad pedida."},
+    "C": {"action": "Dejar de quedar con {P1}.", "consequence": "Pierdes la amistad.", "relational_cost": "Alto."}
+  },
+  "selected": "B",
+  "justification": "{P1} pidió sinceridad [pide]; sólo elogiar o quitar importancia (A) ignora su petición. El patrón [patron] y los turnos [turno] sugieren una causa práctica que un plan ajustado (B) puede resolver.",
+  "missing_information": ["Calendario de turnos de {P1}."],
+  "competing_explanations": ["Puede haber otra causa, como cansancio o desorganización."],
+  "revision_conditions": ["Si con el ajuste sigue llegando tarde, quedar en sitios donde la espera no importe."],
+  "counterfactual": {
+    "replace_evidence": {"pide": "{P1} no ha pedido opinión y está pasando un duelo reciente."},
+    "selected": "A", "changes": "action",
+    "justification": "Sin petición de opinión y en duelo [pide], la crítica ahora tiene coste alto; mostrar flexibilidad (A) protege la amistad, y el patrón [patron] puede tratarse más adelante.",
+    "missing_information": ["Cuándo estará {P1} en mejor momento."],
+    "revision_conditions": ["Pasado el duelo, si el patrón sigue, proponer el ajuste por turnos."]
+  },
+  "provenance": {"kind": "owned-synthetic", "author": "claude-opus-5-5", "review": "pending-human"}
+},
+{
+  "family_id": "f017-prestamo-familiar", "domain": "personal", "split": "train", "stratum": "family",
+  "causal_variables": ["historial_devolucion", "capacidad", "relacion_familiar"],
+  "people": {"P1": "Jorge"}, "renamed": {"P1": "Daniel"},
+  "objective": "Ayudar a tu primo {P1} sin comprometer tu fondo de emergencia.",
+  "horizon": "seis meses",
+  "situation": "{P1} te pide 3.000 € para pagar una deuda.",
+  "evidence": [
+    ["anterior", "{P1} no devolvió 500 € que le prestaste hace un año."],
+    ["fondo", "Tu fondo de emergencia es de 4.000 €."],
+    ["empleo", "{P1} empezó un trabajo estable hace un mes."]
+  ],
+  "noise": [["boda", "Tu tía comparte fotos antiguas de una boda familiar."]],
+  "options": {
+    "A": {"action": "Prestar los 3.000 € sin condiciones.", "consequence": "Tu fondo queda casi vacío con riesgo de impago.", "relational_cost": "Bajo hoy."},
+    "B": {"action": "Ofrecer una cantidad que puedas perder y un plan de pagos por escrito.", "consequence": "Ayudas limitando tu riesgo.", "relational_cost": "Medio; puede sentir desconfianza."},
+    "C": {"action": "Negarte sin explicación.", "consequence": "Proteges tu fondo.", "relational_cost": "Alto con {P1}."}
+  },
+  "selected": "B",
+  "justification": "El impago previo [anterior] y tu fondo limitado [fondo] desaconsejan prestar todo; el empleo nuevo [empleo] hace razonable una ayuda parcial con plan escrito (B).",
+  "missing_information": ["Consecuencias para {P1} si no paga la deuda."],
+  "competing_explanations": ["El impago anterior pudo deberse al desempleo de entonces."],
+  "revision_conditions": ["Si {P1} cumple los primeros pagos, valorar ampliar la ayuda."],
+  "counterfactual": {
+    "replace_evidence": {"anterior": "{P1} te devolvió puntualmente dos préstamos anteriores."},
+    "selected": "B", "changes": "confidence",
+    "justification": "Con buen historial [anterior] el riesgo de impago baja, pero tu fondo [fondo] sigue siendo limitado; ayudar con plan escrito (B) sigue siendo prudente, quizá por más cantidad.",
+    "missing_information": ["Plazo en que {P1} podría devolverlo."],
+    "revision_conditions": ["Si tu fondo crece, prestar la cantidad completa."]
+  },
+  "provenance": {"kind": "owned-synthetic", "author": "claude-opus-5-5", "review": "pending-human"}
+},
+{
+  "family_id": "f018-secreto-hermana", "domain": "personal", "split": "train", "stratum": "family",
+  "causal_variables": ["confidencialidad", "riesgo_tercero", "consentimiento"],
+  "people": {"P1": "Lucía", "P2": "Pilar"}, "renamed": {"P1": "Clara", "P2": "Teresa"},
+  "objective": "Mantener la confianza de tu hermana {P1} y proteger a tu madre {P2}.",
+  "horizon": "este mes",
+  "situation": "{P1} te pide no contar a {P2} que ha dejado la carrera.",
+  "evidence": [
+    ["pago", "{P2} sigue pagando la matrícula de {P1} cada mes."],
+    ["plan", "{P1} dice que se lo contará cuando encuentre trabajo."],
+    ["plazo", "El siguiente pago de matrícula es dentro de tres semanas."]
+  ],
+  "noise": [["perro", "El perro de la vecina ladra por las mañanas."]],
+  "options": {
+    "A": {"action": "Contárselo hoy a {P2} sin avisar a {P1}.", "consequence": "{P2} deja de pagar; {P1} se siente traicionada.", "relational_cost": "Alto con {P1}."},
+    "B": {"action": "Animar a {P1} a contarlo antes del próximo pago y ofrecer acompañarla.", "consequence": "Evita el pago inútil respetando su protagonismo.", "relational_cost": "Bajo."},
+    "C": {"action": "Guardar el secreto indefinidamente.", "consequence": "{P2} sigue pagando por nada.", "relational_cost": "Alto con {P2} si se entera."}
+  },
+  "selected": "B",
+  "justification": "Los pagos [pago] dañan a {P2} y el próximo es en tres semanas [plazo]; pedir a {P1} que lo cuente antes con tu apoyo (B) protege a ambas mejor que esperar a su plan abierto [plan].",
+  "missing_information": ["Si {P1} tiene miedo a una reacción concreta de {P2}."],
+  "competing_explanations": ["{P1} puede estar pensando en volver a la carrera."],
+  "revision_conditions": ["Si {P1} no lo cuenta antes del pago, avisarle de que lo harás tú."],
+  "counterfactual": {
+    "replace_evidence": {"pago": "{P1} paga ella misma la matrícula con sus ahorros."},
+    "selected": "C", "changes": "action",
+    "justification": "Si {P2} no paga nada [pago], el secreto no le causa un daño material; respetar la decisión de {P1} (C) preserva la confianza.",
+    "missing_information": ["Si {P2} tomará decisiones basadas en esa creencia."],
+    "revision_conditions": ["Si {P2} va a gastar o decidir algo por creer que estudia, animar a {P1} a contarlo."]
+  },
+  "provenance": {"kind": "owned-synthetic", "author": "claude-opus-5-5", "review": "pending-human"}
+},
+{
+  "family_id": "f019-amigo-cancela", "domain": "personal", "split": "development", "stratum": "friendship",
+  "causal_variables": ["cambio_conducta", "señales_bienestar", "incertidumbre"],
+  "people": {"P1": "Andrea"}, "renamed": {"P1": "Sara"},
+  "objective": "Mantener la amistad con {P1} y saber si necesita apoyo.",
+  "horizon": "próximas semanas",
+  "situation": "{P1} ha cancelado los tres últimos planes en el último momento.",
+  "evidence": [
+    ["antes", "Antes {P1} era quien organizaba los planes."],
+    ["redes", "{P1} dejó de publicar en redes hace un mes."],
+    ["mensaje", "En su última cancelación escribió «perdona, no estoy para nada»."]
+  ],
+  "noise": [["concierto", "Han anunciado un concierto de un grupo que os gustaba de adolescentes."]],
+  "options": {
+    "A": {"action": "Dejar de invitarle para no molestar.", "consequence": "Puede aislarse más.", "relational_cost": "Medio; distancia."},
+    "B": {"action": "Escribirle sin reproche, decir que le echas de menos y proponer algo breve y fácil.", "consequence": "Abre la puerta sin presión.", "relational_cost": "Bajo."},
+    "C": {"action": "Reprocharle que siempre cancela.", "consequence": "Puede cerrarse aún más.", "relational_cost": "Alto."}
+  },
+  "selected": "B",
+  "justification": "El cambio respecto a antes [antes], el silencio en redes [redes] y «no estoy para nada» [mensaje] sugieren malestar; un contacto cálido y de baja exigencia (B) apoya sin presionar ni diagnosticar.",
+  "missing_information": ["Si {P1} atraviesa algún problema concreto."],
+  "competing_explanations": ["Puede estar saturado de trabajo o con una relación nueva."],
+  "revision_conditions": ["Si {P1} expresa algo grave, sugerir con tacto apoyo profesional."],
+  "counterfactual": {
+    "replace_evidence": {"mensaje": "En su última cancelación escribió «perdona, estoy a tope con la mudanza, ¡la semana que viene sin falta!»."},
+    "selected": "B", "changes": "rationale",
+    "justification": "La mudanza [mensaje] explica las cancelaciones mejor que un malestar; proponer algo breve (B) sigue siendo adecuado, quizá ofreciendo ayuda con la mudanza.",
+    "missing_information": ["Cuándo termina la mudanza de {P1}."],
+    "revision_conditions": ["Si tras la mudanza sigue cancelando, preguntar con calma si pasa algo."]
+  },
+  "provenance": {"kind": "owned-synthetic", "author": "claude-opus-5-5", "review": "pending-human"}
+},
+{
+  "family_id": "f020-viaje-grupo", "domain": "personal", "split": "train", "stratum": "groups",
+  "causal_variables": ["presupuesto_desigual", "presion_grupo", "objetivo_usuario"],
+  "people": {"P1": "Marina", "P2": "Iván"}, "renamed": {"P1": "Noelia", "P2": "Adrián"},
+  "objective": "Que el viaje de amigos salga adelante con todos y sin tensiones de dinero.",
+  "horizon": "dos meses",
+  "situation": "Organizas un viaje; {P1} propone un hotel caro y {P2} guarda silencio.",
+  "evidence": [
+    ["votos", "Cuatro de seis votaron por el hotel caro en la encuesta."],
+    ["paro", "{P2} te contó en privado que está en paro."],
+    ["silencio", "{P2} no votó ni comentó en el grupo."]
+  ],
+  "noise": [["meme", "Alguien envió un meme sobre maletas que no cierran."]],
+  "options": {
+    "A": {"action": "Reservar el hotel caro porque ganó la votación.", "consequence": "{P2} puede quedarse fuera.", "relational_cost": "Medio con {P2}."},
+    "B": {"action": "Proponer dos opciones de alojamiento por precio y un presupuesto común máximo, sin exponer a {P2}.", "consequence": "Incluye a todos sin revelar lo privado.", "relational_cost": "Bajo."},
+    "C": {"action": "Contar al grupo que {P2} está en paro para justificar el cambio.", "consequence": "Resuelve el precio exponiendo a {P2}.", "relational_cost": "Alto con {P2}."}
+  },
+  "selected": "B",
+  "justification": "La votación [votos] excluye en la práctica a {P2}, cuya situación [paro] es confidencial y explica su silencio [silencio]; replantear por presupuesto (B) incluye a todos sin exponerle.",
+  "missing_information": ["Cuánto puede gastar {P2}."],
+  "competing_explanations": ["{P2} puede no querer ir por otros motivos."],
+  "revision_conditions": ["Si {P2} dice que no viene de todos modos, mantener la opción votada."],
+  "counterfactual": {
+    "replace_evidence": {"paro": "{P2} acaba de recibir un ascenso y dijo que le da igual el precio."},
+    "selected": "A", "changes": "action",
+    "justification": "Sin restricción económica de {P2} [paro] no hay nadie excluido; respetar la votación mayoritaria [votos] (A) es lo más sencillo.",
+    "missing_information": ["Si alguien más tiene límites de presupuesto."],
+    "revision_conditions": ["Si alguien expresa límite de dinero, proponer opciones por precio."]
+  },
+  "provenance": {"kind": "owned-synthetic", "author": "claude-opus-5-5", "review": "pending-human"}
+}
+]

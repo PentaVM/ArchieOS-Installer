@@ -115,6 +115,7 @@ pub struct Answered {
 pub struct Routed {
     registry: ModelRegistry,
     router: Router,
+    min_quality_tier: u8,
 }
 
 impl Routed {
@@ -122,7 +123,14 @@ impl Routed {
         Self {
             registry,
             router: Router::new(Weights::default()),
+            min_quality_tier: 0,
         }
+    }
+
+    /// Operator-configured quality floor, using the existing router's admission.
+    pub fn requiring_quality(mut self, tier: u8) -> Self {
+        self.min_quality_tier = tier.min(100);
+        self
     }
 
     /// From the node's model manifests, e.g. `/etc/archie/models`.
@@ -142,7 +150,8 @@ impl Routed {
             ((question.system.len() + question.user.len()) / 3) as u32,
             question.max_tokens,
         )
-        .requiring(question.role.capability());
+        .requiring(question.role.capability())
+        .min_quality(self.min_quality_tier);
         if question.image.is_some() {
             request = request.requiring(ModelRole::VisionModel.capability());
         }

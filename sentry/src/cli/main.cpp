@@ -21,6 +21,7 @@
 
 #include "sentry/ingest/chat_export.hpp"
 #include "sentry/store/graph_store.hpp"
+#include "sentry/store/wanda_projection.hpp"
 
 #include <algorithm>
 #include <array>
@@ -28,6 +29,7 @@
 #include <fstream>
 #include <cstdlib>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -59,6 +61,7 @@ void print_usage() {
         "archie-sentry — the person graph\n"
         "\n"
         "  show [--all]                 the graph as a tree rooted at the owner\n"
+        "  export-json [--all]          bounded Wanda graph projection (schema 1)\n"
         "  person <id> [--all]          one profile\n"
         "  init <owner-id> [label]      create the graph, rooted at you\n"
         "  add-person <id> <kind> [label]\n"
@@ -133,7 +136,7 @@ constexpr std::array kRelationKinds{
     RelationKind::Colleague, RelationKind::Employer,   RelationKind::Coauthor,
     RelationKind::PublishedBy, RelationKind::Represents, RelationKind::Household,
     RelationKind::Family,    RelationKind::Friend,     RelationKind::EmergencyContact,
-    RelationKind::AuthorizedGuest};
+    RelationKind::AuthorizedGuest, RelationKind::Partner, RelationKind::Manager};
 constexpr std::array kEdgeBases{EdgeBasis::OwnerDeclared, EdgeBasis::SubjectDeclared,
                                 EdgeBasis::PublicRecord, EdgeBasis::ModelHypothesis,
                                 EdgeBasis::CoPresenceInference};
@@ -272,9 +275,37 @@ int main(int argc, char** argv) {
     const GraphStore store{graph_path()};
     const std::string& command = args[0];
 
+    // First creation participates in the same OS-owned transaction as every update.
+    // Directory creation is idempotent; checking for an existing graph happens ONLY
+    // after locking, so two first-run processes cannot overwrite each other's owner.
+    if (command == "init" && !store.path().parent_path().empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(store.path().parent_path(), ec);
+        if (ec) { return fail("graph directory could not be created", kStoreProblem); }
+    }
+    // Writers hold the transaction across load -> edit -> save. Readers do not take it:
+    // every save is an atomic rename, so a reader sees one whole graph or the next, and
+    // a reader with read-only access to the graph directory (the Wanda service) must not
+    // need to create or lock anything there, nor queue behind a writer.
+    static constexpr std::array<std::string_view, 6> kReadOnly{
+        "show", "check", "person", "mutual", "path", "export-json"};
+    std::optional<GraphTransaction> transaction;
+    if (std::ranges::find(kReadOnly, command) == kReadOnly.end()) {
+        auto acquired = GraphTransaction::acquire(store.path());
+        if (!acquired) {
+            return fail(describe(acquired.error()), kStoreProblem);
+        }
+        transaction.emplace(std::move(*acquired));
+    }
+
     if (command == "init") {
         if (args.size() < 2) {
             return fail("init needs the owner's identifier", kUsage);
+        }
+        std::error_code ec;
+        const bool exists = std::filesystem::exists(store.path(), ec);
+        if (ec || exists) {
+            return fail("init requires a new graph; the existing graph is untouched", kStoreProblem);
         }
         PersonGraph graph;
         graph.owner_id = args[1];
@@ -284,8 +315,6 @@ int main(int argc, char** argv) {
         owner.subject.display_label = args.size() > 2 ? args[2] : args[1];
         graph.profiles.push_back(std::move(owner));
 
-        std::error_code ec;
-        std::filesystem::create_directories(store.path().parent_path(), ec);
         if (!save_or_report(store, graph)) {
             return kStoreProblem;
         }
@@ -297,6 +326,18 @@ int main(int argc, char** argv) {
     auto graph = load_or_report(store);
     if (!graph) {
         return kStoreProblem;
+    }
+
+    if (command == "export-json") {
+        if (args.size() != 1) { return fail("export-json accepts only --all", kUsage); }
+        const auto json = project_wanda_json(*graph, reveal);
+        if (!json) { return fail(describe(json.error()), kStoreProblem); }
+        // Validate/construct the complete bounded document before writing stdout.
+        if (std::fwrite(json->data(), 1, json->size(), stdout) != json->size() ||
+            std::fputc('\n', stdout) == EOF || std::fflush(stdout) != 0) {
+            return fail("graph projection could not be written", kStoreProblem);
+        }
+        return kOk;
     }
 
     if (command == "show") {

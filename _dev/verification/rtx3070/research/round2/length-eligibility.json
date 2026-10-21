@@ -1,0 +1,90 @@
+{
+  "source_sha256": "98c9929a3b8836bd25b422d499f9648933c5577084cac673f859e5ffd5ae5461",
+  "tokenizer": "pinned native vocab-only CPU",
+  "seed": 17,
+  "selection": "first two sorted work families whose complete four variants all fit512; no model outputs",
+  "limit": 512,
+  "ledger": [
+    {
+      "family_id": "r2-bono-metrica",
+      "lengths": {
+        "clean": 586,
+        "noise": 645,
+        "cosmetic": 586,
+        "counterfactual": 576
+      },
+      "eligible": false
+    },
+    {
+      "family_id": "r2-cabina-interprete",
+      "lengths": {
+        "clean": 519,
+        "noise": 571,
+        "cosmetic": 520,
+        "counterfactual": 516
+      },
+      "eligible": false
+    },
+    {
+      "family_id": "r2-errata-audiencia",
+      "lengths": {
+        "clean": 547,
+        "noise": 595,
+        "cosmetic": 547,
+        "counterfactual": 541
+      },
+      "eligible": false
+    },
+    {
+      "family_id": "r2-garantia-traduccion",
+      "lengths": {
+        "clean": 572,
+        "noise": 620,
+        "cosmetic": 574,
+        "counterfactual": 571
+      },
+      "eligible": false
+    },
+    {
+      "family_id": "r2-licencia-repetida",
+      "lengths": {
+        "clean": 533,
+        "noise": 583,
+        "cosmetic": 533,
+        "counterfactual": 518
+      },
+      "eligible": false
+    },
+    {
+      "family_id": "r2-mandato-feria",
+      "lengths": {
+        "clean": 493,
+        "noise": 545,
+        "cosmetic": 496,
+        "counterfactual": 494
+      },
+      "eligible": false
+    },
+    {
+      "family_id": "r2-quorum-archivo",
+      "lengths": {
+        "clean": 517,
+        "noise": 567,
+        "cosmetic": 517,
+        "counterfactual": 518
+      },
+      "eligible": false
+    },
+    {
+      "family_id": "r2-testigos-parada",
+      "lengths": {
+        "clean": 574,
+        "noise": 630,
+        "cosmetic": 575,
+        "counterfactual": 579
+      },
+      "eligible": false
+    }
+  ],
+  "selected": []
+}

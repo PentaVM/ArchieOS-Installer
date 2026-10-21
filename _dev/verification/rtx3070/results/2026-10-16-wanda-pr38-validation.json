@@ -1,0 +1,106 @@
+{
+  "format_version": 1,
+  "at_utc": "2026-10-16T05:36:47.755167+00:00",
+  "target_pr": "https://github.com/PentaVM/ArchieOS-Nvidia/pull/38",
+  "expected_parent": "72cc261c7721fa77fe8a21e25af7a55847787c74",
+  "scope": "plan_amendments_and_previous_public_compatibility_evidence",
+  "requests": [
+    "progressive_causal_curriculum",
+    "local_use_ai_arena",
+    "compatible_decision_v1_cortex_channel"
+  ],
+  "validation": [
+    "all_relative_links_in_publish_set",
+    "utf8_and_markdown_whitespace",
+    "json_parse",
+    "probe_syntax_only",
+    "credential_marker_scan",
+    "existing_source_contract_review"
+  ],
+  "new_product_code": false,
+  "new_training": false,
+  "new_live_arena_connections": false,
+  "cortex_channel_deployed": false,
+  "files": [
+    {
+      "path": "_dev/verification/rtx3070/2026-10-16-wanda-bonsai2-9b-design.md",
+      "bytes": 16096,
+      "sha256": "f2cc2cc217c44b379f787a5692725b4e759b79ada88a0638ca11651a1a02e25a"
+    },
+    {
+      "path": "_dev/verification/rtx3070/2026-10-16-wanda-social-benchmark-design.md",
+      "bytes": 13732,
+      "sha256": "ac26dc0a911776fcd16444f940ac384fcf54be9dfc115f88926bf749f4b302a8"
+    },
+    {
+      "path": "_dev/verification/rtx3070/2026-10-16-wanda-reading-catalogue.md",
+      "bytes": 12427,
+      "sha256": "a093cdb2c38e513ec3ec0250e38066df1a88a52a9fa07e039b74d31fe6bc7e58"
+    },
+    {
+      "path": "_dev/verification/rtx3070/2026-10-16-wanda-trainer-plan.md",
+      "bytes": 30342,
+      "sha256": "c0ab0ef89c7926fe4746521c20e8ab3ad475daec588a971e36b9ca090872bf29"
+    },
+    {
+      "path": "_dev/verification/rtx3070/2026-10-16-wanda-benchmark-plan.md",
+      "bytes": 19443,
+      "sha256": "2d83de0d3c16831089f66bfc453b0229d2f485cea93d73413c8bb9be3ad7b47c"
+    },
+    {
+      "path": "_dev/verification/rtx3070/2026-10-16-wanda-arena-curriculum-design.md",
+      "bytes": 8725,
+      "sha256": "0906b28cb01550a97c1ea61842810ee03872876bb327fb2658ec31f783a1f7be"
+    },
+    {
+      "path": "_dev/verification/rtx3070/2026-10-16-wanda-cortex-decision-design.md",
+      "bytes": 8066,
+      "sha256": "6a1d2773f6ff558bb2ef6b971c925a6777f0040ad0a9d85ab7b2d00f69ec87b4"
+    },
+    {
+      "path": "_dev/verification/rtx3070/2026-10-16-wanda-pr38-update.md",
+      "bytes": 3913,
+      "sha256": "21e2be1c89e4903ec31e079f4b830c2ddc891d9736c30a4c71825ca59b501d2d"
+    },
+    {
+      "path": "_dev/verification/rtx3070/results/2026-10-16-bonsai-9b-smoke.json",
+      "bytes": 1171,
+      "sha256": "454bb2ffcebd0dea0f9d3160f6c134da4eadfe3d4bd62bc60910200e23af7300"
+    },
+    {
+      "path": "_dev/verification/rtx3070/results/2026-10-16-bonsai-9b-tool-proposal.json",
+      "bytes": 1182,
+      "sha256": "fcb98a4bad59ab1456da9243de42a7951937fb204335a967b5e956d93af1103c"
+    },
+    {
+      "path": "_dev/verification/rtx3070/results/2026-10-16-bonsai-lora-layer-probe.json",
+      "bytes": 948,
+      "sha256": "a052f17af2b8565479a3ee9e00041b06cd95967f890d63e214bbd1708e2e7b1e"
+    },
+    {
+      "path": "_dev/verification/rtx3070/results/2026-10-16-bonsai-native-lora.json",
+      "bytes": 12584,
+      "sha256": "09f78ddedda6eef400261d7c7348333875b4fedd007ad623751b98f02ebfa384"
+    },
+    {
+      "path": "_dev/verification/rtx3070/probes/inspect-bonsai-gguf.py",
+      "bytes": 2783,
+      "sha256": "c328ff833d039da8600bb80ae5b4d3ca6754debbe12c5ee0f7fb0241c2e3a7a6"
+    },
+    {
+      "path": "_dev/verification/rtx3070/probes/bonsai-lora-layer-probe.py",
+      "bytes": 6774,
+      "sha256": "59bcd800500053b73a6e19cf3ea4ba080878efa8f04d822bba6f8e5bc0079747"
+    },
+    {
+      "path": "_dev/verification/rtx3070/probes/check-bonsai-native-lora.py",
+      "bytes": 2399,
+      "sha256": "1ac4ee1a7ad3dc9f5fdbf7831b34d35b12f0f860b31e328bc516d378e3016060"
+    },
+    {
+      "path": "_dev/verification/rtx3070/probes/run-bonsai-adapter-probe.py",
+      "bytes": 1122,
+      "sha256": "902a1c039c7706359ed682b400645d44906c039b2c6f10b141ff11cb6e256ef8"
+    }
+  ]
+}

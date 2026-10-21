@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="referrer" content="no-referrer">
+  <title>Wanda · Tu círculo</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a href="#workspace" class="skip-link">Ir al mapa de personas</a>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Wanda, inicio"><span class="brand-mark" aria-hidden="true">w</span><span>wanda<span class="brand-sub">por Archie</span></span></a>
+    <div class="topbar-middle"><span class="local-dot"></span><span id="connection">Sin conectar</span><span class="topbar-divider"></span><span>Tu contexto, en tu equipo</span></div>
+    <button id="pair-button" class="button subtle">Conectar</button>
+  </header>
+  <div class="app-shell">
+    <aside class="navigation" aria-label="Explorar tu círculo">
+      <div class="nav-caption">TU ESPACIO</div>
+      <div class="nav-current"><span aria-hidden="true">◉</span> Tu círculo <span class="nav-current-dot"></span></div>
+      <label class="nav-caption" for="domain">CONTEXTO</label>
+      <select id="domain" disabled><option value="">Sin configurar</option></select>
+      <div class="nav-section"><div class="nav-caption">EXPLORAR POR ETIQUETA</div><div id="tags" class="tag-navigation"><button class="tag-filter active" data-tag="" aria-pressed="true">Todas las personas <span>0</span></button></div></div>
+      <div class="nav-note"><span class="note-symbol" aria-hidden="true">✧</span><p>Las relaciones las defines tú.</p><span>Las interpretaciones aparecen separadas para que puedas revisarlas.</span></div>
+      <div class="nav-footer"><span class="mini-orbit" aria-hidden="true"></span><div><strong>La voz va primero</strong><p>Habla con Archie. Aquí puedes explorar lo que recuerda.</p></div></div>
+    </aside>
+    <main id="workspace" class="main-content" tabindex="-1">
+      <section class="page-heading"><div><div class="eyebrow">PERSONAS, RECUERDOS Y CONEXIONES</div><h1>Tu círculo<span class="heading-dot">.</span></h1><p>Un lugar para entender a las personas que forman parte de tu vida.</p></div><button id="refresh" class="button" disabled><span aria-hidden="true">↻</span> Actualizar</button></section>
+      <div id="demo-banner" class="demo-banner" hidden><strong>Demostración · personas y evidencias ficticias</strong><span>No representa tu memoria ni una conexión en vivo.</span><button id="leave-demo" class="button small">Salir de la demo</button></div>
+      <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+      <section class="circle-panel" aria-label="Mapa de relaciones">
+        <div class="map-toolbar"><label class="search-field"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Buscar personas, intereses…" aria-label="Buscar personas, etiquetas o preferencias" maxlength="192"><kbd aria-hidden="true">/</kbd></label><span id="person-count" class="person-count">0 personas</span><div class="view-switch" aria-label="Vista"><button id="map-view" class="active" aria-pressed="true">Mapa</button><button id="list-view" aria-pressed="false">Lista</button></div></div>
+        <div class="map-body">
+          <div class="graph-area" id="graph-area">
+            <svg id="graph" role="group" aria-label="Mapa de personas. Tab para recorrerlas; flechas para desplazar el mapa." tabindex="0"><g id="scene"></g></svg>
+            <div id="map-empty" class="empty-state"><div class="empty-orbits" aria-hidden="true"><span></span><i></i><b></b></div><h2>Tu historia empieza contigo</h2><p>Conecta Wanda para ver tu círculo, sus preferencias y las fuentes que les dan contexto.</p><div class="empty-actions"><button id="empty-connect" class="button primary">Conectar mi contexto</button><button id="demo" class="button">Explorar una demo</button></div></div>
+            <div class="map-bottom"><div class="legend"><span><i class="solid-line"></i> Declarada</span><span><i class="dashed-line"></i> Interpretación</span><span><i class="unknown-line"></i> Sin confirmar</span></div><div class="zoom-controls"><button id="zoom-out" aria-label="Alejar mapa">−</button><span id="zoom-label">100%</span><button id="zoom-in" aria-label="Acercar mapa">+</button><button id="fit" aria-label="Ajustar mapa a todas las personas" title="Ajustar mapa">⊡</button></div></div>
+          </div>
+          <div id="people-list" class="people-list" hidden aria-label="Lista de personas"></div>
+          <aside id="profile" class="profile-panel" aria-label="Perfil de la persona seleccionada"><div class="profile-placeholder"><div class="profile-placeholder-icon" aria-hidden="true">◎</div><h2>Cada persona, su contexto</h2><p>Selecciona una persona para ver sus relaciones, preferencias y evidencias.</p></div></aside>
+        </div>
+      </section>
+      <section class="recommendations-section" aria-labelledby="recommendation-heading"><div class="section-heading"><div><div class="eyebrow">CONTEXTO QUE TE ACOMPAÑA</div><h2 id="recommendation-heading">Para tener en cuenta</h2></div><span class="advisory-caption">Propuestas para revisar</span></div><div id="recommendations" class="recommendation-grid"><div class="recommendation-empty">Las recomendaciones aparecerán aquí cuando haya evidencia suficiente.</div></div></section>
+      <section class="ask-section" aria-label="Consultar tu contexto"><div class="ask-intro"><span aria-hidden="true">✧</span><div><h2>Una segunda mirada</h2><p>Pide una propuesta a partir del contexto y sus fuentes.</p></div></div><form id="query-form"><label class="sr-only" for="question">Tu consulta a Wanda</label><textarea id="question" rows="1" maxlength="2000" placeholder="¿Qué podría regalarle? ¿Qué conviene tener en cuenta?" disabled></textarea><div class="ask-actions"><label class="deep-option"><input id="deep" type="checkbox"> Razonamiento profundo</label><button id="ask" type="submit" class="button primary" disabled>Consultar <span aria-hidden="true">↗</span></button></div></form><p class="query-state" id="query-state" role="status" aria-live="polite">El contexto privado se consulta con un modelo local elegible.</p></section>
+      <section class="sources-section" aria-labelledby="sources-heading"><div class="section-heading"><h2 id="sources-heading">Fuentes de contexto</h2><span id="updated" class="muted">Sin sincronizar</span></div><div id="sources" class="sources-list"><p class="muted">No hay fuentes configuradas.</p></div></section>
+      <footer class="page-footer">Wanda no confirma relaciones ni realiza acciones por ti. Las propuestas conservan sus fuentes y su grado de certeza.</footer>
+    </main>
+  </div>
+  <dialog id="pair-dialog" aria-labelledby="pair-title"><form id="pair-form"><button type="button" id="close-pair" class="dialog-close" aria-label="Cerrar">×</button><span class="brand-mark" aria-hidden="true">w</span><h2 id="pair-title">Conecta tu círculo</h2><p>Usa el token local que configuraste para la vista de Wanda. Se guarda sólo en esta sesión de la pestaña.</p><label for="token">Token de acceso</label><input id="token" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" required maxlength="4096"><p id="pair-error" class="error-text" role="alert"></p><div class="dialog-actions"><button id="forget-token" type="button" class="button">Desconectar</button><button type="submit" class="button primary">Conectar</button></div></form></dialog>
+  <script type="module" src="/app.mjs"></script>
+</body>
+</html>

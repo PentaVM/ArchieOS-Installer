@@ -401,13 +401,20 @@ pub struct InferenceClient {
 
 impl InferenceClient {
     pub fn new(endpoint: ProviderEndpoint) -> Result<Self, RuntimeError> {
-        let client = Client::builder()
+        let builder = Client::builder()
             .timeout(endpoint.timeout)
             .https_only(false)
             // A provider may not redirect private context to an endpoint that was
             // never checked by the router/egress gate (including 307/308 POST replay).
-            .redirect(reqwest::redirect::Policy::none())
-            .build()?;
+            .redirect(reqwest::redirect::Policy::none());
+        // Local inference must reach the admitted endpoint directly; an environment
+        // proxy would receive private request bodies despite local classification.
+        let builder = if endpoint.locality == Locality::Local {
+            builder.no_proxy()
+        } else {
+            builder
+        };
+        let client = builder.build()?;
         Ok(Self { endpoint, client })
     }
 

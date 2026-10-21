@@ -105,6 +105,8 @@ struct Asking {
     grade: PrivacyGrade,
     runtime: tokio::runtime::Runtime,
     cognitive: NemotronCognitive<RoutedSource>,
+    #[cfg(feature = "live")]
+    wanda_access: archie_voice::wanda::WandaVoiceAccess,
     clock: String,
 }
 
@@ -225,11 +227,23 @@ fn asking(
         let desc = descriptor(&model, "voice", true, PrivacyGrade::Public, None)?;
         let _ = registry.register(desc);
     }
+    // Wanda's private tool context is graded Restricted for the entire local continuation,
+    // so the router can only choose models that permit it; the public/cloud path keeps its
+    // caller's grade. Wanda is offered only if every model the router could choose at that
+    // grade is local and on loopback (`WandaVoiceAccess::from_registry`).
+    let source_grade = if local.is_some() {
+        PrivacyGrade::Restricted
+    } else {
+        grade
+    };
+    #[cfg(feature = "live")]
+    let wanda_access =
+        archie_voice::wanda::WandaVoiceAccess::from_registry(&registry, source_grade);
     let routed = Arc::new(Routed::new(registry));
     let veil = Arc::new(Veil::new());
     let source = RoutedSource::new(
         routed,
-        grade,
+        source_grade,
         ModelRole::CognitiveResponse,
         veil,
         timeout,
@@ -267,6 +281,8 @@ fn asking(
         grade,
         runtime,
         cognitive,
+        #[cfg(feature = "live")]
+        wanda_access,
         clock: clock(offset),
     })
 }
@@ -907,7 +923,14 @@ fn live(asking: Asking, speech: SpeechFlags, flags: LiveFlags) -> Result<ExitCod
             "off (no TAVILY_API_KEY)"
         }
     );
-    let senses = live::Senses::new(audio_in, identifier, researcher, rate, flags.curiosity);
+    let senses = live::Senses::new_with_wanda(
+        audio_in,
+        identifier,
+        researcher,
+        rate,
+        flags.curiosity,
+        asking.wanda_access,
+    );
     let eyes = eyes::IrisEyes::with_timeout(
         &flags.iris,
         0.35,

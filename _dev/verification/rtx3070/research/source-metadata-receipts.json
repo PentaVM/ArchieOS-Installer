@@ -1,0 +1,179 @@
+{
+  "format_version": 1,
+  "timestamp_utc": "2026-10-16T12:39:13.937352+00:00",
+  "scope": "public metadata only; no corpus admission or model inference",
+  "cuda_used": false,
+  "per_request_byte_cap": 262144,
+  "receipts": [
+    {
+      "source": "fantom",
+      "repo": "skywalker023/fantom",
+      "revision": "1cae6fa30f5ba04ca0fff5f5716b5ba7055e2e85",
+      "file": "README.md",
+      "url": "https://raw.githubusercontent.com/skywalker023/fantom/1cae6fa30f5ba04ca0fff5f5716b5ba7055e2e85/README.md",
+      "bytes": 11091,
+      "sha256": "b07e17732c51e813271b832f31aba3cef8913dddd97340d10e3990b485989524"
+    },
+    {
+      "source": "fantom",
+      "repo": "skywalker023/fantom",
+      "revision": "1cae6fa30f5ba04ca0fff5f5716b5ba7055e2e85",
+      "file": "LICENSE",
+      "url": "https://raw.githubusercontent.com/skywalker023/fantom/1cae6fa30f5ba04ca0fff5f5716b5ba7055e2e85/LICENSE",
+      "bytes": 1068,
+      "sha256": "f6ce05a54cb9eeee88634ab704b966252fce88b81b890fd7400cb42e9f9d93f8"
+    },
+    {
+      "source": "casino",
+      "repo": "kushalchawla/CaSiNo",
+      "revision": "2f6ed4a6a55110152a7699fbaa8150d6036314be",
+      "file": "README.md",
+      "url": "https://raw.githubusercontent.com/kushalchawla/CaSiNo/2f6ed4a6a55110152a7699fbaa8150d6036314be/README.md",
+      "bytes": 2061,
+      "sha256": "b52d17f5a0d71a8760a42cc3cb5b02f7c0ba739487a6a703e15f655400d465a6"
+    },
+    {
+      "source": "casino",
+      "repo": "kushalchawla/CaSiNo",
+      "revision": "2f6ed4a6a55110152a7699fbaa8150d6036314be",
+      "file": "LICENSE",
+      "url": "https://raw.githubusercontent.com/kushalchawla/CaSiNo/2f6ed4a6a55110152a7699fbaa8150d6036314be/LICENSE",
+      "bytes": 18658,
+      "sha256": "f5b745ef98087f531e719ee8ca6a96809444573ecc7173c6fa68eaad39b3cc3f"
+    },
+    {
+      "source": "negotiator",
+      "repo": "facebookresearch/end-to-end-negotiator",
+      "revision": "bbb93bbf00f69fced75d5c0d22e855bda07c9b78",
+      "file": "README.md",
+      "url": "https://raw.githubusercontent.com/facebookresearch/end-to-end-negotiator/bbb93bbf00f69fced75d5c0d22e855bda07c9b78/README.md",
+      "bytes": 8766,
+      "sha256": "c23981d1bcbb5feb54750ce1262b0202e560fe58212adf50135abd78c1f23f08"
+    },
+    {
+      "source": "negotiator",
+      "repo": "facebookresearch/end-to-end-negotiator",
+      "revision": "bbb93bbf00f69fced75d5c0d22e855bda07c9b78",
+      "file": "LICENSE",
+      "url": "https://raw.githubusercontent.com/facebookresearch/end-to-end-negotiator/bbb93bbf00f69fced75d5c0d22e855bda07c9b78/LICENSE",
+      "bytes": 19342,
+      "sha256": "3fbaa451ae2ab9a8d2e1c18666d8f9f00c277ba424cc826046ab0b211ce5d3b2"
+    },
+    {
+      "source": "empathetic",
+      "repo": "facebookresearch/EmpatheticDialogues",
+      "revision": "9649114c71e1af32189a3973b3598dc311297560",
+      "file": "README.md",
+      "url": "https://raw.githubusercontent.com/facebookresearch/EmpatheticDialogues/9649114c71e1af32189a3973b3598dc311297560/README.md",
+      "bytes": 7260,
+      "sha256": "bdb4ad826512bccc956f65d3c0e7df19b7c597aa552f2cbb608cba8e69906c1b"
+    },
+    {
+      "source": "empathetic",
+      "repo": "facebookresearch/EmpatheticDialogues",
+      "revision": "9649114c71e1af32189a3973b3598dc311297560",
+      "file": "LICENSE",
+      "url": "https://raw.githubusercontent.com/facebookresearch/EmpatheticDialogues/9649114c71e1af32189a3973b3598dc311297560/LICENSE",
+      "bytes": 19332,
+      "sha256": "82656a050544ab820c9aa7b61433f5181f8e80cacd042377140962a3e3eb5721"
+    },
+    {
+      "source": "atomic2020",
+      "repo": "allenai/comet-atomic-2020",
+      "revision": "33129ff9fbab126a98ce03f10017c405a553aeab",
+      "file": "README.md",
+      "url": "https://raw.githubusercontent.com/allenai/comet-atomic-2020/33129ff9fbab126a98ce03f10017c405a553aeab/README.md",
+      "bytes": 3720,
+      "sha256": "dd4299fe8c78cf5322e370006d0c72c1e7ef6068149096309b81f24b38e0d6f4"
+    },
+    {
+      "source": "atomic2020",
+      "repo": "allenai/comet-atomic-2020",
+      "revision": "33129ff9fbab126a98ce03f10017c405a553aeab",
+      "file": "LICENSE",
+      "url": "https://raw.githubusercontent.com/allenai/comet-atomic-2020/33129ff9fbab126a98ce03f10017c405a553aeab/LICENSE",
+      "error": "HTTPError: HTTP Error 404: Not Found"
+    },
+    {
+      "source": "socialreasoningbench",
+      "repo": "microsoft/social-reasoning-bench",
+      "revision": "400cb66790136fdb7e0e1d443da0d47ebcdd07a1",
+      "file": "README.md",
+      "url": "https://raw.githubusercontent.com/microsoft/social-reasoning-bench/400cb66790136fdb7e0e1d443da0d47ebcdd07a1/README.md",
+      "bytes": 1562,
+      "sha256": "32de269ff0923318d8bc7545281bcdc71c5da525084779823f54a9d5fe27002d"
+    },
+    {
+      "source": "socialreasoningbench",
+      "repo": "microsoft/social-reasoning-bench",
+      "revision": "400cb66790136fdb7e0e1d443da0d47ebcdd07a1",
+      "file": "LICENSE",
+      "url": "https://raw.githubusercontent.com/microsoft/social-reasoning-bench/400cb66790136fdb7e0e1d443da0d47ebcdd07a1/LICENSE",
+      "bytes": 1066,
+      "sha256": "98a96c38494df4963951e32b81ec4effebe4c8a812ab8d9e7d185d59e86fe2fc"
+    },
+    {
+      "source": "socialbench",
+      "repo": "X-PLUG/SocialBench",
+      "revision": "1287b67034f6c76c4b3b068c51a3a9300f85ee0a",
+      "file": "README.md",
+      "url": "https://raw.githubusercontent.com/X-PLUG/SocialBench/1287b67034f6c76c4b3b068c51a3a9300f85ee0a/README.md",
+      "bytes": 7387,
+      "sha256": "5a4c2d4883adc7c4c4ae66105ef6e2eda407763c92231518217cc80a454455b6"
+    },
+    {
+      "source": "socialbench",
+      "repo": "X-PLUG/SocialBench",
+      "revision": "1287b67034f6c76c4b3b068c51a3a9300f85ee0a",
+      "file": "LICENSE",
+      "url": "https://raw.githubusercontent.com/X-PLUG/SocialBench/1287b67034f6c76c4b3b068c51a3a9300f85ee0a/LICENSE",
+      "error": "HTTPError: HTTP Error 404: Not Found"
+    },
+    {
+      "source": "opentom",
+      "repo": "seacowx/OpenToM",
+      "revision": "3f22b66276b2d7ca5fe573c28c79cc0d077aafc5",
+      "file": "README.md",
+      "url": "https://raw.githubusercontent.com/seacowx/OpenToM/3f22b66276b2d7ca5fe573c28c79cc0d077aafc5/README.md",
+      "bytes": 10218,
+      "sha256": "936467a4644db35dbcd791051a865826912d05d8707e64f150600d86fcc71990"
+    },
+    {
+      "source": "opentom",
+      "repo": "seacowx/OpenToM",
+      "revision": "3f22b66276b2d7ca5fe573c28c79cc0d077aafc5",
+      "file": "LICENSE",
+      "url": "https://raw.githubusercontent.com/seacowx/OpenToM/3f22b66276b2d7ca5fe573c28c79cc0d077aafc5/LICENSE",
+      "bytes": 19336,
+      "sha256": "c1ff5b40378d5dc3126d708bc9291a4c0c4101002f7bab9e344ec01e18b6e957"
+    },
+    {
+      "source": "allenai/soda",
+      "url": "https://datasets-server.huggingface.co/splits?dataset=allenai%2Fsoda",
+      "file": "allenai-soda-splits.json",
+      "bytes": 227,
+      "sha256": "56c97b9a4d0e20aee3bbc876abe7588dbb2cb0e7afd33ece05eb7324debe07e5"
+    },
+    {
+      "source": "allenai/soda",
+      "url": "https://datasets-server.huggingface.co/size?dataset=allenai%2Fsoda",
+      "file": "allenai-soda-size.json",
+      "bytes": 1028,
+      "sha256": "03fbe2b053a07657503e14a36ac2243eba14ccdfc80208b922fafcf931b67d68"
+    },
+    {
+      "source": "google-research-datasets/go_emotions",
+      "url": "https://datasets-server.huggingface.co/splits?dataset=google-research-datasets%2Fgo_emotions",
+      "file": "google-research-datasets-go_emotions-splits.json",
+      "bytes": 390,
+      "sha256": "bb21dbf0c724a02f92dd81b9650b4e52762f0063f27de2c7177b8eca164795ce"
+    },
+    {
+      "source": "google-research-datasets/go_emotions",
+      "url": "https://datasets-server.huggingface.co/size?dataset=google-research-datasets%2Fgo_emotions",
+      "file": "google-research-datasets-go_emotions-size.json",
+      "bytes": 1563,
+      "sha256": "bfb94a3c8e5af99b91a2b060b41027a588d6855880514271f1fe206dda625f14"
+    }
+  ]
+}

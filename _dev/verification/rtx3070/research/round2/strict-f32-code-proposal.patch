@@ -1,0 +1,761 @@
+diff --git a/training/wanda_bonsai2/src/archie_wanda/admission.py b/training/wanda_bonsai2/src/archie_wanda/admission.py
+new file mode 100644
+index 0000000..2dd7ca4
+--- /dev/null
++++ b/training/wanda_bonsai2/src/archie_wanda/admission.py
+@@ -0,0 +1,128 @@
++"""CPU-only numerical admission and resume identity; no CUDA imports or allocations."""
++from dataclasses import asdict
++import json
++import math
++import os
++from pathlib import Path
++from .contracts import BASE_SHA, PRISM_COMMIT, AdmissionError, digest
++from .native import STRICT_F32_ENV, sha_file, judge_native_comparisons
++from .contracts import ParityError
++
++
++def _receipt(spec, key):
++    path = Path(spec.get(key, ''))
++    if not path.is_file() or path.stat().st_size > 1024 * 1024:
++        raise AdmissionError('missing/bounded numerical gate required: ' + key)
++    return json.loads(path.read_text()), sha_file(path)
++
++
++def validate_gates(config, spec):
++    if sorted(spec.get('targets', ['q', 'v'])) != ['q', 'v']:
++        raise AdmissionError('current strict backward proof admits q/v only')
++    if spec.get('precision_profile') != 'strict-f32':
++        raise AdmissionError('training requires an explicitly declared strict-f32 profile')
++    extraction, extraction_sha = _receipt(spec, 'extraction_receipt')
++    parity, parity_sha = _receipt(spec, 'parity_receipt')
++    backward, backward_sha = _receipt(spec, 'backward_receipt')
++    if (extraction.get('precision_profile') != 'strict-f32' or
++            extraction.get('precision_environment') != STRICT_F32_ENV or
++            extraction.get('runtime_commit') != PRISM_COMMIT or
++            extraction.get('base_sha256') != BASE_SHA or
++            extraction.get('scope') != 'real_native_full_row_capture_microbatch_reset' or
++            parity.get('status') != 'passed' or parity.get('scope') != 'real_zero_adapter_suffix' or
++            parity.get('base_sha256') != BASE_SHA or parity.get('precision_profile') != 'strict-f32' or
++            parity.get('extraction_sha256') != extraction_sha or len(parity.get('cases', [])) < 3 or
++            backward.get('status') != 'passed' or
++            backward.get('scope') != 'real_suffix_full_vocabulary_backward' or
++            backward.get('base_sha256') != BASE_SHA or backward.get('precision_profile') != 'strict-f32' or
++            backward.get('parity_sha256') != parity_sha):
++        raise AdmissionError('strict extraction/parity/backward receipt chain mismatch')
++    extraction_cases = extraction.get('cases', [])
++    if (len(extraction_cases) < 3 or len({case.get('id') for case in extraction_cases}) != len(extraction_cases) or
++            any(not isinstance(case.get('id'), str) or not case['id'] or
++                type(case.get('tokens')) is not int or case['tokens'] < 10 for case in extraction_cases)):
++        raise AdmissionError('three complete strict native extraction cases are required')
++    try:
++        for case in extraction_cases:
++            judge_native_comparisons(case.get('comparisons', {}), 'strict-f32')
++    except (ParityError, KeyError, TypeError) as error:
++        raise AdmissionError('invalid strict native extraction measurements') from error
++    if ({(case.get('id'), case.get('tokens')) for case in parity['cases']} !=
++            {(case['id'], case['tokens']) for case in extraction_cases} or
++            len(parity['cases']) != len(extraction_cases) or
++            parity.get('torch_float32_matmul_precision') != 'highest'):
++        raise AdmissionError('strict suffix cases/precision do not match extraction')
++    for case in parity['cases']:
++        rms, kl = case.get('normalized_relative_rms'), case.get('maximum_token_kl')
++        if (case.get('criterion') != 'strict' or type(rms) not in (int, float) or
++                type(kl) not in (int, float) or not math.isfinite(rms) or not math.isfinite(kl) or
++                not 0 <= rms <= 5e-4 or not 0 <= kl <= 1e-3):
++            raise AdmissionError('original suffix tolerance is required; no layout-noise admission')
++    steps = backward.get('steps', [])
++    if (backward.get('vocabulary') != 248320 or type(backward.get('tokens')) is not int or
++            backward['tokens'] < 2 or backward.get('torch_float32_matmul_precision') != 'highest' or
++            len(steps) != 2 or [step.get('step') for step in steps] != [1, 2]):
++        raise AdmissionError('two measured full-vocabulary highest-FP32 backward steps are required')
++    gradient_names = {'q_delta.a','q_delta.b','v_delta.a','v_delta.b'}
++    for number, step in enumerate(steps):
++        loss = step.get('loss')
++        gradients = step.get('gradient_norms', {})
++        if (type(loss) not in (int, float) or not math.isfinite(loss) or loss < 0 or
++                set(gradients) != gradient_names or
++                any(type(value) not in (int, float) or not math.isfinite(value) or value < 0 or
++                    (number == 1 and value == 0) for value in gradients.values())):
++            raise AdmissionError('backward loss/complete A/B gradients must be finite; step2 gradients nonzero')
++    runtimes = extraction.get('runtime_library_sha256', {})
++    required = {'libllama.so', 'libggml-cuda.so', 'libggml-base.so'}
++    if set(runtimes) != required or any(sha_file(Path(config.runtime_dir) / name) != runtimes[name] for name in required):
++        raise AdmissionError('runtime changed since strict reference')
++    return {'base_sha256': BASE_SHA, 'precision_profile': 'strict-f32',
++            'precision_environment': dict(STRICT_F32_ENV), 'runtime_commit': PRISM_COMMIT,
++            'shim_sha256': extraction.get('shim_sha256'),
++            'runtime_library_sha256': runtimes, 'extraction_sha256': extraction_sha,
++            'parity_sha256': parity_sha, 'backward_sha256': backward_sha}
++
++
++def validate_cache_profile(cache, admission):
++    if (cache.get('precision_profile') != admission['precision_profile'] or
++            cache.get('precision_environment') != admission.get('precision_environment') or
++            cache.get('runtime_commit') != admission.get('runtime_commit') or
++            cache.get('runtime_library_sha256') != admission.get('runtime_library_sha256') or
++            cache.get('base_sha256') != admission.get('base_sha256')):
++        raise AdmissionError('training cache does not match the admitted numerical profile')
++    if not admission.get('shim_sha256') or cache.get('shim_sha256') != admission['shim_sha256']:
++        raise AdmissionError('training cache shim differs from the strict reference')
++
++
++def configure_training_precision(torch):
++    """Pin effective process policy before allocation; machine-wide settings are untouched."""
++    for key in ('TORCH_ALLOW_TF32_CUBLAS_OVERRIDE', 'NVIDIA_TF32_OVERRIDE'):
++        if os.environ.get(key) not in (None, '0'):
++            raise AdmissionError('conflicting training precision environment: ' + key)
++    os.environ['NVIDIA_TF32_OVERRIDE'] = '0'
++    torch.set_float32_matmul_precision('highest')
++    torch.backends.cuda.matmul.allow_tf32 = False
++    policy = {'float32_matmul_precision': torch.get_float32_matmul_precision(),
++              'allow_tf32': torch.backends.cuda.matmul.allow_tf32,
++              'NVIDIA_TF32_OVERRIDE': os.environ['NVIDIA_TF32_OVERRIDE'],
++              'TORCH_ALLOW_TF32_CUBLAS_OVERRIDE': os.environ.get('TORCH_ALLOW_TF32_CUBLAS_OVERRIDE')}
++    if policy['float32_matmul_precision'] != 'highest' or policy['allow_tf32']:
++        raise AdmissionError('effective training policy does not match the strict FP32 reference')
++    return policy
++
++
++def validate_lora_keys(state, targets):
++    expected = {target + '_delta.' + matrix for target in targets for matrix in ('a', 'b')}
++    if set(state) != expected:
++        raise AdmissionError('checkpoint must hold exactly the complete selected LoRA A/B pairs')
++
++
++def run_identity(config, settings, examples, dataset_paths, admission):
++    sources = ('admission.py', 'worker.py', 'suffix.py', 'ptq.py', 'head_loss.py', 'model.py', 'data.py')
++    return digest({'settings': settings, 'config': asdict(config), 'admission': admission,
++                   'init_checkpoint_sha256':sha_file(settings['init_from']) if settings.get('init_from') else None,
++                   'examples': examples,
++                   'datasets': [(str(path), sha_file(path)) for path in dataset_paths],
++                   'cache_receipts': [(e['cache'], sha_file(Path(e['cache']) / 'receipt.json'))
++                                      for e in examples if (Path(e['cache']) / 'receipt.json').is_file()],
++                   'implementation': {name: sha_file(Path(__file__).with_name(name)) for name in sources}})
+diff --git a/training/wanda_bonsai2/src/archie_wanda/cli.py b/training/wanda_bonsai2/src/archie_wanda/cli.py
+index 2302dd6..be31e77 100644
+--- a/training/wanda_bonsai2/src/archie_wanda/cli.py
++++ b/training/wanda_bonsai2/src/archie_wanda/cli.py
+@@ -14,6 +14,7 @@ def main():
+     extract.add_argument('--headers', required=True)
+     extract.add_argument('--cases', required=True)
+     extract.add_argument('--out', required=True)
++    extract.add_argument('--precision-profile', choices=('native','strict-f32'), default='native')
+     for command, gate in [('verify-suffix','extraction'),('verify-loss','parity')]:
+         verify=commands.add_parser(command)
+         verify.add_argument('--config',required=True)
+@@ -72,7 +73,7 @@ def main():
+     elif args.command == 'verify-extraction':
+         from .contracts import TrainConfig
+         from .native import verify_extraction
+-        result=verify_extraction(TrainConfig.load(args.config),args.headers,args.cases,args.out)
++        result=verify_extraction(TrainConfig.load(args.config),args.headers,args.cases,args.out,args.precision_profile)
+         print(json.dumps(result))
+     elif args.command in ('verify-suffix','verify-loss'):
+         from .contracts import TrainConfig
+diff --git a/training/wanda_bonsai2/src/archie_wanda/native.py b/training/wanda_bonsai2/src/archie_wanda/native.py
+index b87ba15..46da46a 100644
+--- a/training/wanda_bonsai2/src/archie_wanda/native.py
++++ b/training/wanda_bonsai2/src/archie_wanda/native.py
+@@ -63,9 +63,24 @@ def validate_cache(root, expected_base, expected_split, expected_tokens, cap):
+     return info
+ 
+ 
+-def native_environment(config):
++STRICT_F32_ENV = {'GGML_CUDA_PTQ1_0_MMQ_MAX_BATCH': '0',
++                  'GGML_CUDA_CUBLAS_COMPUTE_TYPE': 'f32', 'NVIDIA_TF32_OVERRIDE': '0'}
++
++
++def strict_microbatch(count):
++    """Both pieces must exceed the native PTQ MMVQ cutoff of four tokens."""
++    if type(count) is not int or count < 10:
++        raise AdmissionError('strict FP32 microbatch proof requires at least ten tokens')
++    return (count + 1) // 2
++
++
++def native_environment(config, precision_profile='native'):
+     env = os.environ.copy()
+     env['LD_LIBRARY_PATH'] = config.runtime_dir + ':' + config.runtime_dir + '/lib:/usr/lib/wsl/lib'
++    if precision_profile == 'strict-f32':
++        env.update(STRICT_F32_ENV)
++    elif precision_profile != 'native':
++        raise AdmissionError('unknown native precision profile')
+     return env
+ 
+ 
+@@ -92,7 +107,7 @@ def build_native(config, headers, source_name='prefix_export.cpp', binary_name='
+     return binary
+ 
+ 
+-def extract_text(model, text, root, config, binary, *, ubatch=0, split='parity'):
++def extract_text(model, text, root, config, binary, *, ubatch=0, split='parity', precision_profile='native'):
+     if model.sha256!=BASE_SHA or signature(model.path)!=model.signature or split not in ('train','development','parity'):
+         raise AdmissionError('extraction requires unchanged approved base/admitted split')
+     raw = text.encode('utf-8')
+@@ -111,19 +126,25 @@ def extract_text(model, text, root, config, binary, *, ubatch=0, split='parity')
+     command = [str(binary),'--model',str(model.path),'--request',str(request),
+                '--out',str(root),'--runtime',config.runtime_dir]
+     with (root/'native.log').open('w') as log:
+-        process = run_guarded(command,config,native_environment(config),log,timeout=180)
++        process = run_guarded(command,config,native_environment(config,precision_profile),log,timeout=180)
+     if process.returncode:
+         raise AdmissionError('native extraction failed; see '+str(root/'native.log'))
+     result = json.loads(process.stdout)
+     count = len(result['tokens'])
+     if not 0<count<=config.sequence_length or result.get('rows')!=count or result.get('hidden_size')!=4096:
+         raise AdmissionError('native extraction incomplete/outside sequence limit')
++    if precision_profile == 'strict-f32' and (count <= 4 or (ubatch and (ubatch <= 4 or 0 < count % ubatch <= 4))):
++        raise AdmissionError('strict FP32 reference entered native Q8 MMVQ token layout')
+     shape_map = {'prefix.f32':[count,4096],'norm.f32':[count,4096],'logits.f32':[count,248320]}
+     info = {'format_version':1,'base_sha256':model.sha256,'split':split,
+             'tokens':result['tokens'],'positions':list(range(count)),'sequence_ids':[0]*count,
+             'control_vectors':'none','capture_layer':30,'hidden_size':4096,
+             'settings':result,'resources_before':asdict(resources),'runtime_commit':PRISM_COMMIT,
+             'shim_sha256':sha_file(binary),'metadata_sha256':model.metadata_sha256,
++            'precision_profile':precision_profile,
++            'precision_environment':dict(STRICT_F32_ENV) if precision_profile=='strict-f32' else {},
++            'runtime_library_sha256':{name:sha_file(Path(config.runtime_dir)/name)
++                                      for name in ('libllama.so','libggml-cuda.so','libggml-base.so')},
+             'files':{name:{'shape':shape,'dtype':'float32','sha256':sha_file(root/name)}
+                      for name,shape in shape_map.items()}}
+     (root/'receipt.json').write_text(json.dumps(info,indent=2)+'\n')
+@@ -168,16 +189,37 @@ RESET_RELATIVE_RMS = 5e-4
+ LAYOUT_MAX_TOKEN_KL = 1e-3
+ 
+ 
+-def judge_native_comparisons(comparisons):
++def judge_native_comparisons(comparisons, precision_profile='native'):
++    for kind in ('fresh_reset', 'microbatch'):
++        record = comparisons.get(kind, {})
++        for name in ('prefix.f32', 'norm.f32', 'logits.f32'):
++            metric = record.get(name, {}).get('relative_rms')
++            if type(metric) not in (int, float) or not math.isfinite(metric) or metric < 0:
++                raise ParityError('native RMS metrics must be finite and nonnegative')
++        distribution = record.get('distribution', {})
++        if kind == 'microbatch' or distribution:
++            kl = distribution.get('max_token_kl')
++            if type(kl) not in (int, float) or not math.isfinite(kl) or kl < 0:
++                raise ParityError('native KL metrics must be finite and nonnegative')
++            for key in ('mean_token_kl', 'greedy_agreement'):
++                if key in distribution:
++                    value = distribution[key]
++                    if (type(value) not in (int, float) or not math.isfinite(value) or value < 0 or
++                            (key == 'greedy_agreement' and value > 1)):
++                        raise ParityError('invalid native distribution metric: ' + key)
+     reset = comparisons['fresh_reset']
+     if any(reset[name]['relative_rms']>RESET_RELATIVE_RMS for name in ['prefix.f32','norm.f32','logits.f32']):
+         raise ParityError('native clean repeat is not reproducible: '+json.dumps(reset))
+     layout = comparisons['microbatch']['distribution']
++    if precision_profile == 'strict-f32' and any(
++            comparisons['microbatch'][name]['relative_rms'] > RESET_RELATIVE_RMS
++            for name in ['prefix.f32','norm.f32','logits.f32']):
++        raise ParityError('strict FP32 native microbatch mismatch: '+json.dumps(comparisons['microbatch']))
+     if layout['max_token_kl']>LAYOUT_MAX_TOKEN_KL:
+         raise ParityError('native batch-layout noise exceeds bound: '+json.dumps(layout))
+ 
+ 
+-def verify_extraction(config, headers, cases, output):
++def verify_extraction(config, headers, cases, output, precision_profile='native'):
+     from .model import inspect_model
+     model=inspect_model(Path(config.model_path),config.base_sha256)
+     binary=build_native(config,headers)
+@@ -188,8 +230,10 @@ def verify_extraction(config, headers, cases, output):
+         if set(case)!={'id','text'} or not case['id'].replace('-','').isalnum():
+             raise AdmissionError('invalid public parity case')
+         paths=[root/(case['id']+'-'+str(index)) for index in range(3)]
+-        receipts=[extract_text(model,case['text'],path,config,binary,ubatch=batch)
+-                  for path,batch in zip(paths,[0,4,0])]
++        receipts=[extract_text(model,case['text'],paths[0],config,binary,ubatch=0,precision_profile=precision_profile)]
++        width = strict_microbatch(len(receipts[0]['tokens'])) if precision_profile=='strict-f32' else 4
++        receipts += [extract_text(model,case['text'],path,config,binary,ubatch=batch,precision_profile=precision_profile)
++                     for path,batch in zip(paths[1:],[width,0])]
+         comparisons={}
+         for index,label in [(1,'microbatch'),(2,'fresh_reset')]:
+             if receipts[0]['tokens']!=receipts[index]['tokens']:
+@@ -197,7 +241,7 @@ def verify_extraction(config, headers, cases, output):
+             comparisons[label]={name:relative_rms(paths[0]/name,paths[index]/name)
+                                 for name in ['prefix.f32','norm.f32','logits.f32']}
+             comparisons[label]['distribution']=logit_agreement(paths[0]/'logits.f32',paths[index]/'logits.f32')
+-        judge_native_comparisons(comparisons)
++        judge_native_comparisons(comparisons,precision_profile)
+         results.append({'id':case['id'],'tokens':len(receipts[0]['tokens']),
+                         'paths':[str(p) for p in paths],'comparisons':comparisons})
+     noise={'norm_relative_rms':max(r['comparisons']['microbatch']['norm.f32']['relative_rms'] for r in results),
+@@ -205,9 +249,14 @@ def verify_extraction(config, headers, cases, output):
+     receipt={'format_version':1,'scope':'real_native_full_row_capture_microbatch_reset',
+              'base_sha256':model.sha256,'runtime_commit':PRISM_COMMIT,
+              'shim_sha256':sha_file(binary),'cases':results,'native_layout_noise_floor':noise,
++             'precision_profile':precision_profile,
++             'precision_environment':dict(STRICT_F32_ENV) if precision_profile=='strict-f32' else {},
++             'runtime_library_sha256':{name:sha_file(Path(config.runtime_dir)/name)
++                                      for name in ('libllama.so','libggml-cuda.so','libggml-base.so')},
+              'gates':{'reset_relative_rms':RESET_RELATIVE_RMS,'layout_max_token_kl':LAYOUT_MAX_TOKEN_KL,
+-                      'revision':'microbatch rms 5e-4 gate replaced after measured native layout noise; '
+-                                 'see native.py comment and ledger'},
++                      'revision':('original strict microbatch RMS and KL; no layout-noise substitution'
++                                  if precision_profile=='strict-f32' else
++                                  'legacy diagnostic: microbatch rms replaced by measured native layout noise')},
+              'full_model_backward':False}
+     output=Path(output); output.parent.mkdir(parents=True,exist_ok=True)
+     with output.open('x') as stream: json.dump(receipt,stream,indent=2)
+diff --git a/training/wanda_bonsai2/src/archie_wanda/verification.py b/training/wanda_bonsai2/src/archie_wanda/verification.py
+index 7cb8268..2bc02f6 100644
+--- a/training/wanda_bonsai2/src/archie_wanda/verification.py
++++ b/training/wanda_bonsai2/src/archie_wanda/verification.py
+@@ -32,7 +32,7 @@ def load_cache(config, model, root):
+     return info
+ 
+ 
+-def suffix_criterion(rms, kl, floor):
++def suffix_criterion(rms, kl, floor, precision_profile='native'):
+     """Strict predeclared tolerance, or no worse than native's own measured layout noise.
+ 
+     Native CUDA is deterministic per batch layout but differs ~1% across layouts
+@@ -41,6 +41,8 @@ def suffix_criterion(rms, kl, floor):
+     """
+     if rms<=5e-4 and kl<=1e-3:
+         return 'strict'
++    if precision_profile == 'strict-f32':
++        return None
+     if rms<=floor['norm_relative_rms'] and kl<=max(1e-3,floor['max_token_kl']):
+         return 'within_native_layout_noise'
+     return None
+@@ -52,12 +54,14 @@ def verify_suffix(config, extraction, output):
+     from .ptq import FrozenPTQLinear
+     before=preflight(config,required_gpu_mib=1500)
+     native=json.loads(Path(extraction).read_text())
++    precision_profile=native.get('precision_profile','native')
+     if native.get('base_sha256')!=config.base_sha256 or len(native.get('cases',[]))<3:
+         raise AdmissionError('complete three-case native extraction gate required')
+     floor=native.get('native_layout_noise_floor')
+     if not floor:
+         raise AdmissionError('extraction receipt lacks measured native noise floor')
+     model=inspect_model(Path(config.model_path),config.base_sha256)
++    torch.set_float32_matmul_precision('highest')
+     torch.manual_seed(config.seed); torch.cuda.reset_peak_memory_stats()
+     suffix=BonsaiSuffix(model,config).cuda().make_resident('cuda')
+     head=FrozenPTQLinear(model,'output.weight',config.row_chunk).make_resident('cuda')
+@@ -77,7 +81,7 @@ def verify_suffix(config, extraction, output):
+             record={'id':case['id'],'cache':str(root),'cache_sha256':sha_file(root/'receipt.json'),
+                     'tokens':count,'normalized_relative_rms':rms,'maximum_token_kl':kl,
+                     'greedy_agreement':float((logits.argmax(-1)==reference.argmax(-1)).double().mean())}
+-            record['criterion']=suffix_criterion(rms,kl,floor)
++            record['criterion']=suffix_criterion(rms,kl,floor,precision_profile)
+             cases.append(record)
+             if record['criterion'] is None:
+                 failed={'format_version':1,'status':'failed','scope':'real_zero_adapter_suffix',
+@@ -87,6 +91,9 @@ def verify_suffix(config, extraction, output):
+             del logits,reference,log_p,log_q,prefix,actual,expected
+     result={'format_version':1,'status':'passed','scope':'real_zero_adapter_suffix',
+             'base_sha256':model.sha256,'extraction_sha256':sha_file(extraction),'cases':cases,
++            'precision_profile':precision_profile,'precision_environment':native.get('precision_environment',{}),
++            'torch_float32_matmul_precision':torch.get_float32_matmul_precision(),
++            'thresholds':{'normalized_relative_rms':5e-4,'maximum_token_kl':1e-3},
+             'seconds':time.monotonic()-start,'peak_cuda_allocated_bytes':torch.cuda.max_memory_allocated(),
+             'resources_before':asdict(before),'nonzero_native_adapter_verified':False,
+             'semantic_training':False}
+@@ -129,21 +136,25 @@ def verify_native(config, headers, candidate, checkpoint, cases, output):
+     from .native import LAYOUT_MAX_TOKEN_KL
+     model=inspect_model(Path(config.model_path),config.base_sha256)
+     binary=build_native(config,headers,'adapter_logits.cpp','archie-wanda-adapter')
+-    saved=torch.load(checkpoint,weights_only=True,map_location='cuda')
++    saved=torch.load(checkpoint,weights_only=True,map_location='cpu')
+     targets=sorted({k.split('_delta.')[0] for k in saved['model']},key='qkvo'.index)
+-    suffix=BonsaiSuffix(model,config,targets).cuda().make_resident('cuda')
+-    suffix.load_state_dict(saved['model'],strict=False)
+-    head=FrozenPTQLinear(model,'output.weight',config.row_chunk).make_resident('cuda')
+     texts=[]
+     for line in Path(cases).read_text(encoding='utf-8').splitlines():
+         case=json.loads(line); texts.append((case['id'],case['text']))
+     work=Path(config.run_dir)/'verify'/uuid.uuid4().hex
+-    records=[]
++    references=[]
+     for case_id,text in texts:
+         base=_native_run(binary,model,text,work/(case_id+'-base'),config)
+         tuned=_native_run(binary,model,text,work/(case_id+'-lora'),config,candidate)
+         if base['tokens']!=tuned['tokens']:
+             raise ParityError('adapter changed tokenization')
++        references.append((case_id,base,tuned))
++    # Every native process and its CUDA context is gone before Torch allocates.
++    suffix=BonsaiSuffix(model,config,targets).cuda().make_resident('cuda')
++    suffix.load_state_dict(saved['model'],strict=False)
++    head=FrozenPTQLinear(model,'output.weight',config.row_chunk).make_resident('cuda')
++    records=[]
++    for case_id,base,tuned in references:
+         count=len(base['tokens'])
+         load=lambda name,root,cols: torch.from_numpy(np.fromfile(root/name,dtype='<f4').reshape(count,cols))
+         prefix_base,prefix_lora=load('prefix.f32',work/(case_id+'-base'),4096),load('prefix.f32',work/(case_id+'-lora'),4096)
+@@ -165,6 +176,7 @@ def verify_native(config, headers, candidate, checkpoint, cases, output):
+     result={'format_version':1,'status':status,'scope':'native_lora_candidate_vs_torch_suffix',
+             'base_sha256':model.sha256,'candidate':str(candidate),'candidate_sha256':sha_file(candidate),
+             'checkpoint':str(checkpoint),'targets':targets,'adapter_binary_sha256':sha_file(binary),
++            'phase_order':'all_native_children_exit_then_torch_cuda',
+             'cases':records,'mean_adapter_effect_kl':effect,'mean_parity_kl':error,'promoted':False}
+     atomic_json(output,result)
+     if status=='failed':
+@@ -188,6 +200,7 @@ def verify_loss(config, parity, output):
+         receipt.get('base_sha256')!=config.base_sha256):
+         raise AdmissionError('passed exact-base native suffix gate required')
+     model=inspect_model(Path(config.model_path),config.base_sha256)
++    torch.set_float32_matmul_precision('highest')
+     root=Path(receipt['cases'][-1]['cache']); info=load_cache(config,model,root)
+     if sha_file(root/'receipt.json')!=receipt['cases'][-1]['cache_sha256']:
+         raise AdmissionError('parity cache changed')
+@@ -212,6 +225,8 @@ def verify_loss(config, parity, output):
+         optimizer.step(); torch.cuda.synchronize()
+         records.append({'step':step+1,'loss':float(loss.detach()),'gradient_norms':gradients})
+     result={'format_version':1,'status':'passed','scope':'real_suffix_full_vocabulary_backward',
++            'precision_profile':receipt.get('precision_profile','native'),
++            'torch_float32_matmul_precision':torch.get_float32_matmul_precision(),
+             'base_sha256':model.sha256,'parity_sha256':sha_file(parity),'tokens':len(info['tokens']),
+             'vocabulary':head.rows,'steps':records,'seconds':time.monotonic()-start,
+             'peak_cuda_allocated_bytes':torch.cuda.max_memory_allocated(),'resources_before':asdict(before),
+diff --git a/training/wanda_bonsai2/src/archie_wanda/worker.py b/training/wanda_bonsai2/src/archie_wanda/worker.py
+index 9bd5f51..3abe032 100644
+--- a/training/wanda_bonsai2/src/archie_wanda/worker.py
++++ b/training/wanda_bonsai2/src/archie_wanda/worker.py
+@@ -155,6 +155,7 @@ class Worker:
+             self.binary = build_native(self.config, self.headers)
+         shim = sha_file(self.binary)
+         tokenizer = NativeTokenizer(self.config)
++        precision_profile = spec.get('precision_profile', 'native')
+         records, rejected = [], []
+         for number, example in enumerate(examples):
+             if self.stopping():
+@@ -170,11 +171,13 @@ class Worker:
+             except AdmissionError as error:
+                 rejected.append({'example_id': example.example_id, 'reason': str(error)}); continue
+             _, full = render(example)
+-            root = self.root/'cache'/digest({'text': full, 'base': model.sha256, 'shim': shim})[:32]
++            root = self.root/'cache'/digest({'text': full, 'base': model.sha256, 'shim': shim,
++                                           'precision_profile': precision_profile})[:32]
+             if not (root/'receipt.json').exists():
+                 if root.exists():
+                     shutil.rmtree(root)
+-                extract_text(model, full, root, self.config, self.binary, ubatch=0, split=example.split)
++                extract_text(model, full, root, self.config, self.binary, ubatch=0, split=example.split,
++                             precision_profile=precision_profile)
+                 prune_reference_outputs(root)
+             info = json.loads((root/'receipt.json').read_text())
+             if info['tokens'] != tokens.tokens or info['split'] != example.split:
+@@ -183,6 +186,7 @@ class Worker:
+                             'choice_row': tokens.choice_row, 'choice_token_ids': tokens.choice_token_ids,
+                             'cache': str(root)})
+         index = {'format_version': 1, 'tranche': str(tranche), 'tranche_sha256': sha_file(tranche),
++                 'precision_profile': precision_profile,
+                  'split_digest': split_digest(examples), 'base_sha256': model.sha256, 'shim_sha256': shim,
+                  'examples': records, 'rejected': rejected, 'created_ms': now_ms()}
+         out = self.root/'datasets'/(tranche.stem+'.json')
+@@ -191,7 +195,11 @@ class Worker:
+ 
+     # ---- train -----------------------------------------------------------------------
+     def train(self, spec):
++        from .admission import (validate_gates, validate_cache_profile, validate_lora_keys,
++                                run_identity, configure_training_precision)
++        admission = validate_gates(self.config, spec)  # fails before Torch/CUDA can be loaded
+         import torch
++        admission['effective_torch_precision'] = configure_training_precision(torch)
+         from .head_loss import full_vocab_cross_entropy
+         from .model import inspect_model
+         from .native import validate_cache
+@@ -220,9 +228,11 @@ class Worker:
+         if not train or {e['family_id'] for e in train} & {e['family_id'] for e in dev}:
+             raise AdmissionError('training set empty or a family crosses train/development')
+         for e in examples:
+-            validate_cache(e['cache'], BASE_SHA, e['split'], e['tokens'], self.config.cache_cap_bytes)
+-        run_digest = digest({'settings': settings, 'base': BASE_SHA,
+-                             'data': sorted((e['example_id'], e['cache']) for e in examples)})
++            info = validate_cache(e['cache'], BASE_SHA, e['split'], e['tokens'], self.config.cache_cap_bytes)
++            validate_cache_profile(info, admission)
++        if len({e['domain'] for e in examples}) != 1:
++            raise AdmissionError('one run must preserve a single personal/work domain')
++        run_digest = run_identity(self.config, settings, examples, spec['datasets'], admission)
+         run = self.root/'runs'/run_id
+         run.mkdir(parents=True, exist_ok=True)
+         model = inspect_model(Path(self.config.model_path), self.config.base_sha256)
+@@ -242,6 +252,7 @@ class Worker:
+             saved = torch.load(last, weights_only=True, map_location='cuda')
+             if saved['run_digest'] != run_digest:
+                 raise AdmissionError('checkpoint belongs to different settings/data; refusing resume')
++            validate_lora_keys(saved['model'], settings['targets'])
+             suffix.load_state_dict(saved['model'], strict=False)
+             optimizer.load_state_dict(saved['optimizer'])
+             state = saved['state']
+@@ -249,10 +260,10 @@ class Worker:
+         else:
+             if settings['init_from']:
+                 initial = torch.load(settings['init_from'], weights_only=True, map_location='cuda')['model']
+-                if set(initial) - {k for k in suffix.state_dict() if '_delta.' in k}:
+-                    raise AdmissionError('init checkpoint has tensors outside this target set')
++                validate_lora_keys(initial, settings['targets'])
+                 suffix.load_state_dict(initial, strict=False)
+             atomic_json(run/'spec.json', {'spec': spec, 'settings': settings, 'run_digest': run_digest,
++                                          'admission': admission,
+                                           'train_examples': len(train), 'dev_examples': len(dev)})
+             state['baseline'] = self.evaluate(suffix, head, dev, train)
+             self.log(run, {'event': 'baseline', 'opt_step': 0, **state['baseline']})
+@@ -262,6 +273,7 @@ class Worker:
+ 
+         def checkpoint():
+             atomic_torch_save({'run_digest': run_digest, 'model': lora_state(), 'optimizer': optimizer.state_dict(),
++                               'settings': settings, 'admission': admission,
+                                'state': state, 'rng_cpu': torch.get_rng_state(),
+                                'rng_cuda': torch.cuda.get_rng_state()}, last)
+ 
+@@ -301,6 +313,7 @@ class Worker:
+                 if self.better(metrics, state['best']):
+                     state['best'] = {'opt_step': state['opt_step'], **metrics}
+                     atomic_torch_save({'run_digest': run_digest, 'model': lora_state(),
++                                       'admission': admission,
+                                        'settings': settings, 'metrics': metrics}, run/'best.pt')
+                 checkpoint(); last_save = time.monotonic()
+             elif time.monotonic()-last_save > 300:
+@@ -320,9 +333,11 @@ class Worker:
+         if self.better(final, state['best']):
+             state['best'] = {'opt_step': state['opt_step'], **final}
+             atomic_torch_save({'run_digest': run_digest, 'model': lora_state(), 'settings': settings,
++                               'admission': admission,
+                                'metrics': final}, run/'best.pt')
+         checkpoint()
+         receipt = {'format_version': 1, 'run_id': run_id, 'run_digest': run_digest, 'base_sha256': BASE_SHA,
++                   'admission': admission,
+                    'settings': settings, 'train_examples': len(train), 'dev_examples': len(dev),
+                    'baseline': state['baseline'], 'final': final, 'best': state['best'],
+                    'opt_steps': state['opt_step'], 'elapsed_seconds': state['elapsed'],
+diff --git a/training/wanda_bonsai2/tests/test_admission.py b/training/wanda_bonsai2/tests/test_admission.py
+new file mode 100644
+index 0000000..d18513d
+--- /dev/null
++++ b/training/wanda_bonsai2/tests/test_admission.py
+@@ -0,0 +1,139 @@
++import dataclasses
++import json
++from pathlib import Path
++import tempfile
++import unittest
++from types import SimpleNamespace
++from unittest.mock import patch
++from archie_wanda import admission
++from archie_wanda.contracts import AdmissionError, TrainConfig, BASE_SHA, PRISM_COMMIT
++from archie_wanda.native import STRICT_F32_ENV, sha_file
++
++
++class TrainingAdmissionTests(unittest.TestCase):
++    def setUp(self):
++        self.temp = tempfile.TemporaryDirectory()
++        self.root = Path(self.temp.name)
++        self.config = TrainConfig(model_path='/unused', runtime_dir=str(self.root))
++        for name in ('libllama.so', 'libggml-cuda.so', 'libggml-base.so'):
++            (self.root / name).write_bytes(name.encode())
++        self.extraction = self.write('extraction.json', {
++            'base_sha256': BASE_SHA, 'runtime_commit': PRISM_COMMIT,
++            'scope': 'real_native_full_row_capture_microbatch_reset', 'shim_sha256': 'a' * 64,
++            'precision_profile': 'strict-f32', 'precision_environment': STRICT_F32_ENV,
++            'cases': [{'id': name, 'tokens': 10, 'comparisons': {
++                kind: {**{file: {'relative_rms': .0001} for file in ('prefix.f32','norm.f32','logits.f32')},
++                       'distribution': {'max_token_kl': .00001}}
++                for kind in ('fresh_reset','microbatch')}} for name in ('a','b','c')],
++            'runtime_library_sha256': {p.name: sha_file(p) for p in self.root.glob('*.so')}})
++        self.parity = self.write('parity.json', {
++            'status': 'passed', 'scope': 'real_zero_adapter_suffix',
++            'base_sha256': self.config.base_sha256, 'precision_profile': 'strict-f32',
++            'extraction_sha256': sha_file(self.extraction),
++            'torch_float32_matmul_precision': 'highest',
++            'cases': [{'id': name, 'tokens': 10, 'criterion': 'strict', 'normalized_relative_rms': .0001,
++                       'maximum_token_kl': .00001} for name in ('a','b','c')]})
++        self.backward = self.write('backward.json', {
++            'status': 'passed', 'scope': 'real_suffix_full_vocabulary_backward',
++            'base_sha256': self.config.base_sha256, 'precision_profile': 'strict-f32',
++            'torch_float32_matmul_precision': 'highest', 'tokens': 10, 'vocabulary': 248320,
++            'steps': [{'step': step, 'loss': 2., 'gradient_norms': {
++                name: .1 for name in ('q_delta.a','q_delta.b','v_delta.a','v_delta.b')}} for step in (1,2)],
++            'parity_sha256': sha_file(self.parity)})
++        self.spec = {'precision_profile': 'strict-f32', 'extraction_receipt': str(self.extraction),
++                     'parity_receipt': str(self.parity), 'backward_receipt': str(self.backward)}
++
++    def tearDown(self):
++        self.temp.cleanup()
++
++    def write(self, name, value):
++        path = self.root / name
++        path.write_text(json.dumps(value))
++        return path
++
++    def test_strict_chain_and_unchanged_runtime_are_required(self):
++        self.assertEqual(admission.validate_gates(self.config, self.spec)['precision_profile'], 'strict-f32')
++        (self.root / 'libggml-cuda.so').write_bytes(b'changed runtime')
++        with self.assertRaises(AdmissionError):
++            admission.validate_gates(self.config, self.spec)
++
++    def test_legacy_or_missing_gate_cannot_start_training(self):
++        with self.assertRaises(AdmissionError):
++            admission.validate_gates(self.config, {})
++        data = json.loads(self.parity.read_text())
++        data['cases'][0]['criterion'] = 'within_native_layout_noise'
++        self.write('parity.json', data)
++        with self.assertRaises(AdmissionError):
++            admission.validate_gates(self.config, self.spec)
++
++    def test_run_identity_changes_when_labels_or_configuration_change(self):
++        examples = [{'example_id': 'example', 'cache': '/same', 'selected': 'A'}]
++        initial = admission.run_identity(self.config, {}, examples, [], {})
++        examples[0]['selected'] = 'B'
++        self.assertNotEqual(initial, admission.run_identity(self.config, {}, examples, [], {}))
++        altered = dataclasses.replace(self.config, sequence_length=64)
++        self.assertNotEqual(initial, admission.run_identity(altered, {}, examples, [], {}))
++
++    def test_lora_pairs_and_cache_precision_cannot_be_partially_restored(self):
++        with self.assertRaises(AdmissionError):
++            admission.validate_lora_keys({'q_delta.a': object()}, ['q'])
++        admission.validate_lora_keys({'q_delta.a': object(), 'q_delta.b': object()}, ['q'])
++        with self.assertRaises(AdmissionError):
++            admission.validate_cache_profile({'precision_profile': 'native'}, {'precision_profile': 'strict-f32'})
++
++    def test_backward_needs_two_finite_full_vocab_steps_with_complete_qv_gradients(self):
++        original = json.loads(self.backward.read_text())
++        for change in ('empty', 'nan', 'missing_gradient', 'zero_second_gradient', 'wrong_vocab', 'medium'):
++            value = json.loads(json.dumps(original))
++            if change == 'empty': value['steps'] = []
++            if change == 'nan': value['steps'][0]['loss'] = float('nan')
++            if change == 'missing_gradient': del value['steps'][1]['gradient_norms']['q_delta.a']
++            if change == 'zero_second_gradient': value['steps'][1]['gradient_norms']['v_delta.a'] = 0.
++            if change == 'wrong_vocab': value['vocabulary'] = 100
++            if change == 'medium': value['torch_float32_matmul_precision'] = 'medium'
++            self.write('backward.json', value)
++            with self.subTest(change=change), self.assertRaises(AdmissionError):
++                admission.validate_gates(self.config, self.spec)
++
++    def test_extraction_needs_three_finite_cases_and_qv_proof_does_not_admit_other_targets(self):
++        value = json.loads(self.extraction.read_text())
++        value['cases'] = []
++        self.write('extraction.json', value)
++        parity = json.loads(self.parity.read_text())
++        parity['extraction_sha256'] = sha_file(self.extraction)
++        self.write('parity.json', parity)
++        backward = json.loads(self.backward.read_text())
++        backward['parity_sha256'] = sha_file(self.parity)
++        self.write('backward.json', backward)
++        with self.assertRaises(AdmissionError):
++            admission.validate_gates(self.config, self.spec)
++        with self.assertRaises(AdmissionError):
++            admission.validate_gates(self.config, dict(self.spec, targets=['q','k','v','o']))
++
++
++class TrainingPrecisionTests(unittest.TestCase):
++    def test_precision_policy_rejects_overrides_and_records_effective_highest(self):
++        self.assertTrue(hasattr(admission, 'configure_training_precision'))
++        fake = SimpleNamespace()
++        fake.policy = 'medium'
++        fake.set_float32_matmul_precision = lambda value: setattr(fake, 'policy', value)
++        fake.get_float32_matmul_precision = lambda: fake.policy
++        fake.backends = SimpleNamespace(cuda=SimpleNamespace(matmul=SimpleNamespace(allow_tf32=True)))
++        with patch.dict('os.environ', {'TORCH_ALLOW_TF32_CUBLAS_OVERRIDE': '1'}):
++            with self.assertRaises(AdmissionError): admission.configure_training_precision(fake)
++        with patch.dict('os.environ', {'TORCH_ALLOW_TF32_CUBLAS_OVERRIDE': '0', 'NVIDIA_TF32_OVERRIDE': '0'}):
++            policy = admission.configure_training_precision(fake)
++            self.assertEqual(policy['float32_matmul_precision'], 'highest')
++            self.assertFalse(policy['allow_tf32'])
++
++    def test_actual_worker_entry_pins_precision_before_any_training_allocation(self):
++        from archie_wanda.worker import Worker
++        class ReachedPolicy(Exception): pass
++        with tempfile.TemporaryDirectory() as directory:
++            worker = Worker(TrainConfig(model_path='/unused'), directory, 'headers', 0)
++            with patch('archie_wanda.admission.validate_gates', return_value={}), \
++                 patch('archie_wanda.admission.configure_training_precision', side_effect=ReachedPolicy,
++                       create=True) as policy:
++                with self.assertRaises(ReachedPolicy):
++                    worker.train({'run_id': 'cpu-spy', 'datasets': []})
++                policy.assert_called_once()
+diff --git a/training/wanda_bonsai2/tests/test_strict_reference.py b/training/wanda_bonsai2/tests/test_strict_reference.py
+new file mode 100644
+index 0000000..ddbe07f
+--- /dev/null
++++ b/training/wanda_bonsai2/tests/test_strict_reference.py
+@@ -0,0 +1,47 @@
++import os
++import unittest
++from unittest.mock import patch
++from archie_wanda import native
++from archie_wanda.contracts import AdmissionError, TrainConfig, ParityError
++from archie_wanda.verification import suffix_criterion
++
++
++class StrictReferenceTests(unittest.TestCase):
++    def test_profile_disables_activation_quantization_and_tf32_only_in_child(self):
++        self.assertTrue(hasattr(native, 'STRICT_F32_ENV'), 'strict native profile is missing')
++        with patch.dict(os.environ, {'GGML_CUDA_CUBLAS_COMPUTE_TYPE': 'f16'}):
++            environment = native.native_environment(TrainConfig(model_path='/unused'), 'strict-f32')
++            self.assertEqual(environment['GGML_CUDA_CUBLAS_COMPUTE_TYPE'], 'f32')
++            self.assertEqual(environment['GGML_CUDA_PTQ1_0_MMQ_MAX_BATCH'], '0')
++            self.assertEqual(environment['NVIDIA_TF32_OVERRIDE'], '0')
++            self.assertEqual(os.environ['GGML_CUDA_CUBLAS_COMPUTE_TYPE'], 'f16')
++
++    def test_balanced_microbatches_never_enter_four_token_q8_path(self):
++        self.assertTrue(hasattr(native, 'strict_microbatch'), 'balanced strict layout is missing')
++        for count in (10, 19, 35):
++            width = native.strict_microbatch(count)
++            self.assertGreaterEqual(count - width, 5)
++            self.assertGreaterEqual(width, 5)
++            self.assertLess(width, count)
++        with self.assertRaises(AdmissionError):
++            native.strict_microbatch(9)
++
++    def test_strict_profile_cannot_pass_by_native_layout_noise(self):
++        floor = {'norm_relative_rms': .02, 'max_token_kl': .01}
++        self.assertIsNone(suffix_criterion(.0032, .0001, floor, 'strict-f32'))
++        self.assertEqual(suffix_criterion(.0004, .0001, floor, 'strict-f32'), 'strict')
++
++    def test_strict_microbatch_capture_requires_original_tolerance(self):
++        exact = {name: {'relative_rms': 0.} for name in ('prefix.f32', 'norm.f32', 'logits.f32')}
++        layout = {name: {'relative_rms': .0032} for name in exact}
++        layout['distribution'] = {'max_token_kl': .0001}
++        with self.assertRaises(ParityError):
++            native.judge_native_comparisons({'fresh_reset': exact, 'microbatch': layout}, 'strict-f32')
++
++    def test_nan_negative_or_boolean_native_metrics_cannot_pass(self):
++        for bad in (float('nan'), float('inf'), -1., True):
++            exact = {name: {'relative_rms': 0.} for name in ('prefix.f32','norm.f32','logits.f32')}
++            layout = {name: {'relative_rms': bad} for name in exact}
++            layout['distribution'] = {'max_token_kl': 0.}
++            with self.subTest(value=bad), self.assertRaises(ParityError):
++                native.judge_native_comparisons({'fresh_reset': exact, 'microbatch': layout}, 'strict-f32')
+diff --git a/training/wanda_bonsai2/tests/test_verification_phases.py b/training/wanda_bonsai2/tests/test_verification_phases.py
+new file mode 100644
+index 0000000..d32cd9a
+--- /dev/null
++++ b/training/wanda_bonsai2/tests/test_verification_phases.py
+@@ -0,0 +1,33 @@
++from pathlib import Path
++from types import SimpleNamespace
++import tempfile
++import unittest
++from unittest.mock import patch
++from archie_wanda.contracts import TrainConfig
++from archie_wanda.verification import verify_native
++
++
++class VerificationPhases(unittest.TestCase):
++    def test_all_native_children_exit_before_torch_suffix_can_allocate(self):
++        class StopAtTorch(Exception):
++            pass
++        events = []
++        def native(*args, **kwargs):
++            events.append('native_lora' if len(args) == 6 else 'native_base')
++            return {'tokens': list(range(10))}
++        def suffix(*args, **kwargs):
++            events.append('torch_suffix')
++            raise StopAtTorch()
++        with tempfile.TemporaryDirectory() as directory:
++            root = Path(directory)
++            cases = root / 'cases.jsonl'
++            cases.write_text('{"id":"public","text":"public case"}\n')
++            config = TrainConfig(model_path='/unused', run_dir=str(root))
++            with patch('archie_wanda.verification.inspect_model', return_value=SimpleNamespace(path='/unused')), \
++                 patch('archie_wanda.native.build_native', return_value='binary'), \
++                 patch('archie_wanda.verification._native_run', side_effect=native), \
++                 patch('archie_wanda.suffix.BonsaiSuffix', side_effect=suffix), \
++                 patch('torch.load', return_value={'model': {'q_delta.a': 0, 'q_delta.b': 0}}):
++                with self.assertRaises(StopAtTorch):
++                    verify_native(config, 'headers', 'candidate', 'checkpoint', cases, root / 'out.json')
++        self.assertEqual(events, ['native_base', 'native_lora', 'torch_suffix'])

@@ -1,0 +1,43 @@
+{
+  "gpu": "RTX 3070",
+  "model_path": "D:\\ArchieLocal\\models\\Ternary-Bonsai-2-9B-PTQ1_0.gguf",
+  "response": {
+    "choices": [
+      {
+        "finish_reason": "stop",
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "LISTO"
+        }
+      }
+    ],
+    "created": 1792123247,
+    "model": "/mnt/d/ArchieLocal/models/Ternary-Bonsai-2-9B-PTQ1_0.gguf",
+    "system_fingerprint": "b10777-e3de71522",
+    "object": "chat.completion",
+    "usage": {
+      "completion_tokens": 3,
+      "prompt_tokens": 21,
+      "total_tokens": 24,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      }
+    },
+    "id": "chatcmpl-lmovrjgz5RSOIMywKM5xRm40MqhSw2kT",
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 21,
+      "prompt_ms": 366.957,
+      "prompt_per_token_ms": 17.47414285714286,
+      "prompt_per_second": 57.22741356616716,
+      "predicted_n": 3,
+      "predicted_ms": 30.949,
+      "predicted_per_token_ms": 15.4745,
+      "predicted_per_second": 64.622443374584
+    }
+  },
+  "elapsed_ms": 459,
+  "test": "real_bonsai_2_9b_cuda_public_prompt",
+  "mock": false
+}

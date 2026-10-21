@@ -35,6 +35,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <optional>
@@ -58,6 +59,8 @@ using sentry::identity::RelationGraph;
 // this build does not know is refused outright — unlike a single bad line, an unknown
 // format means every line might mean something other than what it appears to.
 inline constexpr int kFormatVersion = 1;
+// Checked before a disk read allocates the file, and again while reading a growing file.
+inline constexpr std::size_t kMaxGraphBytes = 4 * 1024 * 1024;
 
 // Everything the graph holds, as one value.
 struct PersonGraph {
@@ -124,9 +127,32 @@ enum class StoreError {
     UnsupportedVersion,
     // The file declares no owner, so nothing in it has a root.
     MissingOwner,
+    TooLarge,
+    LockUnavailable,
 };
 
 [[nodiscard]] std::string_view describe(StoreError error) noexcept;
+
+// An OS-owned advisory lock on a stable sibling `.lock` file. Hold this for the entire
+// load -> edit -> save transaction, including first-run creation. Never unlink the lock
+// file: doing so would let another process lock a different inode while this one holds it.
+// The kernel releases the lock when this object or its process dies. All graph CLI
+// writers participate; this grants no authority and is not a replacement for refusals.
+class GraphTransaction {
+  public:
+    [[nodiscard]] static std::expected<GraphTransaction, StoreError> acquire(
+        const std::filesystem::path& graph_path);
+    GraphTransaction(const GraphTransaction&) = delete;
+    GraphTransaction& operator=(const GraphTransaction&) = delete;
+    GraphTransaction(GraphTransaction&& other) noexcept;
+    GraphTransaction& operator=(GraphTransaction&& other) noexcept;
+    ~GraphTransaction();
+
+  private:
+    explicit GraphTransaction(std::intptr_t handle) : handle_(handle) {}
+    void release() noexcept;
+    std::intptr_t handle_ = -1;
+};
 
 // A person graph on disk.
 class GraphStore {
@@ -138,7 +164,8 @@ class GraphStore {
     // Read the graph, re-validating every record against today's rules.
     [[nodiscard]] std::expected<LoadResult, StoreError> load() const;
 
-    // Write the graph, atomically.
+    // Write the graph, atomically. A read/modify/write caller must hold GraphTransaction
+    // across the load and this save; locking only the save cannot prevent lost updates.
     //
     // Written to a temporary in the same directory, flushed, then renamed over the target.
     // A crash leaves either the previous graph or the new one, never a half-written file —

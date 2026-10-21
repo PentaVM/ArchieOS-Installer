@@ -49,6 +49,8 @@ members = [
     "crates/archie-paint",
     "crates/archie-arena",
     "crates/archie-cerebra",
+    "crates/archie-wanda",
+    "crates/archie-wanda-lncm",
     "crates/archie-workstation",
     "crates/archie-iris",
     "crates/archie-iris-runtime",
@@ -108,6 +110,8 @@ archie-a11y = { path = "crates/archie-a11y" }
 archie-reflex = { path = "crates/archie-reflex" }
 archie-paint = { path = "crates/archie-paint" }
 archie-cerebra = { path = "crates/archie-cerebra" }
+archie-wanda = { path = "crates/archie-wanda" }
+archie-wanda-lncm = { path = "crates/archie-wanda-lncm" }
 archie-workstation = { path = "crates/archie-workstation" }
 archie-iris = { path = "crates/archie-iris" }
 archie-iris-runtime = { path = "crates/archie-iris-runtime" }
@@ -116,6 +120,10 @@ archie-shell-bridge = { path = "crates/archie-shell-bridge" }
 
 # External.
 anyhow = "1"
+# Wanda LNCM: tensors, autograd and safetensors in Rust. The same minor line the IRIS
+# runtime uses, so the workspace carries one copy.
+candle-core = "0.9"
+candle-nn = "0.9"
 async-trait = "0.1"
 base64 = "0.22"
 jpeg-decoder = "0.3"

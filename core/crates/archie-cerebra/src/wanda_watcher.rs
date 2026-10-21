@@ -238,6 +238,18 @@ pub fn ingest_export_file(
     salt: &str,
     task_id: &str,
 ) -> Result<WatchReport, WatcherError> {
+    let domain = ContextDomain::personal("owner").map_err(|e| WatcherError::Io(e.to_string()))?;
+    ingest_export_file_in_domain(vault_dir, journal_path, file, salt, task_id, &domain)
+}
+
+pub fn ingest_export_file_in_domain(
+    vault_dir: &Path,
+    journal_path: &Path,
+    file: &Path,
+    salt: &str,
+    task_id: &str,
+    domain: &ContextDomain,
+) -> Result<WatchReport, WatcherError> {
     let mut report = WatchReport::default();
     let Some(kind) = ExportKind::of(file) else {
         report.failures.push(format!(
@@ -249,16 +261,14 @@ pub fn ingest_export_file(
     report.files_seen = 1;
     let bytes =
         std::fs::read(file).map_err(|e| WatcherError::Io(format!("{}: {e}", file.display())))?;
-    let hash = content_id(&bytes);
+    let hash = scoped_content_id(domain, &bytes);
     let mut journal = WatchJournal::load(journal_path);
     if journal.seen.contains(&hash) {
         report.files_already_known = 1;
         return Ok(report);
     }
     let mut vault = vault_io::open_vault(vault_dir)?;
-    let domain = ContextDomain::personal("owner")
-        .map_err(|e| WatcherError::Io(format!("the wanda domain is fixed and must parse: {e}")))?;
-    match ingest(&mut vault, &domain, task_id, kind, file, salt) {
+    match ingest(&mut vault, domain, task_id, kind, file, salt) {
         Ok((messages, chats)) => {
             report.files_ingested = 1;
             report.messages_recorded = messages;
@@ -289,6 +299,18 @@ pub fn watch_exports_once(
     salt: &str,
     task_id: &str,
 ) -> Result<WatchReport, WatcherError> {
+    let domain = ContextDomain::personal("owner").map_err(|e| WatcherError::Io(e.to_string()))?;
+    watch_exports_once_in_domain(vault_dir, journal_path, watch_dir, salt, task_id, &domain)
+}
+
+pub fn watch_exports_once_in_domain(
+    vault_dir: &Path,
+    journal_path: &Path,
+    watch_dir: &Path,
+    salt: &str,
+    task_id: &str,
+    domain: &ContextDomain,
+) -> Result<WatchReport, WatcherError> {
     let mut report = WatchReport::default();
     let mut entries: Vec<PathBuf> = Vec::new();
     let read_dir = std::fs::read_dir(watch_dir)
@@ -304,8 +326,6 @@ pub fn watch_exports_once(
     let mut journal = WatchJournal::load(journal_path);
     let known: BTreeSet<String> = journal.seen.iter().cloned().collect();
     let mut vault = None;
-    let domain = ContextDomain::personal("owner")
-        .map_err(|e| WatcherError::Io(format!("the wanda domain is fixed and must parse: {e}")))?;
     let mut dirty = false;
     for path in entries {
         report.files_seen += 1;
@@ -318,7 +338,7 @@ pub fn watch_exports_once(
                 continue;
             }
         };
-        let hash = content_id(&bytes);
+        let hash = scoped_content_id(domain, &bytes);
         if known.contains(&hash) {
             report.files_already_known += 1;
             continue;
@@ -328,7 +348,7 @@ pub fn watch_exports_once(
         }
         let open = vault.as_mut().expect("opened above");
         let kind = ExportKind::of(&path).expect("filtered above");
-        match ingest(open, &domain, task_id, kind, &path, salt) {
+        match ingest(open, domain, task_id, kind, &path, salt) {
             Ok((messages, chats)) => {
                 report.files_ingested += 1;
                 report.messages_recorded += messages;
@@ -355,9 +375,32 @@ pub fn watch_exports_once(
     Ok(report)
 }
 
+/// The journal key of an export recorded into `domain`. The owner's personal domain keeps
+/// the plain content id it has always had, so journals written before domains existed stay
+/// valid; any other domain is keyed by its path too, so the same file can be recorded once
+/// per domain without one hiding the other.
+fn scoped_content_id(domain: &ContextDomain, bytes: &[u8]) -> String {
+    if ContextDomain::personal("owner").is_ok_and(|owner| &owner == domain) {
+        return content_id(bytes);
+    }
+    let mut material = domain.path().as_bytes().to_vec();
+    material.push(0);
+    material.extend_from_slice(bytes);
+    content_id(&material)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn journals_from_before_domains_still_recognise_their_exports() {
+        let owner = ContextDomain::personal("owner").unwrap();
+        let work = ContextDomain::work("studio", "building").unwrap();
+        let bytes = b"[10/10/2026, 14:32:01] Ana: hola\n";
+        assert_eq!(scoped_content_id(&owner, bytes), content_id(bytes));
+        assert_ne!(scoped_content_id(&work, bytes), content_id(bytes));
+    }
 
     /// Every export in these tests is a fixture written for the test: fixture
     /// names, a fixture phone number, fixture text. No real chat took part.

@@ -1,0 +1,68 @@
+{
+  "scope": "public metadata and bounded content audit only; no training or queue edits",
+  "sources": [
+    {
+      "repo": "samhog/psychology-10k",
+      "revision": "2d60e5006b2680ee30e8707da4ca763ccb2914f9",
+      "url": "https://huggingface.co/datasets/samhog/psychology-10k",
+      "declared_license": null,
+      "card_metadata_present": false,
+      "files": [
+        ".gitattributes",
+        "Psychology-10K.json"
+      ],
+      "file_sha256": "bee79902f2f46a487ea61c3a9f8e4c5accd2993cca5af98f82c62f1740b7a9d7",
+      "download_bytes": 5208318,
+      "rows": 9846,
+      "fields": [
+        "input",
+        "instruction",
+        "output"
+      ],
+      "unique_normalized_inputs": 6579,
+      "unique_normalized_outputs": 9793,
+      "duplicate_normalized_pairs_beyond_first": 0,
+      "repeated_input_rows_beyond_first": 3267,
+      "inputs_with_multiple_distinct_outputs": 1017,
+      "instruction_classes": 1,
+      "rows_with_professional_role_condition": 9846,
+      "max_input_chars": 215,
+      "max_output_chars": 721,
+      "direct_training_admission": "not admitted: no decision_v1 causal-family supervision or verified license/provenance dossier"
+    },
+    {
+      "repo": "Gopher-Lab/huberman_lab_Dr__Becky_Kennedy_Protocols_for_Excellent_Parenting__Improving_Relationships_of_All",
+      "revision": "63cb615b31cc9e4c4d410d10570ef9ef94435223",
+      "url": "https://huggingface.co/datasets/Gopher-Lab/huberman_lab_Dr__Becky_Kennedy_Protocols_for_Excellent_Parenting__Improving_Relationships_of_All",
+      "declared_license": null,
+      "card_metadata_present": true,
+      "files": [
+        ".gitattributes",
+        "README.md",
+        "data/train-00000-of-00001.parquet"
+      ],
+      "rows": 163,
+      "fields": [
+        "speaker",
+        "text"
+      ],
+      "speaker_labels": {
+        "A": 82,
+        "B": 81
+      },
+      "duplicate_normalized_text_rows_beyond_first": 8,
+      "total_text_chars": 177125,
+      "max_segment_chars": 7877,
+      "truncated_rows_in_viewer": 0,
+      "viewer_response_sha256": [
+        "0d4f0510eb32e767c086943e4a617575f7a6bcd674582a0b3f85773cd845db14",
+        "56f8751b04ac424fa826ba05dcfbee8dbc7b9004e1a13ba0d445a3d911f08108"
+      ],
+      "grouping": "one named podcast episode; speaker segments are not independent train/dev families",
+      "pinning_note": "README pinned; viewer responses hashed; repo revision unchanged before/after viewer audit",
+      "direct_training_admission": "not admitted: no decision_v1 causal-family supervision or verified license/provenance dossier"
+    }
+  ],
+  "rows_admitted": 0,
+  "gpu_jobs_started": 0
+}

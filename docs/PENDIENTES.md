@@ -310,3 +310,23 @@ repositorio, hay que subirlo.
 - [ ] Compatibilidad multiplataforma: [`TODO-COMPATIBILIDAD-MULTIPLATAFORMA.md`](TODO-COMPATIBILIDAD-MULTIPLATAFORMA.md).
 - [ ] Biometría real, conectores de nodos y móviles, app iOS.
 - [ ] Trello al día con esta lista. — Nelson
+
+## 8. Wanda: integración de contexto (rama Codex, todavía fuera del WSL)
+
+Implementado en la rama de integración: grafo C++ existente con transacciones y
+proyección, canal de contenido separado, Vault cifrado con dominio/caducidad,
+Cerebra/router para propuestas locales, gate de voz y mapa/lista de relaciones.
+Detalle, ejecución y límites: [WANDA-CONTEXT.md](WANDA-CONTEXT.md).
+
+- [ ] Revisión independiente del conjunto antes de integrar a main.
+- [ ] Android: build con SDK/Gradle y notificaciones reales.
+- [ ] WhatsApp real: selectores, remitentes, cambios y alcance del chat visible.
+- [ ] Captura real de todos los monitores por el productor existente de IRIS/host.
+- [ ] Resolver remitente → persona y confirmar/corregir perfiles y etiquetas por voz.
+- [ ] Recuperación relevante para grafos grandes y combinación explícita de agendas.
+- [ ] Ofertas con precio, moneda, stock, fuente y caducidad verificadas.
+- [ ] Evals de recomendaciones con modelo local real; incertidumbre y alternativas
+  sociales, abstención ante evidencia insuficiente y conservación de citas.
+- [ ] Interrupción de voz durante tools lentos y prueba real de ASR/TTS.
+- [ ] Quickshell y empaquetado WSL con Claude/Xavi. El release draft de Sheriff
+  conserva la imagen anterior; estos cambios no se agregan al archivo ya subido.

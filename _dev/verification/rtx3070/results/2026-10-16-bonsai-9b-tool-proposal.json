@@ -1,0 +1,46 @@
+{
+  "choices": [
+    {
+      "finish_reason": "tool_calls",
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "type": "function",
+            "function": {
+              "name": "get_system_status",
+              "arguments": "{}"
+            },
+            "id": "WnvFf7TKR4Y7iEjzw42FeNBPV7lEYhoh"
+          }
+        ]
+      }
+    }
+  ],
+  "created": 1792124579,
+  "model": "/mnt/d/ArchieLocal/models/Ternary-Bonsai-2-9B-PTQ1_0.gguf",
+  "system_fingerprint": "b10777-e3de71522",
+  "object": "chat.completion",
+  "usage": {
+    "completion_tokens": 15,
+    "prompt_tokens": 272,
+    "total_tokens": 287,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    }
+  },
+  "id": "chatcmpl-dchFQZVaJT5zIFNaID8vnZax7CD8tDjZ",
+  "timings": {
+    "cache_n": 0,
+    "prompt_n": 272,
+    "prompt_ms": 565.512,
+    "prompt_per_token_ms": 2.0790882352941176,
+    "prompt_per_second": 480.980067620139,
+    "predicted_n": 15,
+    "predicted_ms": 139.642,
+    "predicted_per_token_ms": 9.974428571428572,
+    "predicted_per_second": 100.25636986007076
+  }
+}

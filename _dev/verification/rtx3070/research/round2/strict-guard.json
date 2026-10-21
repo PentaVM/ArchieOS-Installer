@@ -1,0 +1,588 @@
+{
+  "format_version": 1,
+  "scope": "owned_short_numerical_reference_only",
+  "deadline_seconds": 180,
+  "start_below_c": 60,
+  "stop_at_c": 70,
+  "semantic_training": false,
+  "samples": [
+    {
+      "elapsed": 141.262584818,
+      "temperature_c": 26.0,
+      "used_gpu_mib": 707.0,
+      "power_w": 17.06
+    },
+    {
+      "elapsed": 0.3978603410000119,
+      "temperature_c": 26.0,
+      "used_gpu_mib": 707.0,
+      "power_w": 17.08
+    },
+    {
+      "elapsed": 0.890891737000004,
+      "temperature_c": 26.0,
+      "used_gpu_mib": 707.0,
+      "power_w": 16.92
+    },
+    {
+      "elapsed": 1.3981618280000134,
+      "temperature_c": 26.0,
+      "used_gpu_mib": 707.0,
+      "power_w": 17.04
+    },
+    {
+      "elapsed": 1.9292662710000172,
+      "temperature_c": 26.0,
+      "used_gpu_mib": 698.0,
+      "power_w": 17.17
+    },
+    {
+      "elapsed": 2.4542356500000153,
+      "temperature_c": 26.0,
+      "used_gpu_mib": 696.0,
+      "power_w": 18.02
+    },
+    {
+      "elapsed": 2.9612691180000184,
+      "temperature_c": 26.0,
+      "used_gpu_mib": 696.0,
+      "power_w": 18.25
+    },
+    {
+      "elapsed": 3.471321097000015,
+      "temperature_c": 26.0,
+      "used_gpu_mib": 696.0,
+      "power_w": 17.8
+    },
+    {
+      "elapsed": 3.9624942389999944,
+      "temperature_c": 26.0,
+      "used_gpu_mib": 696.0,
+      "power_w": 17.53
+    },
+    {
+      "elapsed": 4.440672056000011,
+      "temperature_c": 26.0,
+      "used_gpu_mib": 696.0,
+      "power_w": 17.3
+    },
+    {
+      "elapsed": 4.890357350000016,
+      "temperature_c": 26.0,
+      "used_gpu_mib": 696.0,
+      "power_w": 17.26
+    },
+    {
+      "elapsed": 5.238354502000021,
+      "temperature_c": 26.0,
+      "used_gpu_mib": 696.0,
+      "power_w": 17.34
+    },
+    {
+      "elapsed": 5.747078891000001,
+      "temperature_c": 26.0,
+      "used_gpu_mib": 700.0,
+      "power_w": 17.47
+    },
+    {
+      "elapsed": 6.253463999000019,
+      "temperature_c": 26.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 18.43
+    },
+    {
+      "elapsed": 6.768555979000013,
+      "temperature_c": 26.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 18.45
+    },
+    {
+      "elapsed": 7.264817047999998,
+      "temperature_c": 26.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 17.36
+    },
+    {
+      "elapsed": 7.657790430000006,
+      "temperature_c": 26.0,
+      "used_gpu_mib": 716.0,
+      "power_w": 17.36
+    },
+    {
+      "elapsed": 8.009631788999997,
+      "temperature_c": 30.0,
+      "used_gpu_mib": 852.0,
+      "power_w": 27.99
+    },
+    {
+      "elapsed": 8.368109865000008,
+      "temperature_c": 30.0,
+      "used_gpu_mib": 2536.0,
+      "power_w": 38.32
+    },
+    {
+      "elapsed": 8.730141884000005,
+      "temperature_c": 33.0,
+      "used_gpu_mib": 2952.0,
+      "power_w": 53.39
+    },
+    {
+      "elapsed": 9.081410956000013,
+      "temperature_c": 33.0,
+      "used_gpu_mib": 870.0,
+      "power_w": 69.92
+    },
+    {
+      "elapsed": 9.506645977999995,
+      "temperature_c": 35.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 73.9
+    },
+    {
+      "elapsed": 9.837670375000016,
+      "temperature_c": 35.0,
+      "used_gpu_mib": 720.0,
+      "power_w": 73.91
+    },
+    {
+      "elapsed": 10.186128402000008,
+      "temperature_c": 35.0,
+      "used_gpu_mib": 2388.0,
+      "power_w": 58.96
+    },
+    {
+      "elapsed": 10.554911656000002,
+      "temperature_c": 35.0,
+      "used_gpu_mib": 2536.0,
+      "power_w": 59.45
+    },
+    {
+      "elapsed": 10.958016001000004,
+      "temperature_c": 41.0,
+      "used_gpu_mib": 5890.0,
+      "power_w": 71.83
+    },
+    {
+      "elapsed": 11.311697820000006,
+      "temperature_c": 41.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 86.27
+    },
+    {
+      "elapsed": 11.783869666000015,
+      "temperature_c": 38.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 85.97
+    },
+    {
+      "elapsed": 12.185476038000019,
+      "temperature_c": 38.0,
+      "used_gpu_mib": 808.0,
+      "power_w": 64.95
+    },
+    {
+      "elapsed": 12.537194443999994,
+      "temperature_c": 37.0,
+      "used_gpu_mib": 852.0,
+      "power_w": 59.32
+    },
+    {
+      "elapsed": 12.916967983000006,
+      "temperature_c": 37.0,
+      "used_gpu_mib": 2536.0,
+      "power_w": 59.86
+    },
+    {
+      "elapsed": 13.333451346999993,
+      "temperature_c": 44.0,
+      "used_gpu_mib": 2952.0,
+      "power_w": 68.55
+    },
+    {
+      "elapsed": 13.778463541999997,
+      "temperature_c": 39.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 74.48
+    },
+    {
+      "elapsed": 14.266517883000006,
+      "temperature_c": 38.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 73.77
+    },
+    {
+      "elapsed": 14.595781439000007,
+      "temperature_c": 38.0,
+      "used_gpu_mib": 710.0,
+      "power_w": 59.17
+    },
+    {
+      "elapsed": 14.956367999000008,
+      "temperature_c": 38.0,
+      "used_gpu_mib": 1876.0,
+      "power_w": 59.1
+    },
+    {
+      "elapsed": 15.320849026000019,
+      "temperature_c": 38.0,
+      "used_gpu_mib": 2536.0,
+      "power_w": 60.0
+    },
+    {
+      "elapsed": 15.707310578000005,
+      "temperature_c": 44.0,
+      "used_gpu_mib": 3648.0,
+      "power_w": 71.91
+    },
+    {
+      "elapsed": 16.14744932900001,
+      "temperature_c": 40.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 74.55
+    },
+    {
+      "elapsed": 16.57761781900001,
+      "temperature_c": 40.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 74.02
+    },
+    {
+      "elapsed": 16.957502436,
+      "temperature_c": 38.0,
+      "used_gpu_mib": 852.0,
+      "power_w": 59.92
+    },
+    {
+      "elapsed": 17.30256521000001,
+      "temperature_c": 38.0,
+      "used_gpu_mib": 2536.0,
+      "power_w": 59.62
+    },
+    {
+      "elapsed": 17.687990178000007,
+      "temperature_c": 38.0,
+      "used_gpu_mib": 2718.0,
+      "power_w": 60.26
+    },
+    {
+      "elapsed": 18.035421925999998,
+      "temperature_c": 38.0,
+      "used_gpu_mib": 6640.0,
+      "power_w": 72.03
+    },
+    {
+      "elapsed": 18.382737692999996,
+      "temperature_c": 46.0,
+      "used_gpu_mib": 826.0,
+      "power_w": 87.7
+    },
+    {
+      "elapsed": 18.805863754,
+      "temperature_c": 46.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 87.19
+    },
+    {
+      "elapsed": 19.190008360999997,
+      "temperature_c": 40.0,
+      "used_gpu_mib": 720.0,
+      "power_w": 71.19
+    },
+    {
+      "elapsed": 19.528858360000015,
+      "temperature_c": 40.0,
+      "used_gpu_mib": 852.0,
+      "power_w": 59.79
+    },
+    {
+      "elapsed": 19.913967471000007,
+      "temperature_c": 40.0,
+      "used_gpu_mib": 2536.0,
+      "power_w": 60.28
+    },
+    {
+      "elapsed": 20.27865161600002,
+      "temperature_c": 40.0,
+      "used_gpu_mib": 2944.0,
+      "power_w": 60.79
+    },
+    {
+      "elapsed": 20.631290586000006,
+      "temperature_c": 43.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 75.55
+    },
+    {
+      "elapsed": 21.179493444000002,
+      "temperature_c": 40.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 74.19
+    },
+    {
+      "elapsed": 21.621595009000004,
+      "temperature_c": 39.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 57.89
+    },
+    {
+      "elapsed": 21.972923003000005,
+      "temperature_c": 39.0,
+      "used_gpu_mib": 852.0,
+      "power_w": 58.01
+    },
+    {
+      "elapsed": 22.32607132200002,
+      "temperature_c": 40.0,
+      "used_gpu_mib": 2536.0,
+      "power_w": 58.54
+    },
+    {
+      "elapsed": 22.684336742,
+      "temperature_c": 40.0,
+      "used_gpu_mib": 2960.0,
+      "power_w": 66.37
+    },
+    {
+      "elapsed": 23.043789328000003,
+      "temperature_c": 45.0,
+      "used_gpu_mib": 854.0,
+      "power_w": 78.6
+    },
+    {
+      "elapsed": 23.479750904000014,
+      "temperature_c": 45.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 78.63
+    },
+    {
+      "elapsed": 23.933906347000004,
+      "temperature_c": 41.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 64.96
+    },
+    {
+      "elapsed": 24.273371644000008,
+      "temperature_c": 41.0,
+      "used_gpu_mib": 852.0,
+      "power_w": 60.02
+    },
+    {
+      "elapsed": 24.628220071000015,
+      "temperature_c": 40.0,
+      "used_gpu_mib": 2536.0,
+      "power_w": 60.42
+    },
+    {
+      "elapsed": 24.98352680100001,
+      "temperature_c": 40.0,
+      "used_gpu_mib": 2944.0,
+      "power_w": 65.0
+    },
+    {
+      "elapsed": 25.323422964000002,
+      "temperature_c": 50.0,
+      "used_gpu_mib": 6632.0,
+      "power_w": 79.61
+    },
+    {
+      "elapsed": 25.743271754000006,
+      "temperature_c": 50.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 87.31
+    },
+    {
+      "elapsed": 26.167948335999995,
+      "temperature_c": 42.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 82.7
+    },
+    {
+      "elapsed": 26.506043820000002,
+      "temperature_c": 42.0,
+      "used_gpu_mib": 716.0,
+      "power_w": 61.41
+    },
+    {
+      "elapsed": 26.86599910800001,
+      "temperature_c": 41.0,
+      "used_gpu_mib": 2388.0,
+      "power_w": 60.08
+    },
+    {
+      "elapsed": 27.235678796000002,
+      "temperature_c": 41.0,
+      "used_gpu_mib": 2536.0,
+      "power_w": 60.62
+    },
+    {
+      "elapsed": 27.629999606000013,
+      "temperature_c": 49.0,
+      "used_gpu_mib": 2960.0,
+      "power_w": 74.19
+    },
+    {
+      "elapsed": 28.088151393999993,
+      "temperature_c": 44.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 79.06
+    },
+    {
+      "elapsed": 28.600886512000017,
+      "temperature_c": 42.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 71.89
+    },
+    {
+      "elapsed": 29.120970064000005,
+      "temperature_c": 41.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 59.9
+    },
+    {
+      "elapsed": 29.664977479000015,
+      "temperature_c": 40.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 59.46
+    },
+    {
+      "elapsed": 30.231186616000002,
+      "temperature_c": 36.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 45.98
+    },
+    {
+      "elapsed": 30.74897093300001,
+      "temperature_c": 35.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 34.39
+    },
+    {
+      "elapsed": 31.290680277000007,
+      "temperature_c": 35.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 33.64
+    },
+    {
+      "elapsed": 31.846181179000013,
+      "temperature_c": 34.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 33.44
+    },
+    {
+      "elapsed": 32.389632291,
+      "temperature_c": 32.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 25.47
+    },
+    {
+      "elapsed": 32.90281668700001,
+      "temperature_c": 32.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 19.99
+    },
+    {
+      "elapsed": 33.38536584600001,
+      "temperature_c": 31.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 19.52
+    },
+    {
+      "elapsed": 33.87495431900001,
+      "temperature_c": 31.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 19.25
+    },
+    {
+      "elapsed": 34.374013555999994,
+      "temperature_c": 31.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 18.02
+    },
+    {
+      "elapsed": 34.86287147800002,
+      "temperature_c": 30.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 17.25
+    },
+    {
+      "elapsed": 35.37381287400001,
+      "temperature_c": 30.0,
+      "used_gpu_mib": 701.0,
+      "power_w": 17.23
+    },
+    {
+      "elapsed": 35.760237719,
+      "temperature_c": 30.0,
+      "used_gpu_mib": 912.0,
+      "power_w": 18.79
+    },
+    {
+      "elapsed": 36.07352029400002,
+      "temperature_c": 34.0,
+      "used_gpu_mib": 1152.0,
+      "power_w": 27.95
+    },
+    {
+      "elapsed": 36.368427319000006,
+      "temperature_c": 34.0,
+      "used_gpu_mib": 1592.0,
+      "power_w": 37.74
+    },
+    {
+      "elapsed": 36.68080897300001,
+      "temperature_c": 41.0,
+      "used_gpu_mib": 1594.0,
+      "power_w": 65.86
+    },
+    {
+      "elapsed": 37.010644606,
+      "temperature_c": 41.0,
+      "used_gpu_mib": 1596.0,
+      "power_w": 86.84
+    },
+    {
+      "elapsed": 37.36680022600001,
+      "temperature_c": 50.0,
+      "used_gpu_mib": 1596.0,
+      "power_w": 98.01
+    },
+    {
+      "elapsed": 37.71946779699999,
+      "temperature_c": 50.0,
+      "used_gpu_mib": 1596.0,
+      "power_w": 95.31
+    },
+    {
+      "elapsed": 38.019334541000006,
+      "temperature_c": 41.0,
+      "used_gpu_mib": 1596.0,
+      "power_w": 83.53
+    }
+  ],
+  "phases": [
+    {
+      "phase": "native",
+      "owned_pid": 34,
+      "exit_code": 0
+    },
+    {
+      "phase": "torch",
+      "owned_pid": 463,
+      "exit_code": 0
+    }
+  ],
+  "script_sha256": "11dfc5ef36334d93ed6e079f11a58909c0f5cf9ac9ed614b0216f76f7248214c",
+  "started_unix": 1792179989.6082177,
+  "original_worker": {
+    "format_version": 1,
+    "pid": 20,
+    "boot_id": "5959179a-0bb3-4c58-90af-af826c4b0cf5",
+    "state": "stopped",
+    "job": null,
+    "updated_ms": 1792168229770,
+    "cutoff_epoch": 1792168200.0,
+    "reason": "cutoff"
+  },
+  "status": "passed",
+  "seconds": 38.312432520000016
+}

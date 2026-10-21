@@ -44,6 +44,7 @@ pub mod tools;
 #[cfg(any(feature = "live", test))]
 mod visual;
 pub mod voice;
+pub mod wanda;
 pub mod wav;
 
 pub use act::{decide, Plan, Refusal};

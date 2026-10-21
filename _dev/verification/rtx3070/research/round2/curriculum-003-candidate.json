@@ -1,0 +1,1355 @@
+[
+  {
+    "family_id": "r2-cabina-interprete",
+    "domain": "work",
+    "split": "train",
+    "stratum": "observation-asymmetry",
+    "causal_variables": [
+      "access"
+    ],
+    "people": {
+      "P1": "Marina",
+      "P2": "Tomás"
+    },
+    "renamed": {
+      "P1": "Elena",
+      "P2": "Iván"
+    },
+    "objective": "Que la interpretación de la demostración use el glosario vigente sin demorar el inicio más de un minuto.",
+    "horizon": "short",
+    "situation": "Coordinas una demostración con {P1}, intérprete en cabina; {P2} actualizó un término técnico antes de abrir puertas.",
+    "evidence": [
+      [
+        "access",
+        "El registro confirma que la cabina de {P1} no recibió el audio del cambio de glosario."
+      ],
+      [
+        "rule",
+        "{P1} usa el último glosario recibido y confirma por escrito las actualizaciones antes de traducir."
+      ],
+      [
+        "cost",
+        "Una nota con el término y su confirmación tarda treinta segundos; repetir el guion completo por producción tarda cuatro minutos. El guion principal ya está preparado."
+      ]
+    ],
+    "noise": [
+      [
+        "distractor",
+        "Una visita dijo que la cabina se ve muy moderna."
+      ]
+    ],
+    "options": {
+      "A": {
+        "action": "Enviar el término a la cabina y solicitar confirmación.",
+        "consequence": "Actualiza el conocimiento de la intérprete cuando le falta el cambio.",
+        "relational_cost": "Interrumpe treinta segundos una preparación ya terminada."
+      },
+      "B": {
+        "action": "Dar inicio a la demostración con el glosario recibido.",
+        "consequence": "Evita una pausa si la cabina dispone ya de la versión vigente.",
+        "relational_cost": "Una traducción antigua puede hacer parecer descoordinado al equipo."
+      },
+      "C": {
+        "action": "Repetir el guion completo por el canal de producción.",
+        "consequence": "Sincroniza contexto general, pero consume cuatro minutos.",
+        "relational_cost": "Obliga a todo el equipo a escuchar material que ya conoce."
+      }
+    },
+    "selected": "A",
+    "justification": "El registro [access] implica una laguna concreta, no falta de capacidad. (A) la cierra dentro del límite [cost]; (C) lo excede.",
+    "missing_information": [
+      "No sabemos si habrá cambios adicionales durante la demostración."
+    ],
+    "competing_explanations": [
+      "La versión antigua se explicaría por falta de acceso, sin atribuir desinterés."
+    ],
+    "revision_conditions": [
+      "Revisar si llega otra corrección o falla la confirmación de cabina."
+    ],
+    "counterfactual": {
+      "changes": "action",
+      "replace_evidence": {
+        "access": "El registro confirma que la cabina de {P1} recibió el audio del cambio y confirmó el término por escrito."
+      },
+      "selected": "B",
+      "justification": "La confirmación en [access] satisface [rule]. (B) evita una interrupción redundante; el objetivo y el término no cambiaron."
+    },
+    "provenance": {
+      "kind": "owned-synthetic",
+      "author": "gpt-6.1-sol",
+      "review": "pending-human",
+      "created": "2026-10-16",
+      "source": "independently-authored; no external dataset examples"
+    },
+    "counterexample_note": "El contrafactual reemplaza una sola variable factual; objetivo, alternativas y demás evidencia permanecen iguales."
+  },
+  {
+    "family_id": "r2-mandato-feria",
+    "domain": "work",
+    "split": "train",
+    "stratum": "negotiation-authority",
+    "causal_variables": [
+      "mandate"
+    ],
+    "people": {
+      "P1": "Marina",
+      "P2": "Tomás"
+    },
+    "renamed": {
+      "P1": "Elena",
+      "P2": "Iván"
+    },
+    "objective": "Reservar el espacio de la feria hoy con un coste total máximo de 600 y sin pagos no recuperables antes de confirmar.",
+    "horizon": "short",
+    "situation": "Negocias con {P1}, portavoz del recinto; {P2} puede aprobar una reserva alternativa.",
+    "evidence": [
+      [
+        "mandate",
+        "La acreditación del recinto permite a {P1} firmar reservas vinculantes a precio de 580."
+      ],
+      [
+        "terms",
+        "La propuesta de {P1} cuesta 580 y solo se paga al confirmar; vence en una hora."
+      ],
+      [
+        "alternative",
+        "La reserva con {P2} cuesta 600 con las mismas condiciones y está disponible hoy."
+      ]
+    ],
+    "noise": [
+      [
+        "distractor",
+        "El folleto destaca que la feria tuvo visitantes famosos."
+      ]
+    ],
+    "options": {
+      "A": {
+        "action": "Pedir una reunión de mañana con la dirección del recinto.",
+        "consequence": "Puede aclarar el mandato, pero deja vencer ambas opciones de hoy.",
+        "relational_cost": "Sugiere poca confianza en la acreditación presentada."
+      },
+      "B": {
+        "action": "Reservar el recinto por 580 con la firma de {P1}.",
+        "consequence": "Cierra la opción más barata si su firma obliga al recinto.",
+        "relational_cost": "Expone a una reserva inválida si el portavoz carece de mandato."
+      },
+      "C": {
+        "action": "Elegir el espacio de {P2} por el total de 600.",
+        "consequence": "Asegura una reserva dentro del presupuesto con mandato confirmado.",
+        "relational_cost": "Cierra la conversación con el primer recinto y cuesta veinte más."
+      }
+    },
+    "selected": "B",
+    "justification": "La autoridad documentada [mandate] y el precio [terms] hacen preferible (B); el ahorro no exige adelantar dinero.",
+    "missing_information": [
+      "No conocemos disponibilidad posterior al vencimiento."
+    ],
+    "competing_explanations": [
+      "Un precio preciso puede parecer autoridad aunque solo sea información comercial."
+    ],
+    "revision_conditions": [
+      "Revisar si el recinto obtiene firma autorizada antes del vencimiento."
+    ],
+    "counterfactual": {
+      "changes": "action",
+      "replace_evidence": {
+        "mandate": "La acreditación del recinto permite a {P1} informar precios, pero no firmar reservas vinculantes."
+      },
+      "selected": "C",
+      "justification": "Sin facultad de firma [mandate], (B) no asegura espacio. (C) sí cumple hoy y mantiene el límite [alternative]."
+    },
+    "provenance": {
+      "kind": "owned-synthetic",
+      "author": "gpt-6.1-sol",
+      "review": "pending-human",
+      "created": "2026-10-16",
+      "source": "independently-authored; no external dataset examples"
+    },
+    "counterexample_note": "El contrafactual reemplaza una sola variable factual; objetivo, alternativas y demás evidencia permanecen iguales."
+  },
+  {
+    "family_id": "r2-garantia-traduccion",
+    "domain": "work",
+    "split": "train",
+    "stratum": "costly-signal",
+    "causal_variables": [
+      "signal"
+    ],
+    "people": {
+      "P1": "Marina",
+      "P2": "Tomás"
+    },
+    "renamed": {
+      "P1": "Elena",
+      "P2": "Iván"
+    },
+    "objective": "Adjudicar una traducción a quien ofrezca el menor coste esperado, con entrega el lunes.",
+    "horizon": "short",
+    "situation": "Dos traductores ofrecen idéntico precio y plazo; {P1} asegura dominar un dialecto poco frecuente.",
+    "evidence": [
+      [
+        "signal",
+        "La garantía de {P1} es una devolución verificable de 200 si falla la prueba ciega de dialecto."
+      ],
+      [
+        "prior",
+        "Sin garantía, una muestra evaluada por un tercero favorece moderadamente a {P2}."
+      ],
+      [
+        "terms",
+        "Ambos cobran 500, tienen capacidad el lunes y aceptan la misma prueba. Todo fallo exige certificación y corrección obligatorias de un tercero por 150, incluso si el traductor revisa gratis; no hay otros costes del fallo. El último plazo de adjudicación para entregar el lunes vence hoy; aplazar un día pierde ese plazo."
+      ]
+    ],
+    "noise": [
+      [
+        "distractor",
+        "Una firma del correo dice: máxima calidad internacional."
+      ]
+    ],
+    "options": {
+      "A": {
+        "action": "Adjudicar a {P2} según la muestra evaluada.",
+        "consequence": "Usa la mejor evidencia de desempeño cuando no hay cobertura real del fallo.",
+        "relational_cost": "Deja sin premio la seguridad expresada por el otro traductor."
+      },
+      "B": {
+        "action": "Adjudicar a {P1} con su garantía incorporada.",
+        "consequence": "Reduce el coste neto de fallo si la garantía devuelve dinero; revisar gratis no cubre los 150 obligatorios del tercero.",
+        "relational_cost": "La elección depende de que la garantía se pueda cobrar."
+      },
+      "C": {
+        "action": "Pedir otra muestra y aplazar la adjudicación un día.",
+        "consequence": "Añade evidencia, pero pierde el plazo de contratación para el lunes.",
+        "relational_cost": "Ambos candidatos deben dedicar más tiempo sin encargo confirmado."
+      }
+    },
+    "selected": "B",
+    "justification": "La devolución exigible [signal] cubre más que la corrección de 150 [terms]. (B) minimiza exposición sin confundir seguridad verbal con habilidad.",
+    "missing_information": [
+      "No conocemos la probabilidad exacta de fallo de cada candidato."
+    ],
+    "competing_explanations": [
+      "La seguridad de {P1} puede reflejar pericia o confianza excesiva."
+    ],
+    "revision_conditions": [
+      "Revisar si cambian la exigibilidad de la devolución o la evaluación ciega."
+    ],
+    "counterfactual": {
+      "changes": "action",
+      "replace_evidence": {
+        "signal": "La garantía de {P1} es una promesa de revisar gratis la traducción; no incluye devolución verificable."
+      },
+      "selected": "A",
+      "justification": "La revisión gratis [signal] no evita los 150 obligatorios del tercero [terms]. Sin cobertura monetaria, (A) usa la muestra que favorece a {P2} [prior]."
+    },
+    "provenance": {
+      "kind": "owned-synthetic",
+      "author": "gpt-6.1-sol",
+      "review": "pending-human",
+      "created": "2026-10-16",
+      "source": "independently-authored; no external dataset examples"
+    },
+    "counterexample_note": "El contrafactual reemplaza una sola variable factual; objetivo, alternativas y demás evidencia permanecen iguales."
+  },
+  {
+    "family_id": "r2-quorum-archivo",
+    "domain": "work",
+    "split": "train",
+    "stratum": "coalition-threshold",
+    "causal_variables": [
+      "votes"
+    ],
+    "people": {
+      "P1": "Marina",
+      "P2": "Tomás"
+    },
+    "renamed": {
+      "P1": "Elena",
+      "P2": "Iván"
+    },
+    "objective": "Aprobar hoy el presupuesto del archivo con cuatro votos, evitando ofrecer concesiones innecesarias.",
+    "horizon": "short",
+    "situation": "Hay siete miembros del comité; negocias apoyo con {P1}, que pide prioridad para su colección.",
+    "evidence": [
+      [
+        "votes",
+        "El acta de compromisos registra cuatro votos firmes por tu propuesta, sin contar el de {P1}."
+      ],
+      [
+        "request",
+        "{P1} promete su voto si su colección se digitaliza primero; cambiar el orden cuesta una semana."
+      ],
+      [
+        "rules",
+        "Cuatro votos bastan, los compromisos siguen vigentes y hoy no hay posibilidad de abstención sobrevenida. Si retiras la propuesta para renegociar con los siete, la próxima votación será mañana."
+      ]
+    ],
+    "noise": [
+      [
+        "distractor",
+        "La sala tiene siete sillas nuevas del mismo color."
+      ]
+    ],
+    "options": {
+      "A": {
+        "action": "Incluir la prioridad solicitada y cerrar la votación.",
+        "consequence": "Compra un voto suficiente si falta uno para alcanzar el umbral.",
+        "relational_cost": "Otras colecciones perciben un trato preferente y esperan más."
+      },
+      "B": {
+        "action": "Mantener el orden del archivo y someterlo a votación.",
+        "consequence": "Preserva el calendario si los votos comprometidos alcanzan el umbral.",
+        "relational_cost": "{P1} puede sentirse prescindible aunque no se le retire voz."
+      },
+      "C": {
+        "action": "Retirar la propuesta y renegociar con los siete miembros.",
+        "consequence": "Permite un acuerdo más amplio, pero impide aprobarlo hoy.",
+        "relational_cost": "Frustra a quienes ya comprometieron su voto."
+      }
+    },
+    "selected": "B",
+    "justification": "Con cuatro votos firmes [votes] y umbral de cuatro [rules], (B) logra el objetivo sin la semana de coste [request].",
+    "missing_information": [
+      "No sabemos cuánto resentimiento produciría la prioridad entre otras colecciones."
+    ],
+    "competing_explanations": [
+      "La petición puede ser una preferencia real o el precio de un voto decisivo."
+    ],
+    "revision_conditions": [
+      "Revisar si cambia un compromiso antes de votar."
+    ],
+    "counterfactual": {
+      "changes": "action",
+      "replace_evidence": {
+        "votes": "El acta de compromisos registra tres votos firmes por tu propuesta, sin contar el de {P1}."
+      },
+      "selected": "A",
+      "justification": "Ahora falta exactamente un voto [votes]. (A) obtiene el cuarto con un coste conocido [request]; mantener el orden ya no basta."
+    },
+    "provenance": {
+      "kind": "owned-synthetic",
+      "author": "gpt-6.1-sol",
+      "review": "pending-human",
+      "created": "2026-10-16",
+      "source": "independently-authored; no external dataset examples"
+    },
+    "counterexample_note": "El contrafactual reemplaza una sola variable factual; objetivo, alternativas y demás evidencia permanecen iguales."
+  },
+  {
+    "family_id": "r2-licencia-repetida",
+    "domain": "work",
+    "split": "train",
+    "stratum": "reputation-horizon",
+    "causal_variables": [
+      "repeat"
+    ],
+    "people": {
+      "P1": "Marina",
+      "P2": "Tomás"
+    },
+    "renamed": {
+      "P1": "Elena",
+      "P2": "Iván"
+    },
+    "objective": "Maximizar el ingreso neto de licenciar tus fotografías durante el contrato, contando solo ingresos garantizados.",
+    "horizon": "short",
+    "situation": "La editorial de {P1} solicita hoy una rebaja de 100 a cambio de mantenerte como proveedor.",
+    "evidence": [
+      [
+        "repeat",
+        "La cláusula firmada garantiza seis pedidos futuros, cada uno con margen de 80, si concedes la rebaja hoy."
+      ],
+      [
+        "base",
+        "La licencia actual deja un margen de 300 sin rebaja; puedes exigir el precio íntegro sin perder este pedido. No hay otra oferta con ingresos garantizados esta semana."
+      ],
+      [
+        "cost",
+        "La rebaja no altera los costes de producción ni los derechos sobre las imágenes."
+      ]
+    ],
+    "noise": [
+      [
+        "distractor",
+        "Una editora comentó que la portada del catálogo es muy elegante."
+      ]
+    ],
+    "options": {
+      "A": {
+        "action": "Conceder la rebaja de 100 y documentar la continuidad.",
+        "consequence": "Sacrifica margen actual por pedidos posteriores si están garantizados.",
+        "relational_cost": "Puede establecer una expectativa de concesiones en renovaciones."
+      },
+      "B": {
+        "action": "Cobrar el precio íntegro y cerrar la licencia actual.",
+        "consequence": "Conserva 300 de margen y no cuenta promesas como ingresos.",
+        "relational_cost": "La editorial puede preferir otro proveedor en pedidos futuros."
+      },
+      "C": {
+        "action": "Rechazar la licencia y buscar otra editorial esta semana.",
+        "consequence": "Evita la presión por descuentos, pero no hay otro ingreso garantizado.",
+        "relational_cost": "Interrumpe una relación que ya tiene un pedido confirmado."
+      }
+    },
+    "selected": "A",
+    "justification": "Los 480 futuros garantizados [repeat] superan los 100 cedidos; (A) da 680 frente a 300 de (B), según [base].",
+    "missing_information": [
+      "No se han estimado ingresos de futuros encargos no garantizados."
+    ],
+    "competing_explanations": [
+      "La editorial puede valorar la continuidad sin poder comprometer presupuesto."
+    ],
+    "revision_conditions": [
+      "Revisar si se firma una cantidad mínima exigible de nuevos pedidos."
+    ],
+    "counterfactual": {
+      "changes": "action",
+      "replace_evidence": {
+        "repeat": "La cláusula firmada no garantiza pedidos futuros si concedes la rebaja hoy; solo promete considerarte proveedor."
+      },
+      "selected": "B",
+      "justification": "La promesa de consideración [repeat] no es ingreso garantizado. (B) conserva los 300 de [base] bajo el mismo objetivo."
+    },
+    "provenance": {
+      "kind": "owned-synthetic",
+      "author": "gpt-6.1-sol",
+      "review": "pending-human",
+      "created": "2026-10-16",
+      "source": "independently-authored; no external dataset examples"
+    },
+    "counterexample_note": "El contrafactual reemplaza una sola variable factual; objetivo, alternativas y demás evidencia permanecen iguales."
+  },
+  {
+    "family_id": "r2-testigos-parada",
+    "domain": "work",
+    "split": "train",
+    "stratum": "source-dependence",
+    "causal_variables": [
+      "independence"
+    ],
+    "people": {
+      "P1": "Marina",
+      "P2": "Tomás"
+    },
+    "renamed": {
+      "P1": "Elena",
+      "P2": "Iván"
+    },
+    "objective": "Decidir si reservar una inspección de 20 para evitar una parada que costaría 400; inspeccionar conviene si el fallo supera el 5 %. ",
+    "horizon": "short",
+    "situation": "En una imprenta, {P1} y {P2} afirman haber oído un golpeteo en la misma máquina; dispones de dos turnos de inspección.",
+    "evidence": [
+      [
+        "independence",
+        "Los registros muestran que ambos avisos proceden de observaciones propias en momentos separados."
+      ],
+      [
+        "calibration",
+        "En esta imprenta, dos avisos independientes de este tipo implican un 30 % de fallo; una única fuente implica un 10 %."
+      ],
+      [
+        "capacity",
+        "La inspección no detiene la producción y cuesta 20; no hay otros costes ni avisos. Una reparación inmediata cuesta 120 y elimina el riesgo de esta parada."
+      ]
+    ],
+    "noise": [
+      [
+        "distractor",
+        "El operador dice en otro hilo que dos mensajes siempre cuentan como dos pruebas."
+      ]
+    ],
+    "options": {
+      "A": {
+        "action": "Reservar una inspección de 20 para esta máquina.",
+        "consequence": "Evita exposición de 400 cuando el riesgo supera el umbral indicado.",
+        "relational_cost": "Hace visible la preocupación y ocupa un turno de inspección."
+      },
+      "B": {
+        "action": "Esperar otro aviso antes de reservar la inspección.",
+        "consequence": "Ahorra 20 si no hay fallo, pero mantiene el riesgo mientras se espera.",
+        "relational_cost": "Puede parecer desatención a quienes ya dieron aviso."
+      },
+      "C": {
+        "action": "Retirar hoy la máquina y encargar la reparación de 120.",
+        "consequence": "Elimina la exposición de 400 a un coste mayor que inspeccionar.",
+        "relational_cost": "Impone un cambio de trabajo sin diagnóstico confirmado."
+      }
+    },
+    "selected": "A",
+    "justification": "Con dos fuentes propias [independence], la tabla [calibration] da 30 %, superior al 5 %; (A) es preferible con confianza moderada.",
+    "missing_information": [
+      "La tabla histórica puede no representar el desgaste de esta máquina."
+    ],
+    "competing_explanations": [
+      "Dos mensajes pueden ser dos observaciones o la propagación de una sola."
+    ],
+    "revision_conditions": [
+      "Revisar si una prueba identifica otro origen del sonido o cambia la tabla de riesgo."
+    ],
+    "counterfactual": {
+      "changes": "confidence",
+      "replace_evidence": {
+        "independence": "Los registros muestran que el aviso de {P2} repite lo que le contó {P1}, sin observación propia."
+      },
+      "selected": "A",
+      "justification": "Una sola fuente efectiva [independence] reduce el riesgo al 10 % [calibration]; sigue superando 5 %, por lo que (A) se mantiene con menor confianza."
+    },
+    "provenance": {
+      "kind": "owned-synthetic",
+      "author": "gpt-6.1-sol",
+      "review": "pending-human",
+      "created": "2026-10-16",
+      "source": "independently-authored; no external dataset examples"
+    },
+    "counterexample_note": "El contrafactual reemplaza una sola variable factual; objetivo, alternativas y demás evidencia permanecen iguales."
+  },
+  {
+    "family_id": "r2-bono-metrica",
+    "domain": "work",
+    "split": "train",
+    "stratum": "contingent-contract",
+    "causal_variables": [
+      "metric"
+    ],
+    "people": {
+      "P1": "Marina",
+      "P2": "Tomás"
+    },
+    "renamed": {
+      "P1": "Elena",
+      "P2": "Iván"
+    },
+    "objective": "Elegir la remuneración de un taller que maximice tu ingreso esperado descontando materiales y riesgo de cobro.",
+    "horizon": "short",
+    "situation": "La organizadora {P1} ofrece pago fijo o un bono por asistencia registrada; el contenido y las fechas son iguales.",
+    "evidence": [
+      [
+        "metric",
+        "El conteo de asistentes lo certifica una plataforma independiente y el contrato obliga a pagar su resultado."
+      ],
+      [
+        "pay",
+        "El fijo paga 800. El variable paga 600 más 500 si asisten veinte personas; las reservas auditadas dan 70 % de probabilidad."
+      ],
+      [
+        "cost",
+        "Los materiales cuestan 100 en ambos contratos. Si el conteo depende solo de {P1}, estimas perder la mitad del bono por disputas, según cuatro encargos comparables."
+      ]
+    ],
+    "noise": [
+      [
+        "distractor",
+        "El afiche dice que el taller será un éxito asegurado."
+      ]
+    ],
+    "options": {
+      "A": {
+        "action": "Elegir 800 fijos y confirmar el mismo taller.",
+        "consequence": "Entrega 700 netos sin depender del conteo para cobrar.",
+        "relational_cost": "La organizadora asume toda la incertidumbre de asistencia."
+      },
+      "B": {
+        "action": "Elegir 600 más el bono ligado al conteo.",
+        "consequence": "Da 850 netos esperados con certificación; baja si el bono se disputa.",
+        "relational_cost": "Una discrepancia sobre asistentes puede tensar el cobro."
+      },
+      "C": {
+        "action": "Pedir 950 fijos y posponer la confirmación.",
+        "consequence": "Mejora el ingreso si aceptan, pero no hay acuerdo hoy a ese precio.",
+        "relational_cost": "Reabre una negociación que la organizadora da por cerrada."
+      }
+    },
+    "selected": "B",
+    "justification": "La certificación [metric] respalda cobrar el bono. (B) da 600+0,7×500−100=850, frente a 700 de (A) [pay].",
+    "missing_information": [
+      "Las cuatro disputas previas pueden ser una muestra pequeña."
+    ],
+    "competing_explanations": [
+      "Una discrepancia de conteo puede ser error o selección interesada, no necesariamente engaño."
+    ],
+    "revision_conditions": [
+      "Revisar si se acepta conteo independiente o cambia la estimación de cobro."
+    ],
+    "counterfactual": {
+      "changes": "action",
+      "replace_evidence": {
+        "metric": "El conteo de asistentes lo certifica únicamente {P1} y el contrato no admite verificación independiente."
+      },
+      "selected": "A",
+      "justification": "La dependencia de {P1} [metric] activa el riesgo de [cost]: (B) da 675 esperados frente a 700 fijos; el taller y objetivo no cambian."
+    },
+    "provenance": {
+      "kind": "owned-synthetic",
+      "author": "gpt-6.1-sol",
+      "review": "pending-human",
+      "created": "2026-10-16",
+      "source": "independently-authored; no external dataset examples"
+    },
+    "counterexample_note": "El contrafactual reemplaza una sola variable factual; objetivo, alternativas y demás evidencia permanecen iguales."
+  },
+  {
+    "family_id": "r2-errata-audiencia",
+    "domain": "work",
+    "split": "train",
+    "stratum": "audience-repair",
+    "causal_variables": [
+      "reach"
+    ],
+    "people": {
+      "P1": "Marina",
+      "P2": "Tomás"
+    },
+    "renamed": {
+      "P1": "Elena",
+      "P2": "Iván"
+    },
+    "objective": "Corregir el horario de una visita de prensa antes del mediodía generando el menor número de notificaciones necesarias.",
+    "horizon": "short",
+    "situation": "Enviaste a {P1} un horario equivocado; la versión correcta es a las once, y puedes rectificar por lista o en privado.",
+    "evidence": [
+      [
+        "reach",
+        "El registro de distribución muestra que la nota equivocada llegó a toda la lista de prensa."
+      ],
+      [
+        "channels",
+        "Un mensaje en la lista llega a todos a tiempo; uno privado solo llega a {P1}."
+      ],
+      [
+        "cost",
+        "La lista tiene cuarenta personas; cada rectificación recibida genera una notificación. Quedan veinte minutos hasta mediodía; llamar individualmente requiere al menos un minuto por contacto y no se pueden solapar llamadas. No se requieren disculpas extensas."
+      ]
+    ],
+    "noise": [
+      [
+        "distractor",
+        "Alguien sugiere que una comunicación profesional siempre debe ser pública."
+      ]
+    ],
+    "options": {
+      "A": {
+        "action": "Enviar a {P1} la hora correcta por mensaje privado.",
+        "consequence": "Corrige el dato sin notificar a quienes no recibieron el error.",
+        "relational_cost": "Deja sin corregir a otros receptores si hubo difusión."
+      },
+      "B": {
+        "action": "Llamar uno por uno a los cuarenta contactos de prensa.",
+        "consequence": "Permite confirmar recepción individual, pero supera el mediodía.",
+        "relational_cost": "Interrumpe personalmente a todos los contactos de la lista."
+      },
+      "C": {
+        "action": "Enviar a la lista una rectificación breve del horario.",
+        "consequence": "Alcanza a los receptores cuando el error circuló por toda la lista.",
+        "relational_cost": "Expone el error y notifica también a quienes ya conocían la hora."
+      }
+    },
+    "selected": "C",
+    "justification": "El alcance demostrado [reach] exige corregir a toda la lista. (C) llega a tiempo [channels]; el coste de cuarenta notificaciones es necesario.",
+    "missing_information": [
+      "No sabemos si alguien reenviará el mensaje después."
+    ],
+    "competing_explanations": [
+      "Una difusión amplia puede deberse a una lista automática, no a intención de exponer el error."
+    ],
+    "revision_conditions": [
+      "Revisar si aparecen reenvíos confirmados de la nota equivocada."
+    ],
+    "counterfactual": {
+      "changes": "action",
+      "replace_evidence": {
+        "reach": "El registro de distribución muestra que la nota equivocada llegó únicamente a {P1}."
+      },
+      "selected": "A",
+      "justification": "Solo {P1} recibió el error [reach]. (A) corrige a la audiencia afectada con una notificación, según [channels] y [cost]."
+    },
+    "provenance": {
+      "kind": "owned-synthetic",
+      "author": "gpt-6.1-sol",
+      "review": "pending-human",
+      "created": "2026-10-16",
+      "source": "independently-authored; no external dataset examples"
+    },
+    "counterexample_note": "El contrafactual reemplaza una sola variable factual; objetivo, alternativas y demás evidencia permanecen iguales."
+  },
+  {
+    "family_id": "r2-ensayo-sustituta",
+    "domain": "personal",
+    "split": "train",
+    "stratum": "second-order-access",
+    "causal_variables": [
+      "access"
+    ],
+    "people": {
+      "P1": "Marina",
+      "P2": "Tomás"
+    },
+    "renamed": {
+      "P1": "Elena",
+      "P2": "Iván"
+    },
+    "objective": "Que la suplente llegue al ensayo de coro a la sede correcta enviándole el menor número posible de mensajes.",
+    "horizon": "medium",
+    "situation": "{P1} cree que {P2}, la suplente, conoce el traslado de sede; tú viste quién estaba en la llamada.",
+    "evidence": [
+      [
+        "access",
+        "{P2} salió de la llamada antes del anuncio del traslado y no recibió ningún otro aviso."
+      ],
+      [
+        "belief",
+        "{P1} dijo: ella estaba conectada al principio, así que ya lo sabe."
+      ],
+      [
+        "route",
+        "El ensayo pasó del centro al teatro; {P2} saldrá de casa en diez minutos."
+      ]
+    ],
+    "noise": [
+      [
+        "distractor",
+        "En el chat alguien escribió: quien canta bien siempre se entera de todo."
+      ]
+    ],
+    "options": {
+      "A": {
+        "action": "Esperar a que {P1} publique mañana el acta del coro.",
+        "consequence": "Evita un mensaje tuyo, pero llega después del ensayo de hoy.",
+        "relational_cost": "La suplente puede interpretar la falta de aviso como descuido."
+      },
+      "B": {
+        "action": "Enviar a {P2} una única nota con la sede del teatro.",
+        "consequence": "Cierra una laguna de información antes de que salga de casa.",
+        "relational_cost": "Puede resultar redundante si recibió ya el anuncio."
+      },
+      "C": {
+        "action": "No enviar mensaje y dejar que siga su información.",
+        "consequence": "Evita duplicar avisos cuando la suplente conoce el cambio.",
+        "relational_cost": "Si conserva la sede antigua, tendrá un desplazamiento inútil."
+      }
+    },
+    "selected": "B",
+    "justification": "La salida previa [access] invalida la inferencia de {P1} [belief]. (B) informa antes de la salida [route].",
+    "missing_information": [
+      "No conocemos cambios posteriores de transporte."
+    ],
+    "competing_explanations": [
+      "Estar al principio de una llamada no prueba haber oído un anuncio posterior."
+    ],
+    "revision_conditions": [
+      "Revisar si la suplente manifiesta dudas o se anuncia otra sede."
+    ],
+    "counterfactual": {
+      "changes": "action",
+      "replace_evidence": {
+        "access": "{P2} permaneció en la llamada durante el anuncio del traslado y confirmó que iría al teatro."
+      },
+      "selected": "C",
+      "justification": "La confirmación de {P2} en [access] hace correcto el conocimiento que {P1} le atribuye. (C) evita un aviso redundante."
+    },
+    "provenance": {
+      "kind": "owned-synthetic",
+      "author": "gpt-6.1-sol",
+      "review": "pending-human",
+      "created": "2026-10-16",
+      "source": "independently-authored; no external dataset examples"
+    },
+    "counterexample_note": "El contrafactual reemplaza una sola variable factual; objetivo, alternativas y demás evidencia permanecen iguales."
+  },
+  {
+    "family_id": "r2-cancha-horarios",
+    "domain": "personal",
+    "split": "train",
+    "stratum": "asymmetric-preferences",
+    "causal_variables": [
+      "compensacion_solicitada"
+    ],
+    "people": {
+      "P1": "Marina",
+      "P2": "Tomás"
+    },
+    "renamed": {
+      "P1": "Elena",
+      "P2": "Iván"
+    },
+    "objective": "Conseguir una hora de cancha esta semana gastando como máximo 15 y sin perder tu clase del martes.",
+    "horizon": "medium",
+    "situation": "Tienes una reserva el martes incompatible con tu clase; {P1} tiene el jueves y propone intercambiar.",
+    "evidence": [
+      [
+        "preference",
+        "{P1} acepta cambiar el jueves por tu martes y solicita una compensación de 0 por ceder su reserva."
+      ],
+      [
+        "budget",
+        "Tu reserva costó 10; la tasa administrativa por cambiar es cero, aparte de la compensación que solicite {P1}. Una reserva nueva cuesta 20 y no hay devolución."
+      ],
+      [
+        "fallback",
+        "Puedes ceder el martes y usar una cancha municipal el sábado por 5; ambas opciones te permiten jugar una hora."
+      ]
+    ],
+    "noise": [
+      [
+        "distractor",
+        "Un cartel llama al jueves el mejor día para hacer deporte."
+      ]
+    ],
+    "options": {
+      "A": {
+        "action": "Cambiar tu reserva del martes por la del jueves.",
+        "consequence": "Permite jugar pagando los 10 iniciales más la compensación solicitada, sin tasa administrativa.",
+        "relational_cost": "Implica coordinar el traspaso y depender del acuerdo de {P1}."
+      },
+      "B": {
+        "action": "Ceder el martes y pagar la municipal del sábado.",
+        "consequence": "Asegura jugar por 15 totales sin negociar otro horario.",
+        "relational_cost": "Renuncias al recinto habitual y a la reserva que ya pagaste."
+      },
+      "C": {
+        "action": "Conservar el martes y comprar también otra reserva.",
+        "consequence": "Da flexibilidad para jugar, pero el gasto total sube a 30.",
+        "relational_cost": "La segunda reserva ocupa una hora que otra persona podría usar."
+      }
+    },
+    "selected": "A",
+    "justification": "La compensación solicitada es cero [preference], distinta de la tasa administrativa [budget]. (A) cuesta 10 frente a 15 de (B) y conserva la clase.",
+    "missing_information": [
+      "No sabemos si aparecerán reservas gratuitas después."
+    ],
+    "competing_explanations": [
+      "La compensación puede reflejar un coste real de horario y no una táctica de presión."
+    ],
+    "revision_conditions": [
+      "Revisar si aparece otro intercambio sin coste o cambia la compensación."
+    ],
+    "counterfactual": {
+      "changes": "action",
+      "replace_evidence": {
+        "preference": "{P1} acepta cambiar el jueves por tu martes y solicita una compensación de 10 por ceder su reserva."
+      },
+      "selected": "B",
+      "justification": "La única variable modificada es la compensación solicitada [preference]: ahora 10. Sumada a los 10 pagados [budget], (A) cuesta 20; (B) sigue en 15 [fallback]."
+    },
+    "provenance": {
+      "kind": "owned-synthetic",
+      "author": "gpt-6.1-sol",
+      "review": "pending-human",
+      "created": "2026-10-16",
+      "source": "independently-authored; no external dataset examples"
+    },
+    "counterexample_note": "El contrafactual reemplaza una sola variable factual; objetivo, alternativas y demás evidencia permanecen iguales."
+  },
+  {
+    "family_id": "r2-club-silencio",
+    "domain": "personal",
+    "split": "train",
+    "stratum": "calibrated-inference",
+    "causal_variables": [
+      "signal"
+    ],
+    "people": {
+      "P1": "Marina",
+      "P2": "Tomás"
+    },
+    "renamed": {
+      "P1": "Elena",
+      "P2": "Iván"
+    },
+    "objective": "Elegir el plan de excursión que tenga mayor probabilidad de incluir a {P1}, sin preguntarle de nuevo hoy.",
+    "horizon": "medium",
+    "situation": "{P1} guarda silencio ante una propuesta de sendero; puedes elegir entre sendero y museo para la salida del club.",
+    "evidence": [
+      [
+        "signal",
+        "La encuesta privada de ayer registra que {P1} prefiere sendero sobre museo."
+      ],
+      [
+        "base",
+        "Sin una preferencia registrada, {P1} eligió sendero en seis de diez salidas comparables."
+      ],
+      [
+        "feasible",
+        "Ambos planes cuestan lo mismo y están disponibles hasta esta noche; si no eliges hoy, ambas reservas caducan sin posibilidad de recuperarlas para esta salida. Nadie informó limitaciones físicas o de horario."
+      ]
+    ],
+    "noise": [
+      [
+        "distractor",
+        "Otro miembro escribió que el silencio siempre significa rechazo."
+      ]
+    ],
+    "options": {
+      "A": {
+        "action": "Elegir el sendero para la salida del club.",
+        "consequence": "Es el plan más respaldado si la preferencia o el historial siguen vigentes.",
+        "relational_cost": "Puede pasar por alto un cambio de gusto que no se comunicó."
+      },
+      "B": {
+        "action": "Elegir el museo para la salida del club.",
+        "consequence": "Puede acertar si hoy cambió de preferencia, sin evidencia de ese cambio.",
+        "relational_cost": "Podría parecer que la encuesta no tuvo ningún peso."
+      },
+      "C": {
+        "action": "Suspender la salida hasta repetir la encuesta mañana.",
+        "consequence": "Obtiene una señal nueva, pero se pierden ambas reservas de hoy.",
+        "relational_cost": "El grupo debe rehacer su organización por una duda no confirmada."
+      }
+    },
+    "selected": "A",
+    "justification": "La preferencia declarada [signal] y la disponibilidad [feasible] apoyan (A) con confianza relativamente alta; el silencio no la revoca.",
+    "missing_information": [
+      "No conocemos la causa del silencio actual."
+    ],
+    "competing_explanations": [
+      "El silencio puede reflejar distracción o indecisión, no oposición."
+    ],
+    "revision_conditions": [
+      "Revisar si {P1} comunica preferencia o una limitación concreta."
+    ],
+    "counterfactual": {
+      "changes": "confidence",
+      "replace_evidence": {
+        "signal": "La encuesta privada de ayer registra que {P1} dejó su preferencia entre sendero y museo en blanco."
+      },
+      "selected": "A",
+      "justification": "Sin respuesta [signal], solo [base] favorece sendero por 6/10. (A) sigue siendo la mejor apuesta, con confianza menor y sin inferir entusiasmo."
+    },
+    "provenance": {
+      "kind": "owned-synthetic",
+      "author": "gpt-6.1-sol",
+      "review": "pending-human",
+      "created": "2026-10-16",
+      "source": "independently-authored; no external dataset examples"
+    },
+    "counterexample_note": "El contrafactual reemplaza una sola variable factual; objetivo, alternativas y demás evidencia permanecen iguales."
+  },
+  {
+    "family_id": "r2-entrada-reventa",
+    "domain": "personal",
+    "split": "train",
+    "stratum": "sunk-cost-option",
+    "causal_variables": [
+      "transfer"
+    ],
+    "people": {
+      "P1": "Marina",
+      "P2": "Tomás"
+    },
+    "renamed": {
+      "P1": "Elena",
+      "P2": "Iván"
+    },
+    "objective": "Asistir al recital de tu hermana con el menor coste adicional; ya decidiste darle prioridad sobre el cine.",
+    "horizon": "medium",
+    "situation": "Compraste una entrada de cine por 12 antes de conocer la hora del recital; {P1} puede comprártela.",
+    "evidence": [
+      [
+        "transfer",
+        "La entrada admite traspaso y {P1} tiene una oferta firme de 8, sin gastos."
+      ],
+      [
+        "timing",
+        "Cine y recital coinciden; asistir al recital no cuesta nada y no hay función alternativa."
+      ],
+      [
+        "refund",
+        "El cine confirmó una resolución definitiva: no devuelve los 12 de esta entrada ni admite excepción. Enviar otra reclamación cuesta 3 no reembolsables. Conservar la entrada sin usarla no tiene otro efecto."
+      ]
+    ],
+    "noise": [
+      [
+        "distractor",
+        "El anuncio de la película asegura que nadie debería perdérsela."
+      ]
+    ],
+    "options": {
+      "A": {
+        "action": "Asistir al recital y dejar la entrada sin usar.",
+        "consequence": "Respeta la prioridad elegida sin nuevas gestiones ni gastos.",
+        "relational_cost": "Si la entrada es transferible, {P1} pierde una compra viable; si es nominal e intransferible, no pierde esa oportunidad."
+      },
+      "B": {
+        "action": "Vender la entrada a {P1} y asistir al recital.",
+        "consequence": "Recupera parte del pago si el traspaso es válido.",
+        "relational_cost": "Requiere coordinar el envío y que el acceso de {P1} funcione."
+      },
+      "C": {
+        "action": "Enviar otra reclamación al cine antes del recital.",
+        "consequence": "Añade 3 de tasa sin devolución posible bajo la resolución definitiva, aunque permite acudir al recital.",
+        "relational_cost": "Abre otra reclamación después de la resolución definitiva del personal."
+      }
+    },
+    "selected": "B",
+    "justification": "El traspaso válido [transfer] permite recuperar 8 manteniendo el recital [timing]. Los 12 ya se pagaron; (C) añade 3 y la resolución definitiva excluye devolución [refund].",
+    "missing_information": [
+      "No conocemos una eventual excepción del cine para cambiar el nombre."
+    ],
+    "competing_explanations": [
+      "Querer usar algo pagado puede responder al coste hundido, sin cambiar la prioridad familiar."
+    ],
+    "revision_conditions": [
+      "Revisar si el cine autoriza el cambio de nombre sin coste."
+    ],
+    "counterfactual": {
+      "changes": "action",
+      "replace_evidence": {
+        "transfer": "La entrada no admite traspaso: es nominal y {P1} no puede usarla aunque ofrece 8."
+      },
+      "selected": "A",
+      "justification": "La entrada nominal [transfer] impide una venta utilizable. (A) mantiene la prioridad del recital sin otro gasto; (C) añade 3 sin devolución posible según [refund]. No se sacrifica el recital por un coste pasado."
+    },
+    "provenance": {
+      "kind": "owned-synthetic",
+      "author": "gpt-6.1-sol",
+      "review": "pending-human",
+      "created": "2026-10-16",
+      "source": "independently-authored; no external dataset examples"
+    },
+    "counterexample_note": "El contrafactual reemplaza una sola variable factual; objetivo, alternativas y demás evidencia permanecen iguales."
+  },
+  {
+    "family_id": "r2-telescopio-reputacion",
+    "domain": "personal",
+    "split": "train",
+    "stratum": "repeated-trust",
+    "causal_variables": [
+      "record"
+    ],
+    "people": {
+      "P1": "Marina",
+      "P2": "Tomás"
+    },
+    "renamed": {
+      "P1": "Elena",
+      "P2": "Iván"
+    },
+    "objective": "Prestar tu telescopio al club sin asumir más de 30 de pérdida esperada y conservando un sistema de confianza sostenible.",
+    "horizon": "medium",
+    "situation": "{P1} coordina el préstamo; puedes pedir depósito, prestar sin él o reservarte el telescopio.",
+    "evidence": [
+      [
+        "record",
+        "En los diez préstamos anteriores, {P1} devolvió el equipo completo a tiempo; estimas un riesgo de pérdida del 2 %."
+      ],
+      [
+        "loss",
+        "Una pérdida cuesta 500; un depósito de 500 la cubre y {P1} puede pagarlo, pero le inmoviliza dinero un mes."
+      ],
+      [
+        "threshold",
+        "Si el riesgo supera el límite, prefieres depósito a no prestar; si está debajo, prefieres evitar inmovilizar dinero ajeno."
+      ]
+    ],
+    "noise": [
+      [
+        "distractor",
+        "Una persona del club afirma que pedir garantías destruye cualquier amistad."
+      ]
+    ],
+    "options": {
+      "A": {
+        "action": "Pedir el depósito de 500 antes de prestar el telescopio.",
+        "consequence": "Cubre una pérdida si el riesgo no permite prestar sin respaldo.",
+        "relational_cost": "Inmoviliza durante un mes dinero de quien recibe el préstamo."
+      },
+      "B": {
+        "action": "Prestar el telescopio sin depósito y registrar la devolución.",
+        "consequence": "Evita inmovilizar fondos cuando la pérdida esperada es tolerable.",
+        "relational_cost": "Te deja asumir la pérdida si esta vez falla la devolución."
+      },
+      "C": {
+        "action": "Conservar el telescopio y cancelar el préstamo del club.",
+        "consequence": "Elimina la exposición, pero impide el uso compartido previsto.",
+        "relational_cost": "El club pierde una actividad aun pudiendo ofrecer depósito."
+      }
+    },
+    "selected": "B",
+    "justification": "El historial y la estimación [record] dan 0,02×500=10 [loss], debajo de 30. (B) sigue la preferencia explícita [threshold].",
+    "missing_information": [
+      "Diez préstamos no bastan para estimar con precisión un riesgo estable."
+    ],
+    "competing_explanations": [
+      "Una pérdida puede ser accidental; el historial cambia exposición y no demuestra mala intención."
+    ],
+    "revision_conditions": [
+      "Revisar si hay cobertura de seguro o nueva información sobre el riesgo."
+    ],
+    "counterfactual": {
+      "changes": "action",
+      "replace_evidence": {
+        "record": "En los diez préstamos anteriores, {P1} devolvió nueve a tiempo y perdió uno; estimas un riesgo de pérdida del 10 %. "
+      },
+      "selected": "A",
+      "justification": "La estimación [record] da 0,1×500=50 [loss], sobre 30; (A) aplica el respaldo preferido [threshold], sin castigo personal adicional."
+    },
+    "provenance": {
+      "kind": "owned-synthetic",
+      "author": "gpt-6.1-sol",
+      "review": "pending-human",
+      "created": "2026-10-16",
+      "source": "independently-authored; no external dataset examples"
+    },
+    "counterexample_note": "El contrafactual reemplaza una sola variable factual; objetivo, alternativas y demás evidencia permanecen iguales."
+  },
+  {
+    "family_id": "r2-intercambio-vinilo",
+    "domain": "personal",
+    "split": "train",
+    "stratum": "bluff-verification",
+    "causal_variables": [
+      "offer"
+    ],
+    "people": {
+      "P1": "Marina",
+      "P2": "Tomás"
+    },
+    "renamed": {
+      "P1": "Elena",
+      "P2": "Iván"
+    },
+    "objective": "Intercambiar tu vinilo duplicado por la edición que buscas minimizando la diferencia pagada, con un máximo de 10.",
+    "horizon": "medium",
+    "situation": "{P1} pide 15 de diferencia y dice tener otra oferta; {P2} ofrece la misma edición por 10, disponible hasta mañana.",
+    "evidence": [
+      [
+        "offer",
+        "El comprobante de la otra oferta a {P1} corresponde a una consulta sin precio ni compromiso de compra."
+      ],
+      [
+        "values",
+        "Ambas ediciones están en estado equivalente. {P1} dejó por escrito que acepta 8 si no tiene otra oferta firme, y no acepta menos de 15 si la tiene."
+      ],
+      [
+        "route",
+        "Debes elegir ahora una sola contraparte: seleccionar a {P1} libera irrevocablemente la reserva de {P2}; elegir a {P2} conserva su precio hasta mañana. La acción con {P1} es una única oferta inmediata de 8, sin espera ni segunda ronda. La oferta rival, si es firme, se ejecuta automáticamente al vencer y retira el vinilo de {P1}."
+      ]
+    ],
+    "noise": [
+      [
+        "distractor",
+        "Una publicación dice que un buen coleccionista nunca deja escapar una pieza."
+      ]
+    ],
+    "options": {
+      "A": {
+        "action": "Elegir a {P1} y ofrecerle 8 en una única ronda.",
+        "consequence": "Obtiene la edición por 8 si aplica el precio sin rival firme; si rechaza, termina sin intercambio ni reserva de {P2}.",
+        "relational_cost": "Elegir esta contraparte libera la reserva de {P2}; una oferta rechazada cierra la ronda sin acuerdo."
+      },
+      "B": {
+        "action": "Cerrar hoy el intercambio con {P2} por diferencia de 10.",
+        "consequence": "Asegura la edición por 10 sin necesitar otra ronda con el primer coleccionista.",
+        "relational_cost": "Termina la negociación iniciada con {P1} sin otra ronda."
+      },
+      "C": {
+        "action": "Aceptar los 15 de {P1} para asegurar esa edición.",
+        "consequence": "Cierra con ese coleccionista, pero supera tu límite por cinco.",
+        "relational_cost": "Puede reforzar que la urgencia declarada obtenga concesiones."
+      }
+    },
+    "selected": "A",
+    "justification": "La consulta [offer] no activa el mínimo de 15 [values]; (A) cierra por 8 en la única ronda disponible [route], frente a 10 con {P2}. No se atribuye engaño intencional.",
+    "missing_information": [
+      "No sabemos si {P1} exageró deliberadamente la primera consulta."
+    ],
+    "competing_explanations": [
+      "Puede confundir una consulta con oferta o intentar producir presión competitiva."
+    ],
+    "revision_conditions": [
+      "Revisar si la oferta rival se retira y {P1} acepta una diferencia menor."
+    ],
+    "counterfactual": {
+      "changes": "action",
+      "replace_evidence": {
+        "offer": "El comprobante de la otra oferta a {P1} corresponde a un compromiso firme de 15 que vence en cinco minutos; {P1} no acepta menos mientras esté vigente."
+      },
+      "selected": "B",
+      "justification": "El compromiso firme [offer] activa el mínimo de 15 [values]; la oferta inmediata de 8 sería rechazada. No hay espera ni segunda ronda y elegir a {P1} libera la alternativa [route]. (B) obtiene la edición por 10."
+    },
+    "provenance": {
+      "kind": "owned-synthetic",
+      "author": "gpt-6.1-sol",
+      "review": "pending-human",
+      "created": "2026-10-16",
+      "source": "independently-authored; no external dataset examples"
+    },
+    "counterexample_note": "El contrafactual reemplaza una sola variable factual; objetivo, alternativas y demás evidencia permanecen iguales."
+  },
+  {
+    "family_id": "r2-cena-indirecta",
+    "domain": "personal",
+    "split": "train",
+    "stratum": "pragmatics-constraint",
+    "causal_variables": [
+      "transport"
+    ],
+    "people": {
+      "P1": "Marina",
+      "P2": "Tomás"
+    },
+    "renamed": {
+      "P1": "Elena",
+      "P2": "Iván"
+    },
+    "objective": "Celebrar la cena de cumpleaños con {P1} este viernes; prefieres cocinar en casa siempre que ambos puedan llegar y regresar.",
+    "horizon": "medium",
+    "situation": "Propusiste cocinar en tu casa; {P1} respondió: me encantaría, aunque el último bus pasa a las ocho.",
+    "evidence": [
+      [
+        "transport",
+        "{P1} vive fuera de la ciudad y depende de ese bus para volver; no dispone de otro transporte el viernes."
+      ],
+      [
+        "schedule",
+        "En tu casa solo puedes empezar a las nueve; cerca de la terminal pueden cenar a las seis y media."
+      ],
+      [
+        "preference",
+        "{P1} dijo que le agradan ambas opciones y que quiere celebrar contigo."
+      ]
+    ],
+    "noise": [
+      [
+        "distractor",
+        "Un conocido comenta que quien menciona horarios solo está poniendo excusas."
+      ]
+    ],
+    "options": {
+      "A": {
+        "action": "Confirmar la cena en casa a las nueve del viernes.",
+        "consequence": "Conserva el plan doméstico si existe transporte de regreso.",
+        "relational_cost": "Puede desatender una restricción que ya expresó."
+      },
+      "B": {
+        "action": "Proponer cenar junto a la terminal a las seis y media.",
+        "consequence": "Permite celebrar y volver en el bus si esa es la restricción real.",
+        "relational_cost": "Reduce el tiempo disponible y cambia el ambiente que imaginabas."
+      },
+      "C": {
+        "action": "Posponer la celebración hasta encontrar un viernes libre.",
+        "consequence": "Evita el problema de transporte, pero no concreta la cena pedida.",
+        "relational_cost": "Puede sonar a falta de interés pese a su disposición explícita."
+      }
+    },
+    "selected": "B",
+    "justification": "[transport] convierte el bus en restricción efectiva; (B) satisface ambos horarios [schedule] sin interpretar la frase como rechazo [preference].",
+    "missing_information": [
+      "No sabemos si el horario del último bus podría cambiar antes del viernes."
+    ],
+    "competing_explanations": [
+      "Mencionar el bus puede ser preocupación logística, sin indicar desinterés por celebrar."
+    ],
+    "revision_conditions": [
+      "Revisar si cambia el último bus o aparece un transporte alternativo de regreso confirmado."
+    ],
+    "counterfactual": {
+      "changes": "action",
+      "replace_evidence": {
+        "transport": "{P1} vive fuera de la ciudad, pero tiene confirmado un coche de regreso para el viernes a medianoche."
+      },
+      "selected": "A",
+      "justification": "El coche confirmado [transport] elimina la restricción del bus. (A) conserva el plan ya propuesto y es compatible con [schedule] y [preference].",
+      "missing_information": [
+        "No sabemos si el coche de regreso confirmado puede cancelarse antes del viernes."
+      ],
+      "revision_conditions": [
+        "Revisar si se cancela el coche confirmado o se adelanta su salida hasta hacer inviable la cena en casa."
+      ]
+    },
+    "provenance": {
+      "kind": "owned-synthetic",
+      "author": "gpt-6.1-sol",
+      "review": "pending-human",
+      "created": "2026-10-16",
+      "source": "independently-authored; no external dataset examples"
+    },
+    "counterexample_note": "El contrafactual reemplaza una sola variable factual; objetivo, alternativas y demás evidencia permanecen iguales."
+  },
+  {
+    "family_id": "r2-huerto-portavoz",
+    "domain": "personal",
+    "split": "train",
+    "stratum": "representation-consent",
+    "causal_variables": [
+      "mandate"
+    ],
+    "people": {
+      "P1": "Marina",
+      "P2": "Tomás"
+    },
+    "renamed": {
+      "P1": "Elena",
+      "P2": "Iván"
+    },
+    "objective": "Repartir hoy las parcelas del huerto con acuerdos válidos de sus usuarios, sin asignar por encima de lo autorizado.",
+    "horizon": "medium",
+    "situation": "{P1} habla por dos usuarios ausentes y propone un canje de parcelas con {P2}.",
+    "evidence": [
+      [
+        "mandate",
+        "Los dos usuarios dejaron autorización escrita a {P1} para aceptar exactamente el canje propuesto."
+      ],
+      [
+        "timing",
+        "{P2} acepta el canje hoy; los ausentes podrán responder mañana y sus parcelas pueden quedar reservadas sin coste."
+      ],
+      [
+        "alternative",
+        "Si no se cierra hoy, {P2} conserva su parcela y no pierde acceso al huerto."
+      ]
+    ],
+    "noise": [
+      [
+        "distractor",
+        "El grupo comenta que {P1} siempre habla con mucha seguridad."
+      ]
+    ],
+    "options": {
+      "A": {
+        "action": "Registrar el canje aceptado por {P1} y {P2} hoy.",
+        "consequence": "Cierra un acuerdo válido si el mandato cubre ese intercambio.",
+        "relational_cost": "Los ausentes dependen de que se respete lo que autorizaron."
+      },
+      "B": {
+        "action": "Reservar las parcelas y pedir mañana respuesta a los ausentes.",
+        "consequence": "Obtiene consentimiento directo sin asignar fuera del mandato.",
+        "relational_cost": "Demora un día un canje que la otra parte acepta ahora."
+      },
+      "C": {
+        "action": "Asignar las parcelas por sorteo entre todos esta tarde.",
+        "consequence": "Resuelve la distribución, pero sustituye acuerdos por azar no autorizado.",
+        "relational_cost": "Los usuarios pueden perder parcelas que esperaban conservar."
+      }
+    },
+    "selected": "A",
+    "justification": "La autorización exacta [mandate] permite (A); [timing] confirma el acuerdo de la otra parte. No hace falta inferir preferencias ausentes.",
+    "missing_information": [
+      "No conocemos preferencias que los ausentes no incluyeron en su autorización."
+    ],
+    "competing_explanations": [
+      "La seguridad del portavoz puede reflejar familiaridad, sin constituir mandato."
+    ],
+    "revision_conditions": [
+      "Revisar si llega autorización escrita de los ausentes antes del reparto."
+    ],
+    "counterfactual": {
+      "changes": "action",
+      "replace_evidence": {
+        "mandate": "Los dos usuarios dejaron autorización escrita a {P1} solo para escuchar propuestas, sin aceptar ningún canje."
+      },
+      "selected": "B",
+      "justification": "En este mundo ninguna acción ofrecida cumple simultáneamente repartir hoy y obtener acuerdos válidos: {P1} solo puede escuchar [mandate] y los usuarios responden mañana [timing]. (B) sacrifica expresamente el plazo de hoy para conservar validez y parcelas sin coste. (A) excede el mandato y (C) impone un sorteo no autorizado.",
+      "revision_conditions": [
+        "Revisar si llegan hoy autorizaciones válidas: permitirían cumplir también el plazo que (B) deja incumplido."
+      ]
+    },
+    "provenance": {
+      "kind": "owned-synthetic",
+      "author": "gpt-6.1-sol",
+      "review": "pending-human",
+      "created": "2026-10-16",
+      "source": "independently-authored; no external dataset examples"
+    },
+    "counterexample_note": "El contrafactual reemplaza una sola variable factual; objetivo, alternativas y demás evidencia permanecen iguales."
+  }
+]

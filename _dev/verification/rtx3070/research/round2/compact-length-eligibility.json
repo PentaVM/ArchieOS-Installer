@@ -1,0 +1,40 @@
+{
+  "source_sha256": "a6eff2ddebbe2755c4937a3da9f4aea1737738d49496b9070fc286edeac9202f",
+  "tokenizer": "native vocab-only CPU; one full-text call pervariant",
+  "limit": 512,
+  "rows": [
+    {
+      "id": "r2c-bono-metrica:clean",
+      "full_tokens": 519
+    },
+    {
+      "id": "r2c-bono-metrica:noise",
+      "full_tokens": 561
+    },
+    {
+      "id": "r2c-bono-metrica:cosmetic",
+      "full_tokens": 519
+    },
+    {
+      "id": "r2c-bono-metrica:counterfactual",
+      "full_tokens": 507
+    },
+    {
+      "id": "r2c-cabina-interprete:clean",
+      "full_tokens": 454
+    },
+    {
+      "id": "r2c-cabina-interprete:noise",
+      "full_tokens": 502
+    },
+    {
+      "id": "r2c-cabina-interprete:cosmetic",
+      "full_tokens": 455
+    },
+    {
+      "id": "r2c-cabina-interprete:counterfactual",
+      "full_tokens": 445
+    }
+  ],
+  "all_fit": false
+}

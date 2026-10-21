@@ -11,7 +11,7 @@
   </head>
   <body>
     <p>
-      Records your own web activity — searches and navigation — and sends it only to your
+      Metadata capture records your own web activity — searches and navigation — and sends it only to your
       node. No page content, no form fields, no passwords.
     </p>
     <label>Your node's capture URL</label>
@@ -20,6 +20,20 @@
     <input id="token" placeholder="token from the node" />
     <button id="save">Pair this browser</button>
     <p id="status"></p>
+    <hr />
+    <p>Wanda can read message bubbles in the visible selected WhatsApp Web chat. Drafts and hidden history are excluded. This separate channel sends message content only to your configured node.</p>
+    <label>Wanda events URL</label>
+    <input id="wanda-url" placeholder="https://your-node/v1/events" />
+    <label>Wanda source token</label>
+    <input id="wanda-token" type="password" placeholder="separate source token" />
+    <label><input id="wanda-enabled" type="checkbox" style="width:auto" /> Enable visible WhatsApp content</label><br />
+    <label><input id="wanda-presumed" type="checkbox" style="width:auto" /> Allow this browser's presumed-owner attribution</label><br />
+    <button id="wanda-save">Save Wanda pairing</button>
+    <button id="wanda-suspend">Someone else is using this browser</button>
+    <button id="wanda-resume">I am using this browser</button>
+    <p id="wanda-status"></p>
     <script src="popup.js"></script>
+    <script src="wanda-transport.js"></script>
+    <script src="wanda-popup.js"></script>
   </body>
 </html>

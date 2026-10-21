@@ -1,0 +1,130 @@
+{
+  "scope": "pure-function CPU audit; synthetic adversarial inputs only",
+  "source": "training\\wanda_bonsai2\\src\\archie_wanda\\star.py",
+  "source_sha256": "6e478ae2061f9834b4556fa95521c9b05933b53902ac777ba6364f26a57f0931",
+  "functions": {
+    "normalise": {
+      "start": 14,
+      "end": 17
+    },
+    "answer_of": {
+      "start": 20,
+      "end": 23
+    },
+    "answers": {
+      "start": 61,
+      "end": 72
+    },
+    "accept": {
+      "start": 75,
+      "end": 82
+    },
+    "accept_rationale": {
+      "start": 99,
+      "end": 101
+    },
+    "_matches_label": {
+      "start": 26,
+      "end": 58
+    }
+  },
+  "cases": [
+    {
+      "case": "valid_bare_label",
+      "accepted": true,
+      "desired": true,
+      "matches_desired": true
+    },
+    {
+      "case": "valid_label_explanation",
+      "accepted": true,
+      "desired": true,
+      "matches_desired": true
+    },
+    {
+      "case": "longer_word",
+      "accepted": false,
+      "desired": false,
+      "matches_desired": true
+    },
+    {
+      "case": "forced_end",
+      "accepted": false,
+      "desired": false,
+      "matches_desired": true
+    },
+    {
+      "case": "over_cap",
+      "accepted": false,
+      "desired": false,
+      "matches_desired": true
+    },
+    {
+      "case": "negated_label",
+      "accepted": false,
+      "desired": false,
+      "matches_desired": true
+    },
+    {
+      "case": "explicit_self_correction",
+      "accepted": false,
+      "desired": false,
+      "matches_desired": true
+    },
+    {
+      "case": "spanish_self_correction",
+      "accepted": false,
+      "desired": false,
+      "matches_desired": true
+    },
+    {
+      "case": "missing_completion_flag",
+      "accepted": false,
+      "desired": false,
+      "matches_desired": true
+    },
+    {
+      "case": "missing_token_count",
+      "accepted": false,
+      "desired": false,
+      "matches_desired": true
+    },
+    {
+      "case": "negative_token_count",
+      "accepted": false,
+      "desired": false,
+      "matches_desired": true
+    },
+    {
+      "case": "nan_token_count",
+      "accepted": false,
+      "desired": false,
+      "matches_desired": true
+    },
+    {
+      "case": "comparative_label_contradiction",
+      "accepted": false,
+      "desired": false,
+      "matches_desired": true
+    },
+    {
+      "case": "unlisted_hint_paraphrase",
+      "accepted": false,
+      "interpretation": "Lexical exclusion is not a certificate of causal independence."
+    },
+    {
+      "case": "spanish_substring_false_positive",
+      "accepted": true,
+      "interpretation": "The substring pista also occurs in the ordinary word despistada."
+    }
+  ],
+  "early_stop_fixture": {
+    "completion_fixture": "non-delimiter stop after 10 tokens, then correct answer",
+    "forced_end": true,
+    "accepted": false,
+    "native_source_sha256": "988482170a9ed76ad9883c4d81ecac00d6b25de7300e5fdccef69ec28b30ffa9",
+    "hardware_or_live_incidence_claim": false
+  },
+  "adversarial_mismatches": 0,
+  "no_live_trace_incidence_estimated": true
+}

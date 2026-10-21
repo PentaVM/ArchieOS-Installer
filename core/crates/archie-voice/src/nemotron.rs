@@ -26,8 +26,8 @@
 use crate::segment::{Segmenter, Spoken};
 use archie_model_runtime::routed::{ChatDisclosure, Routed, RoutedError};
 use archie_model_runtime::{
-    provider_model_id, InferenceClient, ProviderEndpoint, StreamEvent, StreamUnveiler, ToolCall,
-    ToolChatMessage, ToolChatRequest, ToolDefinition,
+    provider_model_id, InferenceClient, ProviderEndpoint, RuntimeError, StreamEvent,
+    StreamUnveiler, ToolCall, ToolChatMessage, ToolChatRequest, ToolDefinition,
 };
 use archie_speech::{
     validate_request, CancelReason, CognitiveError, CognitiveEvent, CognitiveModelAdapter,
@@ -216,6 +216,7 @@ pub struct NebiusSource {
     descriptor: ModelDescriptor,
     privacy: PrivacyGrade,
     runtime: tokio::runtime::Handle,
+    wanda_access: crate::wanda::WandaVoiceAccess,
 }
 
 impl NebiusSource {
@@ -233,7 +234,30 @@ impl NebiusSource {
             descriptor,
             privacy,
             runtime,
+            wanda_access: crate::wanda::WandaVoiceAccess::default(),
         }
+    }
+    /// Construct the source from the selected endpoint so access proof and transport
+    /// cannot accidentally refer to different providers.
+    pub fn from_endpoint(
+        endpoint: ProviderEndpoint,
+        descriptor: ModelDescriptor,
+        privacy: PrivacyGrade,
+        runtime: tokio::runtime::Handle,
+    ) -> Result<Self, RuntimeError> {
+        let wanda_access =
+            crate::wanda::WandaVoiceAccess::from_selected(&endpoint, &descriptor, privacy);
+        let mut source = Self::new(
+            InferenceClient::new(endpoint)?,
+            descriptor,
+            privacy,
+            runtime,
+        );
+        source.wanda_access = wanda_access;
+        Ok(source)
+    }
+    pub fn wanda_access(&self) -> crate::wanda::WandaVoiceAccess {
+        self.wanda_access
     }
 }
 

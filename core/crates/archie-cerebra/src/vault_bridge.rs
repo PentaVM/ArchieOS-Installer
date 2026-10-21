@@ -375,7 +375,7 @@ pub fn watch_documents_once(
     paths.sort();
     let mut journal = Journal::load(journal_path);
     let known: BTreeSet<String> = journal.seen.iter().cloned().collect();
-    let mut vault: Option<Vault> = None;
+    let mut vault: Option<vault_io::VaultGuard> = None;
     let fail = |report: &mut DocumentWatchReport, message: String| {
         if report.failures.len() < MAX_FAILURE_NAMES {
             report.failures.push(message);

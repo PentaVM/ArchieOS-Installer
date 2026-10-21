@@ -1,0 +1,72 @@
+{
+  "candidate_sha256": "98c9929a3b8836bd25b422d499f9648933c5577084cac673f859e5ffd5ae5461",
+  "scope": "root CPU schema/invariance/baseline checks, no model inference or semantic quality proof",
+  "families": 16,
+  "examples": 64,
+  "domains": {
+    "work": 8,
+    "personal": 8
+  },
+  "family_ids": [
+    "r2-bono-metrica",
+    "r2-cabina-interprete",
+    "r2-cancha-horarios",
+    "r2-cena-indirecta",
+    "r2-club-silencio",
+    "r2-ensayo-sustituta",
+    "r2-entrada-reventa",
+    "r2-errata-audiencia",
+    "r2-garantia-traduccion",
+    "r2-huerto-portavoz",
+    "r2-intercambio-vinilo",
+    "r2-licencia-repetida",
+    "r2-mandato-feria",
+    "r2-quorum-archivo",
+    "r2-telescopio-reputacion",
+    "r2-testigos-parada"
+  ],
+  "baselines": {
+    "all": {
+      "n": 64,
+      "correct": {
+        "longest": 12,
+        "shortest": 24,
+        "always_A": 19
+      }
+    },
+    "clean": {
+      "n": 16,
+      "correct": {
+        "longest": 3,
+        "shortest": 4,
+        "always_A": 3
+      }
+    },
+    "noise": {
+      "n": 16,
+      "correct": {
+        "longest": 3,
+        "shortest": 4,
+        "always_A": 3
+      }
+    },
+    "cosmetic": {
+      "n": 16,
+      "correct": {
+        "longest": 3,
+        "shortest": 5,
+        "always_A": 5
+      }
+    },
+    "counterfactual": {
+      "n": 16,
+      "correct": {
+        "longest": 3,
+        "shortest": 11,
+        "always_A": 8
+      }
+    }
+  },
+  "human_review": "pending",
+  "cuda_used": false
+}
