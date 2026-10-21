@@ -25,6 +25,9 @@ pub struct Settings {
     pub wanda_token: Option<String>,
     pub domain: String,
     pub ocr_every: Duration,
+    /// A local vision-language model reading the text boxes (llama-server with its projector,
+    /// OpenAI-compatible). None: IRIS's own reading head.
+    pub ocr_url: Option<String>,
 }
 
 fn now_ms() -> u64 {
@@ -206,8 +209,9 @@ fn short(text: &str) -> String {
     text.chars().take(160).collect()
 }
 
-/// Every `ocr_every`: the boxes IRIS sees text in, read by IRIS's reading head, and the lines
-/// that are new or changed handed to Wanda's state update (`scene.text`).
+/// Every `ocr_every`: the boxes IRIS sees text in, read by the configured reader (a local
+/// vision-language model given `--ocr-url`, or IRIS's own reading head), and the lines that
+/// are new or changed handed to Wanda's state update (`scene.text`).
 pub fn ocr(state: State, settings: Arc<Settings>) {
     let client = client();
     let mut known: HashMap<u64, String> = HashMap::new();
@@ -227,43 +231,34 @@ pub fn ocr(state: State, settings: Arc<Settings>) {
                 .collect();
             boxes.sort_by(|a, b| b.score.total_cmp(&a.score));
             boxes.truncate(OCR_BOXES);
-            (!boxes.is_empty()).then(|| (frame.jpeg.clone(), boxes))
-        });
-        let Some((jpeg, boxes)) = job else {
-            continue;
-        };
-        let spec: Vec<String> = boxes
-            .iter()
-            .map(|d| {
-                format!(
-                    "{:.0},{:.0},{:.0},{:.0}",
-                    d.bbox[0], d.bbox[1], d.bbox[2], d.bbox[3]
+            (!boxes.is_empty()).then(|| {
+                (
+                    frame.jpeg.clone(),
+                    frame.rgb.clone(),
+                    frame.width,
+                    frame.height,
+                    boxes,
                 )
             })
-            .collect();
-        let started = Instant::now();
-        let read = client
-            .post(format!(
-                "{}/read?boxes={}",
-                settings.iris.trim_end_matches('/'),
-                spec.join(";")
-            ))
-            .header("content-type", "image/jpeg")
-            .body(jpeg.as_ref().clone())
-            .send()
-            .and_then(|r| r.json::<Value>());
-        let read_ms = started.elapsed().as_secs_f32() * 1000.0;
-        let texts: Vec<String> = match &read {
-            Ok(value) => value["reads"]
-                .as_array()
-                .map(|r| {
-                    r.iter()
-                        .map(|x| x["text"].as_str().unwrap_or("").trim().to_owned())
-                        .collect()
-                })
-                .unwrap_or_default(),
-            Err(_) => Vec::new(),
+        });
+        let Some((jpeg, rgb, width, height, boxes)) = job else {
+            continue;
         };
+        let started = Instant::now();
+        let (read, origin, reader) = match &settings.ocr_url {
+            Some(url) => (
+                read_with_model(&client, url, &rgb, width, height, &boxes),
+                "external_ocr",
+                "Qwen3-VL",
+            ),
+            None => (
+                read_with_iris(&client, &settings.iris, &jpeg, &boxes),
+                "iris_read",
+                "IRIS read_decoder",
+            ),
+        };
+        let read_ms = started.elapsed().as_secs_f32() * 1000.0;
+        let texts = read.clone().unwrap_or_default();
         let mut lines = Vec::new();
         for (seen, text) in boxes.iter().zip(&texts) {
             if text.chars().filter(|c| c.is_alphanumeric()).count() < 2 {
@@ -273,13 +268,11 @@ pub fn ocr(state: State, settings: Arc<Settings>) {
                 continue;
             }
             known.insert(seen.track, text.clone());
-            lines.push(
-                json!({"track": seen.track, "text": text, "origin": "iris_read",
-                              "confidence": seen.score, "observed_at_ms": now_ms()}),
-            );
+            lines.push(json!({"track": seen.track, "text": text, "origin": origin,
+                              "confidence": seen.score, "observed_at_ms": now_ms()}));
         }
         let wanda = if let Err(error) = &read {
-            Err(format!("IRIS /read: {}", short(&error.to_string())))
+            Err(format!("{reader}: {error}"))
         } else if lines.is_empty() {
             Ok("nada nuevo: no se llama a Wanda".to_owned())
         } else {
@@ -288,6 +281,7 @@ pub fn ocr(state: State, settings: Arc<Settings>) {
         if let Ok(mut s) = state.lock() {
             s.ocr.push_front(OcrCall {
                 at: Instant::now(),
+                reader,
                 boxes: boxes.len(),
                 read_ms,
                 lines: texts,
@@ -297,6 +291,138 @@ pub fn ocr(state: State, settings: Arc<Settings>) {
             s.ocr.truncate(OCR_LOG);
         }
     }
+}
+
+/// IRIS's reading head (`POST /read`), all boxes in one call.
+fn read_with_iris(
+    client: &reqwest::blocking::Client,
+    iris: &str,
+    jpeg: &[u8],
+    boxes: &[Seen],
+) -> Result<Vec<String>, String> {
+    let spec: Vec<String> = boxes
+        .iter()
+        .map(|d| {
+            format!(
+                "{:.0},{:.0},{:.0},{:.0}",
+                d.bbox[0], d.bbox[1], d.bbox[2], d.bbox[3]
+            )
+        })
+        .collect();
+    let value: Value = client
+        .post(format!(
+            "{}/read?boxes={}",
+            iris.trim_end_matches('/'),
+            spec.join(";")
+        ))
+        .header("content-type", "image/jpeg")
+        .body(jpeg.to_vec())
+        .send()
+        .and_then(|r| r.json())
+        .map_err(|e| short(&e.to_string()))?;
+    if let Some(error) = value["error"].as_str() {
+        return Err(error.to_owned());
+    }
+    Ok(value["reads"]
+        .as_array()
+        .map(|r| {
+            r.iter()
+                .map(|x| x["text"].as_str().unwrap_or("").trim().to_owned())
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+/// The pixels inside `b`, padded by a tenth of the box (at least 4 px), as a PNG.
+fn crop_png(rgb: &[u8], width: usize, height: usize, b: [f32; 4]) -> Option<Vec<u8>> {
+    let pad_x = ((b[2] - b[0]) * 0.1).max(4.0);
+    let pad_y = ((b[3] - b[1]) * 0.1).max(4.0);
+    let x0 = (b[0] - pad_x).max(0.0) as usize;
+    let y0 = (b[1] - pad_y).max(0.0) as usize;
+    let x1 = ((b[2] + pad_x).max(0.0) as usize).min(width);
+    let y1 = ((b[3] + pad_y).max(0.0) as usize).min(height);
+    if x1 <= x0 + 1 || y1 <= y0 + 1 {
+        return None;
+    }
+    let (w, h) = (x1 - x0, y1 - y0);
+    let mut pixels = Vec::with_capacity(w * h * 3);
+    for y in y0..y1 {
+        let start = (y * width + x0) * 3;
+        pixels.extend_from_slice(&rgb[start..start + w * 3]);
+    }
+    let mut out = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut out, w as u32, h as u32);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().ok()?;
+        writer.write_image_data(&pixels).ok()?;
+    }
+    Some(out)
+}
+
+const READ_PROMPT: &str = "Transcribe the text in this image exactly as written, in its \
+original language. Reply with the text only, on one line. If there is no legible text, reply \
+with nothing.";
+
+/// A local vision-language model behind an OpenAI-compatible server (llama-server with its
+/// projector): one crop per request, all at once.
+fn read_with_model(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    rgb: &[u8],
+    width: usize,
+    height: usize,
+    boxes: &[Seen],
+) -> Result<Vec<String>, String> {
+    use base64::Engine;
+    let endpoint = format!("{}/v1/chat/completions", url.trim_end_matches('/'));
+    let read_one = |seen: &Seen| -> Result<String, String> {
+        let Some(png) = crop_png(rgb, width, height, seen.bbox) else {
+            return Ok(String::new());
+        };
+        let image = format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(png)
+        );
+        let body = json!({
+            "messages": [{"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": image}},
+                {"type": "text", "text": READ_PROMPT}
+            ]}],
+            "temperature": 0,
+            "max_tokens": 48
+        });
+        let value: Value = client
+            .post(&endpoint)
+            .json(&body)
+            .send()
+            .and_then(|r| r.json())
+            .map_err(|e| short(&e.to_string()))?;
+        let text: String = value["choices"][0]["message"]["content"]
+            .as_str()
+            .unwrap_or("")
+            .trim()
+            .trim_matches(|c| c == '"' || c == '`')
+            .lines()
+            .next()
+            .unwrap_or("")
+            .chars()
+            .take(200)
+            .collect();
+        Ok(text)
+    };
+    let results: Vec<Result<String, String>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = boxes
+            .iter()
+            .map(|seen| scope.spawn(move || read_one(seen)))
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().unwrap_or_else(|_| Err("lector caído".into())))
+            .collect()
+    });
+    results.into_iter().collect()
 }
 
 fn send_to_wanda(

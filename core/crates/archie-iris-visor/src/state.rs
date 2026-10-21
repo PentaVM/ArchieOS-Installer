@@ -75,6 +75,8 @@ pub struct Iris {
 #[derive(Clone)]
 pub struct OcrCall {
     pub at: Instant,
+    /// Who read the boxes: `Qwen3-VL` or `IRIS read_decoder`.
+    pub reader: &'static str,
     pub boxes: usize,
     pub read_ms: f32,
     pub lines: Vec<String>,

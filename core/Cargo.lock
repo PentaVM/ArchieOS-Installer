@@ -472,8 +472,10 @@ dependencies = [
 name = "archie-iris-visor"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "eframe",
  "jpeg-decoder",
+ "png",
  "reqwest",
  "serde",
  "serde_json",

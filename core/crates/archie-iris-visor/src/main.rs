@@ -15,6 +15,7 @@
 //! archie-iris-visor [--camera 127.0.0.1:7671] [--iris http://127.0.0.1:8765]
 //!     [--wanda http://127.0.0.1:8791 --wanda-token-file <owner.token> --domain personal/owner]
 //!     [--phrases person,face,hand,cup,phone,screen,text,keyboard,book,bottle] [--threshold 0.35]
+//!     [--ocr-url http://127.0.0.1:8792]   (a local vision-language model reads the text boxes)
 //! ```
 
 mod state;
@@ -461,7 +462,12 @@ impl Visor {
         );
         ui.label(
             egui::RichText::new(format!(
-                "IRIS /read cada {:.1} s sobre cajas de texto · Wanda {}",
+                "{} lee cada {:.1} s las cajas de texto de IRIS · Wanda {}",
+                if self.settings.ocr_url.is_some() {
+                    "Qwen3-VL-4B (local)"
+                } else {
+                    "IRIS read_decoder"
+                },
                 self.settings.ocr_every.as_secs_f32(),
                 s.wanda.domain
             ))
@@ -482,8 +488,8 @@ impl Visor {
                 let age = call.at.elapsed().as_secs();
                 ui.label(
                     egui::RichText::new(format!(
-                        "hace {age} s · {} cajas · lectura {:.0} ms · {} nuevas",
-                        call.boxes, call.read_ms, call.sent
+                        "hace {age} s · {} · {} cajas · {:.0} ms · {} nuevas",
+                        call.reader, call.boxes, call.read_ms, call.sent
                     ))
                     .font(text(11.5))
                     .color(T3),
@@ -564,6 +570,7 @@ fn main() -> eframe::Result<()> {
                 .and_then(|t| t.parse().ok())
                 .unwrap_or(1500),
         ),
+        ocr_url: arg(&args, "--ocr-url"),
     });
     let state: State = Arc::new(Mutex::new(Shared::default()));
     {
