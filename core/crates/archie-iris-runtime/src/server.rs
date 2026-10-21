@@ -3,7 +3,8 @@
 //! `POST /detect?mode=all|phrases&phrases=a,b&threshold=0.35&embed=1` with a JPEG or PNG body,
 //! `POST /act?session=&instruction=&skill=&adapter=&record=&app=&sensitivity=`,
 //! `POST /act/reset?session=`, `POST /act/recorded?app=&run=`, `POST /read?boxes=x0,y0,x1,y1;…`
-//! (the text of each crop, by IRIS's reading head), `GET /health`, and `GET /`.
+//! (the text of each crop, by IRIS's reading head), `POST /ocr?boxes=…` (the OCR expert,
+//! GOT-OCR 2.0, given `--ocr-model`), `GET /health`, and `GET /`.
 //! `POST /live?focus=&mode=&phrases=&fps=&threshold=&priority=` answers each frame of a live
 //! focus from damage and tracking without waiting for the model, `POST /live/advice` takes
 //! Cortex's `ResourceAdvice`, and `GET /live` reports the foci and measured costs.
@@ -112,6 +113,8 @@ pub struct Service {
     pub actor: Option<Actor>,
     /// The reading head (`read_decoder`), when the release has one.
     pub reader: Option<crate::read::Reader>,
+    /// The OCR expert (GOT-OCR 2.0), when the server was given one.
+    pub ocr: Option<crate::ocr::OcrExpert>,
     pub info: Value,
     pub rem_spool: Option<PathBuf>,
     pub skills_dir: PathBuf,
@@ -133,6 +136,7 @@ impl Service {
             detector,
             actor,
             reader: None,
+            ocr: None,
             info,
             rem_spool: None,
             skills_dir,
@@ -151,6 +155,11 @@ impl Service {
 
     pub fn with_rem_spool(mut self, rem_spool: Option<PathBuf>) -> Self {
         self.rem_spool = rem_spool;
+        self
+    }
+
+    pub fn with_ocr(mut self, ocr: Option<crate::ocr::OcrExpert>) -> Self {
+        self.ocr = ocr;
         self
     }
 
@@ -194,6 +203,7 @@ impl Service {
         info["skill_adapters"] = json!(self.actor.as_ref().is_some_and(|a| a.bank.is_some()));
         info["rem_recording"] = json!(self.rem_spool.is_some());
         info["reading"] = json!(self.reader.is_some());
+        info["ocr"] = json!(self.ocr.is_some());
         info
     }
 
@@ -237,6 +247,40 @@ impl Service {
 
     /// `/read?boxes=x0,y0,x1,y1;…`: the text of each crop (pixel boxes of the frame; the
     /// whole frame when none), read by IRIS's own reading head.
+    /// `/ocr?boxes=x0,y0,x1,y1;…&max_tokens=96`: the OCR expert reads the whole frame, or
+    /// each box (pixels) over one encoding of it.
+    pub fn ocr(&mut self, frame: &Frame, query: &HashMap<String, String>) -> Result<Value, Error> {
+        let expert = self
+            .ocr
+            .as_ref()
+            .ok_or_else(|| Error::Refused("this server has no OCR expert (--ocr-model)".into()))?;
+        let boxes = crate::read::parse_boxes(query.get("boxes").map_or("", String::as_str))?;
+        if boxes.len() > crate::read::MAX_CROPS {
+            return Err(Error::Refused(format!(
+                "at most {} boxes",
+                crate::read::MAX_CROPS
+            )));
+        }
+        let max_tokens = query
+            .get("max_tokens")
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(96)
+            .clamp(1, 1024);
+        let started = Instant::now();
+        let readings = expert.read(&frame.image, &boxes, max_tokens)?;
+        let latency = started.elapsed().as_secs_f64() * 1000.0;
+        self.record(latency);
+        let reads: Vec<Value> = readings
+            .iter()
+            .zip(boxes.iter().map(Some).chain(std::iter::repeat(None)))
+            .map(|(r, b)| json!({"box": b, "region_1000": r.region, "text": r.text, "tokens": r.tokens}))
+            .collect();
+        Ok(
+            json!({"reads": reads, "latency_ms": (latency * 10.0).round() / 10.0,
+                  "image_size": [frame.image.width, frame.image.height], "expert": "got-ocr2"}),
+        )
+    }
+
     pub fn read(&mut self, frame: &Frame, query: &HashMap<String, String>) -> Result<Value, Error> {
         let reader = self
             .reader
@@ -676,6 +720,19 @@ pub fn router(service: Service) -> Router {
                         return refusal;
                     }
                     with_frame(state, size, body, move |s, f| s.detect(f, &query)).await
+                },
+            ),
+        )
+        .route(
+            "/ocr",
+            post(
+                move |State(state): State<Shared>,
+                      Query(query): Query<HashMap<String, String>>,
+                      body: Bytes| async move {
+                    if let Some(refusal) = frame_size_ok(&body) {
+                        return refusal;
+                    }
+                    with_frame(state, size, body, move |s, f| s.ocr(f, &query)).await
                 },
             ),
         )

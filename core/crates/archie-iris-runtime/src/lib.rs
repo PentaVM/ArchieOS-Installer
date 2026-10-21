@@ -21,6 +21,7 @@ pub mod live;
 pub mod lora;
 pub mod model;
 pub mod nn;
+pub mod ocr;
 pub mod phrases;
 pub mod preprocess;
 pub mod read;
