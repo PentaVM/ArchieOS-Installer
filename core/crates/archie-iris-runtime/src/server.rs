@@ -411,8 +411,15 @@ fn frame_size_ok(body: &Bytes) -> Option<Response> {
 }
 
 /// Reads a batch of live requests: focused requests of up to four foci in one pass with a
-/// capacity per image, open sweeps one by one. One result per request, in order.
-fn live_inference(state: &Shared, batch: &[InferRequest]) -> Vec<Result<Vec<Detection>, String>> {
+/// capacity per image, open sweeps one by one. One result per request, in order. The
+/// canvases are built before the model is taken, in parallel.
+fn live_inference(
+    state: &Shared,
+    size: usize,
+    batch: &[InferRequest],
+) -> Vec<Result<Vec<Detection>, String>> {
+    use rayon::prelude::*;
+    let frames: Vec<Frame> = batch.par_iter().map(|r| r.frame(size)).collect();
     let mut service = match state.lock() {
         Ok(service) => service,
         Err(_) => {
@@ -428,7 +435,7 @@ fn live_inference(state: &Shared, batch: &[InferRequest]) -> Vec<Result<Vec<Dete
     for chunk in focused.chunks(4) {
         let requests: Vec<(&Frame, &[String])> = chunk
             .iter()
-            .map(|&i| (&batch[i].frame, batch[i].phrases.as_slice()))
+            .map(|&i| (&frames[i], batch[i].phrases.as_slice()))
             .collect();
         let lowest = chunk
             .iter()
@@ -455,7 +462,7 @@ fn live_inference(state: &Shared, batch: &[InferRequest]) -> Vec<Result<Vec<Dete
         out[i] = service
             .detector
             .detect_everything_frame(
-                &request.frame,
+                &frames[i],
                 request.threshold,
                 &request.phrases,
                 60,
@@ -571,7 +578,7 @@ pub fn router(service: Service) -> Router {
     let state: Shared = Arc::new(Mutex::new(service));
     let worker_state = state.clone();
     spawn_worker(live.clone(), move |batch| {
-        live_inference(&worker_state, batch)
+        live_inference(&worker_state, size, batch)
     });
     let live_frames = live.clone();
     let live_advice_state = live.clone();
@@ -587,7 +594,9 @@ pub fn router(service: Service) -> Router {
                             return refusal;
                         }
                         let joined = tokio::task::spawn_blocking(move || -> Result<Value, Error> {
-                            let frame = Frame::decode(&body, size)?;
+                            let decoding = Instant::now();
+                            let image = crate::preprocess::decode(&body)?;
+                            let decode_ms = decoding.elapsed().as_secs_f64() * 1000.0;
                             let focus = query
                                 .get("focus")
                                 .cloned()
@@ -600,7 +609,7 @@ pub fn router(service: Service) -> Router {
                                 .hub
                                 .lock()
                                 .map_err(|_| Error::Refused("live state unavailable".into()))?
-                                .observe(&focus, &frame, live.now_ms())?;
+                                .observe(&focus, &image, live.now_ms())?;
                             if let Some(request) = request {
                                 live.submit(request);
                             }
@@ -611,7 +620,8 @@ pub fn router(service: Service) -> Router {
                                 .map_err(|e| Error::Refused(e.to_string()))?;
                             out["latency_ms"] =
                                 json!((started.elapsed().as_secs_f64() * 10_000.0).round() / 10.0);
-                            out["image_size"] = json!([frame.image.width, frame.image.height]);
+                            out["decode_ms"] = json!((decode_ms * 10.0).round() / 10.0);
+                            out["image_size"] = json!([image.width, image.height]);
                             Ok(out)
                         })
                         .await;
