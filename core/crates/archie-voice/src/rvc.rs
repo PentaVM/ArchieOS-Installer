@@ -353,7 +353,7 @@ pub fn decode_salience(salience: &[f32], threshold: f32) -> f32 {
     if max <= threshold {
         return 0.0;
     }
-    let cents = |bin: isize| 20.0 * bin as f32 + 1997.379_4;
+    let cents = |bin: isize| 20.0 * bin as f32 + 1_997.379_4;
     let (mut product, mut total) = (0.0f32, 0.0f32);
     for offset in -4isize..=4 {
         let bin = peak as isize + offset;

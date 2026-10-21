@@ -531,6 +531,14 @@ fn spoken(known: &curiosity::Known) -> String {
 /// A moment of the conversation, as the page is told it.
 pub fn moment_json(moment: &Moment) -> serde_json::Value {
     match moment {
+        Moment::Timing {
+            turn_id,
+            phase,
+            elapsed_ms,
+            queued_segments,
+        } => {
+            json!({"type":"timing", "turn_id":turn_id, "phase":phase, "elapsed_ms":elapsed_ms, "queued_segments":queued_segments})
+        }
         Moment::Heard { text, .. } => json!({"type": "heard", "text": text}),
         Moment::Floor { action, reason, .. } => {
             json!({"type": "floor", "action": action, "reason": reason})

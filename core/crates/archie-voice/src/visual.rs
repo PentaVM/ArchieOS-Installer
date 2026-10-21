@@ -2,6 +2,7 @@
 use archie_orb::control::{self, ControlError};
 
 /// The display's names, checked here and again by the display.
+#[cfg(test)]
 pub(crate) fn valid_command(action: &str, value: &str, enabled: Option<bool>) -> bool {
     control::valid(action, value, enabled)
 }

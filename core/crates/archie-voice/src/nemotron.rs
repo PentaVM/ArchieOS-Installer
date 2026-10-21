@@ -285,6 +285,7 @@ struct Turn {
     gate: ResponseGate,
     next_sequence: u32,
     tool_calls: u32,
+    text_bytes: usize,
     queue: VecDeque<CognitiveEvent>,
     ended: bool,
 }
@@ -534,10 +535,32 @@ impl<S: TurnSource> CognitiveModelAdapter for NemotronCognitive<S> {
     fn poll(&mut self) -> Option<CognitiveEvent> {
         let name = self.name.clone();
         let turn = self.turn.as_mut()?;
-        loop {
+        if turn.queue.is_empty() && !turn.ended {
+            for spoken in turn.segmenter.push_up_to("", 1) {
+                release(turn, spoken);
+            }
+        }
+        // Leave transport output pending once an event is ready. Also cap invisible
+        // fragments per tick so an unfinished/empty burst cannot monopolise hearing.
+        for _ in 0..32 {
+            if !turn.queue.is_empty() || turn.ended {
+                break;
+            }
             match turn.stream.updates.try_recv() {
                 Ok(Update::Event(StreamEvent::Text(words))) => {
-                    for spoken in turn.segmenter.push(&words) {
+                    // Normal speech is requested with a 400-token budget. Refuse a
+                    // misbehaving backend before one huge delta/buffer can stall ASR.
+                    turn.text_bytes = turn.text_bytes.saturating_add(words.len());
+                    if words.len() > 16 * 1024 || turn.text_bytes > 64 * 1024 {
+                        (turn.stream.stop)();
+                        turn.queue.push_back(CognitiveEvent::Failed {
+                            turn_id: turn.id.clone(),
+                            reason: "the answer exceeded the realtime text limit".into(),
+                        });
+                        turn.ended = true;
+                        break;
+                    }
+                    for spoken in turn.segmenter.push_up_to(&words, 1) {
                         release(turn, spoken);
                     }
                 }
@@ -643,6 +666,7 @@ impl Turn {
             gate: ResponseGate::new(budget),
             next_sequence: 0,
             tool_calls: 0,
+            text_bytes: 0,
             queue: VecDeque::new(),
             ended: false,
         }
@@ -654,6 +678,72 @@ mod tests {
     use super::*;
     use archie_model_runtime::SseAssembler;
     use std::sync::{Arc, Mutex};
+
+    struct Burst(bool);
+    impl TurnSource for Burst {
+        fn start(&mut self, _: ToolChatRequest) -> TurnStream {
+            let (send, updates) = mpsc::channel();
+            for _ in 0..if self.0 { 1 } else { 1000 } {
+                send.send(Update::Event(StreamEvent::Text(
+                    "Una frase. ".repeat(if self.0 { 1000 } else { 1 }),
+                )))
+                .unwrap();
+            }
+            send.send(Update::Event(StreamEvent::Finished {
+                reason: Some("stop".into()),
+            }))
+            .unwrap();
+            TurnStream {
+                updates,
+                stop: Box::new(|| {}),
+            }
+        }
+    }
+
+    #[test]
+    fn one_poll_does_not_drain_a_prequeued_transport_burst() {
+        let mut cognitive = NemotronCognitive::new(Burst(false), "test", vec!["es".into()], vec![]);
+        cognitive
+            .begin(ask("burst", "hola", SpeechBudget::Full))
+            .unwrap();
+        assert!(matches!(cognitive.poll(), Some(CognitiveEvent::Segment(_))));
+        let turn = cognitive.turn.as_ref().expect("transport remains pending");
+        assert_eq!(
+            turn.next_sequence, 1,
+            "one released segment per poll, without parsing the whole backlog"
+        );
+        assert!(turn.queue.is_empty());
+        let rest = drain(&mut cognitive);
+        assert_eq!(
+            rest.iter()
+                .filter(|event| matches!(event, CognitiveEvent::Segment(_)))
+                .count(),
+            999
+        );
+        assert!(matches!(
+            rest.last(),
+            Some(CognitiveEvent::Completed { .. })
+        ));
+    }
+
+    #[test]
+    fn one_poll_does_not_segment_a_whole_answer_delivered_in_one_update() {
+        let mut cognitive = NemotronCognitive::new(Burst(true), "test", vec!["es".into()], vec![]);
+        cognitive
+            .begin(ask("combined", "hola", SpeechBudget::Full))
+            .unwrap();
+        assert!(matches!(cognitive.poll(), Some(CognitiveEvent::Segment(_))));
+        let turn = cognitive.turn.as_ref().unwrap();
+        assert_eq!(turn.next_sequence, 1);
+        assert!(turn.queue.is_empty());
+        assert_eq!(
+            drain(&mut cognitive)
+                .iter()
+                .filter(|event| matches!(event, CognitiveEvent::Segment(_)))
+                .count(),
+            999
+        );
+    }
 
     const TEXT: &[u8] = include_bytes!("../../archie-model-runtime/tests/fixtures/nebius-text.sse");
     const TOOL: &[u8] =

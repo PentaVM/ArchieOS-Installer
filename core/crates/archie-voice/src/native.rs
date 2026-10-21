@@ -587,6 +587,8 @@ impl Listening<'_> {
     }
 
     /// Takes the next result, if one is ready.
+    // A live stream can be temporarily empty; None does not mean it is exhausted.
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Result<Option<Heard>, NativeError> {
         let mut result = ptr::null_mut();
         // SAFETY: `result` receives a handle this function owns and destroys below.
