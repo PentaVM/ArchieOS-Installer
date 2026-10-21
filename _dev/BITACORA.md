@@ -1,5 +1,39 @@
 # Bitácora — ArchieOS-Nvidia
 
+## 2026-10-21 — Claude — IRIS C2–C10, archie-accel, S-LINKs, ResourceAdvice, slots del LLM
+
+Pedido del dueño: implementar todos los C y las arquitecturas del plan
+(`_dev/PLAN-CORTEX-ROUTER-SLINKS-2026-10-20.md`, en `perf/wanda-runtime`). Registro completo,
+con qué se verificó y qué no: `IMPLEMENTACION-IRIS-ACCEL-SLINKS-2026-10-21.md`.
+
+- **IRIS**: C3 (carga perezosa del zip, torre de texto en CPU, caché de frases en disco; arreglado
+  un bug previo de offsets de storage), C5–C10, C2 detrás de `flash-attn`. `tests/weights.rs`
+  sobre un `.pt` con la forma real escrito sin PyTorch; `tests/pipeline.rs` corre todo el
+  runtime sobre un modelo aleatorio con las formas de la release.
+- **F3**: `core/crates/archie-accel` (daño, seguimiento, plan, VRAM y residencia de expertos,
+  `ResourceAdvice` con sobre de Policy). En IRIS: `/live` (cada cuadro respondido sin esperar al
+  modelo; lecturas en un worker), `detect_many` con capacidad del MoE por imagen, residencia de
+  expertos (apagada), histogramas de ruteo.
+- **F4**: `core/crates/archie-slink` (en proceso y entre procesos por memfd+seqlock+eventfd, 8
+  enlaces tipados con grado de privacidad, joiner, puente de texto etapa A). IRIS publica y
+  exporta `scene.state`.
+- **Cortex**: `resources.hpp` (`ResourceAdvice` como `CandidateSchedulerChange`, `focus.plan` con
+  fixture compartido C++/Rust, descriptores de capacidad).
+- **§9**: `archie-model-runtime::llama_slots` (prefijo estable, slots en SSD de `llama-server`
+  local).
+- **Herramientas**: `archie-iris-bench` (F0) y `scripts/iris/verify-rtx3070.sh`; la paridad
+  acepta `IRIS_DEVICE=cuda`.
+- **Verificado aquí**: pruebas de CPU; build y clippy con `--features cuda` y `flash-attn`
+  (nvcc 12.8, `CUDA_COMPUTE_CAP=86`); clippy con Rust 1.88 y 1.97; CMake/ctest de Cortex.
+  Seguimiento: 20 cajas a 640×480 en 3.9 ms por cuadro (4 hilos del contenedor).
+- **Sin verificar**: cualquier tiempo o VRAM en la 3070, la paridad con los pesos reales (en
+  CPU y en GPU), flash-attention en ejecución. La inferencia completa por cuadro no llega a
+  60 fps en la 3070 por las cuentas del plan; la rama responde cada cuadro a la tasa de la cámara
+  y lee con el modelo tan seguido como dé la GPU, y el bench mide las dos cosas.
+- **No hecho**: `read_decoder` (falta el código de Foundry), el lado de Wanda (vive en
+  `perf/wanda-runtime`; un merge de prueba choca con el veil del #35 en `archie-voice`), F5 y
+  F6, y el entrenamiento, que sigue en la WSL del dueño.
+
 ## 2026-10-21 — Claude — IRIS F1: C4 y C1 (frases en lote, MoE sin lecturas al host)
 
 Sigue el paso 3 de `HANDOFF-WANDA-IRIS-2026-10-20.md` y §3/§12 de

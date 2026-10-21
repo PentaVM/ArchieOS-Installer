@@ -8,6 +8,8 @@
 //!   cargo test --release -p archie-iris-runtime --test parity -- --ignored --nocapture
 //! ```
 //!
+//! With `IRIS_DEVICE=cuda` (and `--features cuda`) the comparison runs on the GPU in f32.
+//!
 //! `<dir>` holds `reference.safetensors`, `reference.json` and `phrases.json`. The phrase
 //! features in it stand in for the SigLIP2 text tower, which the release does not carry; the
 //! tower itself is compared separately (`text_tower`), on random weights.
@@ -117,7 +119,13 @@ fn rust_matches_the_python_iris() {
         eprintln!("IRIS_WEIGHTS, IRIS_REFERENCE and IRIS_IMAGE are not all set; nothing compared");
         return;
     };
-    let device = Device::Cpu;
+    // IRIS_DEVICE=cuda runs the same comparison on the GPU, in f32: the device routes (MoE
+    // without read-backs, top-k, pooled boxes) against the same Python outputs.
+    let device = match std::env::var("IRIS_DEVICE").as_deref() {
+        Ok("cuda") => Device::new_cuda(0).expect("a CUDA device"),
+        _ => Device::Cpu,
+    };
+    println!("device {device:?}");
     let started = std::time::Instant::now();
     let weights = Weights::load(&weights_path, None, &device, DType::F32).expect("weights");
     println!(
