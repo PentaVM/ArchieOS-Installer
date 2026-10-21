@@ -1,0 +1,31 @@
+[package]
+name = "archie-iris-runtime"
+description = "IRIS inference on the node, in Rust: the released Beta weights read directly, detection, instance embeddings and acting, served on the same loopback API as iris_serve."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+# The GPU, through candle's CUDA backend. Needs the CUDA toolkit when building.
+cuda = ["candle-core/cuda", "candle-nn/cuda"]
+
+[dependencies]
+candle-core = "0.9"
+candle-nn = "0.9"
+tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
+half = "2"
+rayon = "1"
+sha2.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+axum = { workspace = true, features = ["query", "json"] }
+jpeg-decoder.workspace = true
+png.workspace = true
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

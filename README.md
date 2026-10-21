@@ -143,8 +143,11 @@ local Nemotron ASR, provider adapters and FreeCAD. Build with
   scenes, IRIS Beta 1.1 detection behind the live session, the control plane and packaging.
 - **In progress:** IRIS Beta 2 training; Cortex driving the Observatory's view by command;
   IRIS proposing actions beyond clicks.
-- **Not yet:** an IRIS inference runtime inside ArchieOS (it runs as the `archie-iris`
-  service today); opening applications from Forge in the ArchISO image, where the
+- **IRIS without Python:** `archie-iris-serve` (`core/crates/archie-iris-runtime`) runs
+  Beta 2.1 from the release file and matches the Python IRIS on CPU (see
+  [`docs/IRIS-RUNTIME.md`](docs/IRIS-RUNTIME.md)). Its CUDA build is untested, and skill
+  adapters and REM recording are still served only by the Python `iris_serve`.
+- **Not yet:** opening applications from Forge in the ArchISO image, where the
   Observatory has no desktop and opening goes through the Stage; CI (GitHub Actions is
   paused for billing — checks run locally).
 

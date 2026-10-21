@@ -26,9 +26,16 @@ tiene y dónde está el detalle. Se marca aquí cuando se cierra.
 
 ## 2. IRIS
 
-- [ ] **Runtime sin Python.** `iris_serve` es PyTorch; la regla del proyecto es C++/Rust.
-  Exportar a ONNX o escribir el runtime en Rust. Mientras tanto la imagen instala
-  PyTorch en el primer arranque (3 GB) y baja SigLIP (1,5 GB). — Claude
+- [~] **Runtime sin Python.** **Hecho en CPU (Claude, 2026-10-12):** `archie-iris-serve`
+  (`core/crates/archie-iris-runtime`, Rust sobre candle) lee el `.pt` de la release y sirve
+  la misma API que `iris_serve`. Paridad con el IRIS de Python sobre los pesos reales:
+  104/104 detecciones y 3/3 decisiones de `/act` idénticas
+  ([`IRIS-RUNTIME.md`](IRIS-RUNTIME.md)). Falta:
+  - Compilar y medir el build `cuda` en una GPU.
+  - La torre de texto SigLIP2 real: no viene en la release; hay que distribuir su
+    `model.safetensors` y su `tokenizer.json`.
+  - Adaptadores LoRA y grabación REM, que hoy se rechazan.
+  - Que la imagen WSL use este binario en vez de PyTorch. — Claude/Xavi
 - [ ] **Adaptadores LoRA por aplicación**, en los nodos de Sheriff y Xavi. — Nelson
 - [ ] **REM no graba demostraciones de una persona**, solo corridas verificadas de Arena.
 - [ ] **Medir IRIS en 6–8 GB.** El manifiesto dice 56 ms en una RTX 5090 que además

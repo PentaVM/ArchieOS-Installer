@@ -21,7 +21,7 @@ rvc = ["dep:ort", "dep:serde"]
 # WebSocket, IRIS for eyes, and curiosity (identify and search) for what is in front.
 live = [
     "nemo", "dep:axum", "dep:reqwest", "dep:futures-util", "dep:serde", "dep:base64", "dep:png",
-    "dep:jpeg-decoder", "dep:archie-search", "dep:archie-vault", "dep:ring", "dep:zeroize",
+    "dep:jpeg-decoder", "dep:archie-search", "dep:ring", "dep:zeroize",
 ]
 
 [dependencies]
@@ -29,6 +29,9 @@ archie-types.workspace = true
 archie-orb.workspace = true
 archie-speech.workspace = true
 archie-model-runtime.workspace = true
+archie-registry.workspace = true
+archie-router.workspace = true
+archie-vault.workspace = true
 archie-stage.workspace = true
 archie-sight.workspace = true
 archie-a11y.workspace = true
@@ -49,7 +52,6 @@ base64 = { workspace = true, optional = true }
 png = { workspace = true, optional = true }
 jpeg-decoder = { workspace = true, optional = true }
 archie-search = { workspace = true, optional = true }
-archie-vault = { workspace = true, optional = true }
 ring = { workspace = true, optional = true }
 zeroize = { workspace = true, optional = true }
 libpulse-binding = { version = "2", optional = true }

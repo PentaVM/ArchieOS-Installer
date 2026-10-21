@@ -400,6 +400,29 @@ impl Unveil {
     pub fn is_empty(&self) -> bool {
         self.by_alias.is_empty()
     }
+
+    /// Whether `prefix` matches the beginning of any stand-in this veil created.
+    pub fn is_alias_prefix(&self, prefix: &str) -> bool {
+        if prefix.is_empty() {
+            return false;
+        }
+        self.by_alias.keys().any(|alias| alias.starts_with(prefix))
+    }
+
+    /// The stand-ins this veil created.
+    pub fn aliases(&self) -> impl Iterator<Item = &str> {
+        self.by_alias.keys().map(String::as_str)
+    }
+}
+
+impl Clone for Unveil {
+    fn clone(&self) -> Self {
+        Self {
+            by_alias: self.by_alias.clone(),
+            by_value: self.by_value.clone(),
+            counters: self.counters.clone(),
+        }
+    }
 }
 
 impl fmt::Debug for Unveil {

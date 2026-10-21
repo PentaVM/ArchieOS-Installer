@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # The pieces Archie operates with, in this WSL image: the Stage (the window Archie works
-# in, shown on the Windows desktop by WSLg) and IRIS (its eyes and hands, on the GPU).
+# in, shown on the Windows desktop by WSLg) and IRIS (its eyes and hands, on the GPU when
+# there is one).
 #
 #   archie-session up | down | status
 #   archie-session open URL      open a page in the Stage, in a fresh browser profile
 #   archie-session run PROGRAM   start an installed application in the Stage (kdenlive)
 set -euo pipefail
 RUN=${ARCHIE_RUN:-$HOME/.archie/run}
-VENV=/opt/archie/iris-venv
-WEIGHTS=/var/lib/archie/models/iris/iris-beta21-step132000.pt
+IRIS=/var/lib/archie/models/iris
+WEIGHTS=$IRIS/iris-beta21-step132000.pt
+WEIGHTS_SHA=c6cadb02f5a5bffc4ea3c3348d32b475ef7531f643675c06c65451037e4f3b97
 export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 mkdir -p "$RUN" && chmod 700 "$RUN"
 
@@ -43,21 +45,37 @@ up() {
   WAYLAND_DISPLAY=wayland-0 QT_QPA_PLATFORM=wayland LIBGL_ALWAYS_SOFTWARE=1 \
     start stage archie-stage --socket-name archie-stage --control "$RUN/control.sock" --key-file "$RUN/key" \
       --tempo live --seats shared --windowed --width "${ARCHIE_WIDTH:-1280}" --height "${ARCHIE_HEIGHT:-800}"
-  # TORCH_HOME holds the V-JEPA 2 code IRIS's encoder is built from, so it is not fetched.
-  PYTHONPATH=/opt/archie/iris/src HF_HOME=$HOME/.cache/huggingface TORCH_HOME=/opt/archie/torch \
-    start iris "$VENV/bin/python" -m archie_iris_foundry.iris_serve --weights "$WEIGHTS" --port 8765
+  # IRIS is the Rust runtime with its weights and text tower in the image: nothing to fetch.
+  # On the GPU when Windows shares an NVIDIA driver with WSL; ARCHIE_IRIS_DEVICE=cpu|cuda
+  # chooses by hand.
+  local device=${ARCHIE_IRIS_DEVICE:-auto}
+  if [ "$device" = auto ]; then
+    device=cpu
+    if [ -x /usr/bin/archie-iris-serve-cuda ] && [ -e /usr/lib/wsl/lib/libcuda.so.1 ] \
+      && nvidia-smi -L >/dev/null 2>&1; then
+      device=cuda
+    fi
+  fi
+  if [ "$device" = cuda ]; then
+    LD_LIBRARY_PATH=/opt/archie/cuda/lib:/usr/lib/wsl/lib \
+      start iris archie-iris-serve-cuda --weights "$WEIGHTS" --sha256 "$WEIGHTS_SHA" \
+        --text-tower "$IRIS/siglip2-text" --port 8765 --device cuda
+  else
+    start iris archie-iris-serve --weights "$WEIGHTS" --sha256 "$WEIGHTS_SHA" \
+      --text-tower "$IRIS/siglip2-text" --port 8765 --device cpu
+  fi
   for _ in $(seq 1 100); do [ -S "$RUN/control.sock" ] && break; sleep 0.1; done
   [ -S "$RUN/control.sock" ] || { echo "archie-session: the Stage did not start; see $RUN/stage.log" >&2; exit 1; }
-  # The first start downloads IRIS's text encoder (about 1.5 GB) and loads the weights.
+  # Reading 2.5 GB of weights and checking their digest takes a little while.
   printf 'archie-session: waiting for IRIS' >&2
-  for _ in $(seq 1 900); do
+  for _ in $(seq 1 300); do
     if curl -fsS -m 2 http://127.0.0.1:8765/health >/dev/null 2>&1; then echo ' ready' >&2; return 0; fi
     running iris || { echo >&2; echo "archie-session: IRIS stopped; see $RUN/iris.log" >&2; tail -5 "$RUN/iris.log" >&2; exit 1; }
     printf '.' >&2
     sleep 2
   done
   echo >&2
-  echo "archie-session: IRIS did not answer in 30 minutes; see $RUN/iris.log" >&2
+  echo "archie-session: IRIS did not answer in 10 minutes; see $RUN/iris.log" >&2
   exit 1
 }
 

@@ -53,6 +53,80 @@ struct IrisAnswer {
     step: Option<u64>,
 }
 
+/// How one frame is put to IRIS.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Look {
+    /// The whole everyday vocabulary: 256 phrases, read 16 to a batch row, so 17 rows of
+    /// fusion and decoding for the one frame. It finds what is new.
+    Open,
+    /// Only these phrases (at most [`Sweep::MAX_TRACKED`], one batch row): it follows what
+    /// the last open look found, at a fraction of the cost.
+    Focused(Vec<String>),
+}
+
+impl Look {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Look::Open => "open",
+            Look::Focused(_) => "focused",
+        }
+    }
+}
+
+/// When to look openly and when to follow. An open look every `every`; in between, the
+/// frames are read for what that look found. The interval starts when an open look
+/// finishes; inference time also contributes to detection delay. `every` zero is
+/// an open look on every frame, as before.
+#[derive(Debug, Clone)]
+pub struct Sweep {
+    every: Duration,
+    last_open: Option<Instant>,
+    tracked: Vec<String>,
+}
+
+impl Sweep {
+    /// One batch row of IRIS (`max_phrases` in its configuration).
+    pub const MAX_TRACKED: usize = 16;
+
+    pub fn new(every: Duration) -> Self {
+        Self {
+            every,
+            last_open: None,
+            tracked: Vec::new(),
+        }
+    }
+
+    pub fn next(&self, now: Instant) -> Look {
+        let due = self
+            .last_open
+            .is_none_or(|at| now.saturating_duration_since(at) >= self.every);
+        if self.every.is_zero() || due || self.tracked.is_empty() {
+            Look::Open
+        } else {
+            Look::Focused(self.tracked.clone())
+        }
+    }
+
+    /// Learns what to follow from an open look: its phrases, surest first.
+    pub fn observe(&mut self, look: &Look, scene: &Scene, now: Instant) {
+        if *look != Look::Open {
+            return;
+        }
+        self.last_open = Some(scene.at.map_or(now, |finished| finished.max(now)));
+        let mut seen: Vec<&Seen> = scene.seen.iter().collect();
+        seen.sort_by(|a, b| b.score.total_cmp(&a.score));
+        self.tracked.clear();
+        for item in seen {
+            if self.tracked.len() == Self::MAX_TRACKED {
+                break;
+            }
+            if !self.tracked.contains(&item.phrase) {
+                self.tracked.push(item.phrase.clone());
+            }
+        }
+    }
+}
+
 /// A client for the IRIS service.
 #[derive(Clone)]
 pub struct IrisEyes {
@@ -64,8 +138,17 @@ pub struct IrisEyes {
 impl IrisEyes {
     /// `url` is the service root, e.g. `http://127.0.0.1:8765`.
     pub fn new(url: &str, threshold: f32) -> Result<Self, String> {
+        Self::with_timeout(url, threshold, Duration::from_secs(60))
+    }
+
+    /// Bounded request time, configurable for CPU inference without infinite waits.
+    pub fn with_timeout(url: &str, threshold: f32, timeout: Duration) -> Result<Self, String> {
+        if !(Duration::from_secs(1)..=Duration::from_secs(900)).contains(&timeout) {
+            return Err("IRIS timeout must be from 1 to 900 seconds".into());
+        }
         let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(5))
+            .timeout(timeout)
+            .connect_timeout(Duration::from_secs(5).min(timeout))
             .build()
             .map_err(|e| e.to_string())?;
         Ok(Self {
@@ -75,18 +158,25 @@ impl IrisEyes {
         })
     }
 
-    /// Reads one JPEG frame in IRIS's open mode (its whole everyday vocabulary).
-    pub async fn look(&self, jpeg: Arc<Vec<u8>>) -> Result<Scene, String> {
+    /// Reads one JPEG frame, openly or for the phrases being followed.
+    pub async fn look(&self, jpeg: Arc<Vec<u8>>, look: &Look) -> Result<Scene, String> {
         let observed_at_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|duration| duration.as_millis().min(i64::MAX as u128) as i64)
             .unwrap_or(0);
+        let threshold = self.threshold.to_string();
+        let mut query = vec![("embed", "1".to_string()), ("threshold", threshold)];
+        match look {
+            Look::Open => query.push(("mode", "all".into())),
+            Look::Focused(phrases) => {
+                query.push(("mode", "phrases".into()));
+                query.push(("phrases", phrases.join(",")));
+            }
+        }
         let answer: IrisAnswer = self
             .http
-            .post(format!(
-                "{}/detect?mode=all&embed=1&threshold={}",
-                self.url, self.threshold
-            ))
+            .post(format!("{}/detect", self.url))
+            .query(&query)
             .body(jpeg.as_ref().clone())
             .send()
             .await
@@ -258,6 +348,28 @@ pub fn faces(scene: &Scene) -> Vec<[f32; 4]> {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn cpu_look_can_take_longer_than_five_seconds() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 4096];
+            socket.read(&mut request).await.unwrap();
+            tokio::time::sleep(Duration::from_secs(6)).await;
+            let body = r#"{"detections":[],"image_size":[1,1],"step":1}"#;
+            let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+            let _ = socket.write_all(response.as_bytes()).await;
+        });
+        let result = IrisEyes::new(&url, 0.35)
+            .unwrap()
+            .look(Arc::new(vec![0]), &Look::Open)
+            .await;
+        server.await.unwrap();
+        assert!(result.is_ok(), "CPU inference was cut off: {result:?}");
+    }
+
     fn scene(items: &[(&str, f32, [f32; 4])]) -> Scene {
         Scene {
             seen: items
@@ -307,5 +419,66 @@ mod tests {
         // A 32x32 white JPEG is awkward to make without an encoder, so the crop is
         // checked through its refusal of a box too small to be an object.
         assert!(crop_png(&[], [0.0, 0.0, 1.0, 1.0], &[]).is_err());
+    }
+
+    #[test]
+    fn open_looks_find_and_focused_looks_follow() {
+        let start = Instant::now();
+        let mut sweep = Sweep::new(Duration::from_millis(2000));
+        assert_eq!(sweep.next(start), Look::Open);
+        let mut found = scene(&[
+            ("cup", 0.5, [0.0, 0.0, 10.0, 10.0]),
+            ("laptop", 0.9, [0.0, 0.0, 10.0, 10.0]),
+            ("cup", 0.8, [20.0, 20.0, 30.0, 30.0]),
+        ]);
+        found.at = Some(start);
+        sweep.observe(&Look::Open, &found, start);
+        let later = start + Duration::from_millis(500);
+        assert_eq!(
+            sweep.next(later),
+            Look::Focused(vec!["laptop".into(), "cup".into()])
+        );
+        // What a focused look sees does not change what is followed.
+        sweep.observe(&sweep.next(later), &scene(&[]), later);
+        assert_eq!(sweep.next(later).name(), "focused");
+        assert_eq!(sweep.next(start + Duration::from_millis(2000)), Look::Open);
+        // Nothing found: every look stays open. Zero interval: always open.
+        let mut empty = Sweep::new(Duration::from_millis(2000));
+        empty.observe(&Look::Open, &scene(&[]), start);
+        assert_eq!(empty.next(later), Look::Open);
+        let mut always = Sweep::new(Duration::ZERO);
+        always.observe(&Look::Open, &found, start);
+        assert_eq!(always.next(later), Look::Open);
+    }
+
+    #[test]
+    fn slow_open_inference_leaves_time_for_a_focused_look() {
+        let started = Instant::now();
+        let finished = started + Duration::from_secs(31);
+        let mut found = scene(&[("cup", 0.9, [0.0, 0.0, 10.0, 10.0])]);
+        found.at = Some(finished);
+        let mut sweep = Sweep::new(Duration::from_secs(2));
+        sweep.observe(&Look::Open, &found, started);
+        assert!(matches!(sweep.next(finished), Look::Focused(_)));
+        assert_eq!(sweep.next(finished + Duration::from_secs(2)), Look::Open);
+    }
+
+    #[test]
+    fn at_most_one_batch_row_is_followed() {
+        let many: Vec<(String, f32)> = (0..40)
+            .map(|i| (format!("thing{i}"), i as f32 / 40.0))
+            .collect();
+        let items: Vec<(&str, f32, [f32; 4])> = many
+            .iter()
+            .map(|(p, s)| (p.as_str(), *s, [0.0; 4]))
+            .collect();
+        let mut sweep = Sweep::new(Duration::from_secs(2));
+        let now = Instant::now();
+        sweep.observe(&Look::Open, &scene(&items), now);
+        let Look::Focused(phrases) = sweep.next(now) else {
+            panic!("expected a focused look")
+        };
+        assert_eq!(phrases.len(), Sweep::MAX_TRACKED);
+        assert_eq!(phrases[0], "thing39");
     }
 }

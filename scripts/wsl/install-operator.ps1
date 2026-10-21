@@ -2,40 +2,57 @@
 #
 #   .\install-archie-operator.ps1
 #
-# Run it from the folder that holds ArchieOS-Operator.wsl and iris-beta21-step132000.pt
-# (both from the release). It imports the image as the distribution "ArchieOS-Operator",
-# puts IRIS's weights in it, makes the shared folder ArchieOS on the desktop, and starts the
-# first-time setup, which installs PyTorch and the voice and asks for the Nebius key.
-# Nothing is installed on Windows itself.
+# Run it from the folder that holds the image from the release: ArchieOS-Operator.wsl, or
+# its parts ArchieOS-Operator.wsl.001, .002 ... (a release asset holds at most 2 GiB), and
+# SHA256SUMS. IRIS, its weights and its text tower are inside the image: nothing else to
+# download for it. It imports the image as the distribution "ArchieOS-Operator", makes the
+# shared folder ArchieOS on the desktop, and starts the first-time setup, which installs
+# the voice and asks for the Nebius key. Nothing is installed on Windows itself.
 param(
     [string]$Name = 'ArchieOS-Operator',
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'ArchieOS-Operator')
 )
 $ErrorActionPreference = 'Stop'
 $image = Join-Path $PSScriptRoot 'ArchieOS-Operator.wsl'
-$weights = Join-Path $PSScriptRoot 'iris-beta21-step132000.pt'
-$weightsSha = 'c6cadb02f5a5bffc4ea3c3348d32b475ef7531f643675c06c65451037e4f3b97'
+$sums = Join-Path $PSScriptRoot 'SHA256SUMS'
 
-foreach ($file in $image, $weights) {
-    if (-not (Test-Path $file)) { throw "Missing $file. Download it from the release into this folder." }
-}
 if ((wsl.exe --list --quiet) -replace "`0", '' | Where-Object { $_.Trim() -eq $Name }) {
     throw "A WSL distribution named $Name already exists. Remove it with: wsl --unregister $Name"
 }
-Write-Host 'Checking the weights...'
-if ((Get-FileHash $weights -Algorithm SHA256).Hash.ToLower() -ne $weightsSha) {
-    throw 'iris-beta21-step132000.pt is damaged or is not IRIS Beta 2.1 step 132000. Download it again.'
+New-Item -ItemType Directory -Force $InstallDir | Out-Null
+$parts = @(Get-ChildItem -Path $PSScriptRoot -Filter 'ArchieOS-Operator.wsl.*' |
+    Where-Object { $_.Name -match '\.\d{3}$' } | Sort-Object Name)
+$joined = $null
+if (-not (Test-Path $image)) {
+    if ($parts.Count -eq 0) { throw "Missing $image (or its parts). Download it from the release into this folder." }
+    Write-Host "Joining the image from $($parts.Count) parts..."
+    $joined = Join-Path $InstallDir 'ArchieOS-Operator.wsl'
+    $out = [System.IO.File]::Create($joined)
+    try {
+        foreach ($part in $parts) {
+            $in = [System.IO.File]::OpenRead($part.FullName)
+            try { $in.CopyTo($out) } finally { $in.Dispose() }
+        }
+    } finally { $out.Dispose() }
+    $image = $joined
+}
+if (Test-Path $sums) {
+    Write-Host 'Checking the image...'
+    $line = Get-Content $sums | Where-Object { $_ -match 'ArchieOS-Operator\.wsl$' } | Select-Object -First 1
+    if (-not $line) { throw 'SHA256SUMS does not name ArchieOS-Operator.wsl.' }
+    $expected = ($line -split '\s+')[0].ToLower()
+    if ((Get-FileHash $image -Algorithm SHA256).Hash.ToLower() -ne $expected) {
+        throw 'The image is damaged or incomplete. Download it (all its parts) again.'
+    }
+} else {
+    Write-Host 'No SHA256SUMS beside the image: it is not checked.'
 }
 
 Write-Host "Importing $Name..."
 New-Item -ItemType Directory -Force $InstallDir | Out-Null
 wsl.exe --import $Name $InstallDir $image --version 2
 if ($LASTEXITCODE -ne 0) { throw 'wsl --import failed. Is WSL 2 installed? (wsl --install)' }
-
-Write-Host 'Copying the weights into the image...'
-$target = "\\wsl.localhost\$Name\var\lib\archie\models\iris"
-wsl.exe -d $Name -u archie -- true
-Copy-Item $weights (Join-Path $target 'iris-beta21-step132000.pt')
+if ($joined) { Remove-Item $joined }
 
 # The folder Archie and the person share: on the Windows desktop, and ~/ArchieOS inside.
 $shared = Join-Path ([Environment]::GetFolderPath('Desktop')) 'ArchieOS'
@@ -45,7 +62,7 @@ $inside = '/mnt/' + $shared.Substring(0, 1).ToLower() + ($shared.Substring(2) -r
 wsl.exe -d $Name -u archie -- bash -c "ln -sfn '$inside' /home/archie/ArchieOS"
 Write-Host "Shared folder: $shared"
 
-Write-Host 'First-time setup (PyTorch is about 3 GB, the voice about 1 GB)...'
+Write-Host 'First-time setup (the voice, about 1 GB)...'
 wsl.exe -d $Name -u archie -- archie-setup
 if ($LASTEXITCODE -ne 0) { throw "Setup did not finish. Run it again with: wsl -d $Name archie-setup" }
 

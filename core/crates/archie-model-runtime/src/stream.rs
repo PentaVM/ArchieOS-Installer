@@ -308,6 +308,107 @@ impl SseAssembler {
     }
 }
 
+/// Unveils streamed text and tool calls as they arrive.
+///
+/// Stand-ins may be split across SSE deltas (e.g. `SEC` then `RET_1`).
+/// `StreamUnveiler` buffers any trailing suffix that matches a stand-in prefix,
+/// restoring all prior text immediately and releasing the remainder once complete
+/// or when `Finished` arrives.
+#[derive(Debug, Default)]
+pub struct StreamUnveiler {
+    unveil: Option<archie_vault::veil::Unveil>,
+    pending: String,
+}
+
+impl StreamUnveiler {
+    pub fn new(unveil: Option<archie_vault::veil::Unveil>) -> Self {
+        Self {
+            unveil,
+            pending: String::new(),
+        }
+    }
+
+    pub fn feed(&mut self, event: StreamEvent) -> Vec<StreamEvent> {
+        let Some(unveil) = &self.unveil else {
+            return vec![event];
+        };
+        match event {
+            StreamEvent::Text(chunk) => {
+                self.pending.push_str(&chunk);
+                let suffix_len = self
+                    .pending
+                    .chars()
+                    .rev()
+                    .take_while(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || *c == '_')
+                    .count();
+                if suffix_len == 0 {
+                    let out = unveil.restore(&self.pending);
+                    self.pending.clear();
+                    if out.is_empty() {
+                        vec![]
+                    } else {
+                        vec![StreamEvent::Text(out)]
+                    }
+                } else {
+                    let split_pos = self.pending.len() - suffix_len;
+                    let potential_prefix = &self.pending[split_pos..];
+                    if unveil.is_alias_prefix(potential_prefix) {
+                        let to_emit = &self.pending[..split_pos];
+                        let out = unveil.restore(to_emit);
+                        self.pending = potential_prefix.to_string();
+                        if out.is_empty() {
+                            vec![]
+                        } else {
+                            vec![StreamEvent::Text(out)]
+                        }
+                    } else {
+                        let out = unveil.restore(&self.pending);
+                        self.pending.clear();
+                        if out.is_empty() {
+                            vec![]
+                        } else {
+                            vec![StreamEvent::Text(out)]
+                        }
+                    }
+                }
+            }
+            StreamEvent::ToolCall(mut call) => {
+                // Inside the strings of JSON arguments, so a value with a quote in it
+                // comes back escaped instead of breaking them.
+                call.arguments = match serde_json::from_str::<Value>(&call.arguments) {
+                    Ok(mut value) => {
+                        restore_json(&mut value, unveil);
+                        value.to_string()
+                    }
+                    Err(_) => unveil.restore(&call.arguments),
+                };
+                vec![StreamEvent::ToolCall(call)]
+            }
+            StreamEvent::Finished { reason } => {
+                let mut events = Vec::new();
+                if !self.pending.is_empty() {
+                    let out = unveil.restore(&self.pending);
+                    self.pending.clear();
+                    if !out.is_empty() {
+                        events.push(StreamEvent::Text(out));
+                    }
+                }
+                events.push(StreamEvent::Finished { reason });
+                events
+            }
+        }
+    }
+}
+
+fn restore_json(value: &mut Value, unveil: &archie_vault::veil::Unveil) {
+    match value {
+        Value::String(text) => *text = unveil.restore(text),
+        Value::Object(map) => map.values_mut().for_each(|v| restore_json(v, unveil)),
+        Value::Array(items) => items.iter_mut().for_each(|v| restore_json(v, unveil)),
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -466,5 +567,49 @@ mod tests {
         let mut greedy = request;
         greedy.max_tokens = MAX_STREAM_TOKENS + 1;
         assert!(greedy.validate().is_err());
+    }
+
+    #[test]
+    fn stream_unveiler_restores_split_stand_in_and_tool_call_arguments() {
+        let text = "El usuario es juan@example.com y la clave es sk-proj-1234567890abcdef.";
+        let veiled = archie_vault::Veil::new().cover(&[text]);
+        assert!(!veiled.unveil.is_empty());
+
+        let mut unveiler = StreamUnveiler::new(Some(veiled.unveil));
+        // Simulate SSE deltas where stand-ins are split across chunks:
+        // "Tu correo es EMAIL_" then "1 y clave " then "SEC" then "RET_1."
+        let mut out = Vec::new();
+        out.extend(unveiler.feed(StreamEvent::Text("Tu correo es EMAIL_".into())));
+        out.extend(unveiler.feed(StreamEvent::Text("1 y clave SEC".into())));
+        out.extend(unveiler.feed(StreamEvent::Text("RET_1.".into())));
+        out.extend(unveiler.feed(StreamEvent::ToolCall(ToolCall {
+            id: "call_1".into(),
+            name: "send_email".into(),
+            arguments: "{\"to\":\"EMAIL_1\"}".into(),
+        })));
+        out.extend(unveiler.feed(StreamEvent::Finished { reason: None }));
+
+        let combined: String = out
+            .iter()
+            .filter_map(|e| match e {
+                StreamEvent::Text(t) => Some(t.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(
+            combined,
+            "Tu correo es juan@example.com y clave sk-proj-1234567890abcdef."
+        );
+
+        let tool_call = out
+            .iter()
+            .find_map(|e| match e {
+                StreamEvent::ToolCall(call) => Some(call),
+                _ => None,
+            })
+            .expect("tool call preserved");
+
+        assert_eq!(tool_call.arguments, "{\"to\":\"juan@example.com\"}");
     }
 }

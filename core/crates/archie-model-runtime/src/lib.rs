@@ -15,7 +15,8 @@ use thiserror::Error;
 
 pub mod stream;
 pub use stream::{
-    SseAssembler, SseError, StreamEvent, ToolCall, ToolChatMessage, ToolChatRequest, ToolDefinition,
+    SseAssembler, SseError, StreamEvent, StreamUnveiler, ToolCall, ToolChatMessage,
+    ToolChatRequest, ToolDefinition,
 };
 
 pub mod routed;

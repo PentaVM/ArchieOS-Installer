@@ -48,5 +48,7 @@ pub mod wav;
 
 pub use act::{decide, Plan, Refusal};
 pub use hands::{Grounding, Hands, Launch, Performed};
-pub use nemotron::{NebiusSource, NemotronCognitive, TurnSource, TurnStream, Update, PERSONA_ES};
+pub use nemotron::{
+    NebiusSource, NemotronCognitive, RoutedSource, TurnSource, TurnStream, Update, PERSONA_ES,
+};
 pub use segment::{Segmenter, Spoken};

@@ -254,6 +254,215 @@ mod private {
         }
     }
 
+    #[test]
+    fn chat_request_with_local_model_is_kept_and_secret_is_withheld() {
+        let mut registry = ModelRegistry::load_from_dir(shipped_models()).unwrap();
+        registry
+            .register(ModelDescriptor {
+                id: ModelId::parse("local.qwen").unwrap(),
+                display_name: "Qwen 2.5 7B (local)".to_string(),
+                provider: ProviderKind::OpenAiCompatible,
+                locality: Locality::Local,
+                node: None,
+                context_window: 32_768,
+                max_output_tokens: 4096,
+                capabilities: vec![ModelRole::CognitiveResponse.capability()],
+                max_privacy_grade: PrivacyGrade::Restricted,
+                retention: DataRetention::Unknown,
+                availability: Availability::Ready,
+                cost: TokenCost::FREE,
+                latency_ema_ms: Some(900),
+                quality_tier: 40,
+                required_accelerator_bytes: None,
+                labels: BTreeMap::from([(
+                    "base-url".to_string(),
+                    "http://127.0.0.1:11434/v1/".to_string(),
+                )]),
+            })
+            .unwrap();
+        let routed = Routed::new(registry);
+        let req = archie_model_runtime::ToolChatRequest {
+            model: "local.qwen".into(),
+            messages: vec![
+                archie_model_runtime::ToolChatMessage::System("eres archie".into()),
+                archie_model_runtime::ToolChatMessage::User(format!("Mi clave es {KEY}")),
+            ],
+            tools: vec![],
+            max_tokens: 200,
+            temperature: 0.3,
+        };
+
+        // Secret is withheld
+        assert!(matches!(
+            routed.disclose_chat(
+                &req,
+                PrivacyGrade::Secret,
+                ModelRole::CognitiveResponse,
+                &Veil::new()
+            ),
+            Err(RoutedError::Withheld(_))
+        ));
+
+        // Restricted is Kept because local model is available
+        match routed
+            .disclose_chat(
+                &req,
+                PrivacyGrade::Restricted,
+                ModelRole::CognitiveResponse,
+                &Veil::new(),
+            )
+            .unwrap()
+        {
+            archie_model_runtime::routed::ChatDisclosure::Kept { models, request } => {
+                assert_eq!(models, [ModelId::parse("local.qwen").unwrap()]);
+                assert_eq!(request.messages.len(), 2);
+            }
+            _ => panic!("expected Kept"),
+        }
+    }
+
+    fn chat(
+        messages: Vec<archie_model_runtime::ToolChatMessage>,
+    ) -> archie_model_runtime::ToolChatRequest {
+        archie_model_runtime::ToolChatRequest {
+            model: "unchosen".into(),
+            messages,
+            tools: vec![archie_model_runtime::ToolDefinition {
+                name: "deploy".into(),
+                description: "Deploys the service with the token it is given.".into(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {"token": {"type": "string"}, "notify": {"type": "string"}}
+                }),
+            }],
+            max_tokens: 200,
+            temperature: 0.3,
+        }
+    }
+
+    /// With only cloud models, internal and sensitive chat is veiled, not refused for want
+    /// of a model at its own grade; restricted and secret chat still go nowhere.
+    #[test]
+    fn cloud_only_chat_is_veiled_up_to_sensitive_and_withheld_above() {
+        use archie_model_runtime::routed::ChatDisclosure;
+        use archie_model_runtime::ToolChatMessage as M;
+        let routed = cloud_only();
+        let req = chat(vec![
+            M::System("eres archie".into()),
+            M::User(format!("Mi clave es {KEY}")),
+        ]);
+        for grade in [PrivacyGrade::Internal, PrivacyGrade::Sensitive] {
+            match routed.disclose_chat(&req, grade, ModelRole::CognitiveResponse, &Veil::new()) {
+                Ok(ChatDisclosure::Veiled {
+                    models, request, ..
+                }) => {
+                    assert!(!models.is_empty(), "{grade}");
+                    let body = request.body().to_string();
+                    assert!(!body.contains(KEY), "{grade}: {body}");
+                }
+                other => panic!("{grade}: expected veiled, got {other:?}"),
+            }
+        }
+        for grade in [PrivacyGrade::Restricted, PrivacyGrade::Secret] {
+            assert!(
+                matches!(
+                    routed.disclose_chat(&req, grade, ModelRole::CognitiveResponse, &Veil::new()),
+                    Err(RoutedError::Withheld(_))
+                ),
+                "{grade}"
+            );
+        }
+    }
+
+    /// A key that appears only in the arguments of an earlier tool call is covered too,
+    /// in the whole request as it would be sent, and the call keeps its id, its name and
+    /// well-formed arguments.
+    #[test]
+    fn tool_call_arguments_leave_veiled() {
+        use archie_model_runtime::routed::ChatDisclosure;
+        use archie_model_runtime::{StreamEvent, StreamUnveiler, ToolCall, ToolChatMessage as M};
+        let veil = Veil::new().knowing(EntityKind::Person, "Camila Rojas");
+        let arguments = serde_json::json!({
+            "token": KEY,
+            "notify": ["camila@acme.cl", {"who": "Camila Rojas \"la jefa\""}],
+            "retries": 3
+        })
+        .to_string();
+        let req = chat(vec![
+            M::System("eres archie".into()),
+            M::User("despliega el servicio".into()),
+            M::Assistant {
+                content: None,
+                tool_calls: vec![ToolCall {
+                    id: "call_7".into(),
+                    name: "deploy".into(),
+                    arguments: arguments.clone(),
+                }],
+            },
+            M::Tool {
+                call_id: "call_7".into(),
+                content: "ok".into(),
+            },
+        ]);
+        let Ok(ChatDisclosure::Veiled {
+            request, unveil, ..
+        }) = cloud_only().disclose_chat(
+            &req,
+            PrivacyGrade::Sensitive,
+            ModelRole::CognitiveResponse,
+            &veil,
+        )
+        else {
+            panic!("expected veiled");
+        };
+        let body = request.body().to_string();
+        for kept_here in [KEY, "camila@acme.cl", "Camila Rojas"] {
+            assert!(
+                !body.contains(kept_here),
+                "{kept_here} would have left: {body}"
+            );
+        }
+        let M::Assistant { tool_calls, .. } = &request.messages[2] else {
+            panic!("{:?}", request.messages[2]);
+        };
+        assert_eq!(
+            (tool_calls[0].id.as_str(), tool_calls[0].name.as_str()),
+            ("call_7", "deploy")
+        );
+        let sent: serde_json::Value = serde_json::from_str(&tool_calls[0].arguments).unwrap();
+        assert_eq!(sent["retries"], 3);
+        assert!(sent["token"].as_str().unwrap().starts_with("SECRET_"));
+
+        // What the model calls back with is restored inside the JSON, quotes and all.
+        let mut unveiler = StreamUnveiler::new(Some(unveil));
+        let back = unveiler.feed(StreamEvent::ToolCall(tool_calls[0].clone()));
+        let StreamEvent::ToolCall(call) = &back[0] else {
+            panic!("{back:?}");
+        };
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&call.arguments).unwrap(),
+            serde_json::from_str::<serde_json::Value>(&arguments).unwrap()
+        );
+    }
+
+    /// A tool definition is the program's text and is not rewritten; one that holds a
+    /// sensitive value is not sent at all.
+    #[test]
+    fn a_tool_definition_with_a_secret_is_withheld() {
+        use archie_model_runtime::ToolChatMessage as M;
+        let mut req = chat(vec![M::User("despliega".into())]);
+        req.tools[0].description = format!("Deploys with the token {KEY}.");
+        assert!(matches!(
+            cloud_only().disclose_chat(
+                &req,
+                PrivacyGrade::Internal,
+                ModelRole::CognitiveResponse,
+                &Veil::new()
+            ),
+            Err(RoutedError::Withheld(_))
+        ));
+    }
+
     /// Against Nebius: a key, an address and a name go in veiled, Nemotron writes the file,
     /// and the real values are in what comes back.
     #[tokio::test]

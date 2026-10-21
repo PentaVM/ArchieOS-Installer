@@ -83,7 +83,19 @@ async fn run(mut args: Vec<String>) -> Result<ExitCode, String> {
     if let Some(list) = planners_flag {
         task.planners = models(list);
     }
-    let nebius = Nebius::from_environment()?;
+    let models_flag = take(&mut args, "--models");
+    let grade = match take(&mut args, "--grade").as_deref() {
+        Some("public") => archie_types::PrivacyGrade::Public,
+        Some("internal") => archie_types::PrivacyGrade::Internal,
+        Some("sensitive") => archie_types::PrivacyGrade::Sensitive,
+        Some(other) => {
+            return Err(format!(
+                "--grade is public, internal or sensitive, not {other}"
+            ))
+        }
+        None => archie_types::PrivacyGrade::Public,
+    };
+    let nebius = Nebius::from_environment_with_routing(models_flag.as_deref(), grade)?;
     let stamp = format!(
         "{}-t{tier}",
         std::time::SystemTime::now()

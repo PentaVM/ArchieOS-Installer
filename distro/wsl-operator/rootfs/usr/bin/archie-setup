@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# First-time setup of the operator image: IRIS's Python environment and weights, the
-# voice (speech recognition and two Piper voices) and the key of the reasoning model.
+# First-time setup of the operator image: the voice (speech recognition and two Piper
+# voices) and the key of the reasoning model. IRIS needs nothing here: the runtime, its
+# weights and its text tower are in the image.
 # Safe to run again; each part is skipped once it is done.
 #
 #   archie-setup            everything that is missing
 #   archie-setup key        replace the Nebius key
 #   archie-setup status     what is in place
 set -euo pipefail
-VENV=/opt/archie/iris-venv
+VENV=/opt/archie/voice-venv
 WEIGHTS=/var/lib/archie/models/iris/iris-beta21-step132000.pt
 WEIGHTS_SHA=c6cadb02f5a5bffc4ea3c3348d32b475ef7531f643675c06c65451037e4f3b97
+TEXT_TOWER=/var/lib/archie/models/iris/siglip2-text/model.safetensors
 KEY=$HOME/.config/archie/nebius.key
 # Nemotron 3.5 ASR, the revision and digest scripts/models/install-nemotron-speech.sh pins.
 ASR=/var/lib/archie/models/asr/nemotron-3.5-asr-streaming-0.6b.q8_0.gguf
@@ -17,7 +19,6 @@ ASR_SHA=a5c435f294eea8f88ce68dd27b8c3bfea7f777cb2fbba04fcd30eaa555f429ae
 ASR_URL=https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b/resolve/1c8deaecc64b91f034d73e08dd8b64625eb3395d/nemotron-3.5-asr-streaming-0.6b.q8_0.gguf
 VOICES=/var/lib/archie/models/piper
 
-python_ready() { [ -x "$VENV/bin/python" ] && "$VENV/bin/python" -c 'import torch, transformers, timm' 2>/dev/null; }
 piper_ready() { [ -x "$VENV/bin/python" ] && "$VENV/bin/python" -c 'import onnxruntime, piper' 2>/dev/null; }
 
 ask_key() {
@@ -31,12 +32,11 @@ ask_key() {
 }
 
 status() {
-  if python_ready; then
-    echo "python:  ready ($("$VENV/bin/python" -c 'import torch; print("torch", torch.__version__, "with CUDA" if torch.cuda.is_available() else "CPU only")'))"
+  if [ -f "$WEIGHTS" ] && [ -f "$TEXT_TOWER" ]; then
+    echo "iris:    $(basename "$WEIGHTS") and its text tower, in the image"
   else
-    echo 'python:  missing'
+    echo 'iris:    the weights or the text tower are missing from the image'
   fi
-  if [ -f "$WEIGHTS" ]; then echo "weights: $WEIGHTS"; else echo "weights: missing ($WEIGHTS)"; fi
   if [ -f "$ASR" ] && piper_ready && [ -f "$VOICES/es_MX-ald-medium.onnx" ]; then
     echo 'voice:   ready (hears with Nemotron 3.5 ASR, speaks with Piper)'
   else
@@ -62,30 +62,21 @@ case "${1:-all}" in
   *) echo 'usage: archie-setup [status|key]' >&2; exit 64 ;;
 esac
 
-if ! python_ready; then
-  echo 'archie-setup: installing PyTorch and what IRIS needs (about 3 GB, once)' >&2
-  python -m venv "$VENV"
-  "$VENV/bin/pip" install --quiet --upgrade pip
-  # ARCHIE_TORCH_INDEX names another wheel index, e.g. https://download.pytorch.org/whl/cpu
-  "$VENV/bin/pip" install ${ARCHIE_TORCH_INDEX:+--index-url "$ARCHIE_TORCH_INDEX"} torch torchvision
-  grep -vE '^(#|torch|$)' /opt/archie/iris/requirements-iris.txt | xargs "$VENV/bin/pip" install
-fi
-
-if [ ! -f "$WEIGHTS" ]; then
-  echo "archie-setup: IRIS's weights are not here. Copy iris-beta21-step132000.pt to $WEIGHTS" >&2
-  echo '  (the installer does this; from Windows the folder is \\wsl.localhost\ArchieOS-Operator\var\lib\archie\models\iris)' >&2
+[ -f "$WEIGHTS" ] && [ -f "$TEXT_TOWER" ] || {
+  echo 'archie-setup: IRIS is not complete in this image; reinstall it from the release' >&2
   exit 1
-fi
+}
 if [ ! -f "$WEIGHTS.verified" ]; then
   echo 'archie-setup: checking the weights' >&2
   [ "$(sha256sum "$WEIGHTS" | cut -d' ' -f1)" = "$WEIGHTS_SHA" ] || { echo 'archie-setup: the weights file is not IRIS Beta 2.1 step 132000' >&2; exit 1; }
-  : > "$WEIGHTS.verified"
+  : > "$WEIGHTS.verified" 2>/dev/null || true
 fi
 
 # The voice. It runs on this machine: what is said is recognised and spoken here, and
 # only the words of a question go to the reasoning model.
 if ! piper_ready; then
   echo 'archie-setup: installing Piper, the voice Archie speaks with' >&2
+  [ -x "$VENV/bin/python" ] || python -m venv "$VENV"
   "$VENV/bin/pip" install --quiet 'piper-tts==1.8.0' 'onnxruntime==1.30.0'
 fi
 PIPER_VOICES=$VOICES /usr/lib/archie/install-piper-voices >&2

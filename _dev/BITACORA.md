@@ -1,5 +1,42 @@
 # Bitácora — ArchieOS-Nvidia
 
+## 2026-10-12 — Claude — IRIS en Rust, memoria y Wanda probadas
+
+- **Runtime de IRIS sin Python** (`core/crates/archie-iris-runtime`, binario
+  `archie-iris-serve`).
+  - Lee `iris-beta21-step132000.pt` (SHA-256 verificado) con el lector de pickles de candle,
+    sin ejecutar código.
+  - Porta V-JEPA 2.1 desde `facebookresearch/vjepa2@204698b`, SigLIP2 (visión y texto), la
+    fusión MoE de 32 expertos, el decodificador, las incrustaciones de instancia y la
+    cabeza de acción con su memoria por sesión.
+  - Sirve la API de `iris_serve`.
+- **Paridad medida contra el IRIS de Python**, en CPU float32, con los pesos reales y una
+  captura de 1920×1080:
+  - Canvas idéntico byte a byte.
+  - Error relativo de 1e-4 en los encoders y de 1e-6 en la fusión.
+  - 104/104 y 60/60 detecciones idénticas; 3/3 frames de `/act` iguales.
+  - La torre de texto, contra `transformers` con pesos aleatorios: 1e-6.
+  - Las frases fueron features sintéticas porque la torre real no viene en la release y
+    Hugging Face está bloqueado aquí: las detecciones no significan nada, solo coinciden.
+- **Velocidad en CPU** (4 núcleos): encoders en 3,8 s contra 1,4 s de PyTorch. El build
+  `cuda` no se compiló ni se corrió: no hay GPU ni toolkit.
+- **Memoria personal y Wanda**:
+  - `a_person_named_aloud_is_remembered_as_what_the_speaker_said` (`archie-voice`): «Pedro
+    es mi hermano» sobrevive 40 días y un reinicio como cita atribuida y no verificada.
+  - `sentry/tests/test_wanda_memory.cpp`, 27 comprobaciones: la persona persiste en el
+    grafo y Wanda propone `Friend` como `Inferred` con 630‰.
+  - La hipótesis solo se guarda como arista `ModelHypothesis` con la nota «wanda»; se
+    pierden la confianza, el falsificador y la expiración.
+  - Al confirmarla Pedro, la arista pasa a `SubjectDeclared` con Wanda como nota.
+  - No hay un puente de la memoria de voz al grafo de Wanda, ni un productor de
+    `CoPresence` desde la cámara.
+- **Arreglo menor**: `sentry/src/cli/main.cpp` no compilaba con GCC 13 por un
+  `#include <array>` que faltaba. Ahora pasan 17/17 pruebas de Sentry.
+- **Kimi se quedó sin créditos** a mitad de su ola 3. Se abrió la sesión
+  `session_01YNCXAzdiH83GtVLw6Dh3Y2`, que parte de `todo/pendientes` (`6a977c4`), para
+  Chromecast CAST v2, el feeder con focos y los servidores de protocolo en proceso.
+  Empuja a `claude/sentry-ola3-cast-focos-servidores`.
+
 ## 2026-10-11 — Claude — Solo `main`, pendientes en un PR, Kdenlive en la imagen
 
 Codex se quedó sin créditos a mitad de la consolidación; esto la cierra.
