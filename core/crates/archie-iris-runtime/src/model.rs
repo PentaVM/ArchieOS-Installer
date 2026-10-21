@@ -394,6 +394,10 @@ impl FusionLayer {
         let batch = image.dim(0)?;
         let normed = self.image_norm1.forward(image)?;
         let query = normed.broadcast_add(position)?;
+        if crate::nn::attention_is_fused(image.device(), image.dtype()) {
+            let attended = self.image_self.forward(&query, &query, &normed, None)?;
+            return Ok((image + attended)?);
+        }
         let attended = in_slices(batch, |start, len| {
             let q = query.narrow(0, start, len)?;
             self.image_self

@@ -114,6 +114,19 @@ pub fn attend(q: &Tensor, k: &Tensor, v: &Tensor, allowed: Option<&Tensor>) -> R
     if matches!(q.device(), candle_core::Device::Cpu) && q.dtype() == DType::F32 {
         return attend_per_head(q, k, v, allowed, scale);
     }
+    #[cfg(feature = "flash-attn")]
+    if allowed.is_none() && attention_is_fused(q.device(), q.dtype()) {
+        // `[B, H, L, Dh]` seen as `[B, L, H, Dh]`: a view, which flash-attention reads
+        // through its strides. No score matrix is ever stored.
+        let out = candle_flash_attn::flash_attn(
+            &q.transpose(1, 2)?,
+            &k.transpose(1, 2)?,
+            &v.transpose(1, 2)?,
+            scale as f32,
+            false,
+        )?;
+        return Ok(out.transpose(1, 2)?);
+    }
     let q = q.contiguous()?;
     let kt = k.transpose(D::Minus2, D::Minus1)?.contiguous()?;
     let scores = (q.matmul(&kt)? * scale)?;
@@ -131,6 +144,12 @@ pub fn attend(q: &Tensor, k: &Tensor, v: &Tensor, allowed: Option<&Tensor>) -> R
     let dtype = scores.dtype();
     let weights = crate::fast::softmax_last_dim(&scores.to_dtype(DType::F32)?)?.to_dtype(dtype)?;
     Ok(weights.matmul(&v.contiguous()?)?)
+}
+
+/// Whether an unmasked attention on this device and dtype runs fused (flash-attention),
+/// holding no `L x S` score matrix: then a wide batch need not be cut into slices.
+pub fn attention_is_fused(device: &candle_core::Device, dtype: DType) -> bool {
+    cfg!(feature = "flash-attn") && device.is_cuda() && matches!(dtype, DType::BF16 | DType::F16)
 }
 
 /// The CPU path: one rayon task per (image, head). A batched product over twelve heads of

@@ -63,6 +63,28 @@ pub fn softmax_last_dim(x: &Tensor) -> Result<Tensor> {
     Ok(Tensor::from_vec(values, x.shape(), x.device())?)
 }
 
+/// Rotary embedding over `[B, H, L, W]` with `[L, W]` tables: each pair `(a, b)` becomes
+/// `(a * cos - b * sin, b * cos + a * sin)`, multiplied and added in the order candle's
+/// broadcast ops use, so the result is theirs to the bit.
+pub fn rope(x: &Tensor, cos: &[f32], sin: &[f32]) -> Result<Tensor> {
+    let (_, _, length, width) = x.dims4()?;
+    let plane = length * width;
+    let mut values: Vec<f32> = x.flatten_all()?.to_vec1()?;
+    values.par_chunks_mut(plane).for_each(|block| {
+        for (row, chunk) in block.chunks_exact_mut(width).enumerate() {
+            let c = &cos[row * width..(row + 1) * width];
+            let s = &sin[row * width..(row + 1) * width];
+            for pair in 0..width / 2 {
+                let (i, j) = (2 * pair, 2 * pair + 1);
+                let (a, b) = (chunk[i], chunk[j]);
+                chunk[i] = a * c[i] + (-b) * s[i];
+                chunk[j] = b * c[j] + a * s[j];
+            }
+        }
+    });
+    Ok(Tensor::from_vec(values, x.shape(), x.device())?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
