@@ -245,7 +245,7 @@ impl PhraseSource for Phrases {
                         - 1.0
                 };
                 let pooled = (0..ENCODER as u32).map(value).collect();
-                let rows = 1 + (seed % 2) as u32;
+                let rows = 1 + seed % 2;
                 let states = (0..rows)
                     .map(|r| {
                         (0..ENCODER as u32)
