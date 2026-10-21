@@ -13,6 +13,7 @@ add_library(archie-cortex-core STATIC
     src/contracts.cpp
     src/ipc.cpp
     src/intelligence.cpp
+    src/resources.cpp
 )
 target_include_directories(archie-cortex-core PUBLIC include)
 target_compile_options(archie-cortex-core PRIVATE
@@ -49,6 +50,13 @@ if(ARCHIE_CORTEX_BUILD_TESTS)
     target_link_libraries(archie-cortex-intelligence PRIVATE archie-cortex-core)
     target_compile_definitions(archie-cortex-intelligence PRIVATE ARCHIE_CORTEX_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/../protocols/fixtures")
     add_test(NAME archie-cortex-intelligence COMMAND archie-cortex-intelligence)
+    add_executable(archie-cortex-resources tests/test_resources.cpp)
+    target_link_libraries(archie-cortex-resources PRIVATE archie-cortex-core)
+    target_compile_definitions(archie-cortex-resources PRIVATE ARCHIE_CORTEX_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/../protocols/fixtures")
+    target_compile_options(archie-cortex-resources PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wswitch-enum -Werror>
+    )
+    add_test(NAME archie-cortex-resources COMMAND archie-cortex-resources)
     add_executable(archie-cortex-benchmark tests/benchmark_retrieval.cpp)
     target_link_libraries(archie-cortex-benchmark PRIVATE archie-cortex-core)
 

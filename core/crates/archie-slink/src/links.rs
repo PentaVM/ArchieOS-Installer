@@ -416,4 +416,37 @@ mod tests {
         };
         assert!(Message::new(1, 0, people).is_err());
     }
+
+    /// Cortex writes `focus.plan` in C++ (`focus_plan_json`); its test checks it produces
+    /// this fixture byte for byte, and this one that the Rust side accepts it.
+    #[test]
+    fn cortex_focus_plans_are_accepted_as_written() {
+        use archie_accel::advice::Envelope;
+        use archie_accel::plan::{FocusMode, Priority};
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../protocols/fixtures/focus-plan.json"
+        );
+        let plan: FocusPlan = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let message = Message::new(1, 0, plan).unwrap();
+        assert_eq!(message.header.grade, PrivacyGrade::Internal);
+        let envelope = Envelope {
+            max_priority: Priority::ActiveFocus,
+            max_fps: 20.0,
+            max_vram_bytes: 0,
+            allow_partial_experts: false,
+            expert_floor: 0.5,
+        };
+        let budgets: Vec<_> = message
+            .payload
+            .advice
+            .iter()
+            .map(|a| a.apply(&envelope).unwrap().0)
+            .collect();
+        assert_eq!(budgets[0].mode, FocusMode::Focused);
+        assert_eq!(budgets[0].max_fps, 20.0, "the envelope caps Cortex's 30");
+        assert_eq!(budgets[1].mode, FocusMode::FocusedAndOpen);
+        assert!(budgets[1].read_text);
+        assert_eq!(budgets[2].mode, FocusMode::Off);
+    }
 }
