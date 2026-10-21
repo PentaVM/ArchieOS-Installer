@@ -52,7 +52,7 @@ cd ..
 sh scripts/voice/prepare-floor-trial.sh core/target/debug/archie-voice "$HOME/.local/share/archie-voice-floor-trial"
 ```
 
-El preparador rechaza un destino existente. Los paths de modelos y venv se pueden cambiar con `ARCHIE_ASR_MODEL`, `ARCHIE_PIPER_ES`, `ARCHIE_PIPER_EN` y `ARCHIE_PIPER_PYTHON`. El archivo `SHA256SUMS` identifica el binario y bridge preparados.
+El preparador rechaza un destino existente. Si el worktree pertenece a Git de Windows, pasa `ARCHIE_VOICE_SOURCE_REV` con el SHA completo obtenido en Windows; Git de Linux no puede resolver ese `.git`. Los paths de modelos y venv se pueden cambiar con `ARCHIE_ASR_MODEL`, `ARCHIE_PIPER_ES`, `ARCHIE_PIPER_EN` y `ARCHIE_PIPER_PYTHON`. El archivo `SHA256SUMS` identifica el binario y bridge preparados.
 
 ## Límites conocidos
 

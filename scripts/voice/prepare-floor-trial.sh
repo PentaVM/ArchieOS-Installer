@@ -13,11 +13,23 @@ if [ -e "$destination" ]; then
     exit 1
 fi
 test -x "$binary"
+revision=${ARCHIE_VOICE_SOURCE_REV:-}
+if [ -z "$revision" ]; then
+    revision=$(git -C "$root" rev-parse HEAD) || {
+        echo 'Set ARCHIE_VOICE_SOURCE_REV from the host Git when preparing a Windows worktree in WSL.' >&2
+        exit 1
+    }
+fi
+case "$revision" in
+    ''|*[!0-9a-f]*) echo 'Source revision must be a full lowercase Git SHA.' >&2; exit 1 ;;
+esac
+test "${#revision}" -eq 40 || { echo 'Source revision must be a full Git SHA.' >&2; exit 1; }
 mkdir -p "$destination"
 cp "$binary" "$destination/archie-voice"
 cp "$root/scripts/models/piper-json-bridge.py" "$destination/piper-json-bridge.py"
-git -C "$root" rev-parse HEAD > "$destination/source-base.txt"
-git -C "$root" diff --stat > "$destination/source-diff.txt"
+printf '%s\n' "$revision" > "$destination/source-base.txt"
+git -C "$root" diff --stat > "$destination/source-diff.txt" 2>/dev/null ||
+    printf 'Host Git worktree; source revision supplied by ARCHIE_VOICE_SOURCE_REV.\n' > "$destination/source-diff.txt"
 cat > "$destination/piper" <<'PIPER'
 #!/bin/sh
 set -eu
