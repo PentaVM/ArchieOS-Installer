@@ -232,6 +232,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "archie-camera"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "archie-cerebra"
 version = "0.1.0"
 dependencies = [

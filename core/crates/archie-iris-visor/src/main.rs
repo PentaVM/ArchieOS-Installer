@@ -365,6 +365,48 @@ impl Visor {
                 Color32::WHITE,
             );
         }
+        // Where the OCR's own attention found text (for a few seconds after it looked): a
+        // dashed white frame and what it read underneath.
+        if s.spots_at
+            .is_some_and(|at| at.elapsed() < Duration::from_secs(6))
+        {
+            for spot in &s.spots {
+                let b = Rect::from_min_max(
+                    pos2(
+                        shown.left() + spot.bbox[0] * scale,
+                        shown.top() + spot.bbox[1] * scale,
+                    ),
+                    pos2(
+                        shown.left() + spot.bbox[2] * scale,
+                        shown.top() + spot.bbox[3] * scale,
+                    ),
+                );
+                let stroke = Stroke::new(1.5, T1);
+                for (a, z) in [
+                    (b.left_top(), b.right_top()),
+                    (b.right_top(), b.right_bottom()),
+                    (b.right_bottom(), b.left_bottom()),
+                    (b.left_bottom(), b.left_top()),
+                ] {
+                    p.extend(egui::Shape::dashed_line(&[a, z], stroke, 6.0, 4.0));
+                }
+                let galley = p.layout_no_wrap(
+                    format!("texto: {}", spot.text),
+                    text(12.5),
+                    Color32::from_rgb(4, 18, 28),
+                );
+                let tag = Rect::from_min_size(
+                    pos2(b.left(), (b.bottom() + 2.0).min(shown.bottom() - 20.0)),
+                    vec2(galley.size().x + 10.0, 20.0),
+                );
+                p.rect_filled(tag, Rounding::same(4.0), T1);
+                p.galley(
+                    pos2(tag.left() + 5.0, tag.top() + 2.0),
+                    galley,
+                    Color32::BLACK,
+                );
+            }
+        }
         for seen in &s.iris.seen {
             let colour = phrase_colour(&seen.phrase);
             let b = Rect::from_min_max(
@@ -462,11 +504,11 @@ impl Visor {
         );
         ui.label(
             egui::RichText::new(format!(
-                "{} lee cada {:.1} s las cajas de texto de IRIS · Wanda {}",
+                "{} cada {:.1} s · Wanda {}",
                 if self.settings.ocr_url.is_some() {
-                    "Qwen3-VL-4B (local)"
+                    "Qwen3-VL-4B busca y lee el texto del cuadro entero"
                 } else {
-                    "IRIS read_decoder"
+                    "IRIS read_decoder lee las cajas de texto de IRIS"
                 },
                 self.settings.ocr_every.as_secs_f32(),
                 s.wanda.domain
@@ -553,6 +595,8 @@ fn main() -> eframe::Result<()> {
         .and_then(|path| std::fs::read_to_string(path).ok())
         .map(|t| t.trim().to_owned())
         .filter(|t| !t.is_empty());
+    let attention =
+        arg(&args, "--ocr-url").is_some() && !args.iter().any(|a| a == "--ocr-on-iris-boxes");
     let settings = Arc::new(Settings {
         camera_listen: arg(&args, "--camera").unwrap_or_else(|| "127.0.0.1:7671".into()),
         iris: arg(&args, "--iris").unwrap_or_else(|| "http://127.0.0.1:8765".into()),
@@ -565,10 +609,11 @@ fn main() -> eframe::Result<()> {
         wanda: arg(&args, "--wanda").unwrap_or_else(|| "http://127.0.0.1:8791".into()),
         wanda_token: token,
         domain: arg(&args, "--domain").unwrap_or_else(|| "personal/owner".into()),
+        // A whole-frame look takes the model a few seconds; a crop well under one.
         ocr_every: Duration::from_millis(
             arg(&args, "--ocr-ms")
                 .and_then(|t| t.parse().ok())
-                .unwrap_or(1500),
+                .unwrap_or(if attention { 3000 } else { 1500 }),
         ),
         ocr_url: arg(&args, "--ocr-url"),
     });
@@ -577,7 +622,14 @@ fn main() -> eframe::Result<()> {
         let (s, listen) = (state.clone(), settings.camera_listen.clone());
         std::thread::spawn(move || workers::camera(s, listen));
     }
-    let jobs: [fn(State, Arc<Settings>); 3] = [workers::iris, workers::ocr, workers::wanda_health];
+    // With a model, the OCR looks for text itself; `--ocr-on-iris-boxes` reads only the
+    // boxes IRIS labelled as text (the only way with IRIS's own reading head).
+    let reader: fn(State, Arc<Settings>) = if attention {
+        workers::ocr_attention
+    } else {
+        workers::ocr
+    };
+    let jobs: [fn(State, Arc<Settings>); 3] = [workers::iris, reader, workers::wanda_health];
     for work in jobs {
         let (s, settings) = (state.clone(), settings.clone());
         std::thread::spawn(move || work(s, settings));

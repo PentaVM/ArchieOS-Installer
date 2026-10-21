@@ -1,7 +1,7 @@
 //! The threads behind the window: the camera feed, IRIS's live answers, and reading text
 //! for Wanda. Each writes what it learned to the shared state and never waits on the UI.
 
-use crate::state::{Frame, OcrCall, Seen, State, OCR_LOG};
+use crate::state::{Frame, OcrCall, Seen, Spot, State, OCR_LOG};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::Read;
@@ -293,6 +293,252 @@ pub fn ocr(state: State, settings: Arc<Settings>) {
     }
 }
 
+/// One short line per text (a JSON object per line cost three times the tokens, and writing
+/// the answer, not seeing the image, was most of the time).
+const ATTEND_PROMPT: &str = "List every line of legible text in this image, one per line, \
+as x1,y1,x2,y2|text with coordinates on a 0-1000 grid and the text exactly as written. No \
+other words. If there is no legible text, reply NONE.";
+/// The answer's length limit: about a dozen lines.
+const ATTEND_MAX_TOKENS: u32 = 200;
+/// A frame this close to the last one read (mean luma difference out of 255, on a coarse
+/// grid) is not read again unless `RELOOK` has passed.
+const UNCHANGED: f32 = 4.0;
+const RELOOK: Duration = Duration::from_secs(10);
+
+/// A 32 x 18 luma grid: enough to tell whether the scene changed since the last read.
+fn signature(rgb: &[u8], width: usize, height: usize) -> Vec<f32> {
+    let (cols, rows) = (32usize, 18usize);
+    let mut grid = vec![0f32; cols * rows];
+    if width < cols || height < rows {
+        return grid;
+    }
+    for (cell, value) in grid.iter_mut().enumerate() {
+        let (cx, cy) = (cell % cols, cell / cols);
+        let (x, y) = (
+            cx * width / cols + width / cols / 2,
+            cy * height / rows + height / rows / 2,
+        );
+        let at = (y * width + x) * 3;
+        *value = 0.299 * f32::from(rgb[at])
+            + 0.587 * f32::from(rgb[at + 1])
+            + 0.114 * f32::from(rgb[at + 2]);
+    }
+    grid
+}
+
+fn difference(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() || a.is_empty() {
+        return f32::INFINITY;
+    }
+    a.iter().zip(b).map(|(x, y)| (x - y).abs()).sum::<f32>() / a.len() as f32
+}
+
+/// FNV-1a: a line's stable id for Wanda, from its normalised text.
+fn line_key(text: &str) -> u64 {
+    text.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
+/// Lower case, single spaces: two reads of the same line compare equal.
+fn normalise(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+/// The OCR's own attention: every `ocr_every`, the newest frame goes whole to the
+/// vision-language model, which says where text is and what it says. IRIS's labels are not
+/// used, so a box IRIS mislabels as text costs nothing and text IRIS did not label is still
+/// read. A line already sent in the last minute is not sent again.
+pub fn ocr_attention(state: State, settings: Arc<Settings>) {
+    let client = client();
+    let url = settings.ocr_url.clone().unwrap_or_default();
+    let mut recent: HashMap<String, Instant> = HashMap::new();
+    let mut last_frame = 0u64;
+    let mut last_look: Option<(Vec<f32>, Instant)> = None;
+    loop {
+        std::thread::sleep(settings.ocr_every);
+        let job = state.lock().ok().and_then(|s| {
+            if !s.ocr_enabled {
+                return None;
+            }
+            let frame = s.frame.as_ref()?;
+            (frame.id != last_frame).then(|| {
+                (
+                    frame.id,
+                    frame.jpeg.clone(),
+                    frame.rgb.clone(),
+                    frame.width,
+                    frame.height,
+                )
+            })
+        });
+        let Some((id, jpeg, rgb, width, height)) = job else {
+            continue;
+        };
+        last_frame = id;
+        let seen_now = signature(&rgb, width, height);
+        if let Some((before, at)) = &last_look {
+            if difference(before, &seen_now) < UNCHANGED && at.elapsed() < RELOOK {
+                continue;
+            }
+        }
+        last_look = Some((seen_now, Instant::now()));
+        let started = Instant::now();
+        let found = attend_with_model(&client, &url, &jpeg, width, height);
+        let read_ms = started.elapsed().as_secs_f32() * 1000.0;
+        recent.retain(|_, at| at.elapsed() < Duration::from_secs(60));
+        let spots = found.clone().unwrap_or_default();
+        let mut lines = Vec::new();
+        for spot in &spots {
+            let key = normalise(&spot.text);
+            if key.chars().filter(|c| c.is_alphanumeric()).count() < 2 || recent.contains_key(&key)
+            {
+                continue;
+            }
+            recent.insert(key.clone(), Instant::now());
+            lines.push(
+                json!({"track": line_key(&key), "text": spot.text, "origin": "external_ocr",
+                              "confidence": 0.9, "observed_at_ms": now_ms()}),
+            );
+        }
+        let wanda = if let Err(error) = &found {
+            Err(format!("Qwen3-VL: {error}"))
+        } else if lines.is_empty() {
+            Ok("nada nuevo: no se llama a Wanda".to_owned())
+        } else {
+            send_to_wanda(&client, &settings, &state, &lines)
+        };
+        if let Ok(mut s) = state.lock() {
+            s.spots = spots.clone();
+            s.spots_at = Some(Instant::now());
+            s.ocr.push_front(OcrCall {
+                at: Instant::now(),
+                reader: "Qwen3-VL (atención propia)",
+                boxes: spots.len(),
+                read_ms,
+                lines: spots.iter().map(|s| s.text.clone()).collect(),
+                sent: lines.len(),
+                wanda,
+            });
+            s.ocr.truncate(OCR_LOG);
+        }
+    }
+}
+
+/// Asks the model where the text in the whole frame is. Qwen3-VL answers `bbox_2d` on a
+/// 0–1000 grid; a box with a coordinate past 1000 is taken as pixels of the frame sent.
+fn attend_with_model(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    jpeg: &[u8],
+    width: usize,
+    height: usize,
+) -> Result<Vec<Spot>, String> {
+    use base64::Engine;
+    let image = format!(
+        "data:image/jpeg;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(jpeg)
+    );
+    let body = json!({
+        "messages": [{"role": "user", "content": [
+            {"type": "image_url", "image_url": {"url": image}},
+            {"type": "text", "text": ATTEND_PROMPT}
+        ]}],
+        "temperature": 0,
+        "max_tokens": ATTEND_MAX_TOKENS
+    });
+    let value: Value = client
+        .post(format!("{}/v1/chat/completions", url.trim_end_matches('/')))
+        .json(&body)
+        .send()
+        .and_then(|r| r.json())
+        .map_err(|e| short(&e.to_string()))?;
+    if let Some(error) = value["error"]["message"].as_str() {
+        return Err(short(error));
+    }
+    let content = value["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("");
+    Ok(parse_spots(content, width as f32, height as f32))
+}
+
+/// The model's answer, boxes in frame pixels: `x1,y1,x2,y2|text` lines (on the 0–1000 grid),
+/// or, if it answered JSON anyway, a list of `{text, bbox_2d}`.
+fn parse_spots(content: &str, width: f32, height: f32) -> Vec<Spot> {
+    let lines: Vec<Spot> = content
+        .lines()
+        .filter_map(|line| {
+            let (coords, text) = line.split_once('|')?;
+            let b: Vec<f32> = coords
+                .trim()
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .split(',')
+                .filter_map(|v| v.trim().parse::<f32>().ok())
+                .collect();
+            let [x0, y0, x1, y1] = b[..] else {
+                return None;
+            };
+            let text = text.trim();
+            (!text.is_empty()).then(|| Spot {
+                text: text.chars().take(200).collect(),
+                bbox: [
+                    (x0 * width / 1000.0).clamp(0.0, width),
+                    (y0 * height / 1000.0).clamp(0.0, height),
+                    (x1 * width / 1000.0).clamp(0.0, width),
+                    (y1 * height / 1000.0).clamp(0.0, height),
+                ],
+            })
+        })
+        .take(32)
+        .collect();
+    if !lines.is_empty() {
+        return lines;
+    }
+    let (Some(start), Some(end)) = (content.find('['), content.rfind(']')) else {
+        return Vec::new();
+    };
+    let Ok(Value::Array(items)) = serde_json::from_str::<Value>(&content[start..=end]) else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let text = item["text"].as_str()?.trim();
+            if text.is_empty() {
+                return None;
+            }
+            let b: Vec<f32> = item["bbox_2d"]
+                .as_array()?
+                .iter()
+                .filter_map(|v| v.as_f64().map(|v| v as f32))
+                .collect();
+            let [x0, y0, x1, y1] = b[..] else {
+                return None;
+            };
+            let relative = b.iter().all(|&v| (0.0..=1000.0).contains(&v));
+            let (sx, sy) = if relative {
+                (width / 1000.0, height / 1000.0)
+            } else {
+                (1.0, 1.0)
+            };
+            Some(Spot {
+                text: text.chars().take(200).collect(),
+                bbox: [
+                    (x0 * sx).clamp(0.0, width),
+                    (y0 * sy).clamp(0.0, height),
+                    (x1 * sx).clamp(0.0, width),
+                    (y1 * sy).clamp(0.0, height),
+                ],
+            })
+        })
+        .take(32)
+        .collect()
+}
+
 /// IRIS's reading head (`POST /read`), all boxes in one call.
 fn read_with_iris(
     client: &reqwest::blocking::Client,
@@ -494,5 +740,47 @@ pub fn wanda_health(state: State, settings: Arc<Settings>) {
             s.wanda.domain = settings.domain.clone();
         }
         std::thread::sleep(Duration::from_secs(10));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_models_text_boxes_land_in_frame_pixels() {
+        let fenced = "```json\n[{\"text\": \"Salida 3\", \"bbox_2d\": [100, 500, 300, 600]},\
+                      {\"text\": \"  \", \"bbox_2d\": [0, 0, 10, 10]},\
+                      {\"text\": \"sin caja\"}]\n```";
+        let spots = parse_spots(fenced, 1280.0, 720.0);
+        assert_eq!(spots.len(), 1);
+        assert_eq!(spots[0].text, "Salida 3");
+        for (got, want) in spots[0].bbox.iter().zip([128.0, 360.0, 384.0, 432.0]) {
+            assert!((got - want).abs() < 1e-3, "{:?}", spots[0].bbox);
+        }
+        // Past 1000: pixels of the frame sent.
+        let pixels = parse_spots(
+            "[{\"text\": \"x1\", \"bbox_2d\": [900, 10, 1200, 40]}]",
+            1280.0,
+            720.0,
+        );
+        assert_eq!(pixels[0].bbox, [900.0, 10.0, 1200.0, 40.0]);
+        // The compact form the prompt asks for.
+        let compact = parse_spots(
+            "100,500,300,600|Salida 3\n0,0,10,10|  \nNONE",
+            1280.0,
+            720.0,
+        );
+        assert_eq!(compact.len(), 1);
+        assert_eq!(compact[0].text, "Salida 3");
+        assert!((compact[0].bbox[1] - 360.0).abs() < 1e-3);
+        assert!(parse_spots("NONE", 1280.0, 720.0).is_empty());
+        let grid = signature(&vec![10u8; 64 * 36 * 3], 64, 36);
+        assert!(difference(&grid, &grid) < UNCHANGED);
+        assert!(difference(&grid, &signature(&vec![200u8; 64 * 36 * 3], 64, 36)) > UNCHANGED);
+        assert!(parse_spots("no hay texto", 1280.0, 720.0).is_empty());
+        assert!(parse_spots("[]", 1280.0, 720.0).is_empty());
+        assert_eq!(normalise("  Salida   3 "), "salida 3");
+        assert_eq!(line_key("salida 3"), line_key(&normalise("SALIDA 3")));
     }
 }

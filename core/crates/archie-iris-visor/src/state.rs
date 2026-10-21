@@ -71,6 +71,13 @@ pub struct Iris {
     pub error: Option<String>,
 }
 
+/// A line of text the OCR's own attention found, in frame pixels.
+#[derive(Clone, Debug)]
+pub struct Spot {
+    pub text: String,
+    pub bbox: [f32; 4],
+}
+
 /// One OCR call and what Wanda made of it.
 #[derive(Clone)]
 pub struct OcrCall {
@@ -104,6 +111,9 @@ pub struct Shared {
     pub iris: Iris,
     pub ocr: VecDeque<OcrCall>,
     pub ocr_enabled: bool,
+    /// Where the OCR's own attention last found text, and when.
+    pub spots: Vec<Spot>,
+    pub spots_at: Option<Instant>,
     pub wanda: Wanda,
 }
 
@@ -117,6 +127,8 @@ impl Default for Shared {
             iris: Iris::default(),
             ocr: VecDeque::new(),
             ocr_enabled: true,
+            spots: Vec::new(),
+            spots_at: None,
             wanda: Wanda::default(),
         }
     }

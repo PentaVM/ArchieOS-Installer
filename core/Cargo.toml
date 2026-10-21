@@ -54,6 +54,7 @@ members = [
     "crates/archie-workstation",
     "crates/archie-iris",
     "crates/archie-iris-runtime",
+    "crates/archie-camera",
     "crates/archie-iris-visor",
     "crates/archie-accel",
     "crates/archie-slink",
