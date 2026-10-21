@@ -170,12 +170,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|_| ())
             .map_err(|e| e.to_string())
     })?;
+    // With IRIS_PROFILE set, each stage waits for the GPU and the focused frames' time is
+    // reported by stage (the totals are then slower than without it).
+    let stages = |runs: usize| -> Value {
+        let taken = archie_iris_runtime::profile::take();
+        if taken.is_empty() {
+            return Value::Null;
+        }
+        Value::Object(
+            taken
+                .into_iter()
+                .map(|(name, total, _)| {
+                    (
+                        name.to_owned(),
+                        json!((total / runs.max(1) as f64 * 10.0).round() / 10.0),
+                    )
+                })
+                .collect(),
+        )
+    };
+    let _ = stages(1);
     let focused = time(rounds, |round| {
         detector
             .detect_frame(&fresh(1000 + round), &phrases, 0.35, 20, 0.5, false)
             .map(|_| ())
             .map_err(|e| e.to_string())
     })?;
+    let focused_stages = stages(rounds + 1);
     let same = fresh(5000);
     let focused_cached = time(rounds, |_| {
         detector
@@ -183,6 +204,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|_| ())
             .map_err(|e| e.to_string())
     })?;
+    let focused_cached_stages = stages(rounds + 1);
     let open = if skip_open {
         Value::Null
     } else {
@@ -328,6 +350,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "encode": encode,
         "focused": focused,
         "focused_cached": focused_cached,
+        "focused_stages_ms": focused_stages,
+        "focused_cached_stages_ms": focused_cached_stages,
         "open": open,
         "multi4": multi4,
         "live": live_report,

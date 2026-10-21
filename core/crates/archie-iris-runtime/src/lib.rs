@@ -24,6 +24,7 @@ pub mod nn;
 pub mod ocr;
 pub mod phrases;
 pub mod preprocess;
+pub mod profile;
 pub mod read;
 pub mod rem;
 pub mod roi;

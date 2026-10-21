@@ -378,6 +378,7 @@ impl SparseMoe {
         let chosen_probability = Tensor::cat(&chosen_probability, 1)?;
         let total = chosen_probability.sum_keepdim(1)?;
         let gate = chosen_probability.broadcast_div(&total)?.to_dtype(dtype)?;
+        crate::profile::mark(device, "moe.route");
 
         // Queue position of each (token, k) at its expert, in arrival order, per group.
         let assignments = tokens * k;
@@ -432,6 +433,7 @@ impl SparseMoe {
             &filled(&position, slots as f64)?,
         )?;
         let slot = slot.flatten_all()?.to_dtype(DType::U32)?;
+        crate::profile::mark(device, "moe.queue");
 
         // Each token once per choice, in the same (token, k) order as `slot`.
         let repeated = flat
@@ -463,6 +465,7 @@ impl SparseMoe {
         }
         routed.push(Tensor::zeros((1, width), dtype, device)?);
         let routed = Tensor::cat(&routed, 0)?;
+        crate::profile::mark(device, "moe.experts");
         let contribution = routed
             .index_select(&slot, 0)?
             .broadcast_mul(&gate.reshape((assignments, 1))?)?
@@ -482,6 +485,7 @@ impl SparseMoe {
                 .unsqueeze(2)?;
             output = (output + contribution.broadcast_mul(&pick)?.sum(1)?)?;
         }
+        crate::profile::mark(device, "moe.combine");
         Ok(output)
     }
 }
@@ -545,6 +549,7 @@ impl FusionLayer {
         groups: usize,
     ) -> Result<(Tensor, Tensor)> {
         let image = self.image_self_block(image, position)?;
+        crate::profile::mark(image.device(), "fusion.image_self");
         self.after_image_self(&image, position, text, text_padding, groups)
     }
 
@@ -599,11 +604,13 @@ impl FusionLayer {
             + self
                 .text_image
                 .forward(&self.text_norm1.forward(text)?, &keys, &image, None)?)?;
+        crate::profile::mark(image.device(), "fusion.cross");
         let image = (&image
             + self
                 .moe
                 .forward(&self.image_norm3.forward(&image)?, groups)?)?;
         let text = (&text + self.text_ffn.forward(&self.text_norm2.forward(&text)?)?)?;
+        crate::profile::mark(image.device(), "fusion.text_ffn");
         Ok((image, text))
     }
 }
@@ -901,8 +908,11 @@ impl IrisModel {
     /// `images`: `[B, 3, S, S]` in [0, 1]. Returns `[B, N, D]` tokens ready for fusion.
     pub fn encode_image(&self, images: &Tensor) -> Result<Tensor> {
         let images = images.to_device(&self.device)?;
+        crate::profile::mark(&self.device, "encode.upload");
         let vjepa = self.vjepa.forward(&images, &self.rope)?;
+        crate::profile::mark(&self.device, "encode.vjepa");
         let siglip = self.siglip.forward(&images)?;
+        crate::profile::mark(&self.device, "encode.siglip");
         Ok(
             (self.vjepa_projection.forward(&vjepa)? + self.siglip_projection.forward(&siglip)?)?
                 .broadcast_add(&self.position)?,
@@ -1186,6 +1196,7 @@ impl IrisModel {
                 .contiguous()?;
             Ok(source.contiguous()?.gather(&ids, 1)?)
         };
+        crate::profile::mark(fused.device(), "decode.select");
         let mut queries = self.query_projection_norm.forward(
             &self
                 .query_projection_linear
@@ -1213,6 +1224,7 @@ impl IrisModel {
             reference = boxes;
         }
         let (scorer, boxes) = last.expect("at least one decoder layer");
+        crate::profile::mark(fused.device(), "decode.layers");
         Ok(Decoded {
             logits: scorer.forward(&queries, &phrase_values, &encoded.phrase_padding)?,
             boxes,
