@@ -30,3 +30,11 @@ Final native smoke passed on CPU affinity0,1 with lower priority: Nemotron ASR l
 Controlled ASR/model/audio tests establish state transitions, not model accuracy or human-perceived latency. The native smoke uses real CPU ASR and Piper with a scripted loopback reasoning server and synthetic input; it must not be described as Bonsai quality, microphone, speaker or physical AEC verification. Optional RVC model inference stays opt-in. Existing optional second-pass ASR/native synthesis/PulseAudio blocking boundaries remain; details and operator cases are in `docs/VOICE-FLOOR-TRIAL.md`.
 
 This branch does not rebuild the earlier WSL release image and does not adopt or modify Claude's Wanda/LNCM work.
+
+## Delivery
+
+Published review: https://github.com/PentaVM/ArchieOS-Nvidia/pull/48 (unmerged). Implementation commit325b6c9; preparation fixc36d8ae. The preparator initially failed because Linux Git cannot follow a Windows worktree gitfile. It now validates/saves a host-supplied full revision before creating the destination. Only the verified three-file partial trial created by that failed command was removed; no other checkout or installation was touched.
+
+Installed trial: `/home/archie/.local/share/archie-voice-floor-trial` in `ArchieOS-Operator-RTX3070-Test`, source provenancec36d8ae1248e133fde6085bba907a7813941b470. Installed binary checksum exactly matches the native receipt above. A second smoke through the actual installed `run` wrapper passed: one scripted loopback request,62208 frames at22050Hz, same checksum, two-core CPU and no GPU. This exercises shell/wrapper/venv/model paths and the conversation loop, while still using WAV I/O rather than a physical room.
+
+Windows handoff: `C:\Users\Penta\Archie-RTX3070-Handoff\voice-floor-trial`. Contains `Probar-voz.cmd`, explicit solo option `Probar-voz-modo-individual.cmd`, PowerShell launcher, operator guide, PR receipt and synthetic native/installed smoke receipts. WSLg's Pulse socket exists; physical microphone/speaker input remains an operator trial. The trial lock prevents duplicate copies of this launcher; it does not stop anyone else's process.

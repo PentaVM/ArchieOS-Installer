@@ -36,6 +36,7 @@ def bounded(command, env, seconds):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, required=True)
+    parser.add_argument('--trial-launcher', type=Path)
     parser.add_argument('--asr', type=Path, required=True)
     parser.add_argument('--piper-model', type=Path, required=True)
     parser.add_argument('--python', type=Path, required=True)
@@ -97,6 +98,12 @@ def main():
                                 str(args.piper_model), '--wav-in', str(audio_in), '--wav-out', str(audio_out),
                                 '--endpoint', f'http://127.0.0.1:{server.server_port}/v1', '--model', 'cpu-smoke',
                                 '--always', '--timeout-seconds', '15', '--threads', '2']
+            if args.trial_launcher:
+                env.update(ARCHIE_ASR_MODEL=str(args.asr), ARCHIE_PIPER_ES=str(args.piper_model),
+                           ARCHIE_PIPER_PYTHON=str(args.python))
+                command = prefix + [str(args.trial_launcher), '--endpoint',
+                                    f'http://127.0.0.1:{server.server_port}/v1', '--model', 'cpu-smoke',
+                                    '--wav-in', str(audio_in), '--wav-out', str(audio_out), '--always']
             status, log = bounded(command, env, 120)
             (args.output / 'conversation.log').write_text(log)
             if status or not requests or not audio_out.exists():
@@ -107,6 +114,7 @@ def main():
                 raise RuntimeError('missing nonempty audio or terminal timing evidence')
             result = {'status': 'pass', 'cpu_affinity': affinity, 'requests': len(requests),
                       'binary_sha256': hashlib.sha256(args.binary.read_bytes()).hexdigest(),
+                      'trial_launcher': str(args.trial_launcher) if args.trial_launcher else None,
                       'output_frames': frames, 'sample_rate': rate, 'reasoning': 'scripted-loopback',
                       'microphone_or_speaker': False, 'gpu': False}
             (args.output / 'receipt.json').write_text(json.dumps(result, indent=2) + '\n')
