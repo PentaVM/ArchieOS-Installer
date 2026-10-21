@@ -35,6 +35,54 @@ impl NormLinear {
     }
 }
 
+/// Rows per block of [`inclusive_counts`]: one `[SCAN_BLOCK, SCAN_BLOCK]` triangle per pass.
+const SCAN_BLOCK: usize = 128;
+
+/// Experts per batched matrix product, so open mode's hidden layer stays near 50 MiB.
+const EXPERT_GROUP: usize = 8;
+
+/// Running column sums of a `[N, E]` f32 count matrix, row `i` included, without leaving
+/// the device. candle's `cumsum` multiplies by an `N x N` triangle (4.8 GB at open mode's
+/// 34 816 assignments); this does it by blocks of [`SCAN_BLOCK`] rows and carries the block
+/// totals the same way. Counts stay integers below 2^24, so every sum is exact in f32.
+fn inclusive_counts(x: &Tensor, triangle: &Tensor) -> Result<Tensor> {
+    let (rows, columns) = x.dims2()?;
+    if rows <= SCAN_BLOCK {
+        let lower = triangle
+            .narrow(0, 0, rows)?
+            .narrow(1, 0, rows)?
+            .contiguous()?;
+        return Ok(lower.matmul(x)?);
+    }
+    let blocks = rows.div_ceil(SCAN_BLOCK);
+    let padded = blocks * SCAN_BLOCK;
+    let x = if padded == rows {
+        x.clone()
+    } else {
+        Tensor::cat(
+            &[
+                x,
+                &Tensor::zeros((padded - rows, columns), x.dtype(), x.device())?,
+            ],
+            0,
+        )?
+    };
+    let x = x.reshape((blocks, SCAN_BLOCK, columns))?;
+    let within = triangle.unsqueeze(0)?.broadcast_matmul(&x)?;
+    let totals = x.sum(1)?;
+    let before = (inclusive_counts(&totals, triangle)? - &totals)?;
+    Ok(within
+        .broadcast_add(&before.unsqueeze(1)?)?
+        .reshape((padded, columns))?
+        .narrow(0, 0, rows)?)
+}
+
+/// `value` in the shape and on the device of `like`, made there rather than copied from
+/// the host.
+fn filled(like: &Tensor, value: f64) -> Result<Tensor> {
+    Ok((like.zeros_like()? + value)?)
+}
+
 /// Token-routed top-k experts with a fixed capacity, plus an always-on shared expert.
 struct SparseMoe {
     router: Linear,
@@ -46,10 +94,16 @@ struct SparseMoe {
     experts: usize,
     top_k: usize,
     capacity_factor: f64,
+    /// `0..experts` as f32, on the weights' device.
+    expert_ids: Tensor,
+    /// Lower-triangular ones, `[SCAN_BLOCK, SCAN_BLOCK]` f32, for [`inclusive_counts`].
+    triangle: Tensor,
 }
 
 impl SparseMoe {
     fn load(weights: &Weights, prefix: &str, config: &ModelConfig) -> Result<Self> {
+        let w_in = weights.get(&format!("{prefix}.w_in"))?;
+        let device = w_in.device().clone();
         Ok(Self {
             router: Linear::load(weights, &format!("{prefix}.router"))?,
             shared: Mlp::load(
@@ -58,31 +112,52 @@ impl SparseMoe {
                 &format!("{prefix}.shared.2"),
                 true,
             )?,
-            w_in: weights.get(&format!("{prefix}.w_in"))?,
+            w_in,
             b_in: weights.get(&format!("{prefix}.b_in"))?,
             w_out: weights.get(&format!("{prefix}.w_out"))?,
             b_out: weights.get(&format!("{prefix}.b_out"))?,
             experts: config.experts,
             top_k: config.expert_top_k,
             capacity_factor: config.expert_capacity_factor,
+            expert_ids: Tensor::arange(0u32, config.experts as u32, &device)?
+                .to_dtype(DType::F32)?,
+            triangle: Tensor::tril2(SCAN_BLOCK, DType::F32, &device)?,
         })
+    }
+
+    fn capacity(&self, tokens: usize) -> usize {
+        ((self.capacity_factor * (tokens * self.top_k) as f64 / self.experts as f64).ceil()
+            as usize)
+            .max(4)
     }
 
     /// Every token of the batch competes for the same capacity, in batch-major order: the
     /// same rows `SparseMoeFeedForward` flattens. A token over an expert's capacity keeps
     /// only its shared-expert path, as in training.
+    ///
+    /// Both routes give the same numbers. On the CPU reading the router back costs nothing
+    /// and only the assigned rows are multiplied; on a GPU every read back drains it.
     fn forward(&self, x: &Tensor) -> Result<Tensor> {
         let shape = x.shape().clone();
         let width = x.dim(D::Minus1)?;
         let flat = x.reshape(((), width))?;
+        let output = if flat.device().is_cpu() {
+            self.route_on_host(&flat)?
+        } else {
+            self.route_on_device(&flat)?
+        };
+        Ok(output.reshape(shape)?)
+    }
+
+    /// Probabilities read back, a stable sort per token, one product per expert, added in
+    /// expert order.
+    fn route_on_host(&self, flat: &Tensor) -> Result<Tensor> {
         let tokens = flat.dim(0)?;
         let probabilities: Vec<f32> =
-            candle_nn::ops::softmax_last_dim(&self.router.forward(&flat)?.to_dtype(DType::F32)?)?
+            candle_nn::ops::softmax_last_dim(&self.router.forward(flat)?.to_dtype(DType::F32)?)?
                 .flatten_all()?
                 .to_vec1()?;
-        let capacity = ((self.capacity_factor * (tokens * self.top_k) as f64 / self.experts as f64)
-            .ceil() as usize)
-            .max(4);
+        let capacity = self.capacity(tokens);
         let mut assigned: Vec<(Vec<u32>, Vec<f32>)> = vec![(Vec::new(), Vec::new()); self.experts];
         let mut order: Vec<usize> = (0..self.experts).collect();
         for token in 0..tokens {
@@ -98,7 +173,7 @@ impl SparseMoe {
                 }
             }
         }
-        let mut output = self.shared.forward(&flat)?;
+        let mut output = self.shared.forward(flat)?;
         let dtype = flat.dtype();
         for (expert, (ids, weights)) in assigned.into_iter().enumerate() {
             if ids.is_empty() {
@@ -117,7 +192,113 @@ impl SparseMoe {
             let scale = Tensor::from_vec(weights, (count, 1), flat.device())?.to_dtype(dtype)?;
             output = output.index_add(&ids, &routed.broadcast_mul(&scale)?, 0)?;
         }
-        Ok(output.reshape(shape)?)
+        Ok(output)
+    }
+
+    /// Nothing read back, as in `SparseMoeFeedForward`: top-k by repeated maxima (ties to
+    /// the lower expert, as the stable sort), queue positions by running counts over the
+    /// `(token, k)` order, one batched product per group of experts. Each token adds its
+    /// experts' outputs in ascending expert order, the order the host route adds them, so
+    /// the sums round the same way.
+    fn route_on_device(&self, flat: &Tensor) -> Result<Tensor> {
+        let (tokens, width) = flat.dims2()?;
+        let device = flat.device();
+        let dtype = flat.dtype();
+        let experts = self.experts;
+        let k = self.top_k;
+        let capacity = self.capacity(tokens);
+        let probabilities =
+            candle_nn::ops::softmax_last_dim(&self.router.forward(flat)?.to_dtype(DType::F32)?)?;
+
+        // Top-k: the largest probability, the lowest expert holding it, then mask it out.
+        // Probabilities are never negative, so -1 sits below every remaining one.
+        let ids = self
+            .expert_ids
+            .unsqueeze(0)?
+            .broadcast_as((tokens, experts))?;
+        let above = filled(&probabilities, experts as f64)?;
+        let below = filled(&probabilities, -1.0)?;
+        let mut remaining = probabilities.clone();
+        let mut chosen = Vec::with_capacity(k);
+        let mut chosen_probability = Vec::with_capacity(k);
+        for _ in 0..k {
+            let best = remaining.max_keepdim(1)?;
+            let holds = remaining.broadcast_eq(&best)?;
+            let expert = holds.where_cond(&ids, &above)?.min_keepdim(1)?;
+            let one_hot = ids.broadcast_eq(&expert)?;
+            remaining = one_hot.where_cond(&below, &remaining)?;
+            chosen.push(expert);
+            chosen_probability.push(best);
+        }
+        let chosen = Tensor::cat(&chosen, 1)?; // [T, k], expert ids as f32
+        let chosen_probability = Tensor::cat(&chosen_probability, 1)?;
+        let total = chosen_probability.sum_keepdim(1)?;
+        let gate = chosen_probability.broadcast_div(&total)?.to_dtype(dtype)?;
+
+        // Queue position of each (token, k) at its expert, in the order the tokens arrive.
+        let assignments = tokens * k;
+        let chosen_flat = chosen.reshape((assignments, 1))?;
+        let one_hot = self
+            .expert_ids
+            .unsqueeze(0)?
+            .broadcast_eq(&chosen_flat)?
+            .to_dtype(DType::F32)?;
+        let position =
+            ((inclusive_counts(&one_hot, &self.triangle)? * &one_hot)?.sum_keepdim(1)? - 1.0)?;
+        let kept = position.lt(&filled(&position, capacity as f64)?)?;
+        let slots = experts * capacity;
+        // Dropped assignments all land in one spare row past the last slot.
+        let slot = kept.where_cond(
+            &((&chosen_flat * capacity as f64)? + &position)?,
+            &filled(&position, slots as f64)?,
+        )?;
+        let slot = slot.flatten_all()?.to_dtype(DType::U32)?;
+
+        // Each token once per choice, in the same (token, k) order as `slot`.
+        let repeated = flat
+            .unsqueeze(1)?
+            .broadcast_as((tokens, k, width))?
+            .reshape((assignments, width))?;
+        let dispatched =
+            Tensor::zeros((slots + 1, width), dtype, device)?.index_add(&slot, &repeated, 0)?;
+
+        let mut routed = Vec::with_capacity(experts.div_ceil(EXPERT_GROUP) + 1);
+        for first in (0..experts).step_by(EXPERT_GROUP) {
+            let count = EXPERT_GROUP.min(experts - first);
+            let input = dispatched
+                .narrow(0, first * capacity, count * capacity)?
+                .reshape((count, capacity, width))?;
+            let hidden = input
+                .matmul(&self.w_in.narrow(0, first, count)?)?
+                .broadcast_add(&self.b_in.narrow(0, first, count)?.unsqueeze(1)?)?;
+            let hidden = crate::fast::gelu_erf(&hidden)?;
+            let out = hidden
+                .matmul(&self.w_out.narrow(0, first, count)?)?
+                .broadcast_add(&self.b_out.narrow(0, first, count)?.unsqueeze(1)?)?;
+            routed.push(out.reshape((count * capacity, width))?);
+        }
+        routed.push(Tensor::zeros((1, width), dtype, device)?);
+        let routed = Tensor::cat(&routed, 0)?;
+        let contribution = routed
+            .index_select(&slot, 0)?
+            .broadcast_mul(&gate.reshape((assignments, 1))?)?
+            .reshape((tokens, k, width))?;
+
+        // Rank of each choice among the token's k experts, lowest expert first.
+        let rank = chosen
+            .unsqueeze(1)?
+            .broadcast_lt(&chosen.unsqueeze(2)?)?
+            .to_dtype(DType::F32)?
+            .sum(2)?; // [T, k]
+        let mut output = self.shared.forward(flat)?;
+        for r in 0..k {
+            let pick = rank
+                .eq(&filled(&rank, r as f64)?)?
+                .to_dtype(dtype)?
+                .unsqueeze(2)?;
+            output = (output + contribution.broadcast_mul(&pick)?.sum(1)?)?;
+        }
+        Ok(output)
     }
 }
 
@@ -711,5 +892,190 @@ impl IrisModel {
 
     pub fn anchor(&self, index: usize) -> [f32; 4] {
         self.anchors_host[index]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::weights::Release;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    const WIDTH: usize = 16;
+    const HIDDEN: usize = 32;
+
+    fn config(experts: usize, top_k: usize) -> ModelConfig {
+        ModelConfig {
+            image_size: 64,
+            dimension: WIDTH,
+            heads: 4,
+            feedforward: HIDDEN,
+            fusion_layers: 1,
+            decoder_layers: 1,
+            experts,
+            expert_top_k: top_k,
+            expert_capacity_factor: 1.5,
+            queries: 10,
+            max_phrases: 4,
+            text_length: 16,
+            text_tokens_per_phrase: 1,
+            act_head: false,
+            act_layers: 1,
+            act_slots: 4,
+            act_chunk: 1,
+            siglip_repository: String::new(),
+            siglip_revision: String::new(),
+        }
+    }
+
+    /// A MoE on random weights. The router leans on the first `favourites` experts so their
+    /// queues overflow, and has no bias, so a zero token sees every expert tied.
+    fn moe(experts: usize, top_k: usize, favourites: usize) -> SparseMoe {
+        let device = Device::Cpu;
+        let randn = |shape: &[usize]| Tensor::randn(0f32, 0.5, shape, &device).unwrap();
+        let mut router = randn(&[experts, WIDTH]).to_vec2::<f32>().unwrap();
+        router[..favourites]
+            .iter_mut()
+            .for_each(|row| row.iter_mut().for_each(|v| *v = 1.0));
+        let router: Vec<f32> = router.into_iter().flatten().collect();
+        let mut map = HashMap::new();
+        let mut put = |name: &str, tensor: Tensor| {
+            map.insert(format!("moe.{name}"), tensor);
+        };
+        put(
+            "router.weight",
+            Tensor::from_vec(router, (experts, WIDTH), &device).unwrap(),
+        );
+        put("shared.0.weight", randn(&[HIDDEN, WIDTH]));
+        put("shared.0.bias", randn(&[HIDDEN]));
+        put("shared.2.weight", randn(&[WIDTH, HIDDEN]));
+        put("shared.2.bias", randn(&[WIDTH]));
+        put("w_in", randn(&[experts, WIDTH, HIDDEN]));
+        put("b_in", randn(&[experts, HIDDEN]));
+        put("w_out", randn(&[experts, HIDDEN, WIDTH]));
+        put("b_out", randn(&[experts, WIDTH]));
+        let config = config(experts, top_k);
+        let weights = Weights::from_tensors(
+            map,
+            Release {
+                path: PathBuf::from("test.pt"),
+                sha256: "a".repeat(64),
+                format: "archie-iris-beta1-weights-v1".to_owned(),
+                step: None,
+                score: None,
+                config: config.clone(),
+            },
+        );
+        SparseMoe::load(&weights, "moe", &config).unwrap()
+    }
+
+    fn on_host(moe: &SparseMoe, x: &Tensor) -> Tensor {
+        moe.route_on_host(&x.reshape(((), WIDTH)).unwrap()).unwrap()
+    }
+
+    fn on_device(moe: &SparseMoe, x: &Tensor) -> Tensor {
+        moe.route_on_device(&x.reshape(((), WIDTH)).unwrap())
+            .unwrap()
+    }
+
+    /// Batch of `rows x columns` random tokens; every seventh is zero, a full tie.
+    fn tokens(rows: usize, columns: usize) -> Tensor {
+        let x = Tensor::randn(0f32, 1.0, (rows, columns, WIDTH), &Device::Cpu).unwrap();
+        let keep: Vec<f32> = (0..rows * columns)
+            .map(|i| if i % 7 == 3 { 0.0 } else { 1.0 })
+            .collect();
+        let keep = Tensor::from_vec(keep, (rows, columns, 1), &Device::Cpu).unwrap();
+        x.broadcast_mul(&keep).unwrap()
+    }
+
+    fn max_difference(a: &Tensor, b: &Tensor) -> f32 {
+        (a - b)
+            .unwrap()
+            .abs()
+            .unwrap()
+            .flatten_all()
+            .unwrap()
+            .max(0)
+            .unwrap()
+            .to_scalar()
+            .unwrap()
+    }
+
+    #[test]
+    fn inclusive_counts_match_a_running_sum() {
+        let triangle = Tensor::tril2(SCAN_BLOCK, DType::F32, &Device::Cpu).unwrap();
+        for rows in [
+            1,
+            5,
+            SCAN_BLOCK,
+            SCAN_BLOCK + 1,
+            700,
+            SCAN_BLOCK * SCAN_BLOCK + 3,
+        ] {
+            let values: Vec<f32> = (0..rows * 3).map(|i| ((i * 7919) % 3) as f32).collect();
+            let x = Tensor::from_vec(values.clone(), (rows, 3), &Device::Cpu).unwrap();
+            let got = inclusive_counts(&x, &triangle)
+                .unwrap()
+                .flatten_all()
+                .unwrap()
+                .to_vec1::<f32>()
+                .unwrap();
+            let mut running = [0f32; 3];
+            let want: Vec<f32> = values
+                .chunks(3)
+                .flat_map(|row| {
+                    for (total, v) in running.iter_mut().zip(row) {
+                        *total += v;
+                    }
+                    running
+                })
+                .collect();
+            assert_eq!(got, want, "{rows} rows");
+        }
+    }
+
+    #[test]
+    fn device_routing_matches_host_routing() {
+        // 2 x 150 tokens: 600 assignments over two scan levels. 2 x 4200: 16 800, three.
+        for (experts, top_k, rows, columns) in [(8, 2, 2, 150), (8, 2, 2, 4200), (12, 3, 3, 50)] {
+            let moe = moe(experts, top_k, 1);
+            let x = tokens(rows, columns);
+            let device = on_device(&moe, &x);
+            let host = on_host(&moe, &x);
+            assert_eq!(device.dims(), host.dims());
+            let difference = max_difference(&device, &host);
+            assert!(
+                difference <= 1e-5,
+                "{experts} experts, top-{top_k}, {rows}x{columns}: max |diff| {difference:e}"
+            );
+        }
+    }
+
+    #[test]
+    fn tokens_past_capacity_keep_only_the_shared_expert() {
+        // Non-negative tokens all pick experts 0 and 1, so both queues fill at the same
+        // token and every later one comes out as the shared expert alone.
+        let moe = moe(8, 2, 2);
+        let x = tokens(1, 400).abs().unwrap();
+        let capacity = moe.capacity(400);
+        assert!(capacity < 400);
+        let shared = moe
+            .shared
+            .forward(&x.reshape(((), WIDTH)).unwrap())
+            .unwrap();
+        for routed in [on_host(&moe, &x), on_device(&moe, &x)] {
+            let difference: Vec<f32> = (&routed - &shared)
+                .unwrap()
+                .abs()
+                .unwrap()
+                .max(1)
+                .unwrap()
+                .to_vec1()
+                .unwrap();
+            for (token, d) in difference.iter().enumerate() {
+                assert_eq!(*d == 0.0, token >= capacity, "token {token}: {d:e}");
+            }
+        }
     }
 }

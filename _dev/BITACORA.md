@@ -1,5 +1,34 @@
 # Bitácora — ArchieOS-Nvidia
 
+## 2026-10-21 — Claude — IRIS F1: C4 y C1 (frases en lote, MoE sin lecturas al host)
+
+Sigue el paso 3 de `HANDOFF-WANDA-IRIS-2026-10-20.md` y §3/§12 de
+`_dev/PLAN-CORTEX-ROUTER-SLINKS-2026-10-20.md` (rama `perf/wanda-runtime`).
+
+- **C4** (`siglip.rs`): `.contiguous()` sobre la última posición de la torre de texto. Es el
+  fallo de CUDA "matmul is only supported for contiguous tensors" con 2 o más frases nuevas.
+  **No reproducido ni verificado en GPU**: en CPU candle acepta la vista con stride.
+- **C1** (`model.rs`, `SparseMoe`): dos rutas con el mismo resultado.
+  - `route_on_device` (GPU): sin `to_vec1`. Top-k por máximos repetidos (empates al experto
+    menor, como el sort estable), posición en la cola por conteos acumulados por bloques de
+    128 (el `cumsum` de candle multiplica por un triángulo N×N, 4.8 GB en modo abierto),
+    productos por lotes de 8 expertos sobre `[E, capacidad, D]`, y cada token suma sus
+    expertos en orden ascendente, como el bucle anterior.
+  - `route_on_host` (CPU): el algoritmo anterior, sin cambios. Medido en este contenedor
+    (CPU de 4 núcleos, forma real 512→2048, 32 expertos): la ruta por lotes tardó 722 ms
+    contra 539 ms con 1 fila y 6.3 s contra 4.0 s con 17 filas, porque multiplica las ranuras
+    vacías de la capacidad 1.5×. Por eso la CPU conserva la ruta del host.
+  - La capacidad sigue siendo una sola para todo el lote, como en el entrenamiento. Calcularla
+    por imagen en lotes con varios focos (handoff §4.2) cambia resultados y es de F3.
+- **Verificado** (CPU, f32): `device_routing_matches_host_routing` compara las dos rutas con
+  8 y 12 expertos, top-2 y top-3, empates y desbordes, y un escaneo de tres niveles. Con
+  umbral 0 dieron idénticas bit a bit; la prueba deja 1e-5 por si otra CPU elige otro kernel
+  de gemm. `tokens_past_capacity_keep_only_the_shared_expert` comprueba los descartes.
+  `cargo clippy -p archie-iris-runtime --all-targets -- -D warnings` y `cargo fmt` limpios.
+- **Sin verificar**: la build `--features cuda` (sin toolkit aquí), la paridad con
+  `tests/parity.rs` sobre los pesos reales y cualquier latencia en la RTX 3070. La meta de F1
+  (open ≤ 300 ms, focused ≤ 90 ms) sigue sin medir.
+
 ## 2026-10-12 — Claude — IRIS en Rust, memoria y Wanda probadas
 
 - **Runtime de IRIS sin Python** (`core/crates/archie-iris-runtime`, binario
