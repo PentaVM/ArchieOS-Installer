@@ -16,6 +16,7 @@
 //!     [--wanda http://127.0.0.1:8791 --wanda-token-file <owner.token> --domain personal/owner]
 //!     [--phrases person,face,hand,cup,phone,screen,text,keyboard,book,bottle] [--threshold 0.35]
 //!     [--ocr-url http://127.0.0.1:8792]   (a local vision-language model reads the text boxes)
+//!     [--ocr-expert]   (IRIS's own OCR expert, GOT-OCR 2.0 behind `POST /ocr`, reads the frame)
 //! ```
 
 mod state;
@@ -370,7 +371,8 @@ impl Visor {
         if s.spots_at
             .is_some_and(|at| at.elapsed() < Duration::from_secs(6))
         {
-            for spot in &s.spots {
+            // A reader that does not locate (the OCR expert) gives no box to draw.
+            for spot in s.spots.iter().filter(|spot| spot.bbox[2] > spot.bbox[0]) {
                 let b = Rect::from_min_max(
                     pos2(
                         shown.left() + spot.bbox[0] * scale,
@@ -505,7 +507,9 @@ impl Visor {
         ui.label(
             egui::RichText::new(format!(
                 "{} cada {:.1} s · Wanda {}",
-                if self.settings.ocr_url.is_some() {
+                if self.settings.ocr_expert {
+                    "El experto OCR de IRIS (GOT-OCR 2.0) lee el cuadro entero"
+                } else if self.settings.ocr_url.is_some() {
                     "Qwen3-VL-4B busca y lee el texto del cuadro entero"
                 } else {
                     "IRIS read_decoder lee las cajas de texto de IRIS"
@@ -595,8 +599,9 @@ fn main() -> eframe::Result<()> {
         .and_then(|path| std::fs::read_to_string(path).ok())
         .map(|t| t.trim().to_owned())
         .filter(|t| !t.is_empty());
-    let attention =
-        arg(&args, "--ocr-url").is_some() && !args.iter().any(|a| a == "--ocr-on-iris-boxes");
+    let ocr_expert = args.iter().any(|a| a == "--ocr-expert");
+    let attention = (ocr_expert || arg(&args, "--ocr-url").is_some())
+        && !args.iter().any(|a| a == "--ocr-on-iris-boxes");
     let settings = Arc::new(Settings {
         camera_listen: arg(&args, "--camera").unwrap_or_else(|| "127.0.0.1:7671".into()),
         iris: arg(&args, "--iris").unwrap_or_else(|| "http://127.0.0.1:8765".into()),
@@ -613,9 +618,16 @@ fn main() -> eframe::Result<()> {
         ocr_every: Duration::from_millis(
             arg(&args, "--ocr-ms")
                 .and_then(|t| t.parse().ok())
-                .unwrap_or(if attention { 3000 } else { 1500 }),
+                .unwrap_or(if ocr_expert {
+                    1000
+                } else if attention {
+                    3000
+                } else {
+                    1500
+                }),
         ),
         ocr_url: arg(&args, "--ocr-url"),
+        ocr_expert,
     });
     let state: State = Arc::new(Mutex::new(Shared::default()));
     {

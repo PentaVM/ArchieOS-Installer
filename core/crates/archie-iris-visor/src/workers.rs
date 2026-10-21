@@ -28,6 +28,8 @@ pub struct Settings {
     /// A local vision-language model reading the text boxes (llama-server with its projector,
     /// OpenAI-compatible). None: IRIS's own reading head.
     pub ocr_url: Option<String>,
+    /// IRIS's own OCR expert (`POST /ocr`, GOT-OCR 2.0 in IRIS's process) reads the frame.
+    pub ocr_expert: bool,
 }
 
 fn now_ms() -> u64 {
@@ -390,7 +392,17 @@ pub fn ocr_attention(state: State, settings: Arc<Settings>) {
         }
         last_look = Some((seen_now, Instant::now()));
         let started = Instant::now();
-        let found = attend_with_model(&client, &url, &jpeg, width, height);
+        let (found, reader) = if settings.ocr_expert {
+            (
+                read_with_expert(&client, &settings.iris, &jpeg),
+                "IRIS OCR (GOT-OCR 2.0)",
+            )
+        } else {
+            (
+                attend_with_model(&client, &url, &jpeg, width, height),
+                "Qwen3-VL (atención propia)",
+            )
+        };
         let read_ms = started.elapsed().as_secs_f32() * 1000.0;
         recent.retain(|_, at| at.elapsed() < Duration::from_secs(60));
         let spots = found.clone().unwrap_or_default();
@@ -408,7 +420,7 @@ pub fn ocr_attention(state: State, settings: Arc<Settings>) {
             );
         }
         let wanda = if let Err(error) = &found {
-            Err(format!("Qwen3-VL: {error}"))
+            Err(format!("{reader}: {error}"))
         } else if lines.is_empty() {
             Ok("nada nuevo: no se llama a Wanda".to_owned())
         } else {
@@ -419,7 +431,7 @@ pub fn ocr_attention(state: State, settings: Arc<Settings>) {
             s.spots_at = Some(Instant::now());
             s.ocr.push_front(OcrCall {
                 at: Instant::now(),
-                reader: "Qwen3-VL (atención propia)",
+                reader,
                 boxes: spots.len(),
                 read_ms,
                 lines: spots.iter().map(|s| s.text.clone()).collect(),
@@ -429,6 +441,39 @@ pub fn ocr_attention(state: State, settings: Arc<Settings>) {
             s.ocr.truncate(OCR_LOG);
         }
     }
+}
+
+/// IRIS's OCR expert over the whole frame (`POST /ocr`): its reading, one spot per line, with
+/// no position (GOT-OCR reads, it does not locate).
+fn read_with_expert(
+    client: &reqwest::blocking::Client,
+    iris: &str,
+    jpeg: &[u8],
+) -> Result<Vec<Spot>, String> {
+    let value: Value = client
+        .post(format!("{}/ocr?max_tokens=96", iris.trim_end_matches('/')))
+        .header("content-type", "image/jpeg")
+        .body(jpeg.to_vec())
+        .send()
+        .and_then(|r| r.json())
+        .map_err(|e| short(&e.to_string()))?;
+    if let Some(error) = value["error"].as_str() {
+        return Err(short(error));
+    }
+    Ok(value["reads"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|r| r["text"].as_str())
+        .flat_map(str::lines)
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .take(32)
+        .map(|line| Spot {
+            text: line.chars().take(200).collect(),
+            bbox: [0.0; 4],
+        })
+        .collect())
 }
 
 /// Asks the model where the text in the whole frame is. Qwen3-VL answers `bbox_2d` on a
