@@ -132,6 +132,30 @@ por IPC hoy).
 Compilación verificada en el contenedor: `--features cuda` con nvcc 12.8 y
 `CUDA_COMPUTE_CAP=86`, clippy limpio (Rust 1.88 y 1.97). `--features flash-attn`: ver §8.
 
+## 6b. Medido en la 3070 (2026-10-21, `_dev/verification/rtx3070/iris-f1-f4-20261021.json`)
+
+bf16, sin flash-attention, tarjeta limitada a 132 W (de 270 W), entrenamiento en pausa, cuadro
+de 1280×720:
+
+| | Medido | Meta |
+|---|---:|---:|
+| Cuadros respondidos en vivo (cámara a 60 fps) | 60/s, p90 2.5 ms | 60/s: cumplida |
+| Lecturas del modelo en vivo | 6.5/s | — |
+| Enfocado | 132.5 ms | F1 ≤ 90: no |
+| Enfocado sobre un cuadro ya codificado | 56.2 ms | — |
+| Encoders | 76.1 ms | — |
+| Abierto (17 filas) | 689.5 ms | F1 ≤ 300: no (con el límite de potencia) |
+| 4 focos en un pase | 454 ms | — |
+| VRAM total (con 0.9 GiB del escritorio) | 3.1 GiB | — |
+
+Lo que sigue para bajar el enfoque: correr el bench con `IRIS_PROFILE=1` (tiempos por etapa,
+`4429b6f`) para ver dónde están los 56 ms de fusión y decodificación de una fila, y medir con
+`--flash`. Después del cambio `be8ca68`, el camino que responde cada cuadro ya no arma el canvas
+del modelo (18 ms en el contenedor para 1280×720; ahora 3.2 ms por cuadro con 20 cajas).
+
+`read_decoder` quedó portado con caché de KV (`e2394b0`, `POST /read`), validado contra Python
+con los pesos reales: es la fuente `IrisRead` del puente de texto.
+
 ## 7. Integración con Wanda
 
 El LNCM de Wanda vive en `perf/wanda-runtime` (sobre `codex/wanda-context`, PR #38), fuera de
@@ -150,8 +174,8 @@ ciegas. Para conectar Wanda:
 
 1. **El entrenamiento del LNCM** (generador de 60 000 pasos en la 3070) y lo que sigue según el
    handoff: calibrar, evaluar, pasar el LLM a GPU. No se puede hacer desde la nube.
-2. Correr `verify-rtx3070.sh` y registrar números reales.
-3. Portar `read_decoder` con caché de KV (necesita Foundry).
+2. Perfilar por etapas en la 3070 (`IRIS_PROFILE=1`) y probar `--flash` para bajar el enfoque a la meta de F1.
+3. ~~Portar `read_decoder`~~: hecho (`e2394b0`).
 4. Integración con Wanda (§7).
 5. F5 (entrenamientos con el tronco congelado) y F6 (megakernel persistente donde F0 muestre
    límite por lanzamientos).
