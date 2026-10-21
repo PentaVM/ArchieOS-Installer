@@ -115,6 +115,8 @@ pub struct Service {
     /// What Policy approved for live foci (`/live`): highest priority class, inference
     /// rate, memory, expert residency.
     pub live_envelope: Envelope,
+    /// Where `scene.state` is exported to other processes (`scene.state.sock`).
+    pub slink_dir: Option<PathBuf>,
     latencies: Vec<f64>,
     started: Instant,
 }
@@ -137,6 +139,7 @@ impl Service {
                 allow_partial_experts: false,
                 expert_floor: 0.5,
             },
+            slink_dir: None,
             latencies: Vec::new(),
             started: Instant::now(),
         }
@@ -144,6 +147,11 @@ impl Service {
 
     pub fn with_rem_spool(mut self, rem_spool: Option<PathBuf>) -> Self {
         self.rem_spool = rem_spool;
+        self
+    }
+
+    pub fn with_slink_dir(mut self, dir: Option<PathBuf>) -> Self {
+        self.slink_dir = dir;
         self
     }
 
@@ -507,6 +515,19 @@ fn live_status(live: &LiveShared) -> Value {
 pub fn router(service: Service) -> Router {
     let size = service.detector.model.config.image_size;
     let live = LiveShared::new(LiveConfig::default(), service.live_envelope.clone());
+    #[cfg(target_os = "linux")]
+    if let Some(dir) = &service.slink_dir {
+        match live.export_scene(dir) {
+            Ok(path) => println!(
+                "{}",
+                json!({"event": "slink_exported", "link": "scene.state", "socket": path})
+            ),
+            Err(error) => eprintln!(
+                "{}",
+                json!({"event": "slink_export_failed", "error": error.to_string()})
+            ),
+        }
+    }
     let state: Shared = Arc::new(Mutex::new(service));
     let worker_state = state.clone();
     spawn_worker(live.clone(), move |batch| {
@@ -542,6 +563,9 @@ pub fn router(service: Service) -> Router {
                                 .observe(&focus, &frame, live.now_ms())?;
                             if let Some(request) = request {
                                 live.submit(request);
+                            }
+                            if !matches!(reply.decision, archie_accel::plan::Decision::Idle) {
+                                live.publish_scene(&reply, live.now_ms())?;
                             }
                             let mut out = serde_json::to_value(&reply)
                                 .map_err(|e| Error::Refused(e.to_string()))?;

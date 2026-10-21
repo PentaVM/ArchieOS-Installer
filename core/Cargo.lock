@@ -379,6 +379,7 @@ name = "archie-iris-runtime"
 version = "0.1.0"
 dependencies = [
  "archie-accel",
+ "archie-slink",
  "axum",
  "candle-core",
  "candle-flash-attn",
@@ -695,6 +696,20 @@ dependencies = [
  "serde_json",
  "sha2",
  "toml",
+]
+
+[[package]]
+name = "archie-slink"
+version = "0.1.0"
+dependencies = [
+ "archie-accel",
+ "archie-types",
+ "hex",
+ "libc",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

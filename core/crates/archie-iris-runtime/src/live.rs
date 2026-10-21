@@ -23,6 +23,8 @@ use archie_accel::plan::{
     decide, finished, CostModel, Decision, FocusBudget, FocusState, PlanConfig,
 };
 use archie_accel::track::{TrackConfig, Tracked, Tracker};
+use archie_slink::link::Link;
+use archie_slink::links::{SceneState, SceneTrack};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -367,6 +369,11 @@ pub struct LiveShared {
     pub costs: Mutex<CostModel>,
     /// What Policy approved for live foci on this node.
     pub envelope: Envelope,
+    /// `scene.state`: every live focus's tracks, for the action head, Cortex and Wanda.
+    pub scene: Link<SceneState>,
+    /// The same link for other processes, when exported.
+    #[cfg(target_os = "linux")]
+    export: Mutex<Option<Arc<archie_slink::shm::Exporter>>>,
     clock: Instant,
     stop: AtomicBool,
 }
@@ -379,9 +386,64 @@ impl LiveShared {
             wake: Condvar::new(),
             costs: Mutex::new(CostModel::new(0.2, 100.0)),
             envelope,
+            scene: Link::new(64),
+            #[cfg(target_os = "linux")]
+            export: Mutex::new(None),
             clock: Instant::now(),
             stop: AtomicBool::new(false),
         })
+    }
+
+    /// Exports `scene.state` to other processes through a socket in `dir`.
+    #[cfg(target_os = "linux")]
+    pub fn export_scene(&self, dir: &std::path::Path) -> Result<std::path::PathBuf, Error> {
+        let path = dir.join("scene.state.sock");
+        let exporter = archie_slink::shm::Exporter::serve(&path, "scene.state", 512 * 1024)
+            .map_err(|error| Error::Refused(error.to_string()))?;
+        if let Ok(mut export) = self.export.lock() {
+            *export = Some(exporter);
+        }
+        Ok(path)
+    }
+
+    /// Publishes a live reply as `scene.state` (and to other processes when exported).
+    pub fn publish_scene(&self, reply: &LiveReply, observed_at_ms: u64) -> Result<u64, Error> {
+        let state = SceneState {
+            focus: reply.focus.clone(),
+            slots: Vec::new(),
+            tracks: reply
+                .detections
+                .iter()
+                .take(256)
+                .map(|d| SceneTrack {
+                    id: d.track,
+                    label: d.detection.phrase.chars().take(64).collect(),
+                    bbox: d.detection.bbox.map(|v| v as f32),
+                    score: d.detection.score as f32,
+                    source: match d.source {
+                        Source::Inferred => "inferred",
+                        Source::Reused => "reused",
+                        Source::Tracked => "tracked",
+                        Source::Lost => "lost",
+                    }
+                    .into(),
+                })
+                .collect(),
+            damage: reply.damage,
+        };
+        let revision = self
+            .scene
+            .publish(observed_at_ms, state)
+            .map_err(|error| Error::Refused(error.to_string()))?;
+        #[cfg(target_os = "linux")]
+        if let Ok(export) = self.export.lock() {
+            if let (Some(exporter), Some(message)) = (export.as_ref(), self.scene.latest()) {
+                exporter
+                    .publish(&message)
+                    .map_err(|error| Error::Refused(error.to_string()))?;
+            }
+        }
+        Ok(revision)
     }
 
     pub fn now_ms(&self) -> u64 {
@@ -705,6 +767,23 @@ mod tests {
             [104.0, 82.0, 144.0, 122.0]
         );
         assert!(shared.costs.lock().unwrap().estimate("focused") < 100.0);
+        assert_eq!(shared.publish_scene(&reply, 5).unwrap(), 1);
+        let scene = shared.scene.latest().unwrap();
+        assert_eq!(scene.payload.tracks[0].bbox, [104.0, 82.0, 144.0, 122.0]);
+        assert_eq!(scene.payload.tracks[0].source, "tracked");
+        assert!(!scene.may_reach(archie_slink::Locality::Cloud));
+        #[cfg(target_os = "linux")]
+        {
+            let dir = std::env::temp_dir().join(format!("iris-slink-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = shared.export_scene(&dir).unwrap();
+            let reader = archie_slink::shm::connect(&path).unwrap();
+            shared.publish_scene(&reply, 6).unwrap();
+            let seen = reader.latest::<SceneState>().unwrap().unwrap();
+            assert_eq!(seen.header.revision, 2);
+            assert_eq!(seen.payload.focus, "camera:desk");
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
         shared.shutdown();
         worker.join().unwrap();
     }

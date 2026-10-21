@@ -1,0 +1,19 @@
+[package]
+name = "archie-slink"
+description = "S-LINKs: typed, bounded, versioned channels that pass state between IRIS, Wanda, the LLM and the harness mid-processing. They carry data, never authority."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+archie-accel.workspace = true
+archie-types.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true

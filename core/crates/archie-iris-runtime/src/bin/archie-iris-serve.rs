@@ -5,8 +5,11 @@
 //!                   [--sha256 <hex>] [--device auto|cpu|cuda] [--rem-spool <dir>]
 //!                   [--skills-dir <dir>] [--text-device cpu|model] [--phrase-cache <dir>]
 //!                   [--live-max-fps <n>] [--live-max-priority <class>]
-//!                   [--record-expert-usage]
+//!                   [--record-expert-usage] [--slink-dir <dir>]
 //! ```
+//!
+//! `--slink-dir` exports the `scene.state` S-LINK (every live focus's tracks) to other
+//! processes through `<dir>/scene.state.sock`, owner-only.
 //!
 //! `--record-expert-usage` counts how often each MoE expert is chosen, per layer, and
 //! `GET /experts` reports it: the routing histograms residency decisions are made from.
@@ -43,7 +46,7 @@ fn usage() -> ! {
          [--port 8765] [--sha256 <hex>] [--device auto|cpu|cuda] [--rem-spool <dir>] [--skills-dir <dir>] \
          [--text-device cpu|model] [--phrase-cache <dir>] [--live-max-fps <n>] \
          [--live-max-priority background|wanda_interactive|active_focus|voice_reflex] \
-         [--record-expert-usage]"
+         [--record-expert-usage] [--slink-dir <dir>]"
     );
     std::process::exit(2);
 }
@@ -55,6 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut rem_spool, mut skills_dir, mut phrase_cache) = (None, None, None);
     let mut text_device = "cpu".to_owned();
     let mut record_usage = false;
+    let mut slink_dir = None;
     let mut envelope = Envelope {
         max_priority: Priority::ActiveFocus,
         max_fps: 30.0,
@@ -77,6 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--text-device" => text_device = value(),
             "--phrase-cache" => phrase_cache = Some(PathBuf::from(value())),
             "--record-expert-usage" => record_usage = true,
+            "--slink-dir" => slink_dir = Some(PathBuf::from(value())),
             "--live-max-fps" => envelope.max_fps = value().parse().unwrap_or_else(|_| usage()),
             "--live-max-priority" => {
                 envelope.max_priority = match value().as_str() {
@@ -151,7 +156,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     drop(loaded);
     let mut service = Service::new(Detector::new(model, phrases), actor, info)
         .with_rem_spool(rem_spool)
-        .with_live_envelope(envelope);
+        .with_live_envelope(envelope)
+        .with_slink_dir(slink_dir);
     if let Some(dir) = skills_dir {
         service = service.with_skills_dir(dir);
     }
