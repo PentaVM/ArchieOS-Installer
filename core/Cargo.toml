@@ -54,6 +54,8 @@ members = [
     "crates/archie-workstation",
     "crates/archie-iris",
     "crates/archie-iris-runtime",
+    "crates/archie-accel",
+    "crates/archie-slink",
     "crates/archie-orb",
     "crates/archie-rem",
     "crates/archie-lan",
@@ -115,6 +117,8 @@ archie-wanda-lncm = { path = "crates/archie-wanda-lncm" }
 archie-workstation = { path = "crates/archie-workstation" }
 archie-iris = { path = "crates/archie-iris" }
 archie-iris-runtime = { path = "crates/archie-iris-runtime" }
+archie-accel = { path = "crates/archie-accel" }
+archie-slink = { path = "crates/archie-slink" }
 archie-orb = { path = "crates/archie-orb" }
 archie-shell-bridge = { path = "crates/archie-shell-bridge" }
 

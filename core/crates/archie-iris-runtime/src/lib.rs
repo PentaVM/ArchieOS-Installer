@@ -17,11 +17,13 @@
 pub mod act;
 pub mod detect;
 pub mod fast;
+pub mod live;
 pub mod lora;
 pub mod model;
 pub mod nn;
 pub mod phrases;
 pub mod preprocess;
+pub mod read;
 pub mod rem;
 pub mod roi;
 pub mod server;

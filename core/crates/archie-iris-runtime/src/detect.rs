@@ -3,10 +3,11 @@
 use crate::model::{EncodedPhrases, IrisModel};
 use crate::nn::Result;
 use crate::phrases::PhraseSource;
-use crate::preprocess::{letterbox, to_tensor, Rgb};
+use crate::preprocess::{canvas_tensor, letterbox, to_tensor, Frame, Rgb};
 use crate::roi::nms;
 use candle_core::{DType, Tensor};
 use serde::Serialize;
+use std::collections::HashMap;
 
 /// The broad everyday vocabulary "everything" mode reads in one batched pass
 /// (`iris_infer.EVERYDAY_VOCABULARY`, in its order).
@@ -124,6 +125,27 @@ impl Detector {
         nms_iou: f32,
         with_embeddings: bool,
     ) -> Result<Vec<Detection>> {
+        let frame = Frame::new(image.clone(), self.model.config.image_size);
+        self.detect_frame(
+            &frame,
+            phrases,
+            threshold,
+            max_per_phrase,
+            nms_iou,
+            with_embeddings,
+        )
+    }
+
+    /// [`Detector::detect`] on a frame already decoded and letterboxed.
+    pub fn detect_frame(
+        &mut self,
+        frame: &Frame,
+        phrases: &[String],
+        threshold: f32,
+        max_per_phrase: usize,
+        nms_iou: f32,
+        with_embeddings: bool,
+    ) -> Result<Vec<Detection>> {
         let phrases: Vec<String> = phrases
             .iter()
             .map(|p| p.trim().to_owned())
@@ -133,14 +155,113 @@ impl Detector {
         if phrases.is_empty() {
             return Ok(Vec::new());
         }
-        let tokens = self.model.encode_image(&self.canvas(image)?)?;
+        let tokens = self.model.encode_frame(frame)?;
         let encoded = self.encode_chunks(std::slice::from_ref(&phrases))?;
         let (fused, text) = self
             .model
             .fuse(&tokens, &encoded.text, &encoded.text_padding)?;
         let decoded = self.model.decode(&fused, &text, &encoded)?;
-        let scores: Vec<Vec<f32>> = candle_nn::ops::sigmoid(&decoded.logits.get(0)?)?.to_vec2()?;
-        let boxes: Vec<Vec<f32>> = decoded.boxes.get(0)?.to_dtype(DType::F32)?.to_vec2()?;
+        self.row_detections(
+            frame,
+            &phrases,
+            &decoded.logits.get(0)?,
+            &decoded.boxes.get(0)?,
+            &fused.get(0)?,
+            threshold,
+            max_per_phrase,
+            nms_iou,
+            with_embeddings,
+        )
+    }
+
+    /// [`Detector::detect_frame`] for several foci in one pass: the frames go through the
+    /// encoders as one batch and through fusion with a MoE capacity per image, so each
+    /// focus gets what it would get alone. One result list per request, in order.
+    pub fn detect_many(
+        &mut self,
+        requests: &[(&Frame, &[String])],
+        threshold: f32,
+        max_per_phrase: usize,
+        nms_iou: f32,
+        with_embeddings: bool,
+    ) -> Result<Vec<Vec<Detection>>> {
+        let limit = self.model.config.max_phrases;
+        let cleaned: Vec<Vec<String>> = requests
+            .iter()
+            .map(|(_, phrases)| {
+                phrases
+                    .iter()
+                    .map(|p| p.trim().to_owned())
+                    .filter(|p| !p.is_empty())
+                    .take(limit)
+                    .collect()
+            })
+            .collect();
+        let rows: Vec<usize> = (0..requests.len())
+            .filter(|&i| !cleaned[i].is_empty())
+            .collect();
+        let mut out = vec![Vec::new(); requests.len()];
+        match rows.len() {
+            0 => return Ok(out),
+            1 => {
+                let row = rows[0];
+                out[row] = self.detect_frame(
+                    requests[row].0,
+                    &cleaned[row],
+                    threshold,
+                    max_per_phrase,
+                    nms_iou,
+                    with_embeddings,
+                )?;
+                return Ok(out);
+            }
+            _ => {}
+        }
+        let canvases = rows
+            .iter()
+            .map(|&i| canvas_tensor(&requests[i].0.canvas, &self.model.device))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let tokens = self.model.encode_image(&Tensor::cat(&canvases, 0)?)?;
+        let chunks: Vec<Vec<String>> = rows.iter().map(|&i| cleaned[i].clone()).collect();
+        let encoded = self.encode_chunks(&chunks)?;
+        let (fused, text) =
+            self.model
+                .fuse_per_image(&tokens, &encoded.text, &encoded.text_padding)?;
+        let decoded = self.model.decode(&fused, &text, &encoded)?;
+        for (position, &row) in rows.iter().enumerate() {
+            out[row] = self.row_detections(
+                requests[row].0,
+                &cleaned[row],
+                &decoded.logits.get(position)?,
+                &decoded.boxes.get(position)?,
+                &fused.get(position)?,
+                threshold,
+                max_per_phrase,
+                nms_iou,
+                with_embeddings,
+            )?;
+        }
+        Ok(out)
+    }
+
+    /// One batch row's detections: per phrase, the queries over `threshold`, NMS, at most
+    /// `max_per_phrase`, highest score first overall.
+    #[allow(clippy::too_many_arguments)]
+    fn row_detections(
+        &self,
+        frame: &Frame,
+        phrases: &[String],
+        logits: &Tensor,
+        boxes: &Tensor,
+        fused: &Tensor,
+        threshold: f32,
+        max_per_phrase: usize,
+        nms_iou: f32,
+        with_embeddings: bool,
+    ) -> Result<Vec<Detection>> {
+        let image = &frame.image;
+        let scores: Vec<Vec<f32>> = candle_nn::ops::sigmoid(logits)?.to_vec2()?;
+        let boxes: Vec<Vec<f32>> = boxes.to_dtype(DType::F32)?.to_vec2()?;
         let boxes: Vec<[f32; 4]> = boxes.iter().map(|b| xyxy(b)).collect();
         let size = self.model.config.image_size;
         let mut found = Vec::new();
@@ -160,7 +281,7 @@ impl Detector {
                 .collect();
             let embeddings = if with_embeddings {
                 let chosen: Vec<[f32; 4]> = kept.iter().map(|&q| boxes[q]).collect();
-                Some(self.model.instance_embeddings(&fused.get(0)?, &chosen)?)
+                Some(self.model.instance_embeddings(fused, &chosen)?)
             } else {
                 None
             };
@@ -197,6 +318,28 @@ impl Detector {
         nms_iou: f32,
         with_embeddings: bool,
     ) -> Result<Vec<Detection>> {
+        let frame = Frame::new(image.clone(), self.model.config.image_size);
+        self.detect_everything_frame(
+            &frame,
+            threshold,
+            extra,
+            max_detections,
+            nms_iou,
+            with_embeddings,
+        )
+    }
+
+    /// [`Detector::detect_everything`] on a frame already decoded and letterboxed.
+    pub fn detect_everything_frame(
+        &mut self,
+        frame: &Frame,
+        threshold: f32,
+        extra: &[String],
+        max_detections: usize,
+        nms_iou: f32,
+        with_embeddings: bool,
+    ) -> Result<Vec<Detection>> {
+        let image = &frame.image;
         let mut vocabulary: Vec<String> = Vec::new();
         for phrase in extra
             .iter()
@@ -212,14 +355,11 @@ impl Detector {
             .chunks(self.model.config.max_phrases)
             .map(<[String]>::to_vec)
             .collect();
-        let tokens = self.model.encode_image(&self.canvas(image)?)?;
+        let tokens = self.model.encode_frame(frame)?;
         let encoded = self.encode_chunks(&chunks)?;
-        let tokens = tokens
-            .broadcast_as((chunks.len(), tokens.dim(1)?, tokens.dim(2)?))?
-            .contiguous()?;
-        let (fused, text) = self
-            .model
-            .fuse(&tokens, &encoded.text, &encoded.text_padding)?;
+        let (fused, text) =
+            self.model
+                .fuse_shared_image(&tokens, &encoded.text, &encoded.text_padding)?;
         let decoded = self.model.decode(&fused, &text, &encoded)?;
         let scores = candle_nn::ops::sigmoid(&decoded.logits)?;
         let (batch, queries, width) = scores.dims3()?;
@@ -255,23 +395,34 @@ impl Detector {
         .map(|i| candidates[i])
         .collect();
         let size = self.model.config.image_size;
+        // One embedding pass per chunk for all of its kept boxes.
+        let mut embeddings: HashMap<usize, Vec<f64>> = HashMap::new();
+        if with_embeddings {
+            let mut by_chunk: Vec<Vec<usize>> = vec![Vec::new(); chunks.len()];
+            for &index in &kept {
+                by_chunk[index / queries].push(index);
+            }
+            for (chunk, indices) in by_chunk.iter().enumerate() {
+                if indices.is_empty() {
+                    continue;
+                }
+                let chosen: Vec<[f32; 4]> = indices.iter().map(|&i| boxes[i]).collect();
+                let vectors = self
+                    .model
+                    .instance_embeddings(&fused.get(chunk)?, &chosen)?;
+                for (&index, vector) in indices.iter().zip(vectors) {
+                    embeddings.insert(
+                        index,
+                        vector.iter().map(|&v| round_to(f64::from(v), 4)).collect(),
+                    );
+                }
+            }
+        }
         let mut found = Vec::with_capacity(kept.len());
         for index in kept {
             let chunk = index / queries;
             let phrase = &chunks[chunk][column[index] as usize];
-            let embedding = if with_embeddings {
-                let vector = self
-                    .model
-                    .instance_embeddings(&fused.get(chunk)?, &[boxes[index]])?;
-                Some(
-                    vector[0]
-                        .iter()
-                        .map(|&v| round_to(f64::from(v), 4))
-                        .collect(),
-                )
-            } else {
-                None
-            };
+            let embedding = embeddings.remove(&index);
             found.push(detection(
                 phrase,
                 best[index],

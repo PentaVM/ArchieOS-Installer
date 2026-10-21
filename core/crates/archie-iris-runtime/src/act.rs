@@ -13,7 +13,7 @@ use crate::detect::round_to;
 use crate::model::IrisModel;
 use crate::nn::{LayerNorm, Linear, Mlp, MultiheadAttention, Result};
 use crate::phrases::PhraseSource;
-use crate::preprocess::{letterbox, to_tensor, Rgb};
+use crate::preprocess::{Frame, Rgb};
 use crate::weights::Weights;
 use crate::Error;
 use candle_core::{DType, Tensor, D};
@@ -554,7 +554,7 @@ impl Actor {
             model,
             phrases,
             session_name,
-            image,
+            &Frame::new(image.clone(), model.config.image_size),
             instruction,
             skill,
             now,
@@ -570,7 +570,7 @@ impl Actor {
         model: &IrisModel,
         phrases: &mut dyn PhraseSource,
         session_name: &str,
-        image: &Rgb,
+        frame: &Frame,
         instruction: &str,
         skill: &str,
         now: f64,
@@ -584,8 +584,8 @@ impl Actor {
         let active_name = active_adapter.as_ref().map(|a| a.skill.clone());
         crate::lora::with_adapter(active_adapter, || {
             let size = model.config.image_size;
-            let (canvas, scale) = letterbox(image, size);
-            let tokens = model.encode_image(&to_tensor(&canvas, &model.device)?)?;
+            let (canvas, scale) = (frame.canvas.clone(), frame.scale);
+            let tokens = model.encode_frame(frame)?;
             let instruction_features = phrases.encode(&[instruction.to_owned()])?;
             let encoded = model.encode_phrases(&[instruction_features])?;
             // The scene with no phrase, as memory frames were in training: the null token padded
@@ -605,8 +605,7 @@ impl Actor {
             let null_padding = Tensor::from_vec(null_padding, (1, length), &model.device)?;
             let text = Tensor::cat(&[&encoded.text, &null_row], 0)?;
             let padding = Tensor::cat(&[&encoded.text_padding, &null_padding], 0)?;
-            let both = tokens.broadcast_as((2, tokens.dim(1)?, d))?.contiguous()?;
-            let (fused_both, text_both) = model.fuse(&both, &text, &padding)?;
+            let (fused_both, text_both) = model.fuse_shared_image(&tokens, &text, &padding)?;
             let fused = fused_both.narrow(0, 0, 1)?;
             let fused_null = fused_both.narrow(0, 1, 1)?;
 

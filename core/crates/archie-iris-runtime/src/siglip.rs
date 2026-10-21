@@ -209,7 +209,8 @@ impl SiglipText {
             x = layer.forward(&x, allowed.as_ref())?;
         }
         let states = self.norm.forward(&x)?;
-        let last = states.narrow(1, length - 1, 1)?.squeeze(1)?;
+        // The last position is a strided view; cuBLAS refuses it for two or more phrases.
+        let last = states.narrow(1, length - 1, 1)?.squeeze(1)?.contiguous()?;
         Ok(TextOutput {
             pooled: self.head.forward(&last)?,
             states,
@@ -221,14 +222,16 @@ impl SiglipText {
     }
 }
 
-/// Reads a safetensors file into a [`Weights`] holding only tensors under `prefix`.
+/// Reads a safetensors file into a [`Weights`] holding only tensors under `prefix`. The
+/// file is read on the host and only the kept tensors reach `device`: the repository's
+/// file also holds the vision tower, which would otherwise pass through the GPU in f32.
 pub fn load_text_weights(
     path: &std::path::Path,
     prefix: &str,
     device: &Device,
     dtype: DType,
 ) -> Result<std::collections::HashMap<String, Tensor>> {
-    let all = candle_core::safetensors::load(path, device)?;
+    let all = candle_core::safetensors::load(path, &Device::Cpu)?;
     let mut kept = std::collections::HashMap::new();
     for (name, tensor) in all {
         if name.starts_with(prefix) {
@@ -237,7 +240,7 @@ pub fn load_text_weights(
             } else {
                 tensor
             };
-            kept.insert(name, tensor);
+            kept.insert(name, tensor.to_device(device)?);
         }
     }
     if kept.is_empty() {
