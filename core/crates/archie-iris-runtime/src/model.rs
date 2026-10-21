@@ -270,11 +270,11 @@ impl SparseMoe {
                 .reshape((count, capacity, width))?;
             let hidden = input
                 .matmul(&self.w_in.narrow(0, first, count)?)?
-                .broadcast_add(&self.b_in.narrow(0, first, count)?.unsqueeze(1)?)?;
+                .broadcast_add(&self.b_in.narrow(0, first, count)?.reshape((count, 1, ()))?)?;
             let hidden = crate::fast::gelu_erf(&hidden)?;
             let out = hidden
                 .matmul(&self.w_out.narrow(0, first, count)?)?
-                .broadcast_add(&self.b_out.narrow(0, first, count)?.unsqueeze(1)?)?;
+                .broadcast_add(&self.b_out.narrow(0, first, count)?.reshape((count, 1, ()))?)?;
             routed.push(out.reshape((count * capacity, width))?);
         }
         routed.push(Tensor::zeros((1, width), dtype, device)?);
@@ -952,9 +952,9 @@ mod tests {
         put("shared.2.weight", randn(&[WIDTH, HIDDEN]));
         put("shared.2.bias", randn(&[WIDTH]));
         put("w_in", randn(&[experts, WIDTH, HIDDEN]));
-        put("b_in", randn(&[experts, HIDDEN]));
+        put("b_in", randn(&[experts, 1, HIDDEN]));
         put("w_out", randn(&[experts, HIDDEN, WIDTH]));
-        put("b_out", randn(&[experts, WIDTH]));
+        put("b_out", randn(&[experts, 1, WIDTH]));
         let config = config(experts, top_k);
         let weights = Weights::from_tensors(
             map,
