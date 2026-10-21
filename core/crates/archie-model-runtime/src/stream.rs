@@ -373,7 +373,15 @@ impl StreamUnveiler {
                 }
             }
             StreamEvent::ToolCall(mut call) => {
-                call.arguments = unveil.restore(&call.arguments);
+                // Inside the strings of JSON arguments, so a value with a quote in it
+                // comes back escaped instead of breaking them.
+                call.arguments = match serde_json::from_str::<Value>(&call.arguments) {
+                    Ok(mut value) => {
+                        restore_json(&mut value, unveil);
+                        value.to_string()
+                    }
+                    Err(_) => unveil.restore(&call.arguments),
+                };
                 vec![StreamEvent::ToolCall(call)]
             }
             StreamEvent::Finished { reason } => {
@@ -389,6 +397,15 @@ impl StreamUnveiler {
                 events
             }
         }
+    }
+}
+
+fn restore_json(value: &mut Value, unveil: &archie_vault::veil::Unveil) {
+    match value {
+        Value::String(text) => *text = unveil.restore(text),
+        Value::Object(map) => map.values_mut().for_each(|v| restore_json(v, unveil)),
+        Value::Array(items) => items.iter_mut().for_each(|v| restore_json(v, unveil)),
+        _ => {}
     }
 }
 

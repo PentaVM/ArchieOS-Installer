@@ -8,12 +8,16 @@ use serde_json::json;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+/// Where a question is asked directly when the router is not used: public data only.
+const DIRECT_ENDPOINT: &str = "https://api.tokenfactory.nebius.com/v1/chat/completions";
+
 pub struct Nebius {
     routed: Option<Arc<Routed>>,
     veil: Arc<Veil>,
     grade: PrivacyGrade,
     http: reqwest::Client,
     key: Option<String>,
+    endpoint: String,
 }
 
 /// What a model answered, and how long it took.
@@ -65,11 +69,17 @@ impl Nebius {
             grade,
             http,
             key,
+            endpoint: DIRECT_ENDPOINT.into(),
         })
     }
 
     /// Asks each model in turn until one answers within `timeout`. `images` are data URLs,
     /// sent after the text in the order given.
+    ///
+    /// Anything graded above public goes through the router and the veil and nowhere else:
+    /// without a registry, with pictures (pixels cannot be veiled), or when no model the
+    /// router allows answers, it is refused, never sent straight to the cloud. Only public
+    /// data may take the direct request, and only when the router did not withhold it.
     pub async fn ask(
         &self,
         models: &[String],
@@ -79,8 +89,15 @@ impl Nebius {
         max_tokens: u32,
         timeout: Duration,
     ) -> Result<Answer, String> {
-        if images.is_empty() {
-            if let Some(routed) = &self.routed {
+        let private = self.grade > PrivacyGrade::Public;
+        if private && !images.is_empty() {
+            return Err(format!(
+                "withheld by privacy rules: {} data with a picture is not sent, a picture cannot be veiled",
+                self.grade
+            ));
+        }
+        match (&self.routed, images.is_empty()) {
+            (Some(routed), true) => {
                 let question = Question {
                     role: ModelRole::ReasoningWorker,
                     privacy: self.grade,
@@ -102,21 +119,20 @@ impl Nebius {
                     Err(RoutedError::Withheld(why)) => {
                         return Err(format!("withheld by privacy rules: {why}"));
                     }
-                    Err(RoutedError::NoModel(why)) => {
-                        if self.key.is_none() {
-                            return Err(format!("no model may answer: {why}"));
-                        }
-                    }
-                    Err(err) => {
-                        if self.key.is_none() {
-                            return Err(err.to_string());
-                        }
-                    }
+                    Err(err) if private || self.key.is_none() => return Err(err.to_string()),
+                    Err(_) => {}
                 }
             }
+            (None, _) if private => {
+                return Err(format!(
+                    "withheld by privacy rules: {} data needs the model registry to decide where it may go, and none is loaded",
+                    self.grade
+                ));
+            }
+            _ => {}
         }
 
-        // When images are present or when direct provider endpoint is used with key:
+        // Public data only from here: with pictures, or when the router found no model.
         let key = match &self.key {
             Some(k) => k,
             None => {
@@ -147,7 +163,7 @@ impl Nebius {
             let asked = Instant::now();
             let response = self
                 .http
-                .post("https://api.tokenfactory.nebius.com/v1/chat/completions")
+                .post(&self.endpoint)
                 .bearer_auth(key)
                 .timeout(left)
                 .json(&body)
@@ -198,5 +214,147 @@ impl Nebius {
             });
         }
         Err(last)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use archie_registry::ModelRegistry;
+    use archie_types::{
+        Availability, DataRetention, Locality, ModelDescriptor, ModelId, ProviderKind, TokenCost,
+    };
+    use std::collections::BTreeMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// A loopback stand-in for the cloud that counts who reaches it and answers each.
+    async fn cloud() -> (String, Arc<AtomicUsize>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!(
+            "http://{}/v1/chat/completions",
+            listener.local_addr().unwrap()
+        );
+        let reached = Arc::new(AtomicUsize::new(0));
+        let counter = reached.clone();
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                counter.fetch_add(1, Ordering::SeqCst);
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                    let mut buf = vec![0; 64 * 1024];
+                    let _ = stream.read(&mut buf).await;
+                    let body = r#"{"choices":[{"message":{"content":"ok"}}],"usage":{"completion_tokens":1}}"#;
+                    let _ = stream
+                        .write_all(
+                            format!(
+                                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                                body.len()
+                            )
+                            .as_bytes(),
+                        )
+                        .await;
+                });
+            }
+        });
+        (url, reached)
+    }
+
+    /// A model on this machine whose server is not there: local inference fails.
+    fn dead_local_model() -> Routed {
+        let mut registry = ModelRegistry::default();
+        registry
+            .register(ModelDescriptor {
+                id: ModelId::parse("local.qwen").unwrap(),
+                display_name: "Qwen (local, down)".to_string(),
+                provider: ProviderKind::OpenAiCompatible,
+                locality: Locality::Local,
+                node: None,
+                context_window: 32_768,
+                max_output_tokens: 4096,
+                capabilities: vec![ModelRole::ReasoningWorker.capability()],
+                max_privacy_grade: PrivacyGrade::Restricted,
+                retention: DataRetention::Unknown,
+                availability: Availability::Ready,
+                cost: TokenCost::FREE,
+                latency_ema_ms: Some(900),
+                quality_tier: 40,
+                required_accelerator_bytes: None,
+                labels: BTreeMap::from([(
+                    "base-url".to_string(),
+                    "http://127.0.0.1:9/v1/".to_string(),
+                )]),
+            })
+            .unwrap();
+        Routed::new(registry)
+    }
+
+    fn nebius(routed: Option<Routed>, grade: PrivacyGrade, endpoint: String) -> Nebius {
+        Nebius {
+            routed: routed.map(Arc::new),
+            veil: Arc::new(Veil::new()),
+            grade,
+            http: reqwest::Client::new(),
+            key: Some("a-key-for-tests".into()),
+            endpoint,
+        }
+    }
+
+    async fn ask(nebius: &Nebius, images: &[String]) -> Result<Answer, String> {
+        nebius
+            .ask(
+                &["some/model".to_string()],
+                "you judge drawings",
+                "is the cat drawn?",
+                images,
+                50,
+                Duration::from_secs(5),
+            )
+            .await
+    }
+
+    const PICTURE: &str = "data:image/png;base64,iVBORw0KGgo=";
+
+    #[tokio::test]
+    async fn private_data_never_takes_the_direct_request() {
+        for grade in [
+            PrivacyGrade::Internal,
+            PrivacyGrade::Sensitive,
+            PrivacyGrade::Restricted,
+        ] {
+            let (url, reached) = cloud().await;
+            // With a picture, with no registry, and with the local model down.
+            let cases = [
+                (nebius(None, grade, url.clone()), vec![PICTURE.to_string()]),
+                (nebius(None, grade, url.clone()), vec![]),
+                (nebius(Some(dead_local_model()), grade, url.clone()), vec![]),
+                (
+                    nebius(Some(dead_local_model()), grade, url.clone()),
+                    vec![PICTURE.to_string()],
+                ),
+            ];
+            for (i, (nebius, images)) in cases.iter().enumerate() {
+                let refused = ask(nebius, images).await;
+                assert!(refused.is_err(), "{grade} case {i}: {refused:?}");
+            }
+            assert_eq!(
+                reached.load(Ordering::SeqCst),
+                0,
+                "{grade} reached the cloud"
+            );
+        }
+    }
+
+    /// The same loopback cloud does count a public request, so the zeros above mean something.
+    #[tokio::test]
+    async fn public_data_with_a_picture_takes_the_direct_request() {
+        let (url, reached) = cloud().await;
+        let answer = ask(
+            &nebius(None, PrivacyGrade::Public, url),
+            &[PICTURE.to_string()],
+        )
+        .await
+        .unwrap();
+        assert_eq!(answer.text, "ok");
+        assert_eq!(reached.load(Ordering::SeqCst), 1);
     }
 }

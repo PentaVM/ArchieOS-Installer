@@ -146,7 +146,12 @@ impl Routed {
         if question.image.is_some() {
             request = request.requiring(ModelRole::VisionModel.capability());
         }
-        let outcome = self.router.route(&self.registry, &request);
+        self.callable(&request)
+    }
+
+    /// The eligible models for `request` that can be called, best first.
+    fn callable(&self, request: &RoutingRequest) -> Result<Vec<ModelId>, RoutedError> {
+        let outcome = self.router.route(&self.registry, request);
         let mut eligible: Vec<_> = outcome
             .considered()
             .iter()
@@ -233,7 +238,14 @@ impl Routed {
         Ok(Disclosure::Veiled { models, veiled })
     }
 
-    /// Decides how a tool chat request may be asked, veiling text for cloud models.
+    /// Decides how a tool chat request may be asked, as [`Routed::disclosure`] does for a
+    /// question: as it is to a model on the operator's own machines, else veiled for a cloud
+    /// model when graded no higher than `sensitive`.
+    ///
+    /// Everything that leaves is covered: message text, and every string inside the
+    /// arguments of the tools the assistant called. Ids and tool names are protocol and
+    /// stay as they are. The tool definitions are the program's own words; one that shows
+    /// a sensitive shape is not rewritten but withheld.
     pub fn disclose_chat(
         &self,
         request: &crate::ToolChatRequest,
@@ -241,63 +253,45 @@ impl Routed {
         role: ModelRole,
         veil: &Veil,
     ) -> Result<ChatDisclosure, RoutedError> {
+        use crate::ToolChatMessage as Message;
+
         if privacy == PrivacyGrade::Secret {
             return Err(RoutedError::Withheld("secret data reaches no model".into()));
         }
 
-        let mut total_chars = 0;
-        for msg in &request.messages {
-            match msg {
-                crate::ToolChatMessage::System(t) | crate::ToolChatMessage::User(t) => {
-                    total_chars += t.len();
-                }
-                crate::ToolChatMessage::Assistant { content, .. } => {
-                    if let Some(c) = content {
-                        total_chars += c.len();
-                    }
-                }
-                crate::ToolChatMessage::Tool { content, .. } => {
-                    total_chars += content.len();
-                }
-            }
-        }
-        let input_tokens = (total_chars / 3).max(1) as u32;
-
-        let routing_req = RoutingRequest::new(privacy, input_tokens, request.max_tokens)
-            .requiring(role.capability());
-        let outcome = self.router.route(&self.registry, &routing_req);
-        let mut eligible: Vec<_> = outcome
-            .considered()
+        let total_chars: usize = request
+            .messages
             .iter()
-            .filter(|c| c.is_eligible())
-            .collect();
-        eligible.sort_by(|a, b| b.score.total_cmp(&a.score));
-
-        let callable: Vec<ModelId> = eligible
-            .into_iter()
-            .filter(|candidate| {
-                self.registry
-                    .get(&candidate.model)
-                    .and_then(|descriptor| ProviderEndpoint::for_model(descriptor).ok())
-                    .is_some_and(|endpoint| endpoint.is_configured())
+            .map(|message| match message {
+                Message::System(t) | Message::User(t) => t.len(),
+                Message::Assistant {
+                    content,
+                    tool_calls,
+                } => {
+                    content.as_ref().map_or(0, String::len)
+                        + tool_calls.iter().map(|c| c.arguments.len()).sum::<usize>()
+                }
+                Message::Tool { content, .. } => content.len(),
             })
-            .map(|candidate| candidate.model.clone())
-            .collect();
+            .sum();
+        let input_tokens = (total_chars / 3).max(1) as u32;
+        let routing = |grade| {
+            RoutingRequest::new(grade, input_tokens, request.max_tokens)
+                .requiring(role.capability())
+        };
 
-        if callable.is_empty() {
-            return Err(RoutedError::NoModel(outcome.explain()));
-        }
-
-        let own: Vec<ModelId> = callable
-            .iter()
+        // No model at this grade is no reason to refuse: the veiled request below is
+        // public, and a cloud model may take it.
+        let own: Vec<ModelId> = self
+            .callable(&routing(privacy))
+            .unwrap_or_default()
+            .into_iter()
             .filter(|m| {
                 self.registry
                     .get(m)
                     .is_some_and(|d| d.locality != Locality::Cloud)
             })
-            .cloned()
             .collect();
-
         if !own.is_empty() {
             return Ok(ChatDisclosure::Kept {
                 models: own,
@@ -311,24 +305,57 @@ impl Routed {
             ));
         }
 
-        let mut text_ptrs = Vec::new();
-        for msg in &request.messages {
-            match msg {
-                crate::ToolChatMessage::System(t) | crate::ToolChatMessage::User(t) => {
-                    text_ptrs.push(t.as_str());
-                }
-                crate::ToolChatMessage::Assistant { content, .. } => {
-                    if let Some(c) = content {
-                        text_ptrs.push(c.as_str());
-                    }
-                }
-                crate::ToolChatMessage::Tool { content, .. } => {
-                    text_ptrs.push(content.as_str());
-                }
+        for tool in &request.tools {
+            let parameters = tool.parameters.to_string();
+            if shows_sensitive(veil, &[&tool.name, &tool.description, &parameters]) {
+                return Err(RoutedError::Withheld(format!(
+                    "the definition of tool {} holds a sensitive value",
+                    tool.name
+                )));
             }
         }
 
-        let veiled = veil.cover(&text_ptrs);
+        // Every text that leaves, in the order it is put back below.
+        let mut arguments: Vec<Option<serde_json::Value>> = Vec::new();
+        let mut leaving: Vec<String> = Vec::new();
+        for message in &request.messages {
+            match message {
+                Message::System(t) | Message::User(t) => leaving.push(t.clone()),
+                Message::Assistant {
+                    content,
+                    tool_calls,
+                } => {
+                    leaving.extend(content.iter().cloned());
+                    for call in tool_calls {
+                        match serde_json::from_str::<serde_json::Value>(&call.arguments) {
+                            Ok(value) => {
+                                let mut keys = Vec::new();
+                                json_keys(&value, &mut keys);
+                                let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
+                                if shows_sensitive(veil, &keys) {
+                                    return Err(RoutedError::Withheld(format!(
+                                        "the arguments of a call to {} hold a sensitive value \
+                                         where only a name may stand",
+                                        call.name
+                                    )));
+                                }
+                                json_strings(&value, &mut leaving);
+                                arguments.push(Some(value));
+                            }
+                            // Not JSON: covered as the text it is.
+                            Err(_) => {
+                                leaving.push(call.arguments.clone());
+                                arguments.push(None);
+                            }
+                        }
+                    }
+                }
+                Message::Tool { content, .. } => leaving.push(content.clone()),
+            }
+        }
+
+        let texts: Vec<&str> = leaving.iter().map(String::as_str).collect();
+        let veiled = veil.cover(&texts);
         let residue = veiled.residue();
         if !residue.is_empty() {
             return Err(RoutedError::Withheld(format!(
@@ -338,87 +365,66 @@ impl Routed {
             )));
         }
 
-        let mut veiled_iter = veiled.texts.into_iter();
-        let mut new_messages = Vec::with_capacity(request.messages.len());
+        let Veiled { texts, unveil } = veiled;
+        let mut covered = texts.into_iter();
+        let mut arguments = arguments.into_iter();
+        let mut messages = Vec::with_capacity(request.messages.len() + 1);
         let mut system_found = false;
-
-        for msg in &request.messages {
-            match msg {
-                crate::ToolChatMessage::System(_) => {
-                    let mut s = veiled_iter.next().unwrap_or_default();
+        for message in &request.messages {
+            messages.push(match message {
+                Message::System(_) => {
+                    let mut s = covered.next().unwrap_or_default();
                     if !system_found {
                         s.push_str(STAND_INS);
                         system_found = true;
                     }
-                    new_messages.push(crate::ToolChatMessage::System(s));
+                    Message::System(s)
                 }
-                crate::ToolChatMessage::User(_) => {
-                    new_messages.push(crate::ToolChatMessage::User(
-                        veiled_iter.next().unwrap_or_default(),
-                    ));
-                }
-                crate::ToolChatMessage::Assistant {
+                Message::User(_) => Message::User(covered.next().unwrap_or_default()),
+                Message::Assistant {
                     content,
                     tool_calls,
                 } => {
-                    let new_content = if content.is_some() {
-                        veiled_iter.next()
-                    } else {
-                        None
-                    };
-                    new_messages.push(crate::ToolChatMessage::Assistant {
-                        content: new_content,
-                        tool_calls: tool_calls.clone(),
-                    });
+                    let content = content.as_ref().map(|_| covered.next().unwrap_or_default());
+                    let tool_calls = tool_calls
+                        .iter()
+                        .map(|call| {
+                            let arguments = match arguments.next().flatten() {
+                                Some(mut value) => {
+                                    put_json_strings(&mut value, &mut covered);
+                                    value.to_string()
+                                }
+                                None => covered.next().unwrap_or_default(),
+                            };
+                            crate::ToolCall {
+                                id: call.id.clone(),
+                                name: call.name.clone(),
+                                arguments,
+                            }
+                        })
+                        .collect();
+                    Message::Assistant {
+                        content,
+                        tool_calls,
+                    }
                 }
-                crate::ToolChatMessage::Tool { call_id, .. } => {
-                    new_messages.push(crate::ToolChatMessage::Tool {
-                        call_id: call_id.clone(),
-                        content: veiled_iter.next().unwrap_or_default(),
-                    });
-                }
-            }
+                Message::Tool { call_id, .. } => Message::Tool {
+                    call_id: call_id.clone(),
+                    content: covered.next().unwrap_or_default(),
+                },
+            });
         }
         if !system_found {
-            new_messages.insert(
-                0,
-                crate::ToolChatMessage::System(STAND_INS.trim_start().to_string()),
-            );
+            messages.insert(0, Message::System(STAND_INS.trim_start().to_string()));
         }
 
-        let public_routing_req =
-            RoutingRequest::new(PrivacyGrade::Public, input_tokens, request.max_tokens)
-                .requiring(role.capability());
-        let public_outcome = self.router.route(&self.registry, &public_routing_req);
-        let mut public_eligible: Vec<_> = public_outcome
-            .considered()
-            .iter()
-            .filter(|c| c.is_eligible())
-            .collect();
-        public_eligible.sort_by(|a, b| b.score.total_cmp(&a.score));
-
-        let cloud_models: Vec<ModelId> = public_eligible
-            .into_iter()
-            .filter(|candidate| {
-                self.registry
-                    .get(&candidate.model)
-                    .and_then(|descriptor| ProviderEndpoint::for_model(descriptor).ok())
-                    .is_some_and(|endpoint| endpoint.is_configured())
-            })
-            .map(|candidate| candidate.model.clone())
-            .collect();
-
-        if cloud_models.is_empty() {
-            return Err(RoutedError::NoModel(public_outcome.explain()));
-        }
-
-        let mut veiled_req = request.clone();
-        veiled_req.messages = new_messages;
-
+        let models = self.callable(&routing(PrivacyGrade::Public))?;
+        let mut veiled_request = request.clone();
+        veiled_request.messages = messages;
         Ok(ChatDisclosure::Veiled {
-            models: cloud_models,
-            request: veiled_req,
-            unveil: veiled.unveil,
+            models,
+            request: veiled_request,
+            unveil,
         })
     }
 
@@ -545,6 +551,52 @@ impl Routed {
             seconds: asked.elapsed().as_secs_f32(),
             completion_tokens: response.usage.map_or(0, |usage| usage.completion_tokens),
         })
+    }
+}
+
+/// Whether the veil would change any of `texts`, or still finds something in them.
+fn shows_sensitive(veil: &Veil, texts: &[&str]) -> bool {
+    let veiled = veil.cover(texts);
+    veiled
+        .texts
+        .iter()
+        .zip(texts)
+        .any(|(after, before)| after != before)
+        || !veiled.residue().is_empty()
+}
+
+/// The object keys anywhere in `value`.
+fn json_keys(value: &serde_json::Value, out: &mut Vec<String>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, inner) in map {
+                out.push(key.clone());
+                json_keys(inner, out);
+            }
+        }
+        serde_json::Value::Array(items) => items.iter().for_each(|v| json_keys(v, out)),
+        _ => {}
+    }
+}
+
+/// The string values anywhere in `value`, in the order [`put_json_strings`] puts them back.
+fn json_strings(value: &serde_json::Value, out: &mut Vec<String>) {
+    match value {
+        serde_json::Value::String(text) => out.push(text.clone()),
+        serde_json::Value::Object(map) => map.values().for_each(|v| json_strings(v, out)),
+        serde_json::Value::Array(items) => items.iter().for_each(|v| json_strings(v, out)),
+        _ => {}
+    }
+}
+
+fn put_json_strings(value: &mut serde_json::Value, texts: &mut impl Iterator<Item = String>) {
+    match value {
+        serde_json::Value::String(text) => *text = texts.next().unwrap_or_default(),
+        serde_json::Value::Object(map) => map.values_mut().for_each(|v| put_json_strings(v, texts)),
+        serde_json::Value::Array(items) => {
+            items.iter_mut().for_each(|v| put_json_strings(v, texts))
+        }
+        _ => {}
     }
 }
 
