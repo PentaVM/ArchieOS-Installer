@@ -274,7 +274,12 @@ impl SparseMoe {
             let hidden = crate::fast::gelu_erf(&hidden)?;
             let out = hidden
                 .matmul(&self.w_out.narrow(0, first, count)?)?
-                .broadcast_add(&self.b_out.narrow(0, first, count)?.reshape((count, 1, ()))?)?;
+                .broadcast_add(
+                    &self
+                        .b_out
+                        .narrow(0, first, count)?
+                        .reshape((count, 1, ()))?,
+                )?;
             routed.push(out.reshape((count * capacity, width))?);
         }
         routed.push(Tensor::zeros((1, width), dtype, device)?);

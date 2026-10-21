@@ -25,6 +25,11 @@ Sigue el paso 3 de `HANDOFF-WANDA-IRIS-2026-10-20.md` y §3/§12 de
   umbral 0 dieron idénticas bit a bit; la prueba deja 1e-5 por si otra CPU elige otro kernel
   de gemm. `tokens_past_capacity_keep_only_the_shared_expert` comprueba los descartes.
   `cargo clippy -p archie-iris-runtime --all-targets -- -D warnings` y `cargo fmt` limpios.
+- **Arreglo de revisión** (`9fc97b9`, del dueño): en la release los sesgos de los expertos son
+  `[E, 1, H]`; `route_on_device` les agregaba otra dimensión y el matmul por lotes fallaba, así
+  que el camino de GPU no corría con los pesos reales. Ahora se llevan a `[count, 1, H]` con
+  cualquiera de las dos formas, y las pruebas arman los sesgos como la release. Sin el arreglo
+  fallan 2 de las 3 pruebas del MoE; con él pasan.
 - **Sin verificar**: la build `--features cuda` (sin toolkit aquí), la paridad con
   `tests/parity.rs` sobre los pesos reales y cualquier latencia en la RTX 3070. La meta de F1
   (open ≤ 300 ms, focused ≤ 90 ms) sigue sin medir.
