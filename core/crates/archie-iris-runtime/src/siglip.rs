@@ -209,7 +209,8 @@ impl SiglipText {
             x = layer.forward(&x, allowed.as_ref())?;
         }
         let states = self.norm.forward(&x)?;
-        let last = states.narrow(1, length - 1, 1)?.squeeze(1)?;
+        // The last position is a strided view; cuBLAS refuses it for two or more phrases.
+        let last = states.narrow(1, length - 1, 1)?.squeeze(1)?.contiguous()?;
         Ok(TextOutput {
             pooled: self.head.forward(&last)?,
             states,
