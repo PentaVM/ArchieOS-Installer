@@ -8,7 +8,7 @@
 use crate::nn::{l2_normalize, Attention, LayerNorm, Linear, Mlp, Result};
 use crate::phrases::PhraseFeatures;
 use crate::preprocess::{canvas_tensor, Frame};
-use crate::roi::roi_align;
+use crate::roi::{roi_align, roi_align_matrix};
 use crate::siglip::SiglipVision;
 use crate::vjepa::{Rope, VJepa};
 use crate::weights::{ModelConfig, Weights};
@@ -78,10 +78,15 @@ fn inclusive_counts(x: &Tensor, triangle: &Tensor) -> Result<Tensor> {
         .narrow(0, 0, rows)?)
 }
 
-/// `value` in the shape and on the device of `like`, made there rather than copied from
-/// the host.
+/// `value` in the shape, dtype and on the device of `like`, set there by one fill kernel
+/// rather than copied from the host.
 fn filled(like: &Tensor, value: f64) -> Result<Tensor> {
-    Ok((like.zeros_like()? + value)?)
+    let full = Tensor::full(value as f32, like.shape(), like.device())?;
+    Ok(if like.dtype() == DType::F32 {
+        full
+    } else {
+        full.to_dtype(like.dtype())?
+    })
 }
 
 /// Token-routed top-k experts with a fixed capacity, plus an always-on shared expert.
@@ -364,6 +369,28 @@ impl FusionLayer {
         text: &Tensor,
         text_padding: &Tensor,
     ) -> Result<(Tensor, Tensor)> {
+        let image = self.image_self_block(image, position)?;
+        self.after_image_self(&image, position, text, text_padding)
+    }
+
+    /// The layer on `batch` rows that all hold the same image `[1, N, D]`: the image
+    /// self-attention depends on nothing else, so it runs once and the rows part at the
+    /// cross-attention with their own text.
+    fn forward_shared_image(
+        &self,
+        image: &Tensor,
+        batch: usize,
+        position: &Tensor,
+        text: &Tensor,
+        text_padding: &Tensor,
+    ) -> Result<(Tensor, Tensor)> {
+        let image = self.image_self_block(image, position)?;
+        let (_, tokens, width) = image.dims3()?;
+        let image = image.broadcast_as((batch, tokens, width))?.contiguous()?;
+        self.after_image_self(&image, position, text, text_padding)
+    }
+
+    fn image_self_block(&self, image: &Tensor, position: &Tensor) -> Result<Tensor> {
         let batch = image.dim(0)?;
         let normed = self.image_norm1.forward(image)?;
         let query = normed.broadcast_add(position)?;
@@ -372,9 +399,18 @@ impl FusionLayer {
             self.image_self
                 .forward(&q, &q, &normed.narrow(0, start, len)?, None)
         })?;
-        let image = (image + attended)?;
-        let query = self.image_norm2.forward(&image)?.broadcast_add(position)?;
-        let image = (&image
+        Ok((image + attended)?)
+    }
+
+    fn after_image_self(
+        &self,
+        image: &Tensor,
+        position: &Tensor,
+        text: &Tensor,
+        text_padding: &Tensor,
+    ) -> Result<(Tensor, Tensor)> {
+        let query = self.image_norm2.forward(image)?.broadcast_add(position)?;
+        let image = (image
             + self
                 .image_text
                 .forward(&query, text, text, Some(text_padding))?)?;
@@ -450,6 +486,47 @@ impl DecoderLayer {
             )?)?;
         Ok((&queries + self.ffn.forward(&self.norm4.forward(&queries)?)?)?)
     }
+}
+
+/// The `count` tokens of each row with the highest confidence, ties to the lower index,
+/// as `[B, count]` u32 on the confidence's device. The host route reads the row back and
+/// sorts it stably.
+fn top_tokens_on_host(confidence: &Tensor, count: usize) -> Result<Tensor> {
+    let rows: Vec<Vec<f32>> = confidence.to_vec2()?;
+    let mut selected = Vec::with_capacity(rows.len() * count);
+    for row in &rows {
+        let mut order: Vec<u32> = (0..row.len() as u32).collect();
+        order.sort_by(|&a, &b| row[b as usize].total_cmp(&row[a as usize]).then(a.cmp(&b)));
+        selected.extend_from_slice(&order[..count]);
+    }
+    Ok(Tensor::from_vec(
+        selected,
+        (rows.len(), count),
+        confidence.device(),
+    )?)
+}
+
+/// [`top_tokens_on_host`] without leaving the device. The sort there is not stable, so
+/// every key is made distinct in f64 without changing the order of distinct confidences:
+/// token `i` loses `|c| * i * 2^-40 + i * 2^-1000`. Two different f32 values differ by at
+/// least 2^-24 of their size (or, against zero, by far more than 2^-1000 * N), while the
+/// largest loss is under 2^-30 of it, and each step is above f64's 2^-52 resolution, so
+/// equal confidences come out in index order.
+fn top_tokens_on_device(confidence: &Tensor, count: usize) -> Result<Tensor> {
+    let (batch, tokens) = confidence.dims2()?;
+    let value = confidence.to_dtype(DType::F64)?;
+    let index = Tensor::arange(0u32, tokens as u32, confidence.device())?
+        .to_dtype(DType::F64)?
+        .unsqueeze(0)?
+        .broadcast_as((batch, tokens))?;
+    let relative = (value.abs()? * &index)? * 2f64.powi(-40);
+    let absolute = (&index * 2f64.powi(-1000))?;
+    let key = ((value - relative?)? - absolute)?;
+    Ok(key
+        .contiguous()?
+        .arg_sort_last_dim(false)?
+        .narrow(1, 0, count)?
+        .contiguous()?)
 }
 
 /// Scaled cosine between regions and phrases.
@@ -789,6 +866,29 @@ impl IrisModel {
         Ok((self.fused_norm.forward(&image)?, text))
     }
 
+    /// [`IrisModel::fuse`] for one image `[1, N, D]` read against every row of `text`
+    /// (open mode's chunks, `/act`'s instruction and null rows). The same numbers as
+    /// fusing the image repeated per row, without repeating the first self-attention.
+    pub fn fuse_shared_image(
+        &self,
+        tokens: &Tensor,
+        text: &Tensor,
+        text_padding: &Tensor,
+    ) -> Result<(Tensor, Tensor)> {
+        let batch = text.dim(0)?;
+        let Some((first, rest)) = self.fusion.split_first() else {
+            let (_, n, d) = tokens.dims3()?;
+            let image = tokens.broadcast_as((batch, n, d))?.contiguous()?;
+            return Ok((self.fused_norm.forward(&image)?, text.clone()));
+        };
+        let (mut image, mut text) =
+            first.forward_shared_image(tokens, batch, &self.position, text, text_padding)?;
+        for layer in rest {
+            (image, text) = layer.forward(&image, &self.position, &text, text_padding)?;
+        }
+        Ok((self.fused_norm.forward(&image)?, text))
+    }
+
     /// `decode_fused` without the extras: phrase scores and boxes for every query.
     pub fn decode(
         &self,
@@ -808,30 +908,26 @@ impl IrisModel {
                 .forward(fused, &phrase_values, &encoded.phrase_padding)?;
         let token_boxes = self.token_box.forward(fused, &anchors)?;
         let count = self.config.queries.min(fused.dim(1)?);
-        let confidence: Vec<Vec<f32>> = token_logits.max(D::Minus1)?.to_vec2()?;
-        let mut selected = Vec::with_capacity(batch * count);
-        for row in &confidence {
-            let mut order: Vec<u32> = (0..row.len() as u32).collect();
-            order.sort_by(|&a, &b| row[b as usize].total_cmp(&row[a as usize]).then(a.cmp(&b)));
-            selected.extend_from_slice(&order[..count]);
-        }
-        let mut queries = Vec::with_capacity(batch);
-        let mut references = Vec::with_capacity(batch);
-        for row in 0..batch {
-            let ids = Tensor::from_vec(
-                selected[row * count..(row + 1) * count].to_vec(),
-                count,
-                &self.device,
-            )?;
-            queries.push(fused.get(row)?.index_select(&ids, 0)?);
-            references.push(token_boxes.get(row)?.index_select(&ids, 0)?);
-        }
+        let confidence = token_logits.max(D::Minus1)?;
+        let selected = if self.device.is_cpu() {
+            top_tokens_on_host(&confidence, count)?
+        } else {
+            top_tokens_on_device(&confidence, count)?
+        };
+        let width = fused.dim(2)?;
+        let gather = |source: &Tensor, columns: usize| -> Result<Tensor> {
+            let ids = selected
+                .unsqueeze(2)?
+                .broadcast_as((batch, count, columns))?
+                .contiguous()?;
+            Ok(source.contiguous()?.gather(&ids, 1)?)
+        };
         let mut queries = self.query_projection_norm.forward(
             &self
                 .query_projection_linear
-                .forward(&Tensor::stack(&queries, 0)?)?,
+                .forward(&gather(fused, width)?)?,
         )?;
-        let mut reference = Tensor::stack(&references, 0)?;
+        let mut reference = gather(&token_boxes, 4)?;
         let image_keys = fused.broadcast_add(&self.position)?;
         let mut last = None;
         for ((layer, scorer), box_head) in self
@@ -885,25 +981,36 @@ impl IrisModel {
         }
         let d = self.config.dimension;
         let g = self.grid;
-        // [N, D] -> [D, G, G], channel-major for roi_align.
-        let map: Vec<f32> = fused
-            .to_dtype(DType::F32)?
-            .t()?
-            .contiguous()?
-            .flatten_all()?
-            .to_vec1()?;
-        let mut pooled = Vec::with_capacity(boxes.len() * d * 9);
-        for b in boxes {
-            let scaled = [
-                b[0] * g as f32,
-                b[1] * g as f32,
-                b[2] * g as f32,
-                b[3] * g as f32,
-            ];
-            pooled.extend(roi_align(&map, d, g, g, scaled, 3));
-        }
-        let pooled =
-            Tensor::from_vec(pooled, (boxes.len(), d * 9), &self.device)?.to_dtype(self.dtype)?;
+        let scaled: Vec<[f32; 4]> = boxes.iter().map(|b| b.map(|v| v * g as f32)).collect();
+        let pooled = if self.device.is_cpu() {
+            // [N, D] -> [D, G, G], channel-major for roi_align.
+            let map: Vec<f32> = fused
+                .to_dtype(DType::F32)?
+                .t()?
+                .contiguous()?
+                .flatten_all()?
+                .to_vec1()?;
+            let mut pooled = Vec::with_capacity(boxes.len() * d * 9);
+            for b in &scaled {
+                pooled.extend(roi_align(&map, d, g, g, *b, 3));
+            }
+            Tensor::from_vec(pooled, (boxes.len(), d * 9), &self.device)?
+        } else {
+            // The map stays on the device: a small matrix of bilinear weights goes up and
+            // one product pools every box, `[boxes * 9, N] x [N, D]`.
+            let weights = Tensor::from_vec(
+                roi_align_matrix(g, g, &scaled, 3),
+                (boxes.len() * 9, g * g),
+                &self.device,
+            )?;
+            weights
+                .matmul(&fused.to_dtype(DType::F32)?)?
+                .reshape((boxes.len(), 9, d))?
+                .transpose(1, 2)?
+                .contiguous()?
+                .reshape((boxes.len(), d * 9))?
+        };
+        let pooled = pooled.to_dtype(self.dtype)?;
         let hidden = crate::fast::gelu_erf(
             &self
                 .instance_first
@@ -960,6 +1067,23 @@ mod tests {
     /// A MoE on random weights. The router leans on the first `favourites` experts so their
     /// queues overflow, and has no bias, so a zero token sees every expert tied.
     fn moe(experts: usize, top_k: usize, favourites: usize) -> SparseMoe {
+        let config = config(experts, top_k);
+        let weights = Weights::from_tensors(
+            moe_tensors(experts, favourites, "moe"),
+            Release {
+                path: PathBuf::from("test.pt"),
+                sha256: "a".repeat(64),
+                format: "archie-iris-beta1-weights-v1".to_owned(),
+                step: None,
+                score: None,
+                config: config.clone(),
+            },
+        );
+        SparseMoe::load(&weights, "moe", &config).unwrap()
+    }
+
+    /// The MoE's tensors under `prefix`, in the release's shapes.
+    fn moe_tensors(experts: usize, favourites: usize, prefix: &str) -> HashMap<String, Tensor> {
         let device = Device::Cpu;
         let randn = |shape: &[usize]| Tensor::randn(0f32, 0.5, shape, &device).unwrap();
         let mut router = randn(&[experts, WIDTH]).to_vec2::<f32>().unwrap();
@@ -969,7 +1093,7 @@ mod tests {
         let router: Vec<f32> = router.into_iter().flatten().collect();
         let mut map = HashMap::new();
         let mut put = |name: &str, tensor: Tensor| {
-            map.insert(format!("moe.{name}"), tensor);
+            map.insert(format!("{prefix}.{name}"), tensor);
         };
         put(
             "router.weight",
@@ -983,19 +1107,7 @@ mod tests {
         put("b_in", randn(&[experts, 1, HIDDEN]));
         put("w_out", randn(&[experts, HIDDEN, WIDTH]));
         put("b_out", randn(&[experts, 1, WIDTH]));
-        let config = config(experts, top_k);
-        let weights = Weights::from_tensors(
-            map,
-            Release {
-                path: PathBuf::from("test.pt"),
-                sha256: "a".repeat(64),
-                format: "archie-iris-beta1-weights-v1".to_owned(),
-                step: None,
-                score: None,
-                config: config.clone(),
-            },
-        );
-        SparseMoe::load(&weights, "moe", &config).unwrap()
+        map
     }
 
     fn on_host(moe: &SparseMoe, x: &Tensor) -> Tensor {
@@ -1105,5 +1217,120 @@ mod tests {
                 assert_eq!(*d == 0.0, token >= capacity, "token {token}: {d:e}");
             }
         }
+    }
+
+    /// One fusion layer of width 16, 4 heads, on random weights, with the MoE above.
+    fn fusion_layer() -> FusionLayer {
+        let device = Device::Cpu;
+        let randn = |shape: &[usize]| Tensor::randn(0f32, 0.3, shape, &device).unwrap();
+        let mut map = moe_tensors(8, 1, "f.moe");
+        for norm in [
+            "image_norm1",
+            "image_norm2",
+            "image_norm3",
+            "text_norm1",
+            "text_norm2",
+        ] {
+            map.insert(format!("f.{norm}.weight"), (randn(&[WIDTH]) + 1.0).unwrap());
+            map.insert(format!("f.{norm}.bias"), randn(&[WIDTH]));
+        }
+        for block in ["image_self", "image_text", "text_image"] {
+            for proj in ["query", "key", "value", "output"] {
+                map.insert(format!("f.{block}.{proj}.weight"), randn(&[WIDTH, WIDTH]));
+                map.insert(format!("f.{block}.{proj}.bias"), randn(&[WIDTH]));
+            }
+        }
+        map.insert("f.text_ffn.0.weight".into(), randn(&[HIDDEN, WIDTH]));
+        map.insert("f.text_ffn.0.bias".into(), randn(&[HIDDEN]));
+        map.insert("f.text_ffn.2.weight".into(), randn(&[WIDTH, HIDDEN]));
+        map.insert("f.text_ffn.2.bias".into(), randn(&[WIDTH]));
+        let config = config(8, 2);
+        let weights = Weights::from_tensors(
+            map,
+            Release {
+                path: PathBuf::from("test.pt"),
+                sha256: "a".repeat(64),
+                format: "archie-iris-beta1-weights-v1".to_owned(),
+                step: None,
+                score: None,
+                config: config.clone(),
+            },
+        );
+        FusionLayer::load(&weights, "f", &config).unwrap()
+    }
+
+    #[test]
+    fn a_shared_image_fuses_like_the_image_repeated() {
+        let layer = fusion_layer();
+        let (batch, tokens, words) = (5, 24, 6);
+        let image = Tensor::randn(0f32, 1.0, (1, tokens, WIDTH), &Device::Cpu).unwrap();
+        let position = Tensor::randn(0f32, 0.1, (tokens, WIDTH), &Device::Cpu).unwrap();
+        let text = Tensor::randn(0f32, 1.0, (batch, words, WIDTH), &Device::Cpu).unwrap();
+        let padding: Vec<u8> = (0..batch * words)
+            .map(|i| u8::from(i % words >= 2 + i / words % 4))
+            .collect();
+        let padding = Tensor::from_vec(padding, (batch, words), &Device::Cpu).unwrap();
+        let repeated = image
+            .broadcast_as((batch, tokens, WIDTH))
+            .unwrap()
+            .contiguous()
+            .unwrap();
+        let (image_a, text_a) = layer
+            .forward(&repeated, &position, &text, &padding)
+            .unwrap();
+        let (image_b, text_b) = layer
+            .forward_shared_image(&image, batch, &position, &text, &padding)
+            .unwrap();
+        assert_eq!(max_difference(&image_a, &image_b), 0.0);
+        assert_eq!(max_difference(&text_a, &text_b), 0.0);
+    }
+
+    #[test]
+    fn queries_are_chosen_alike_on_both_routes() {
+        let rows: Vec<Vec<f32>> = vec![
+            // ties at a positive value, at zero, at a negative value, and a blocked row
+            vec![
+                0.5, 2.0, 0.5, 2.0, -1.0, 0.0, 0.0, -1.0, 1e-45, -1e-45, 3.0, 0.5,
+            ],
+            vec![-1e4; 12],
+            (0..12).map(|i| ((i * 7) % 5) as f32 * 0.25 - 0.5).collect(),
+            vec![
+                1.0,
+                1.0 + f32::EPSILON,
+                1.0,
+                1.0 - f32::EPSILON / 2.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+            ],
+        ];
+        let confidence = Tensor::from_vec(
+            rows.iter().flatten().copied().collect::<Vec<f32>>(),
+            (rows.len(), 12),
+            &Device::Cpu,
+        )
+        .unwrap();
+        for count in [1, 5, 12] {
+            let host: Vec<Vec<u32>> = top_tokens_on_host(&confidence, count)
+                .unwrap()
+                .to_vec2()
+                .unwrap();
+            let device: Vec<Vec<u32>> = top_tokens_on_device(&confidence, count)
+                .unwrap()
+                .to_vec2()
+                .unwrap();
+            assert_eq!(host, device, "count {count}");
+        }
+        let all: Vec<Vec<u32>> = top_tokens_on_host(&confidence, 12)
+            .unwrap()
+            .to_vec2()
+            .unwrap();
+        assert_eq!(all[0][..4], [10, 1, 3, 0]);
+        assert_eq!(all[1], (0..12).collect::<Vec<u32>>());
     }
 }

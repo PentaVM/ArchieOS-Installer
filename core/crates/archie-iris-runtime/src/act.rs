@@ -605,8 +605,7 @@ impl Actor {
             let null_padding = Tensor::from_vec(null_padding, (1, length), &model.device)?;
             let text = Tensor::cat(&[&encoded.text, &null_row], 0)?;
             let padding = Tensor::cat(&[&encoded.text_padding, &null_padding], 0)?;
-            let both = tokens.broadcast_as((2, tokens.dim(1)?, d))?.contiguous()?;
-            let (fused_both, text_both) = model.fuse(&both, &text, &padding)?;
+            let (fused_both, text_both) = model.fuse_shared_image(&tokens, &text, &padding)?;
             let fused = fused_both.narrow(0, 0, 1)?;
             let fused_null = fused_both.narrow(0, 1, 1)?;
 

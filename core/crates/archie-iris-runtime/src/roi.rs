@@ -52,6 +52,48 @@ pub fn roi_align(
     result
 }
 
+/// [`roi_align`] as a matrix: `roi_align` is linear in the map, so the pooled values of
+/// `boxes` over a `[C, H, W]` map are this `[boxes * out * out, H * W]` matrix times the map
+/// laid out `[H * W, C]`. Row `box * out * out + bin` holds the bin's bilinear weights
+/// divided by the sample count. The products sum in a different order than the loop in
+/// `roi_align`, so the two agree to rounding, not to the bit.
+pub fn roi_align_matrix(height: usize, width: usize, boxes: &[[f32; 4]], out: usize) -> Vec<f32> {
+    const SAMPLING: usize = 2;
+    let count = (SAMPLING * SAMPLING) as f32;
+    let plane = height * width;
+    let mut matrix = vec![0f32; boxes.len() * out * out * plane];
+    let mut taps = Vec::with_capacity(16);
+    for (index, box_xyxy) in boxes.iter().enumerate() {
+        let offset = 0.5f32;
+        let start_w = box_xyxy[0] - offset;
+        let start_h = box_xyxy[1] - offset;
+        let end_w = box_xyxy[2] - offset;
+        let end_h = box_xyxy[3] - offset;
+        let bin_w = (end_w - start_w) / out as f32;
+        let bin_h = (end_h - start_h) / out as f32;
+        for ph in 0..out {
+            for pw in 0..out {
+                taps.clear();
+                for iy in 0..SAMPLING {
+                    let y =
+                        start_h + ph as f32 * bin_h + (iy as f32 + 0.5) * bin_h / SAMPLING as f32;
+                    for ix in 0..SAMPLING {
+                        let x = start_w
+                            + pw as f32 * bin_w
+                            + (ix as f32 + 0.5) * bin_w / SAMPLING as f32;
+                        bilinear_taps(height, width, y, x, &mut taps);
+                    }
+                }
+                let row = (index * out * out + ph * out + pw) * plane;
+                for &(cell, weight) in &taps {
+                    matrix[row + cell] += weight / count;
+                }
+            }
+        }
+    }
+    matrix
+}
+
 fn bilinear_taps(height: usize, width: usize, y: f32, x: f32, taps: &mut Vec<(usize, f32)>) {
     if y < -1.0 || y > height as f32 || x < -1.0 || x > width as f32 {
         return;
@@ -118,6 +160,42 @@ pub fn nms(boxes: &[[f32; 4]], scores: &[f32], threshold: f32) -> Vec<usize> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_matrix_pools_what_roi_align_pools() {
+        let (channels, height, width) = (5, 7, 9);
+        let map: Vec<f32> = (0..channels * height * width)
+            .map(|i| ((i * 2654435761usize) % 1000) as f32 / 250.0 - 2.0)
+            .collect();
+        let boxes = [
+            [0.3f32, 1.2, 4.8, 6.1],
+            [-1.5, -0.5, 2.0, 3.0],
+            [6.0, 4.0, 9.5, 7.5],
+            [2.0, 2.0, 2.0, 2.0],
+        ];
+        let out = 3;
+        let matrix = roi_align_matrix(height, width, &boxes, out);
+        let plane = height * width;
+        for (index, b) in boxes.iter().enumerate() {
+            let expected = roi_align(&map, channels, height, width, *b, out);
+            for channel in 0..channels {
+                for bin in 0..out * out {
+                    let row = &matrix[(index * out * out + bin) * plane..][..plane];
+                    let got: f32 = row
+                        .iter()
+                        .zip(&map[channel * plane..(channel + 1) * plane])
+                        .map(|(w, v)| w * v)
+                        .sum();
+                    let want = expected[channel * out * out + bin];
+                    assert!(
+                        (got - want).abs() <= 1e-5,
+                        "box {index} channel {channel} bin {bin}: {got} vs {want}"
+                    );
+                }
+            }
+        }
+    }
+
     use super::*;
 
     #[test]

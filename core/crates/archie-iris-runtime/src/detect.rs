@@ -7,6 +7,7 @@ use crate::preprocess::{letterbox, to_tensor, Frame, Rgb};
 use crate::roi::nms;
 use candle_core::{DType, Tensor};
 use serde::Serialize;
+use std::collections::HashMap;
 
 /// The broad everyday vocabulary "everything" mode reads in one batched pass
 /// (`iris_infer.EVERYDAY_VOCABULARY`, in its order).
@@ -258,12 +259,9 @@ impl Detector {
             .collect();
         let tokens = self.model.encode_frame(frame)?;
         let encoded = self.encode_chunks(&chunks)?;
-        let tokens = tokens
-            .broadcast_as((chunks.len(), tokens.dim(1)?, tokens.dim(2)?))?
-            .contiguous()?;
-        let (fused, text) = self
-            .model
-            .fuse(&tokens, &encoded.text, &encoded.text_padding)?;
+        let (fused, text) =
+            self.model
+                .fuse_shared_image(&tokens, &encoded.text, &encoded.text_padding)?;
         let decoded = self.model.decode(&fused, &text, &encoded)?;
         let scores = candle_nn::ops::sigmoid(&decoded.logits)?;
         let (batch, queries, width) = scores.dims3()?;
@@ -299,23 +297,34 @@ impl Detector {
         .map(|i| candidates[i])
         .collect();
         let size = self.model.config.image_size;
+        // One embedding pass per chunk for all of its kept boxes.
+        let mut embeddings: HashMap<usize, Vec<f64>> = HashMap::new();
+        if with_embeddings {
+            let mut by_chunk: Vec<Vec<usize>> = vec![Vec::new(); chunks.len()];
+            for &index in &kept {
+                by_chunk[index / queries].push(index);
+            }
+            for (chunk, indices) in by_chunk.iter().enumerate() {
+                if indices.is_empty() {
+                    continue;
+                }
+                let chosen: Vec<[f32; 4]> = indices.iter().map(|&i| boxes[i]).collect();
+                let vectors = self
+                    .model
+                    .instance_embeddings(&fused.get(chunk)?, &chosen)?;
+                for (&index, vector) in indices.iter().zip(vectors) {
+                    embeddings.insert(
+                        index,
+                        vector.iter().map(|&v| round_to(f64::from(v), 4)).collect(),
+                    );
+                }
+            }
+        }
         let mut found = Vec::with_capacity(kept.len());
         for index in kept {
             let chunk = index / queries;
             let phrase = &chunks[chunk][column[index] as usize];
-            let embedding = if with_embeddings {
-                let vector = self
-                    .model
-                    .instance_embeddings(&fused.get(chunk)?, &[boxes[index]])?;
-                Some(
-                    vector[0]
-                        .iter()
-                        .map(|&v| round_to(f64::from(v), 4))
-                        .collect(),
-                )
-            } else {
-                None
-            };
+            let embedding = embeddings.remove(&index);
             found.push(detection(
                 phrase,
                 best[index],
