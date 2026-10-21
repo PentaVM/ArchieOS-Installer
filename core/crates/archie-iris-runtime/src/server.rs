@@ -8,7 +8,7 @@
 
 use crate::act::Actor;
 use crate::detect::Detector;
-use crate::preprocess::decode;
+use crate::preprocess::Frame;
 use crate::rem::{recorded_samples, Recording};
 use crate::Error;
 use axum::body::Bytes;
@@ -151,8 +151,12 @@ impl Service {
         info
     }
 
-    pub fn detect(&mut self, body: &[u8], query: &HashMap<String, String>) -> Result<Value, Error> {
-        let image = decode(body)?;
+    pub fn detect(
+        &mut self,
+        frame: &Frame,
+        query: &HashMap<String, String>,
+    ) -> Result<Value, Error> {
+        let image = &frame.image;
         let phrases: Vec<String> = query
             .get("phrases")
             .map(|p| {
@@ -172,10 +176,10 @@ impl Service {
         let started = Instant::now();
         let hits = if everything || phrases.is_empty() {
             self.detector
-                .detect_everything(&image, threshold, &phrases, 60, 0.5, embed)?
+                .detect_everything_frame(frame, threshold, &phrases, 60, 0.5, embed)?
         } else {
             self.detector
-                .detect(&image, &phrases, threshold, 20, 0.5, embed)?
+                .detect_frame(frame, &phrases, threshold, 20, 0.5, embed)?
         };
         let latency = started.elapsed().as_secs_f64() * 1000.0;
         self.record(latency);
@@ -185,7 +189,7 @@ impl Service {
         )
     }
 
-    pub fn act(&mut self, body: &[u8], query: &HashMap<String, String>) -> Result<Value, Error> {
+    pub fn act(&mut self, frame: &Frame, query: &HashMap<String, String>) -> Result<Value, Error> {
         let field = |name: &str, limit: usize| {
             query
                 .get(name)
@@ -202,7 +206,6 @@ impl Service {
         let sensitivity = query
             .get("sensitivity")
             .map_or("public".to_owned(), |v| v.chars().take(32).collect());
-        let image = decode(body)?;
         let session = query
             .get("session")
             .map_or("default".to_owned(), |v| v.chars().take(64).collect());
@@ -233,7 +236,7 @@ impl Service {
             &self.detector.model,
             self.detector.phrases.as_mut(),
             &session,
-            &image,
+            frame,
             &instruction,
             &skill,
             now,
@@ -296,6 +299,28 @@ async fn blocking(
     }
 }
 
+/// Decodes and letterboxes the frame on a blocking thread before taking the model, so the
+/// next request's preparation runs while the current one holds the GPU.
+async fn with_frame(
+    state: Shared,
+    size: usize,
+    body: Bytes,
+    work: impl FnOnce(&mut Service, &Frame) -> Result<Value, Error> + Send + 'static,
+) -> Response {
+    let joined = tokio::task::spawn_blocking(move || {
+        let frame = Frame::decode(&body, size)?;
+        let mut service = state
+            .lock()
+            .map_err(|_| Error::Refused("the model is unavailable".into()))?;
+        work(&mut service, &frame)
+    })
+    .await;
+    match joined {
+        Ok(result) => reply(result),
+        Err(_) => reply(Err(Error::Refused("inference stopped".into()))),
+    }
+}
+
 fn frame_size_ok(body: &Bytes) -> Option<Response> {
     if body.is_empty() || body.len() > MAX_FRAME_BYTES {
         return Some(
@@ -310,6 +335,7 @@ fn frame_size_ok(body: &Bytes) -> Option<Response> {
 }
 
 pub fn router(service: Service) -> Router {
+    let size = service.detector.model.config.image_size;
     let state: Shared = Arc::new(Mutex::new(service));
     Router::new()
         .route("/", get(|| async { Html(DEMO_PAGE) }))
@@ -327,26 +353,26 @@ pub fn router(service: Service) -> Router {
         .route(
             "/detect",
             post(
-                |State(state): State<Shared>,
-                 Query(query): Query<HashMap<String, String>>,
-                 body: Bytes| async move {
+                move |State(state): State<Shared>,
+                      Query(query): Query<HashMap<String, String>>,
+                      body: Bytes| async move {
                     if let Some(refusal) = frame_size_ok(&body) {
                         return refusal;
                     }
-                    blocking(state, move |s| s.detect(&body, &query)).await
+                    with_frame(state, size, body, move |s, f| s.detect(f, &query)).await
                 },
             ),
         )
         .route(
             "/act",
             post(
-                |State(state): State<Shared>,
-                 Query(query): Query<HashMap<String, String>>,
-                 body: Bytes| async move {
+                move |State(state): State<Shared>,
+                      Query(query): Query<HashMap<String, String>>,
+                      body: Bytes| async move {
                     if let Some(refusal) = frame_size_ok(&body) {
                         return refusal;
                     }
-                    blocking(state, move |s| s.act(&body, &query)).await
+                    with_frame(state, size, body, move |s, f| s.act(f, &query)).await
                 },
             ),
         )

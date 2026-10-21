@@ -3,7 +3,7 @@
 use crate::model::{EncodedPhrases, IrisModel};
 use crate::nn::Result;
 use crate::phrases::PhraseSource;
-use crate::preprocess::{letterbox, to_tensor, Rgb};
+use crate::preprocess::{letterbox, to_tensor, Frame, Rgb};
 use crate::roi::nms;
 use candle_core::{DType, Tensor};
 use serde::Serialize;
@@ -124,6 +124,28 @@ impl Detector {
         nms_iou: f32,
         with_embeddings: bool,
     ) -> Result<Vec<Detection>> {
+        let frame = Frame::new(image.clone(), self.model.config.image_size);
+        self.detect_frame(
+            &frame,
+            phrases,
+            threshold,
+            max_per_phrase,
+            nms_iou,
+            with_embeddings,
+        )
+    }
+
+    /// [`Detector::detect`] on a frame already decoded and letterboxed.
+    pub fn detect_frame(
+        &mut self,
+        frame: &Frame,
+        phrases: &[String],
+        threshold: f32,
+        max_per_phrase: usize,
+        nms_iou: f32,
+        with_embeddings: bool,
+    ) -> Result<Vec<Detection>> {
+        let image = &frame.image;
         let phrases: Vec<String> = phrases
             .iter()
             .map(|p| p.trim().to_owned())
@@ -133,7 +155,7 @@ impl Detector {
         if phrases.is_empty() {
             return Ok(Vec::new());
         }
-        let tokens = self.model.encode_image(&self.canvas(image)?)?;
+        let tokens = self.model.encode_frame(frame)?;
         let encoded = self.encode_chunks(std::slice::from_ref(&phrases))?;
         let (fused, text) = self
             .model
@@ -197,6 +219,28 @@ impl Detector {
         nms_iou: f32,
         with_embeddings: bool,
     ) -> Result<Vec<Detection>> {
+        let frame = Frame::new(image.clone(), self.model.config.image_size);
+        self.detect_everything_frame(
+            &frame,
+            threshold,
+            extra,
+            max_detections,
+            nms_iou,
+            with_embeddings,
+        )
+    }
+
+    /// [`Detector::detect_everything`] on a frame already decoded and letterboxed.
+    pub fn detect_everything_frame(
+        &mut self,
+        frame: &Frame,
+        threshold: f32,
+        extra: &[String],
+        max_detections: usize,
+        nms_iou: f32,
+        with_embeddings: bool,
+    ) -> Result<Vec<Detection>> {
+        let image = &frame.image;
         let mut vocabulary: Vec<String> = Vec::new();
         for phrase in extra
             .iter()
@@ -212,7 +256,7 @@ impl Detector {
             .chunks(self.model.config.max_phrases)
             .map(<[String]>::to_vec)
             .collect();
-        let tokens = self.model.encode_image(&self.canvas(image)?)?;
+        let tokens = self.model.encode_frame(frame)?;
         let encoded = self.encode_chunks(&chunks)?;
         let tokens = tokens
             .broadcast_as((chunks.len(), tokens.dim(1)?, tokens.dim(2)?))?

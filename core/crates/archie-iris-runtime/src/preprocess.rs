@@ -241,6 +241,36 @@ pub fn letterbox(image: &Rgb, size: usize) -> (Rgb, f64) {
     )
 }
 
+/// A decoded frame ready for the encoders: the image, its letterboxed canvas, the scale
+/// between them and a digest of the canvas pixels. Built before the model is locked, so a
+/// request's decoding and resizing overlap the one running on the GPU.
+#[derive(Debug, Clone)]
+pub struct Frame {
+    pub image: Rgb,
+    pub canvas: Rgb,
+    pub scale: f64,
+    /// SHA-256 of the canvas pixels: two frames with the same digest encode the same.
+    pub digest: [u8; 32],
+}
+
+impl Frame {
+    pub fn new(image: Rgb, size: usize) -> Self {
+        use sha2::{Digest, Sha256};
+        let (canvas, scale) = letterbox(&image, size);
+        let digest = Sha256::digest(&canvas.pixels).into();
+        Self {
+            image,
+            canvas,
+            scale,
+            digest,
+        }
+    }
+
+    pub fn decode(bytes: &[u8], size: usize) -> Result<Self, Error> {
+        Ok(Self::new(decode(bytes)?, size))
+    }
+}
+
 /// The canvas as a `[1, 3, S, S]` tensor in [0, 1].
 pub fn to_tensor(canvas: &Rgb, device: &candle_core::Device) -> Result<candle_core::Tensor, Error> {
     let size = canvas.width;
@@ -258,8 +288,65 @@ pub fn to_tensor(canvas: &Rgb, device: &candle_core::Device) -> Result<candle_co
     )?)
 }
 
+/// [`to_tensor`] done on the device: the bytes cross once, a quarter of the float tensor,
+/// and divide by 255 there with a true division, so the values are the host's to the bit.
+pub fn canvas_tensor(
+    canvas: &Rgb,
+    device: &candle_core::Device,
+) -> Result<candle_core::Tensor, Error> {
+    use candle_core::{DType, Tensor};
+    let bytes = Tensor::from_vec(
+        canvas.pixels.clone(),
+        (canvas.height, canvas.width, 3),
+        device,
+    )?;
+    Ok(bytes
+        .to_dtype(DType::F32)?
+        .broadcast_div(&Tensor::new(255f32, device)?)?
+        .permute((2, 0, 1))?
+        .contiguous()?
+        .unsqueeze(0)?)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_device_conversion_matches_the_host_to_the_bit() {
+        let pixels: Vec<u8> = (0..16 * 16 * 3).map(|i| (i * 37 % 256) as u8).collect();
+        let canvas = Rgb::new(16, 16, pixels).unwrap();
+        let device = candle_core::Device::Cpu;
+        let host: Vec<f32> = to_tensor(&canvas, &device)
+            .unwrap()
+            .flatten_all()
+            .unwrap()
+            .to_vec1()
+            .unwrap();
+        let moved = canvas_tensor(&canvas, &device).unwrap();
+        assert_eq!(moved.dims(), &[1, 3, 16, 16]);
+        let moved: Vec<f32> = moved.flatten_all().unwrap().to_vec1().unwrap();
+        assert!(host
+            .iter()
+            .zip(&moved)
+            .all(|(a, b)| a.to_bits() == b.to_bits()));
+    }
+
+    #[test]
+    fn frames_with_the_same_canvas_share_a_digest() {
+        let image = |seed: u8| {
+            let pixels: Vec<u8> = (0..40 * 30 * 3)
+                .map(|i| (i as u8).wrapping_mul(seed))
+                .collect();
+            Rgb::new(40, 30, pixels).unwrap()
+        };
+        let a = Frame::new(image(3), 32);
+        let b = Frame::new(image(3), 32);
+        let c = Frame::new(image(5), 32);
+        assert_eq!(a.digest, b.digest);
+        assert_ne!(a.digest, c.digest);
+        assert_eq!(a.canvas.width, 32);
+        assert!((a.scale - 32.0 / 40.0).abs() < 1e-12);
+    }
+
     use super::*;
 
     #[test]

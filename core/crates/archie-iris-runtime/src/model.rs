@@ -7,12 +7,13 @@
 
 use crate::nn::{l2_normalize, Attention, LayerNorm, Linear, Mlp, Result};
 use crate::phrases::PhraseFeatures;
+use crate::preprocess::{canvas_tensor, Frame};
 use crate::roi::roi_align;
 use crate::siglip::SiglipVision;
 use crate::vjepa::{Rope, VJepa};
 use crate::weights::{ModelConfig, Weights};
 use candle_core::{DType, Device, Tensor, D};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 const EPS: f64 = 1e-5;
 
@@ -572,6 +573,9 @@ pub struct IrisModel {
     /// `[N, 4]` f32 anchors: each token's cell centre and a two-cell box.
     pub anchors: Tensor,
     anchors_host: Vec<[f32; 4]>,
+    /// The last frame encoded, by canvas digest: `/act` and `/detect` on the same frame,
+    /// or a screen that did not change, encode once.
+    last_encoded: Mutex<Option<([u8; 32], Tensor)>>,
 }
 
 impl IrisModel {
@@ -626,6 +630,7 @@ impl IrisModel {
             instance_second: Linear::load(weights, "instance_head.3")?,
             anchors,
             anchors_host,
+            last_encoded: Mutex::new(None),
             config,
             device,
             dtype,
@@ -642,6 +647,24 @@ impl IrisModel {
             (self.vjepa_projection.forward(&vjepa)? + self.siglip_projection.forward(&siglip)?)?
                 .broadcast_add(&self.position)?,
         )
+    }
+
+    /// `encode_image` of a frame's canvas, reusing the last result when the canvas digest
+    /// is the same. The encoders carry no skill adapter, so the reuse is exact whatever
+    /// adapter is active.
+    pub fn encode_frame(&self, frame: &Frame) -> Result<Tensor> {
+        if let Ok(last) = self.last_encoded.lock() {
+            if let Some((digest, tokens)) = last.as_ref() {
+                if *digest == frame.digest {
+                    return Ok(tokens.clone());
+                }
+            }
+        }
+        let tokens = self.encode_image(&canvas_tensor(&frame.canvas, &self.device)?)?;
+        if let Ok(mut last) = self.last_encoded.lock() {
+            *last = Some((frame.digest, tokens.clone()));
+        }
+        Ok(tokens)
     }
 
     /// The two encoders' own outputs, for the parity test.
