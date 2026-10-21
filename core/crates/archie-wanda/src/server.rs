@@ -177,7 +177,9 @@ impl Service {
                 let now = now_ms();
                 let _ = self
                     .store
-                    .blocking(move |store| crate::social::read_new(store, &domain, now, crate::social::TICK_READ_TURNS))
+                    .blocking(move |store| {
+                        crate::social::read_new(store, &domain, now, crate::social::TICK_READ_TURNS)
+                    })
                     .await;
             }
         }
@@ -194,6 +196,7 @@ pub fn router_with_service(service: Arc<Service>) -> Router {
         .route("/v1/domains", get(domains))
         .route("/v1/people", get(people))
         .route("/v1/people/edit", post(edit_person))
+        .route("/v1/scene/text", post(scene_text))
         .route("/", get(index))
         .route("/index.html", get(index))
         .route("/styles.css", get(css))
@@ -436,6 +439,45 @@ async fn edit_person(
         })
         .await?;
     Ok(Json(serde_json::json!({"changed": changed})))
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SceneRequest {
+    domain: ContextDomain,
+    delta: archie_slink::links::SceneTextDelta,
+}
+/// `scene.text` (lines IRIS read on a screen or a camera) into the domain's social state.
+async fn scene_text(
+    State(service): State<Arc<Service>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<serde_json::Value>, WandaError> {
+    use archie_slink::Payload;
+    owner(&service, &headers)?;
+    let request: SceneRequest = json(&headers, &body)?;
+    request
+        .delta
+        .validate()
+        .map_err(|_| WandaError::InvalidEvent("invalid_scene_text"))?;
+    let _permit = service.wait_for_inference().await?;
+    let now = now_ms();
+    let report = service
+        .store
+        .blocking(move |store| {
+            crate::social::read_scene(
+                store,
+                &request.domain,
+                &request.delta.focus,
+                &request.delta.lines,
+                now,
+            )
+        })
+        .await?;
+    Ok(Json(
+        serde_json::json!({"read": report.map(|r| serde_json::json!({
+            "turns": r.turns, "applied": r.applied, "unchanged": r.unchanged, "rejected": r.rejected,
+        }))}),
+    ))
 }
 async fn domains(
     State(service): State<Arc<Service>>,

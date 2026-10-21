@@ -867,6 +867,7 @@ dependencies = [
  "archie-model-runtime",
  "archie-registry",
  "archie-router",
+ "archie-slink",
  "archie-types",
  "archie-vault",
  "archie-wanda-lncm",

@@ -286,7 +286,10 @@ pub fn read_new(
     let Some(lncm) = store.lncm() else {
         return Ok(None);
     };
-    let _writing = store.social_write().lock().map_err(|_| WandaError::Storage)?;
+    let _writing = store
+        .social_write()
+        .lock()
+        .map_err(|_| WandaError::Storage)?;
     let events = store.events(domain, MAX_CONTEXT, now_ms)?;
     let (mut state, cursor) = load_cached(store, domain, &lncm.owner_label, now_ms)?;
     let (turns, next) = turns_from(&events, &state, &cursor, max_turns);
@@ -315,6 +318,100 @@ pub fn read_new(
     persist_vault(&dir, &vault).map_err(|_| WandaError::Storage)?;
     remember(store, domain, &state, &next)?;
     Ok(Some(report))
+}
+
+/// Who a screen's or camera's text is attributed to in a domain's state.
+pub const SCENE_ID: &str = "scene";
+const SCENE_LABEL: &str = "Pantalla";
+/// Lines one call reads: a `scene.text` delta's own limit.
+pub const MAX_SCENE_LINES: usize = 256;
+
+/// Text IRIS saw (`scene.text` lines), read into the domain's state the way conversation
+/// events are (stage A of the bridge, plan §7.2): one chat per focus, every line said by
+/// [`SCENE_ID`], cited as `iris:<focus>:<track>`. The state changes in place, so what was
+/// seen never grows a transcript to compact; the conversation cursor does not move, these
+/// are not Vault events. `None` without an expert. Blocking, under the inference permit.
+pub fn read_scene(
+    store: &WandaStore,
+    domain: &ContextDomain,
+    focus: &str,
+    lines: &[archie_slink::links::SceneTextLine],
+    now_ms: i64,
+) -> Result<Option<ReadReport>, WandaError> {
+    if lines.len() > MAX_SCENE_LINES {
+        return Err(WandaError::TooLarge);
+    }
+    let Some(lncm) = store.lncm() else {
+        return Ok(None);
+    };
+    if lines.is_empty() {
+        return Ok(Some(ReadReport::default()));
+    }
+    let _writing = store
+        .social_write()
+        .lock()
+        .map_err(|_| WandaError::Storage)?;
+    let (mut state, cursor) = load_cached(store, domain, &lncm.owner_label, now_ms)?;
+    let turns: Vec<Turn> = lines
+        .iter()
+        .enumerate()
+        .map(|(i, line)| Turn {
+            turn: state.last_turn + 1 + i as u64,
+            at_ms: i64::try_from(line.observed_at_ms).unwrap_or(now_ms),
+            chat: format!("scene:{focus}"),
+            kind: TurnKind::Message {
+                speaker: SCENE_ID.to_string(),
+                text: line.text.clone(),
+            },
+            evidence: format!("iris:{focus}:{}", line.track),
+            label: Some(SCENE_LABEL.to_string()),
+        })
+        .collect();
+    let interpreter = LncmInterpreter {
+        model: lncm.model(domain),
+        lang: lncm.lang,
+        threshold: lncm.update_threshold,
+    };
+    let report = reader::read(
+        &mut state,
+        &turns,
+        &interpreter,
+        &ReaderConfig {
+            lang: lncm.lang,
+            ..Default::default()
+        },
+    )
+    .map_err(|_| WandaError::Storage)?;
+    let dir = store.vault_path();
+    let mut vault = open_vault(&dir).map_err(|_| WandaError::Storage)?;
+    save(&mut vault, domain, &state, &cursor, now_ms)?;
+    persist_vault(&dir, &vault).map_err(|_| WandaError::Storage)?;
+    remember(store, domain, &state, &cursor)?;
+    Ok(Some(report))
+}
+
+/// Where `archie_slink::text::Batcher` hands seen text: one domain's state in this store.
+pub struct SceneSink {
+    pub store: WandaStore,
+    pub domain: ContextDomain,
+}
+
+impl archie_slink::text::StateUpdate for SceneSink {
+    fn update(
+        &mut self,
+        focus: &str,
+        lines: &[archie_slink::links::SceneTextLine],
+    ) -> Result<(), String> {
+        read_scene(
+            &self.store,
+            &self.domain,
+            focus,
+            lines,
+            crate::server::now_ms(),
+        )
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+    }
 }
 
 /// The state as the expert reads it for a question, people named in the question first, and
@@ -479,7 +576,10 @@ pub fn edit(
     let owner_label = store
         .lncm()
         .map_or("Yo".to_string(), |l| l.owner_label.clone());
-    let _writing = store.social_write().lock().map_err(|_| WandaError::Storage)?;
+    let _writing = store
+        .social_write()
+        .lock()
+        .map_err(|_| WandaError::Storage)?;
     let dir = store.vault_path();
     let mut vault = open_vault(&dir).map_err(|_| WandaError::Storage)?;
     let (mut state, cursor) = load(&mut vault, domain, &owner_label, now_ms)?;
@@ -567,12 +667,20 @@ mod tests {
         let (first, cursor) = turns_from(&events, &state, &Cursor::default(), 3);
         assert_eq!(first.len(), 3);
         assert_eq!(cursor.at_ms, 3000);
-        assert_eq!(cursor.refs.len(), 1, "one of the two events at 3000 is still unread");
+        assert_eq!(
+            cursor.refs.len(),
+            1,
+            "one of the two events at 3000 is still unread"
+        );
         let (rest, cursor) = turns_from(&events, &state, &cursor, 3);
         assert_eq!(rest.len(), 1);
         let (none, _) = turns_from(&events, &state, &cursor, 3);
         assert!(none.is_empty());
-        let mut seen: Vec<String> = first.iter().chain(&rest).map(|t| t.evidence.clone()).collect();
+        let mut seen: Vec<String> = first
+            .iter()
+            .chain(&rest)
+            .map(|t| t.evidence.clone())
+            .collect();
         seen.sort();
         seen.dedup();
         assert_eq!(seen.len(), 4, "every event read exactly once");

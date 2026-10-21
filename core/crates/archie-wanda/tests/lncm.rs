@@ -143,11 +143,15 @@ async fn the_expert_keeps_a_persistent_state_and_answers_from_it() {
         .unwrap();
     assert_eq!(ingested.accepted, 4);
 
-    let report = social::read_new(&store, &domain, now, usize::MAX).unwrap().unwrap();
+    let report = social::read_new(&store, &domain, now, usize::MAX)
+        .unwrap()
+        .unwrap();
     assert_eq!(report.turns, 4);
     assert!(report.chunks >= 1);
     // The state persisted: reading again finds nothing new.
-    let again = social::read_new(&store, &domain, now, usize::MAX).unwrap().unwrap();
+    let again = social::read_new(&store, &domain, now, usize::MAX)
+        .unwrap()
+        .unwrap();
     assert_eq!(again.turns, 0);
     let people = social::people(&store, &domain, now).unwrap();
     let names: Vec<&str> = people.iter().map(|p| p.label.as_str()).collect();
@@ -197,6 +201,44 @@ async fn the_expert_keeps_a_persistent_state_and_answers_from_it() {
     .is_err());
     let people = social::people(&store, &domain, now).unwrap();
     assert!(!people.iter().any(|p| p.label == "Pedro"));
+
+    // What IRIS read on a screen enters the same state, in place, through the S-LINK sink;
+    // the conversation cursor does not move, so chat reading is unaffected.
+    use archie_slink::links::{SceneTextLine, TextOrigin};
+    use archie_slink::text::StateUpdate;
+    let seen = |track: u64, text: &str| SceneTextLine {
+        track,
+        text: text.into(),
+        origin: TextOrigin::IrisRead,
+        confidence: 0.9,
+        observed_at_ms: now as u64,
+    };
+    let lines = [
+        seen(1, "Ana: el viaje se mueve a agosto"),
+        seen(2, "Reunión 18:00"),
+    ];
+    let report = social::read_scene(&store, &domain, "screen-1", &lines, now)
+        .unwrap()
+        .unwrap();
+    assert_eq!(report.turns, 2);
+    let mut sink = social::SceneSink {
+        store: store.clone(),
+        domain: domain.clone(),
+    };
+    sink.update("screen-1", &lines[..1]).unwrap();
+    assert!(social::people(&store, &domain, now)
+        .unwrap()
+        .iter()
+        .any(|p| p.label == "Pantalla"));
+    assert_eq!(
+        social::read_new(&store, &domain, now, usize::MAX)
+            .unwrap()
+            .unwrap()
+            .turns,
+        0
+    );
+    let too_many = vec![seen(9, "x"); social::MAX_SCENE_LINES + 1];
+    assert!(social::read_scene(&store, &domain, "screen-1", &too_many, now).is_err());
 
     // An expert whose weights changed after measurement is refused at start.
     let vq = checkpoint.join("vq.safetensors");

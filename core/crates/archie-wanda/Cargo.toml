@@ -11,6 +11,7 @@ archie-cerebra.workspace = true
 archie-model-runtime.workspace = true
 archie-registry.workspace = true
 archie-router.workspace = true
+archie-slink.workspace = true
 archie-types.workspace = true
 archie-vault.workspace = true
 archie-wanda-lncm.workspace = true

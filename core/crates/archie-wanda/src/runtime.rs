@@ -268,7 +268,8 @@ async fn enrich(
     let result = store
         .blocking(move |store| {
             // Bring the state up to date first; a failed read leaves the last good state.
-            let _ = crate::social::read_new(store, &scope, now_ms, crate::social::INLINE_READ_TURNS);
+            let _ =
+                crate::social::read_new(store, &scope, now_ms, crate::social::INLINE_READ_TURNS);
             crate::social::answer(store, &scope, &question, draft.as_deref(), now_ms)
         })
         .await;
