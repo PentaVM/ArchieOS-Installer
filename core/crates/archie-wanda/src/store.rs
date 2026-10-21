@@ -13,12 +13,25 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// Each domain's social state and cursor as this service last loaded or saved them.
+pub(crate) type SocialCache = std::collections::BTreeMap<
+    ContextDomain,
+    (archie_wanda_lncm::SocialState, crate::social::Cursor),
+>;
+
 #[derive(Clone)]
 pub struct WandaStore {
     config: WandaConfig,
     operator_digest: [u8; 32],
     sources: Vec<(SourceBinding, [u8; 32])>,
     lncm: Option<std::sync::Arc<crate::social::LncmRuntime>>,
+    /// Only this service writes the social states (`social::save`), so what it saved is what
+    /// the Vault holds: a question reads the state from here instead of opening and parsing
+    /// the whole Vault, every message in it included.
+    social: std::sync::Arc<std::sync::Mutex<SocialCache>>,
+    /// Held while a domain's state is read, changed and saved, so the reader, an edit and a
+    /// query's inline read never interleave.
+    social_write: std::sync::Arc<std::sync::Mutex<()>>,
 }
 impl std::fmt::Debug for WandaStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -95,11 +108,19 @@ impl WandaStore {
             operator_digest,
             sources,
             lncm,
+            social: Default::default(),
+            social_write: Default::default(),
         })
     }
     /// The local expert, when one is configured.
     pub fn lncm(&self) -> Option<&crate::social::LncmRuntime> {
         self.lncm.as_deref()
+    }
+    pub(crate) fn social_cache(&self) -> &std::sync::Mutex<SocialCache> {
+        &self.social
+    }
+    pub(crate) fn social_write(&self) -> &std::sync::Mutex<()> {
+        &self.social_write
     }
     /// Runs Vault and filesystem work off the async runtime. The Vault lock waits up to
     /// seconds for another process, and persisting fsyncs; neither may hold a runtime

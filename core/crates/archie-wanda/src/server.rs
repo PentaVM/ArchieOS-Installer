@@ -19,6 +19,8 @@ use tokio::sync::{RwLock, Semaphore};
 /// The first retry of evidence the model could not turn into advice, and the longest wait.
 const RETRY_BASE_MS: i64 = 60_000;
 const RETRY_CAP_MS: i64 = 3_600_000;
+/// How long a query or an edit waits for a busy service before it answers `wanda_busy`.
+const QUEUE_WAIT: std::time::Duration = std::time::Duration::from_secs(25);
 const REFRESH_QUESTION: &str = "Revisa las evidencias recientes. Propón detalles, respuestas y compromisos útiles; distingue lo observado de las hipótesis y ofrece alternativas. No inventes ofertas o intenciones.";
 
 /// A generation the model failed on, and when it may be tried again.
@@ -63,13 +65,23 @@ fn generation(
 
 impl Service {
     pub fn new(store: WandaStore) -> Arc<Self> {
+        let parallel = usize::from(store.config().parallel_queries.clamp(1, 8));
         Arc::new(Self {
             store,
             last: RwLock::new(BTreeMap::new()),
             processed: RwLock::new(BTreeMap::new()),
             failed: RwLock::new(BTreeMap::new()),
-            inference: Semaphore::new(1),
+            inference: Semaphore::new(parallel),
         })
+    }
+    /// A permit for a request that a person is waiting on: it waits its turn behind the one
+    /// running (a tick's read is bounded) instead of being refused at once, and gives up
+    /// before the voice client's 30 s do.
+    async fn wait_for_inference(&self) -> Result<tokio::sync::SemaphorePermit<'_>, WandaError> {
+        tokio::time::timeout(QUEUE_WAIT, self.inference.acquire())
+            .await
+            .map_err(|_| WandaError::Busy)?
+            .map_err(|_| WandaError::Busy)
     }
     /// The domain's newest events and their generation.
     async fn current(
@@ -165,7 +177,7 @@ impl Service {
                 let now = now_ms();
                 let _ = self
                     .store
-                    .blocking(move |store| crate::social::read_new(store, &domain, now))
+                    .blocking(move |store| crate::social::read_new(store, &domain, now, crate::social::TICK_READ_TURNS))
                     .await;
             }
         }
@@ -292,10 +304,7 @@ async fn query(
 ) -> Result<Json<QueryResponse>, WandaError> {
     owner(&service, &headers)?;
     let request: QueryRequest = json(&headers, &body)?;
-    let _permit = service
-        .inference
-        .try_acquire()
-        .map_err(|_| WandaError::Busy)?;
+    let _permit = service.wait_for_inference().await?;
     let now = now_ms();
     let (_, generation) = service.current(&request.domain, now).await?;
     let result = crate::runtime::query(
@@ -411,10 +420,7 @@ async fn edit_person(
     owner(&service, &headers)?;
     let request: EditRequest = json(&headers, &body)?;
     // The reader holds this permit while it updates a state; an edit waits its turn.
-    let _permit = service
-        .inference
-        .try_acquire()
-        .map_err(|_| WandaError::Busy)?;
+    let _permit = service.wait_for_inference().await?;
     let now = now_ms();
     let changed = service
         .store

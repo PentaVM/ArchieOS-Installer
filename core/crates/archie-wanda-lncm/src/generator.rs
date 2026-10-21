@@ -364,6 +364,51 @@ impl Generator {
         vq.tokens(&acc)
     }
 
+    /// Generates one target per entry of `sampling` from the same prompt, all at once: the
+    /// prompt's keys and values are shared and each level is a single pass for every row,
+    /// instead of one pass per level and per candidate. Row `i` draws with `sampling[i]`.
+    pub fn generate_many<R: Rng>(
+        &self,
+        vq: &VqVae,
+        cache: &PromptCache,
+        sampling: &[Sampling],
+        rng: &mut R,
+    ) -> Result<Vec<Vec<u32>>> {
+        let rows = sampling.len();
+        if rows <= 1 {
+            return sampling
+                .iter()
+                .map(|&s| self.generate(vq, cache, s, rng))
+                .collect();
+        }
+        let device = cache.hidden.device();
+        let kv = cache
+            .kv
+            .iter()
+            .map(|(k, v)| Ok((k.repeat((rows, 1, 1, 1))?, v.repeat((rows, 1, 1, 1))?)))
+            .collect::<Result<Vec<_>>>()?;
+        let mut acc = Tensor::zeros((rows, self.target_len, self.code_dim), DType::F32, device)?;
+        for (k, &l) in self.levels.iter().enumerate() {
+            let mut x = self.level_input(k, l, &acc)?;
+            for (block, (pk, pv)) in self.blocks.iter().zip(&kv) {
+                x = block.forward_with_prefix(&x, pk, pv)?;
+            }
+            let logits = self.code_heads[k].forward(&self.norm.forward(&x)?)?;
+            let codes = if sampling.iter().all(|s| s.temperature <= 0.0) {
+                logits.argmax(D::Minus1)?.flatten_all()?.to_vec1::<u32>()?
+            } else {
+                let mut codes = Vec::with_capacity(rows * l);
+                for (i, &s) in sampling.iter().enumerate() {
+                    codes.extend(pick(&logits.narrow(0, i, 1)?, s, rng)?);
+                }
+                codes
+            };
+            let codes = Tensor::from_vec(codes, (rows, l), device)?;
+            acc = (acc + vq.code_embedding(k, &codes)?)?;
+        }
+        (0..rows).map(|i| vq.tokens(&acc.narrow(0, i, 1)?)).collect()
+    }
+
     pub fn levels(&self) -> &[usize] {
         &self.levels
     }
@@ -526,6 +571,30 @@ mod tests {
             let forced = l.argmax(D::Minus1).unwrap().to_vec2::<u32>().unwrap();
             assert_eq!(forced, codes[k].to_vec2::<u32>().unwrap(), "level {k}");
         }
+    }
+
+    #[test]
+    fn batched_candidates_match_one_at_a_time() {
+        let (_config, _map, vq, gen) = build();
+        let cache = gen.encode_prompt(&vq, &[3u32, 4, 5, 6, 7], &Device::Cpu).unwrap();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(3);
+        let alone = gen
+            .generate(&vq, &cache, Sampling::GREEDY, &mut rng)
+            .unwrap();
+        let many = gen
+            .generate_many(&vq, &cache, &[Sampling::GREEDY; 3], &mut rng)
+            .unwrap();
+        assert_eq!(many.len(), 3);
+        assert!(many.iter().all(|row| *row == alone), "greedy rows equal the single pass");
+        let sampled = Sampling {
+            temperature: 1.0,
+            top_k: 4,
+        };
+        let mixed = gen
+            .generate_many(&vq, &cache, &[Sampling::GREEDY, sampled, sampled], &mut rng)
+            .unwrap();
+        assert_eq!(mixed[0], alone);
+        assert!(mixed.iter().all(|row| row.len() == alone.len()));
     }
 
     #[test]

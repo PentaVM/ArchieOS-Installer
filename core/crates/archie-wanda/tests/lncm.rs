@@ -65,6 +65,7 @@ fn config(dir: &Path, checkpoint: &Path) -> WandaConfig {
         quality_tier: 50,
         deep_quality_tier: 80,
         retention_hours: 168,
+        parallel_queries: 1,
         lncm: Some(LncmBinding {
             dir: checkpoint.to_path_buf(),
             device: "cpu".into(),
@@ -142,11 +143,11 @@ async fn the_expert_keeps_a_persistent_state_and_answers_from_it() {
         .unwrap();
     assert_eq!(ingested.accepted, 4);
 
-    let report = social::read_new(&store, &domain, now).unwrap().unwrap();
+    let report = social::read_new(&store, &domain, now, usize::MAX).unwrap().unwrap();
     assert_eq!(report.turns, 4);
     assert!(report.chunks >= 1);
     // The state persisted: reading again finds nothing new.
-    let again = social::read_new(&store, &domain, now).unwrap().unwrap();
+    let again = social::read_new(&store, &domain, now, usize::MAX).unwrap().unwrap();
     assert_eq!(again.turns, 0);
     let people = social::people(&store, &domain, now).unwrap();
     let names: Vec<&str> = people.iter().map(|p| p.label.as_str()).collect();

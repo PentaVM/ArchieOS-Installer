@@ -66,6 +66,7 @@ fn fixture(path: &std::path::Path, url: &str, locality: Locality) -> WandaStore 
         quality_tier: 50,
         deep_quality_tier: 80,
         retention_hours: 168,
+        parallel_queries: 1,
         lncm: None,
     })
     .unwrap();

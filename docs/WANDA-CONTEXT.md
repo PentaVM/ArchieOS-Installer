@@ -101,8 +101,11 @@ es limitada y no garantiza recuperar todas las personas relevantes de grafos gra
 
 El modo `--proactive` comprueba contexto cada 30 s. Agrupa cambios mediante referencias
 y fecha de modificación del grafo; repeticiones no disparan otra inferencia. Mantiene
-una única inferencia en vuelo, sin cola ilimitada. Una consulta mientras está ocupado
-recibe 503. Los resultados se conservan en memoria del servicio; reiniciarlo no elimina
+`parallel_queries` inferencias en vuelo (1 por defecto; igualarlo a los slots de
+llama-server), sin cola ilimitada: una consulta o edición espera su turno hasta 25 s y
+luego recibe 503. Una consulta lee como mucho 48 mensajes nuevos antes de responder; el
+ciclo proactivo lee el resto (480 por dominio y ciclo). El estado social se lee de memoria:
+sólo el servicio lo escribe y cada guardado actualiza la copia. Los resultados se conservan en memoria del servicio; reiniciarlo no elimina
 evidencias, pero requiere recalcular las propuestas. Una consulta que no produce
 propuestas (modelo caído, salida inválida) no borra las últimas válidas, y el ciclo
 proactivo reintenta esa misma evidencia con espera creciente (1 min, 2, 4… hasta 1 h).

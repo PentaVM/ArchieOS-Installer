@@ -426,7 +426,21 @@ impl Lncm {
         state: Option<&str>,
         draft: Option<&str>,
     ) -> Result<Option<QuickAnswer>> {
-        if self.gate(lang, question)?.yes_no < 0.5 {
+        let gate = self.gate(lang, question)?;
+        self.quick_after_gate(&gate, lang, question, state, draft)
+    }
+
+    /// [`Lncm::quick`] for a question whose gate was already read, so the prompt is not
+    /// encoded twice.
+    pub fn quick_after_gate(
+        &self,
+        gate: &Gate,
+        lang: Lang,
+        question: &str,
+        state: Option<&str>,
+        draft: Option<&str>,
+    ) -> Result<Option<QuickAnswer>> {
+        if gate.yes_no < 0.5 {
             return Ok(None);
         }
         let options = vec![lang.yes().to_string(), lang.no().to_string()];
@@ -470,18 +484,22 @@ impl Lncm {
         let cache = self.cache(&prompt.ids)?;
         let mut rng = rand::rngs::StdRng::seed_from_u64(options.seed);
         let count = options.candidates.clamp(1, 16);
-        let mut candidates = Vec::with_capacity(count);
-        for i in 0..count {
-            let sampling = if i == 0 && count > 1 {
-                Sampling::GREEDY
-            } else {
-                options.sampling
-            };
-            let ids = self
-                .generator
-                .generate(&self.vq, &cache, sampling, &mut rng)?;
-            candidates.push(self.codec.decode_target(&ids));
-        }
+        // The first candidate is greedy when there are several; all are drawn in one batch.
+        let sampling: Vec<Sampling> = (0..count)
+            .map(|i| {
+                if i == 0 && count > 1 {
+                    Sampling::GREEDY
+                } else {
+                    options.sampling
+                }
+            })
+            .collect();
+        let mut candidates: Vec<(Option<String>, String)> = self
+            .generator
+            .generate_many(&self.vq, &cache, &sampling, &mut rng)?
+            .iter()
+            .map(|ids| self.codec.decode_target(ids))
+            .collect();
         let best = minimum_bayes_risk(
             &candidates
                 .iter()

@@ -27,6 +27,11 @@ use std::collections::BTreeMap;
 /// The owner's id in every state.
 pub const OWNER_ID: &str = "owner";
 const MAX_STATE_BYTES: usize = 4 * 1024 * 1024;
+/// Turns a question reads before it is answered (about two of the reader's chunks); a longer
+/// backlog is left to the proactive tick, so a question never waits for a whole history.
+pub const INLINE_READ_TURNS: usize = 48;
+/// Turns one proactive tick reads per domain, so the inference permit is let go between ticks.
+pub const TICK_READ_TURNS: usize = 480;
 const ACTOR: &str = "wanda-social";
 
 pub struct LncmRuntime {
@@ -125,6 +130,46 @@ pub fn load(
     Ok((state, cursor))
 }
 
+/// The domain's state and cursor from memory when this service already holds them; otherwise
+/// from the Vault, and then kept. Only [`save`] writes them, and [`remember`] follows every save.
+pub fn load_cached(
+    store: &WandaStore,
+    domain: &ContextDomain,
+    owner_label: &str,
+    now_ms: i64,
+) -> Result<(SocialState, Cursor), WandaError> {
+    if let Some(hit) = store
+        .social_cache()
+        .lock()
+        .map_err(|_| WandaError::Storage)?
+        .get(domain)
+        .cloned()
+    {
+        return Ok(hit);
+    }
+    let loaded = {
+        let mut vault = open_vault(&store.vault_path()).map_err(|_| WandaError::Storage)?;
+        load(&mut vault, domain, owner_label, now_ms)?
+    };
+    remember(store, domain, &loaded.0, &loaded.1)?;
+    Ok(loaded)
+}
+
+/// Keeps what was just persisted as the domain's state in memory.
+fn remember(
+    store: &WandaStore,
+    domain: &ContextDomain,
+    state: &SocialState,
+    cursor: &Cursor,
+) -> Result<(), WandaError> {
+    store
+        .social_cache()
+        .lock()
+        .map_err(|_| WandaError::Storage)?
+        .insert(domain.clone(), (state.clone(), cursor.clone()));
+    Ok(())
+}
+
 pub fn save(
     vault: &mut VaultGuard,
     domain: &ContextDomain,
@@ -156,11 +201,13 @@ pub fn save(
     Ok(())
 }
 
-/// Conversation events not yet read, as turns numbered after the state's last, in time order.
+/// Conversation events not yet read, as turns numbered after the state's last, in time order:
+/// at most `limit`, the earliest observed first, so the cursor never passes an unread event.
 pub fn turns_from(
     events: &[StoredEvent],
     state: &SocialState,
     cursor: &Cursor,
+    limit: usize,
 ) -> (Vec<Turn>, Cursor) {
     let mut fresh: Vec<&StoredEvent> = events
         .iter()
@@ -177,6 +224,16 @@ pub fn turns_from(
                     && !cursor.refs.contains(&e.evidence_ref.to_string()))
         })
         .collect();
+    if fresh.len() > limit {
+        // The cursor advances by observation time: keep the earliest observed.
+        fresh.sort_by(|a, b| {
+            a.event
+                .observed_at_ms
+                .cmp(&b.event.observed_at_ms)
+                .then_with(|| a.evidence_ref.to_string().cmp(&b.evidence_ref.to_string()))
+        });
+        fresh.truncate(limit);
+    }
     fresh.sort_by(|a, b| {
         let at = |e: &StoredEvent| e.event.sent_at_ms.unwrap_or(e.event.observed_at_ms);
         at(a)
@@ -217,22 +274,22 @@ pub fn turns_from(
     (turns, next)
 }
 
-/// Reads the domain's new conversation events into its state. `None` without an expert.
-/// Blocking: call from blocking work, under the service's inference permit.
+/// Reads at most `max_turns` of the domain's new conversation events into its state; the rest
+/// waits for the next call. `None` without an expert. Blocking: call from blocking work,
+/// under the service's inference permit.
 pub fn read_new(
     store: &WandaStore,
     domain: &ContextDomain,
     now_ms: i64,
+    max_turns: usize,
 ) -> Result<Option<ReadReport>, WandaError> {
     let Some(lncm) = store.lncm() else {
         return Ok(None);
     };
+    let _writing = store.social_write().lock().map_err(|_| WandaError::Storage)?;
     let events = store.events(domain, MAX_CONTEXT, now_ms)?;
-    let (mut state, cursor) = {
-        let mut vault = open_vault(&store.vault_path()).map_err(|_| WandaError::Storage)?;
-        load(&mut vault, domain, &lncm.owner_label, now_ms)?
-    };
-    let (turns, next) = turns_from(&events, &state, &cursor);
+    let (mut state, cursor) = load_cached(store, domain, &lncm.owner_label, now_ms)?;
+    let (turns, next) = turns_from(&events, &state, &cursor, max_turns);
     if turns.is_empty() {
         return Ok(Some(ReadReport::default()));
     }
@@ -256,6 +313,7 @@ pub fn read_new(
     let mut vault = open_vault(&dir).map_err(|_| WandaError::Storage)?;
     save(&mut vault, domain, &state, &next, now_ms)?;
     persist_vault(&dir, &vault).map_err(|_| WandaError::Storage)?;
+    remember(store, domain, &state, &next)?;
     Ok(Some(report))
 }
 
@@ -304,13 +362,10 @@ pub fn answer(
     if gate.social < lncm.gate_threshold {
         return Ok(None);
     }
-    let (state, _) = {
-        let mut vault = open_vault(&store.vault_path()).map_err(|_| WandaError::Storage)?;
-        load(&mut vault, domain, &lncm.owner_label, now_ms)?
-    };
+    let (state, _) = load_cached(store, domain, &lncm.owner_label, now_ms)?;
     let (text, roster) = context_for(&state, question, lncm.lang);
     let quick = model
-        .quick(lncm.lang, question, Some(&text), draft)
+        .quick_after_gate(&gate, lncm.lang, question, Some(&text), draft)
         .ok()
         .flatten();
     let refined = model
@@ -364,8 +419,7 @@ pub fn people(
     let owner_label = store
         .lncm()
         .map_or("Yo".to_string(), |l| l.owner_label.clone());
-    let mut vault = open_vault(&store.vault_path()).map_err(|_| WandaError::Storage)?;
-    let (state, _) = load(&mut vault, domain, &owner_label, now_ms)?;
+    let (state, _) = load_cached(store, domain, &owner_label, now_ms)?;
     Ok(state
         .people
         .values()
@@ -425,6 +479,7 @@ pub fn edit(
     let owner_label = store
         .lncm()
         .map_or("Yo".to_string(), |l| l.owner_label.clone());
+    let _writing = store.social_write().lock().map_err(|_| WandaError::Storage)?;
     let dir = store.vault_path();
     let mut vault = open_vault(&dir).map_err(|_| WandaError::Storage)?;
     let (mut state, cursor) = load(&mut vault, domain, &owner_label, now_ms)?;
@@ -438,6 +493,7 @@ pub fn edit(
         save(&mut vault, domain, &state, &cursor, now_ms)?;
         persist_vault(&dir, &vault).map_err(|_| WandaError::Storage)?;
     }
+    remember(store, domain, &state, &cursor)?;
     Ok(changed)
 }
 
@@ -480,7 +536,7 @@ mod tests {
             event("a", Author::Owner, "Yo", "¿vamos?", 1000),
             event("c", Author::Counterparty, "Ana", "voy", 2000),
         ];
-        let (turns, cursor) = turns_from(&events, &state, &Cursor::default());
+        let (turns, cursor) = turns_from(&events, &state, &Cursor::default(), usize::MAX);
         assert_eq!(turns.len(), 3);
         assert!(matches!(&turns[0].kind, TurnKind::Message { speaker, .. } if speaker == OWNER_ID));
         assert_eq!(turns[0].turn, 1);
@@ -488,12 +544,38 @@ mod tests {
         assert_eq!(cursor.at_ms, 2000);
         assert_eq!(cursor.refs.len(), 2);
         // Nothing is read twice; an event at the cursor's time that was not read is.
-        let (again, _) = turns_from(&events, &state, &cursor);
+        let (again, _) = turns_from(&events, &state, &cursor, usize::MAX);
         assert!(again.is_empty());
         let mut more = events.clone();
         more.push(event("d", Author::Counterparty, "Luis", "ok", 2000));
-        let (late, _) = turns_from(&more, &state, &cursor);
+        let (late, _) = turns_from(&more, &state, &cursor, usize::MAX);
         assert_eq!(late.len(), 1);
+    }
+
+    #[test]
+    fn a_bounded_read_takes_the_earliest_and_loses_nothing() {
+        let state = SocialState::new(OWNER_ID, "Yo").unwrap();
+        // Sent order differs from observed order: the bound follows observation time.
+        let mut late_sent = event("x", Author::Counterparty, "Ana", "uno", 1000);
+        late_sent.event.sent_at_ms = Some(9000);
+        let events = vec![
+            late_sent,
+            event("y", Author::Counterparty, "Pedro", "dos", 2000),
+            event("z", Author::Counterparty, "Luis", "tres", 3000),
+            event("w", Author::Counterparty, "Luis", "cuatro", 3000),
+        ];
+        let (first, cursor) = turns_from(&events, &state, &Cursor::default(), 3);
+        assert_eq!(first.len(), 3);
+        assert_eq!(cursor.at_ms, 3000);
+        assert_eq!(cursor.refs.len(), 1, "one of the two events at 3000 is still unread");
+        let (rest, cursor) = turns_from(&events, &state, &cursor, 3);
+        assert_eq!(rest.len(), 1);
+        let (none, _) = turns_from(&events, &state, &cursor, 3);
+        assert!(none.is_empty());
+        let mut seen: Vec<String> = first.iter().chain(&rest).map(|t| t.evidence.clone()).collect();
+        seen.sort();
+        seen.dedup();
+        assert_eq!(seen.len(), 4, "every event read exactly once");
     }
 
     #[test]

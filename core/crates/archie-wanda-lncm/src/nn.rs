@@ -138,6 +138,14 @@ impl Lin {
     }
 }
 
+/// Whether a fused last-dimension kernel (RMS norm, softmax) beats the composed ops: always on
+/// a GPU, where each op is a launch; on a CPU only for large tensors, below which spreading a
+/// few rows over threads costs more than it saves (measured on the gate's short prompt:
+/// 24 ms composed, 33 ms fused; on a full update prompt: 818 ms composed, 506 ms fused).
+fn fused_pays(x: &Tensor) -> Result<bool> {
+    Ok(!x.device().is_cpu() || x.elem_count() >= 32_768)
+}
+
 #[derive(Clone)]
 pub struct RmsNorm {
     w: Tensor,
@@ -154,6 +162,11 @@ impl RmsNorm {
         })
     }
     pub fn forward(&self, x: &Tensor) -> Result<Tensor> {
+        // In use (no gradient), one fused kernel instead of five ops and four temporaries;
+        // the fused op has no backward, so training keeps the composed form.
+        if !x.track_op() && !self.w.track_op() && x.is_contiguous() && fused_pays(x)? {
+            return candle_nn::ops::rms_norm(x, &self.w, self.eps as f32);
+        }
         let mean_square = x.sqr()?.mean_keepdim(D::Minus1)?;
         let normed = x.broadcast_div(&(mean_square + self.eps)?.sqrt()?)?;
         normed.broadcast_mul(&self.w)
@@ -197,11 +210,18 @@ impl Attention {
 
     fn attend(&self, q: &Tensor, k: &Tensor, v: &Tensor, bias: Option<&Tensor>) -> Result<Tensor> {
         let scale = 1.0 / (self.head_dim as f64).sqrt();
-        let mut scores = (q.matmul(&k.t()?.contiguous()?)? * scale)?;
+        // The matmul reads K transposed in place; copying it contiguous was one more
+        // (B, H, T, d) buffer per layer and call.
+        let mut scores = (q.matmul(&k.t()?)? * scale)?;
         if let Some(bias) = bias {
             scores = scores.broadcast_add(bias)?;
         }
-        let weights = candle_nn::ops::softmax(&scores, D::Minus1)?;
+        let weights = if scores.track_op() || !fused_pays(&scores)? {
+            candle_nn::ops::softmax(&scores, D::Minus1)?
+        } else {
+            // One fused kernel (max, exp, sum, divide) in use.
+            candle_nn::ops::softmax_last_dim(&scores)?
+        };
         self.o.forward(&self.merge(&weights.matmul(v)?)?)
     }
 

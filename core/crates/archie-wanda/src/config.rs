@@ -96,6 +96,13 @@ pub struct WandaConfig {
     pub retention_hours: u16,
     #[serde(default)]
     pub lncm: Option<LncmBinding>,
+    /// Queries answered at once (1..=8). Match the local model server's slots
+    /// (llama-server `--parallel`); further queries wait their turn for a few seconds.
+    #[serde(default = "parallel_queries")]
+    pub parallel_queries: u8,
+}
+fn parallel_queries() -> u8 {
+    1
 }
 impl std::fmt::Debug for WandaConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -168,6 +175,7 @@ impl WandaConfig {
             || self.deep_quality_tier > 100
             || self.deep_quality_tier < self.quality_tier
             || !(1..=720).contains(&self.retention_hours)
+            || !(1..=8).contains(&self.parallel_queries)
         {
             return Err(invalid());
         }
