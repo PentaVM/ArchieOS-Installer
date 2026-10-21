@@ -19,6 +19,7 @@ pub use stream::{
     ToolChatRequest, ToolDefinition,
 };
 
+pub mod llama_slots;
 pub mod routed;
 
 /// Nebius Token Factory's OpenAI-compatible API.
