@@ -155,13 +155,19 @@ impl Detector {
         if phrases.is_empty() {
             return Ok(Vec::new());
         }
+        let device = self.model.device.clone();
+        crate::profile::start(&device);
         let tokens = self.model.encode_frame(frame)?;
+        crate::profile::mark(&device, "encode.projection");
         let encoded = self.encode_chunks(std::slice::from_ref(&phrases))?;
+        crate::profile::mark(&device, "phrases");
         let (fused, text) = self
             .model
             .fuse(&tokens, &encoded.text, &encoded.text_padding)?;
+        crate::profile::mark(&device, "fusion.final_norm");
         let decoded = self.model.decode(&fused, &text, &encoded)?;
-        self.row_detections(
+        crate::profile::mark(&device, "decode.score");
+        let found = self.row_detections(
             frame,
             &phrases,
             &decoded.logits.get(0)?,
@@ -171,7 +177,9 @@ impl Detector {
             max_per_phrase,
             nms_iou,
             with_embeddings,
-        )
+        );
+        crate::profile::mark(&device, "postprocess");
+        found
     }
 
     /// [`Detector::detect_frame`] for several foci in one pass: the frames go through the
