@@ -136,6 +136,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(Error::Weights(_)) => None,
         Err(error) => return Err(error.into()),
     };
+    let reader = archie_iris_runtime::read::Reader::load(&loaded)?;
     let has_skills = actor.as_ref().is_some_and(|a| a.bank.is_some());
     let info = json!({
         "weights": weights_path.display().to_string(),
@@ -152,12 +153,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "action_head": actor.is_some(),
         "skill_adapters": has_skills,
         "rem_recording": rem_spool.is_some(),
+        "reading": reader.is_some(),
     });
     drop(loaded);
     let mut service = Service::new(Detector::new(model, phrases), actor, info)
         .with_rem_spool(rem_spool)
         .with_live_envelope(envelope)
-        .with_slink_dir(slink_dir);
+        .with_slink_dir(slink_dir)
+        .with_reader(reader);
     if let Some(dir) = skills_dir {
         service = service.with_skills_dir(dir);
     }

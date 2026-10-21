@@ -1045,6 +1045,21 @@ impl IrisModel {
         self.fuse_grouped(tokens, text, text_padding, 1)
     }
 
+    /// `encode_fused_state`: image tokens `[B, N, D]` fused with the null phrase alone, each
+    /// image with its own MoE capacity (as Python with one image). The scene state reading,
+    /// tracking and the action memory read.
+    pub fn fuse_null(&self, tokens: &Tensor) -> Result<Tensor> {
+        let batch = tokens.dim(0)?;
+        let d = self.config.dimension;
+        let text = self
+            .null_phrase
+            .reshape((1, 1, d))?
+            .broadcast_as((batch, 1, d))?
+            .contiguous()?;
+        let padding = Tensor::zeros((batch, 1), DType::U8, &self.device)?;
+        Ok(self.fuse_per_image(tokens, &text, &padding)?.0)
+    }
+
     /// [`IrisModel::fuse`] for a batch of different images (several foci in one pass):
     /// each row has its own MoE capacity, so each comes out as it would alone.
     pub fn fuse_per_image(

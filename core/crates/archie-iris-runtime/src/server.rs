@@ -2,7 +2,8 @@
 //!
 //! `POST /detect?mode=all|phrases&phrases=a,b&threshold=0.35&embed=1` with a JPEG or PNG body,
 //! `POST /act?session=&instruction=&skill=&adapter=&record=&app=&sensitivity=`,
-//! `POST /act/reset?session=`, `POST /act/recorded?app=&run=`, `GET /health`, and `GET /`.
+//! `POST /act/reset?session=`, `POST /act/recorded?app=&run=`, `POST /read?boxes=x0,y0,x1,y1;…`
+//! (the text of each crop, by IRIS's reading head), `GET /health`, and `GET /`.
 //! `POST /live?focus=&mode=&phrases=&fps=&threshold=&priority=` answers each frame of a live
 //! focus from damage and tracking without waiting for the model, `POST /live/advice` takes
 //! Cortex's `ResourceAdvice`, and `GET /live` reports the foci and measured costs.
@@ -109,6 +110,8 @@ function draw(out,scale,roundTrip){
 pub struct Service {
     pub detector: Detector,
     pub actor: Option<Actor>,
+    /// The reading head (`read_decoder`), when the release has one.
+    pub reader: Option<crate::read::Reader>,
     pub info: Value,
     pub rem_spool: Option<PathBuf>,
     pub skills_dir: PathBuf,
@@ -129,6 +132,7 @@ impl Service {
         Self {
             detector,
             actor,
+            reader: None,
             info,
             rem_spool: None,
             skills_dir,
@@ -147,6 +151,11 @@ impl Service {
 
     pub fn with_rem_spool(mut self, rem_spool: Option<PathBuf>) -> Self {
         self.rem_spool = rem_spool;
+        self
+    }
+
+    pub fn with_reader(mut self, reader: Option<crate::read::Reader>) -> Self {
+        self.reader = reader;
         self
     }
 
@@ -184,6 +193,7 @@ impl Service {
         info["runtime"] = json!("archie-iris-runtime");
         info["skill_adapters"] = json!(self.actor.as_ref().is_some_and(|a| a.bank.is_some()));
         info["rem_recording"] = json!(self.rem_spool.is_some());
+        info["reading"] = json!(self.reader.is_some());
         info
     }
 
@@ -222,6 +232,36 @@ impl Service {
         Ok(
             json!({"detections": hits, "latency_ms": (latency * 10.0).round() / 10.0,
                   "image_size": [image.width, image.height], "step": self.info["step"]}),
+        )
+    }
+
+    /// `/read?boxes=x0,y0,x1,y1;…`: the text of each crop (pixel boxes of the frame; the
+    /// whole frame when none), read by IRIS's own reading head.
+    pub fn read(&mut self, frame: &Frame, query: &HashMap<String, String>) -> Result<Value, Error> {
+        let reader = self
+            .reader
+            .as_ref()
+            .ok_or_else(|| Error::Refused("these weights have no reading head".into()))?;
+        let boxes = crate::read::parse_boxes(query.get("boxes").map_or("", String::as_str))?;
+        let started = Instant::now();
+        let texts = reader.read(&self.detector.model, &frame.image, &boxes)?;
+        let latency = started.elapsed().as_secs_f64() * 1000.0;
+        self.record(latency);
+        let reads: Vec<Value> = if boxes.is_empty() {
+            texts
+                .into_iter()
+                .map(|text| json!({"box": null, "text": text}))
+                .collect()
+        } else {
+            boxes
+                .iter()
+                .zip(texts)
+                .map(|(b, text)| json!({"box": b, "text": text}))
+                .collect()
+        };
+        Ok(
+            json!({"reads": reads, "latency_ms": (latency * 10.0).round() / 10.0,
+                  "image_size": [frame.image.width, frame.image.height], "step": self.info["step"]}),
         )
     }
 
@@ -636,6 +676,19 @@ pub fn router(service: Service) -> Router {
                         return refusal;
                     }
                     with_frame(state, size, body, move |s, f| s.detect(f, &query)).await
+                },
+            ),
+        )
+        .route(
+            "/read",
+            post(
+                move |State(state): State<Shared>,
+                      Query(query): Query<HashMap<String, String>>,
+                      body: Bytes| async move {
+                    if let Some(refusal) = frame_size_ok(&body) {
+                        return refusal;
+                    }
+                    with_frame(state, size, body, move |s, f| s.read(f, &query)).await
                 },
             ),
         )
