@@ -14,8 +14,9 @@ use crate::weights::{file_sha256, Release, Weights};
 use crate::Error;
 use candle_core::{DType, Device, Tensor};
 use half::f16;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// One phrase as fusion receives it, already rounded through float16.
@@ -110,9 +111,14 @@ pub struct TextTower {
     limit: usize,
     cache: HashMap<String, Arc<PhraseFeatures>>,
     weights_sha256: String,
+    tokenizer_sha256: String,
+    /// Phrase features kept across restarts, under a directory named for everything that
+    /// decides them (tower, tokenizer, lengths, mask).
+    disk: Option<PathBuf>,
 }
 
 const CACHE_LIMIT: usize = 300_000;
+const DISK_MAGIC: &[u8; 8] = b"IRPF1\0\0\0";
 
 impl TextTower {
     /// `dir` holds `model.safetensors`, `tokenizer.json` and, if the repository has one,
@@ -178,7 +184,54 @@ impl TextTower {
             limit,
             cache: HashMap::new(),
             weights_sha256: file_sha256(&model)?,
+            tokenizer_sha256: file_sha256(&dir.join("tokenizer.json"))?,
+            disk: None,
         })
+    }
+
+    /// Keep phrase features under `root` across restarts: one file per phrase, named by
+    /// the digest of its lowercased text, owner-only. A file that does not read back whole
+    /// is ignored and recomputed.
+    pub fn with_disk_cache(mut self, root: &Path) -> Result<Self, Error> {
+        let mut key = Sha256::new();
+        for part in [
+            self.weights_sha256.as_str(),
+            self.tokenizer_sha256.as_str(),
+            &self.length.to_string(),
+            &self.limit.to_string(),
+            if self.attention_mask {
+                "mask"
+            } else {
+                "nomask"
+            },
+        ] {
+            key.update(part.as_bytes());
+            key.update([0]);
+        }
+        let dir = root.join(hex::encode(key.finalize()));
+        private_dir(root)?;
+        private_dir(&dir)?;
+        self.disk = Some(dir);
+        Ok(self)
+    }
+
+    fn disk_path(&self, phrase: &str) -> Option<PathBuf> {
+        Some(phrase_file(self.disk.as_ref()?, phrase))
+    }
+
+    fn read_disk(&self, phrase: &str) -> Option<PhraseFeatures> {
+        let bytes = std::fs::read(self.disk_path(phrase)?).ok()?;
+        decode_features(&bytes)
+    }
+
+    fn write_disk(&self, phrase: &str, features: &PhraseFeatures) -> Result<(), Error> {
+        let Some(path) = self.disk_path(phrase) else {
+            return Ok(());
+        };
+        let partial = path.with_extension(format!("{}.part", std::process::id()));
+        write_private(&partial, &encode_features(features))?;
+        std::fs::rename(&partial, &path)?;
+        Ok(())
     }
 
     /// The tower on explicit ids, for tests: pooled `[N, 768]` and states `[N, T, 768]`.
@@ -215,6 +268,18 @@ impl PhraseSource for TextTower {
                 }
             }
         }
+        if self.disk.is_some() {
+            let mut still = Vec::with_capacity(missing.len());
+            for phrase in missing {
+                match self.read_disk(&phrase) {
+                    Some(features) => {
+                        self.cache.insert(phrase, Arc::new(features));
+                    }
+                    None => still.push(phrase),
+                }
+            }
+            missing = still;
+        }
         for chunk in missing.chunks(512) {
             let lowered: Vec<String> = chunk.iter().map(|text| text.to_lowercase()).collect();
             let encodings = self
@@ -238,10 +303,9 @@ impl PhraseSource for TextTower {
                     .narrow(0, 0, count)?
                     .to_dtype(DType::F32)?
                     .to_vec2()?;
-                self.cache.insert(
-                    text.clone(),
-                    Arc::new(PhraseFeatures::new(pooled[row].clone(), rows)?),
-                );
+                let features = PhraseFeatures::new(pooled[row].clone(), rows)?;
+                self.write_disk(text, &features)?;
+                self.cache.insert(text.clone(), Arc::new(features));
             }
         }
         Ok(phrases
@@ -252,8 +316,83 @@ impl PhraseSource for TextTower {
 
     fn describe(&self) -> serde_json::Value {
         serde_json::json!({"kind": "siglip2-text-tower", "weights_sha256": self.weights_sha256,
-                           "attention_mask": self.attention_mask, "cached": self.cache.len()})
+                           "attention_mask": self.attention_mask, "cached": self.cache.len(),
+                           "device": format!("{:?}", self.tower.device()),
+                           "disk_cache": self.disk.is_some()})
     }
+}
+
+/// The tower sees the lowercased phrase, so differently cased phrases share one file; the
+/// name is a digest, so the directory does not list what was asked.
+fn phrase_file(dir: &Path, phrase: &str) -> PathBuf {
+    let digest = Sha256::digest(phrase.to_lowercase().as_bytes());
+    dir.join(format!("{}.f16", hex::encode(digest)))
+}
+
+/// `IRPF1`, width and row count (u32 little-endian), the pooled vector, then the token
+/// states, every value as float16. Features are already rounded through float16, so the
+/// round trip is exact.
+fn encode_features(features: &PhraseFeatures) -> Vec<u8> {
+    let width = features.pooled.len();
+    let mut out = Vec::with_capacity(16 + 2 * width * (1 + features.states.len()));
+    out.extend_from_slice(DISK_MAGIC);
+    out.extend_from_slice(&(width as u32).to_le_bytes());
+    out.extend_from_slice(&(features.states.len() as u32).to_le_bytes());
+    for value in features
+        .pooled
+        .iter()
+        .chain(features.states.iter().flatten())
+    {
+        out.extend_from_slice(&f16::from_f32(*value).to_le_bytes());
+    }
+    out
+}
+
+fn decode_features(bytes: &[u8]) -> Option<PhraseFeatures> {
+    let header = bytes.get(..16)?;
+    if &header[..8] != DISK_MAGIC {
+        return None;
+    }
+    let width = u32::from_le_bytes(header[8..12].try_into().ok()?) as usize;
+    let rows = u32::from_le_bytes(header[12..16].try_into().ok()?) as usize;
+    let body = &bytes[16..];
+    if width == 0 || rows == 0 || body.len() != 2 * width * (1 + rows) {
+        return None;
+    }
+    let values: Vec<f32> = body
+        .chunks_exact(2)
+        .map(|pair| f16::from_le_bytes([pair[0], pair[1]]).to_f32())
+        .collect();
+    let pooled = values[..width].to_vec();
+    let states = values[width..]
+        .chunks_exact(width)
+        .map(<[f32]>::to_vec)
+        .collect();
+    PhraseFeatures::new(pooled, states).ok()
+}
+
+fn private_dir(dir: &Path) -> Result<(), Error> {
+    std::fs::create_dir_all(dir)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
+
+fn write_private(path: &Path, bytes: &[u8]) -> Result<(), Error> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    std::io::Write::write_all(&mut file, bytes)?;
+    file.sync_all()?;
+    Ok(())
 }
 
 fn placeholder_config() -> crate::weights::ModelConfig {
@@ -277,5 +416,58 @@ fn placeholder_config() -> crate::weights::ModelConfig {
         act_chunk: 1,
         siglip_repository: String::new(),
         siglip_revision: String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn features() -> PhraseFeatures {
+        PhraseFeatures::new(
+            vec![0.1, -2.5, 3.0e-3],
+            vec![vec![1.0, 2.0, 3.0], vec![-0.333, 0.5, 65504.0]],
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn features_round_trip_exactly_through_the_disk_format() {
+        let original = features();
+        let bytes = encode_features(&original);
+        assert_eq!(bytes.len(), 16 + 2 * 3 * 3);
+        assert_eq!(decode_features(&bytes), Some(original));
+    }
+
+    #[test]
+    fn a_damaged_file_reads_as_missing() {
+        let bytes = encode_features(&features());
+        assert_eq!(decode_features(&bytes[..bytes.len() - 1]), None);
+        let mut wrong = bytes.clone();
+        wrong[0] = b'X';
+        assert_eq!(decode_features(&wrong), None);
+        assert_eq!(decode_features(&[]), None);
+    }
+
+    #[test]
+    fn phrase_files_are_private_and_named_by_the_lowercased_digest() {
+        let dir = std::env::temp_dir().join(format!("iris-phrases-{}", std::process::id()));
+        private_dir(&dir).unwrap();
+        let path = phrase_file(&dir, "Taza Roja");
+        assert_eq!(path, phrase_file(&dir, "taza roja"));
+        assert!(!path.to_string_lossy().contains("taza"));
+        write_private(&path, &encode_features(&features())).unwrap();
+        assert_eq!(
+            decode_features(&std::fs::read(&path).unwrap()),
+            Some(features())
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(&path), 0o600);
+            assert_eq!(mode(&dir), 0o700);
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

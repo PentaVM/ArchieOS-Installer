@@ -222,14 +222,16 @@ impl SiglipText {
     }
 }
 
-/// Reads a safetensors file into a [`Weights`] holding only tensors under `prefix`.
+/// Reads a safetensors file into a [`Weights`] holding only tensors under `prefix`. The
+/// file is read on the host and only the kept tensors reach `device`: the repository's
+/// file also holds the vision tower, which would otherwise pass through the GPU in f32.
 pub fn load_text_weights(
     path: &std::path::Path,
     prefix: &str,
     device: &Device,
     dtype: DType,
 ) -> Result<std::collections::HashMap<String, Tensor>> {
-    let all = candle_core::safetensors::load(path, device)?;
+    let all = candle_core::safetensors::load(path, &Device::Cpu)?;
     let mut kept = std::collections::HashMap::new();
     for (name, tensor) in all {
         if name.starts_with(prefix) {
@@ -238,7 +240,7 @@ pub fn load_text_weights(
             } else {
                 tensor
             };
-            kept.insert(name, tensor);
+            kept.insert(name, tensor.to_device(device)?);
         }
     }
     if kept.is_empty() {
