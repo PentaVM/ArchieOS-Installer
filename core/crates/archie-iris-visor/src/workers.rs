@@ -294,12 +294,15 @@ pub fn ocr(state: State, settings: Arc<Settings>) {
 }
 
 /// One short line per text (a JSON object per line cost three times the tokens, and writing
-/// the answer, not seeing the image, was most of the time).
-const ATTEND_PROMPT: &str = "List every line of legible text in this image, one per line, \
-as x1,y1,x2,y2|text with coordinates on a 0-1000 grid and the text exactly as written. No \
-other words. If there is no legible text, reply NONE.";
-/// The answer's length limit: about a dozen lines.
-const ATTEND_MAX_TOKENS: u32 = 200;
+/// the answer, not seeing the image, was most of the time). Stopgap until IRIS's own reader is
+/// distilled: only the few most prominent lines, so a screen full of text does not cost a
+/// full answer (8 of 9 reads with text had hit a 200-token cap, ~6 s of writing).
+const ATTEND_PROMPT: &str = "List at most 4 lines of legible text in this image: the largest \
+and most important ones, each once. One per line, as x1,y1,x2,y2|text with coordinates on a \
+0-1000 grid and the text exactly as written. No other words. If there is no legible text, \
+reply NONE.";
+/// The answer's length limit: about four short lines.
+const ATTEND_MAX_TOKENS: u32 = 60;
 /// A frame this close to the last one read (mean luma difference out of 255, on a coarse
 /// grid) is not read again unless `RELOOK` has passed.
 const UNCHANGED: f32 = 4.0;
@@ -496,7 +499,12 @@ fn parse_spots(content: &str, width: f32, height: f32) -> Vec<Spot> {
         .take(32)
         .collect();
     if !lines.is_empty() {
-        return lines;
+        // A model that repeats itself: keep each line once.
+        let mut seen = std::collections::HashSet::new();
+        return lines
+            .into_iter()
+            .filter(|spot| seen.insert(normalise(&spot.text)))
+            .collect();
     }
     let (Some(start), Some(end)) = (content.find('['), content.rfind(']')) else {
         return Vec::new();
@@ -774,6 +782,8 @@ mod tests {
         assert_eq!(compact.len(), 1);
         assert_eq!(compact[0].text, "Salida 3");
         assert!((compact[0].bbox[1] - 360.0).abs() < 1e-3);
+        let repeated = parse_spots("1,1,2,2|Hola\n3,3,4,4|hola\n5,5,6,6|Chao", 1280.0, 720.0);
+        assert_eq!(repeated.len(), 2);
         assert!(parse_spots("NONE", 1280.0, 720.0).is_empty());
         let grid = signature(&vec![10u8; 64 * 36 * 3], 64, 36);
         assert!(difference(&grid, &grid) < UNCHANGED);
