@@ -93,10 +93,18 @@ fn filled(like: &Tensor, value: f64) -> Result<Tensor> {
 struct SparseMoe {
     router: Linear,
     shared: Mlp,
+    /// Expert weights on the device, one row per resident expert (all of them unless a
+    /// residency plan says otherwise): `[R, D, H]`, `[R, 1, H]`, `[R, H, D]`, `[R, 1, D]`.
     w_in: Tensor,
     b_in: Tensor,
     w_out: Tensor,
     b_out: Tensor,
+    /// Every expert's weights on the host, held only while some are not resident.
+    host: Option<[Tensor; 4]>,
+    /// Each expert's row in the device weights; `None` when it is not resident.
+    row_of: Vec<Option<usize>>,
+    /// `row_of` on the device as f32, -1 for an expert that is not resident.
+    row_of_device: Tensor,
     experts: usize,
     top_k: usize,
     capacity_factor: f64,
@@ -104,12 +112,15 @@ struct SparseMoe {
     expert_ids: Tensor,
     /// Lower-triangular ones, `[SCAN_BLOCK, SCAN_BLOCK]` f32, for [`inclusive_counts`].
     triangle: Tensor,
+    /// Choices per expert while recording, `[E]` f32, accumulated where the route runs.
+    usage: Mutex<Option<Tensor>>,
 }
 
 impl SparseMoe {
     fn load(weights: &Weights, prefix: &str, config: &ModelConfig) -> Result<Self> {
         let w_in = weights.get(&format!("{prefix}.w_in"))?;
         let device = w_in.device().clone();
+        let experts = config.experts;
         Ok(Self {
             router: Linear::load(weights, &format!("{prefix}.router"))?,
             shared: Mlp::load(
@@ -122,12 +133,15 @@ impl SparseMoe {
             b_in: weights.get(&format!("{prefix}.b_in"))?,
             w_out: weights.get(&format!("{prefix}.w_out"))?,
             b_out: weights.get(&format!("{prefix}.b_out"))?,
-            experts: config.experts,
+            host: None,
+            row_of: (0..experts).map(Some).collect(),
+            row_of_device: Tensor::arange(0u32, experts as u32, &device)?.to_dtype(DType::F32)?,
+            experts,
             top_k: config.expert_top_k,
             capacity_factor: config.expert_capacity_factor,
-            expert_ids: Tensor::arange(0u32, config.experts as u32, &device)?
-                .to_dtype(DType::F32)?,
+            expert_ids: Tensor::arange(0u32, experts as u32, &device)?.to_dtype(DType::F32)?,
             triangle: Tensor::tril2(SCAN_BLOCK, DType::F32, &device)?,
+            usage: Mutex::new(None),
         })
     }
 
@@ -137,51 +151,174 @@ impl SparseMoe {
             .max(4)
     }
 
-    /// Every token of the batch competes for the same capacity, in batch-major order: the
-    /// same rows `SparseMoeFeedForward` flattens. A token over an expert's capacity keeps
-    /// only its shared-expert path, as in training.
+    /// Bytes one expert takes on the device.
+    fn expert_bytes(&self) -> usize {
+        let per = |t: &Tensor| t.elem_count() / t.dim(0).unwrap_or(1).max(1);
+        (per(&self.w_in) + per(&self.b_in) + per(&self.w_out) + per(&self.b_out))
+            * self.w_in.dtype().size_in_bytes()
+    }
+
+    /// Keeps only `resident` experts on the device (`None`: all of them). The others act as
+    /// experts at capacity 0: their tokens keep the shared expert, the overflow path of
+    /// training. The full weights wait on the host while any expert is away.
+    fn set_residency(&mut self, resident: Option<&[bool]>) -> Result<()> {
+        let device = self.w_in.device().clone();
+        if self.host.is_none() && self.row_of.iter().all(Option::is_some) {
+            if resident.is_none() {
+                return Ok(());
+            }
+            self.host = Some([
+                self.w_in.to_device(&Device::Cpu)?,
+                self.b_in.to_device(&Device::Cpu)?,
+                self.w_out.to_device(&Device::Cpu)?,
+                self.b_out.to_device(&Device::Cpu)?,
+            ]);
+        }
+        let host = self
+            .host
+            .clone()
+            .expect("the host holds the experts while some are away");
+        let ids: Vec<u32> = match resident {
+            None => (0..self.experts as u32).collect(),
+            Some(mask) => {
+                if mask.len() != self.experts {
+                    return Err(crate::Error::Refused(format!(
+                        "residency for {} experts, the layer has {}",
+                        mask.len(),
+                        self.experts
+                    )));
+                }
+                (0..self.experts as u32)
+                    .filter(|&e| mask[e as usize])
+                    .collect()
+            }
+        };
+        let index = Tensor::from_vec(ids.clone(), ids.len(), &Device::Cpu)?;
+        let pick = |t: &Tensor| -> Result<Tensor> {
+            Ok(t.index_select(&index, 0)?
+                .contiguous()?
+                .to_device(&device)?)
+        };
+        self.w_in = pick(&host[0])?;
+        self.b_in = pick(&host[1])?;
+        self.w_out = pick(&host[2])?;
+        self.b_out = pick(&host[3])?;
+        self.row_of = vec![None; self.experts];
+        for (row, &expert) in ids.iter().enumerate() {
+            self.row_of[expert as usize] = Some(row);
+        }
+        let rows: Vec<f32> = self
+            .row_of
+            .iter()
+            .map(|r| r.map_or(-1.0, |r| r as f32))
+            .collect();
+        self.row_of_device = Tensor::from_vec(rows, self.experts, &device)?;
+        if resident.is_none() {
+            self.host = None;
+        }
+        Ok(())
+    }
+
+    fn record_usage(&self, on: bool) {
+        if let Ok(mut usage) = self.usage.lock() {
+            *usage = if on {
+                Tensor::zeros(self.experts, DType::F32, self.expert_ids.device()).ok()
+            } else {
+                None
+            };
+        }
+    }
+
+    /// Choices per expert since recording started (reads the device).
+    fn usage(&self) -> Result<Option<Vec<u64>>> {
+        let usage = self
+            .usage
+            .lock()
+            .map_err(|_| crate::Error::Refused("usage lock poisoned".into()))?;
+        Ok(match usage.as_ref() {
+            None => None,
+            Some(t) => Some(t.to_vec1::<f32>()?.into_iter().map(|v| v as u64).collect()),
+        })
+    }
+
+    fn add_usage(&self, counts: &Tensor) -> Result<()> {
+        if let Ok(mut usage) = self.usage.lock() {
+            if let Some(total) = usage.as_mut() {
+                *total = (&*total + counts.to_device(total.device())?)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// The tokens of each of `groups` equal, consecutive parts of the batch compete for
+    /// their own capacity, in batch-major order: one group is the batch, as
+    /// `SparseMoeFeedForward` flattens it (open mode's rows of one image); a group per
+    /// image runs each image as if alone (several foci in one batch). A token over an
+    /// expert's capacity, or routed to an expert that is not resident, keeps only its
+    /// shared-expert path, as in training.
     ///
     /// Both routes give the same numbers. On the CPU reading the router back costs nothing
     /// and only the assigned rows are multiplied; on a GPU every read back drains it.
-    fn forward(&self, x: &Tensor) -> Result<Tensor> {
+    fn forward(&self, x: &Tensor, groups: usize) -> Result<Tensor> {
         let shape = x.shape().clone();
         let width = x.dim(D::Minus1)?;
         let flat = x.reshape(((), width))?;
+        let groups = groups.max(1);
+        if flat.dim(0)? % groups != 0 {
+            return Err(crate::Error::Refused(format!(
+                "{} tokens do not split into {groups} groups",
+                flat.dim(0)?
+            )));
+        }
         let output = if flat.device().is_cpu() {
-            self.route_on_host(&flat)?
+            self.route_on_host(&flat, groups)?
         } else {
-            self.route_on_device(&flat)?
+            self.route_on_device(&flat, groups)?
         };
         Ok(output.reshape(shape)?)
     }
 
     /// Probabilities read back, a stable sort per token, one product per expert, added in
     /// expert order.
-    fn route_on_host(&self, flat: &Tensor) -> Result<Tensor> {
+    fn route_on_host(&self, flat: &Tensor, groups: usize) -> Result<Tensor> {
         let tokens = flat.dim(0)?;
+        let per_group = tokens / groups;
         let probabilities: Vec<f32> =
             candle_nn::ops::softmax_last_dim(&self.router.forward(flat)?.to_dtype(DType::F32)?)?
                 .flatten_all()?
                 .to_vec1()?;
-        let capacity = self.capacity(tokens);
+        let capacity = self.capacity(per_group);
         let mut assigned: Vec<(Vec<u32>, Vec<f32>)> = vec![(Vec::new(), Vec::new()); self.experts];
+        let mut queued = vec![0usize; groups * self.experts];
+        let mut chosen_count = vec![0f32; self.experts];
         let mut order: Vec<usize> = (0..self.experts).collect();
         for token in 0..tokens {
+            let group = token / per_group;
             let row = &probabilities[token * self.experts..(token + 1) * self.experts];
             order.sort_by(|&a, &b| row[b].total_cmp(&row[a]).then(a.cmp(&b)));
             let chosen = &order[..self.top_k];
             let total: f32 = chosen.iter().map(|&e| row[e]).sum();
             for &expert in chosen {
-                let (ids, weights) = &mut assigned[expert];
-                if ids.len() < capacity {
+                chosen_count[expert] += 1.0;
+                if self.row_of[expert].is_none() {
+                    continue;
+                }
+                let queue = &mut queued[group * self.experts + expert];
+                if *queue < capacity {
+                    *queue += 1;
+                    let (ids, weights) = &mut assigned[expert];
                     ids.push(token as u32);
                     weights.push(row[expert] / total);
                 }
             }
         }
+        self.add_usage(&Tensor::from_vec(chosen_count, self.experts, &Device::Cpu)?)?;
         let mut output = self.shared.forward(flat)?;
         let dtype = flat.dtype();
         for (expert, (ids, weights)) in assigned.into_iter().enumerate() {
+            let Some(row) = self.row_of[expert] else {
+                continue;
+            };
             if ids.is_empty() {
                 continue;
             }
@@ -189,12 +326,12 @@ impl SparseMoe {
             let ids = Tensor::from_vec(ids, count, flat.device())?;
             let gathered = flat.index_select(&ids, 0)?;
             let hidden = gathered
-                .matmul(&self.w_in.get(expert)?)?
-                .broadcast_add(&self.b_in.get(expert)?)?;
+                .matmul(&self.w_in.get(row)?)?
+                .broadcast_add(&self.b_in.get(row)?)?;
             let hidden = crate::fast::gelu_erf(&hidden)?;
             let routed = hidden
-                .matmul(&self.w_out.get(expert)?)?
-                .broadcast_add(&self.b_out.get(expert)?)?;
+                .matmul(&self.w_out.get(row)?)?
+                .broadcast_add(&self.b_out.get(row)?)?;
             let scale = Tensor::from_vec(weights, (count, 1), flat.device())?.to_dtype(dtype)?;
             output = output.index_add(&ids, &routed.broadcast_mul(&scale)?, 0)?;
         }
@@ -203,16 +340,17 @@ impl SparseMoe {
 
     /// Nothing read back, as in `SparseMoeFeedForward`: top-k by repeated maxima (ties to
     /// the lower expert, as the stable sort), queue positions by running counts over the
-    /// `(token, k)` order, one batched product per group of experts. Each token adds its
-    /// experts' outputs in ascending expert order, the order the host route adds them, so
-    /// the sums round the same way.
-    fn route_on_device(&self, flat: &Tensor) -> Result<Tensor> {
+    /// `(token, k)` order within each group, one batched product per group of resident
+    /// experts. Each token adds its experts' outputs in ascending expert order, the order the
+    /// host route adds them, so the sums round the same way.
+    fn route_on_device(&self, flat: &Tensor, groups: usize) -> Result<Tensor> {
         let (tokens, width) = flat.dims2()?;
         let device = flat.device();
         let dtype = flat.dtype();
         let experts = self.experts;
         let k = self.top_k;
-        let capacity = self.capacity(tokens);
+        let per_group = tokens / groups;
+        let capacity = self.capacity(per_group);
         let probabilities =
             candle_nn::ops::softmax_last_dim(&self.router.forward(flat)?.to_dtype(DType::F32)?)?;
 
@@ -241,21 +379,56 @@ impl SparseMoe {
         let total = chosen_probability.sum_keepdim(1)?;
         let gate = chosen_probability.broadcast_div(&total)?.to_dtype(dtype)?;
 
-        // Queue position of each (token, k) at its expert, in the order the tokens arrive.
+        // Queue position of each (token, k) at its expert, in arrival order, per group.
         let assignments = tokens * k;
+        let per_group_assignments = per_group * k;
         let chosen_flat = chosen.reshape((assignments, 1))?;
         let one_hot = self
             .expert_ids
             .unsqueeze(0)?
             .broadcast_eq(&chosen_flat)?
             .to_dtype(DType::F32)?;
-        let position =
-            ((inclusive_counts(&one_hot, &self.triangle)? * &one_hot)?.sum_keepdim(1)? - 1.0)?;
-        let kept = position.lt(&filled(&position, capacity as f64)?)?;
-        let slots = experts * capacity;
-        // Dropped assignments all land in one spare row past the last slot.
+        self.add_usage(&one_hot.sum(0)?)?;
+        let counts = if groups == 1 {
+            inclusive_counts(&one_hot, &self.triangle)?
+        } else {
+            let parts = (0..groups)
+                .map(|g| {
+                    inclusive_counts(
+                        &one_hot.narrow(0, g * per_group_assignments, per_group_assignments)?,
+                        &self.triangle,
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?;
+            Tensor::cat(&parts, 0)?
+        };
+        let position = ((counts * &one_hot)?.sum_keepdim(1)? - 1.0)?;
+        // The device row of each choice's expert; -1 when it is not resident.
+        let row = self
+            .row_of_device
+            .index_select(&chosen_flat.flatten_all()?.to_dtype(DType::U32)?, 0)?
+            .reshape((assignments, 1))?;
+        let resident_rows = self.w_in.dim(0)?;
+        let kept = (position
+            .lt(&filled(&position, capacity as f64)?)?
+            .to_dtype(DType::F32)?
+            * row.ge(&filled(&row, 0.0)?)?.to_dtype(DType::F32)?)?
+        .gt(&filled(&position, 0.5)?)?;
+        // Slots: resident expert's rows together, each group's queue inside them.
+        let group_slots = groups * capacity;
+        let slots = resident_rows * group_slots;
+        let group_start = if groups == 1 {
+            filled(&position, 0.0)?
+        } else {
+            Tensor::arange(0u32, groups as u32, device)?
+                .to_dtype(DType::F32)?
+                .unsqueeze(1)?
+                .broadcast_as((groups, per_group_assignments))?
+                .reshape((assignments, 1))?
+                .affine(capacity as f64, 0.0)?
+        };
         let slot = kept.where_cond(
-            &((&chosen_flat * capacity as f64)? + &position)?,
+            &(((&row * group_slots as f64)? + group_start)? + &position)?,
             &filled(&position, slots as f64)?,
         )?;
         let slot = slot.flatten_all()?.to_dtype(DType::U32)?;
@@ -268,12 +441,12 @@ impl SparseMoe {
         let dispatched =
             Tensor::zeros((slots + 1, width), dtype, device)?.index_add(&slot, &repeated, 0)?;
 
-        let mut routed = Vec::with_capacity(experts.div_ceil(EXPERT_GROUP) + 1);
-        for first in (0..experts).step_by(EXPERT_GROUP) {
-            let count = EXPERT_GROUP.min(experts - first);
+        let mut routed = Vec::with_capacity(resident_rows.div_ceil(EXPERT_GROUP) + 1);
+        for first in (0..resident_rows).step_by(EXPERT_GROUP) {
+            let count = EXPERT_GROUP.min(resident_rows - first);
             let input = dispatched
-                .narrow(0, first * capacity, count * capacity)?
-                .reshape((count, capacity, width))?;
+                .narrow(0, first * group_slots, count * group_slots)?
+                .reshape((count, group_slots, width))?;
             let hidden = input
                 .matmul(&self.w_in.narrow(0, first, count)?)?
                 .broadcast_add(&self.b_in.narrow(0, first, count)?.reshape((count, 1, ()))?)?;
@@ -286,7 +459,7 @@ impl SparseMoe {
                         .narrow(0, first, count)?
                         .reshape((count, 1, ()))?,
                 )?;
-            routed.push(out.reshape((count * capacity, width))?);
+            routed.push(out.reshape((count * group_slots, width))?);
         }
         routed.push(Tensor::zeros((1, width), dtype, device)?);
         let routed = Tensor::cat(&routed, 0)?;
@@ -362,15 +535,17 @@ impl FusionLayer {
         })
     }
 
+    /// `groups`: how the MoE splits the batch's capacity ([`SparseMoe::forward`]).
     fn forward(
         &self,
         image: &Tensor,
         position: &Tensor,
         text: &Tensor,
         text_padding: &Tensor,
+        groups: usize,
     ) -> Result<(Tensor, Tensor)> {
         let image = self.image_self_block(image, position)?;
-        self.after_image_self(&image, position, text, text_padding)
+        self.after_image_self(&image, position, text, text_padding, groups)
     }
 
     /// The layer on `batch` rows that all hold the same image `[1, N, D]`: the image
@@ -387,7 +562,7 @@ impl FusionLayer {
         let image = self.image_self_block(image, position)?;
         let (_, tokens, width) = image.dims3()?;
         let image = image.broadcast_as((batch, tokens, width))?.contiguous()?;
-        self.after_image_self(&image, position, text, text_padding)
+        self.after_image_self(&image, position, text, text_padding, 1)
     }
 
     fn image_self_block(&self, image: &Tensor, position: &Tensor) -> Result<Tensor> {
@@ -412,6 +587,7 @@ impl FusionLayer {
         position: &Tensor,
         text: &Tensor,
         text_padding: &Tensor,
+        groups: usize,
     ) -> Result<(Tensor, Tensor)> {
         let query = self.image_norm2.forward(image)?.broadcast_add(position)?;
         let image = (image
@@ -423,7 +599,10 @@ impl FusionLayer {
             + self
                 .text_image
                 .forward(&self.text_norm1.forward(text)?, &keys, &image, None)?)?;
-        let image = (&image + self.moe.forward(&self.image_norm3.forward(&image)?)?)?;
+        let image = (&image
+            + self
+                .moe
+                .forward(&self.image_norm3.forward(&image)?, groups)?)?;
         let text = (&text + self.text_ffn.forward(&self.text_norm2.forward(&text)?)?)?;
         Ok((image, text))
     }
@@ -855,19 +1034,85 @@ impl IrisModel {
         })
     }
 
-    /// The fusion stack. Returns the normed image tokens and the fused text.
+    /// The fusion stack. Returns the normed image tokens and the fused text. The batch's
+    /// rows share the MoE capacity, as in Python: open mode's rows are one image.
     pub fn fuse(
         &self,
         tokens: &Tensor,
         text: &Tensor,
         text_padding: &Tensor,
     ) -> Result<(Tensor, Tensor)> {
+        self.fuse_grouped(tokens, text, text_padding, 1)
+    }
+
+    /// [`IrisModel::fuse`] for a batch of different images (several foci in one pass):
+    /// each row has its own MoE capacity, so each comes out as it would alone.
+    pub fn fuse_per_image(
+        &self,
+        tokens: &Tensor,
+        text: &Tensor,
+        text_padding: &Tensor,
+    ) -> Result<(Tensor, Tensor)> {
+        self.fuse_grouped(tokens, text, text_padding, tokens.dim(0)?)
+    }
+
+    fn fuse_grouped(
+        &self,
+        tokens: &Tensor,
+        text: &Tensor,
+        text_padding: &Tensor,
+        groups: usize,
+    ) -> Result<(Tensor, Tensor)> {
         let mut image = tokens.clone();
         let mut text = text.clone();
         for layer in &self.fusion {
-            (image, text) = layer.forward(&image, &self.position, &text, text_padding)?;
+            (image, text) = layer.forward(&image, &self.position, &text, text_padding, groups)?;
         }
         Ok((self.fused_norm.forward(&image)?, text))
+    }
+
+    /// Bytes one MoE expert takes on the device.
+    pub fn expert_bytes(&self) -> usize {
+        self.fusion
+            .first()
+            .map_or(0, |layer| layer.moe.expert_bytes())
+    }
+
+    /// Keeps only the experts `plan[layer][expert]` marks on the device (`None`: all).
+    /// Results change for tokens routed to an absent expert; see `archie_accel::memory`.
+    pub fn set_expert_residency(&mut self, plan: Option<&[Vec<bool>]>) -> Result<()> {
+        if let Some(plan) = plan {
+            if plan.len() != self.fusion.len() {
+                return Err(crate::Error::Refused(format!(
+                    "residency for {} layers, the model has {}",
+                    plan.len(),
+                    self.fusion.len()
+                )));
+            }
+        }
+        for (index, layer) in self.fusion.iter_mut().enumerate() {
+            layer.moe.set_residency(plan.map(|p| p[index].as_slice()))?;
+        }
+        Ok(())
+    }
+
+    /// Starts (or stops) counting how often each expert is chosen, per layer.
+    pub fn record_expert_usage(&self, on: bool) {
+        for layer in &self.fusion {
+            layer.moe.record_usage(on);
+        }
+    }
+
+    /// Choices per expert per layer since recording started; empty when not recording.
+    pub fn expert_usage(&self) -> Result<Vec<Vec<u64>>> {
+        let mut out = Vec::with_capacity(self.fusion.len());
+        for layer in &self.fusion {
+            match layer.moe.usage()? {
+                Some(counts) => out.push(counts),
+                None => return Ok(Vec::new()),
+            }
+        }
+        Ok(out)
     }
 
     /// [`IrisModel::fuse`] for one image `[1, N, D]` read against every row of `text`
@@ -888,7 +1133,7 @@ impl IrisModel {
         let (mut image, mut text) =
             first.forward_shared_image(tokens, batch, &self.position, text, text_padding)?;
         for layer in rest {
-            (image, text) = layer.forward(&image, &self.position, &text, text_padding)?;
+            (image, text) = layer.forward(&image, &self.position, &text, text_padding, 1)?;
         }
         Ok((self.fused_norm.forward(&image)?, text))
     }
@@ -1114,13 +1359,22 @@ mod tests {
         map
     }
 
+    fn grouped_on_host(moe: &SparseMoe, x: &Tensor, groups: usize) -> Tensor {
+        moe.route_on_host(&x.reshape(((), WIDTH)).unwrap(), groups)
+            .unwrap()
+    }
+
+    fn grouped_on_device(moe: &SparseMoe, x: &Tensor, groups: usize) -> Tensor {
+        moe.route_on_device(&x.reshape(((), WIDTH)).unwrap(), groups)
+            .unwrap()
+    }
+
     fn on_host(moe: &SparseMoe, x: &Tensor) -> Tensor {
-        moe.route_on_host(&x.reshape(((), WIDTH)).unwrap()).unwrap()
+        grouped_on_host(moe, x, 1)
     }
 
     fn on_device(moe: &SparseMoe, x: &Tensor) -> Tensor {
-        moe.route_on_device(&x.reshape(((), WIDTH)).unwrap())
-            .unwrap()
+        grouped_on_device(moe, x, 1)
     }
 
     /// Batch of `rows x columns` random tokens; every seventh is zero, a full tie.
@@ -1280,7 +1534,7 @@ mod tests {
             .contiguous()
             .unwrap();
         let (image_a, text_a) = layer
-            .forward(&repeated, &position, &text, &padding)
+            .forward(&repeated, &position, &text, &padding, 1)
             .unwrap();
         let (image_b, text_b) = layer
             .forward_shared_image(&image, batch, &position, &text, &padding)
@@ -1336,5 +1590,57 @@ mod tests {
             .unwrap();
         assert_eq!(all[0][..4], [10, 1, 3, 0]);
         assert_eq!(all[1], (0..12).collect::<Vec<u32>>());
+    }
+
+    #[test]
+    fn a_group_per_image_routes_each_image_as_if_alone() {
+        let moe = moe(8, 2, 1);
+        let images: Vec<Tensor> = (0..3).map(|_| tokens(1, 120)).collect();
+        let batch = Tensor::cat(&images, 0).unwrap();
+        let alone: Vec<Tensor> = images.iter().map(|x| on_host(&moe, x)).collect();
+        let alone = Tensor::cat(&alone, 0).unwrap();
+        let host = grouped_on_host(&moe, &batch, 3);
+        let device = grouped_on_device(&moe, &batch, 3);
+        assert_eq!(max_difference(&host, &alone), 0.0);
+        assert!(max_difference(&device, &alone) <= 1e-5);
+        // One group for the whole batch is a different (shared) capacity.
+        assert!(max_difference(&on_host(&moe, &batch), &alone) > 0.0);
+        assert!(moe.forward(&batch, 7).is_err());
+    }
+
+    #[test]
+    fn absent_experts_act_at_capacity_zero_on_both_routes() {
+        let mut moe = moe(8, 2, 1);
+        let x = tokens(2, 100);
+        let full = on_host(&moe, &x);
+        let resident = [true, false, true, true, false, true, true, false];
+        moe.set_residency(Some(&resident)).unwrap();
+        assert_eq!(moe.w_in.dim(0).unwrap(), 5);
+        let host = on_host(&moe, &x);
+        let device = on_device(&moe, &x);
+        assert!(max_difference(&host, &device) <= 1e-5);
+        assert!(
+            max_difference(&host, &full) > 0.0,
+            "expert 1 was chosen and is gone"
+        );
+        // Every expert back: the original numbers.
+        moe.set_residency(None).unwrap();
+        assert_eq!(moe.w_in.dim(0).unwrap(), 8);
+        assert!(moe.host.is_none());
+        assert_eq!(max_difference(&on_host(&moe, &x), &full), 0.0);
+    }
+
+    #[test]
+    fn usage_counts_every_choice_on_both_routes() {
+        let moe = moe(8, 2, 1);
+        let x = tokens(1, 50);
+        assert!(moe.usage().unwrap().is_none());
+        moe.record_usage(true);
+        on_host(&moe, &x);
+        let host = moe.usage().unwrap().unwrap();
+        assert_eq!(host.iter().sum::<u64>(), 100);
+        moe.record_usage(true);
+        on_device(&moe, &x);
+        assert_eq!(moe.usage().unwrap().unwrap(), host);
     }
 }

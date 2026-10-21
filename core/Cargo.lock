@@ -378,6 +378,7 @@ dependencies = [
 name = "archie-iris-runtime"
 version = "0.1.0"
 dependencies = [
+ "archie-accel",
  "axum",
  "candle-core",
  "candle-flash-attn",

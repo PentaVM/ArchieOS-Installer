@@ -17,6 +17,7 @@
 pub mod act;
 pub mod detect;
 pub mod fast;
+pub mod live;
 pub mod lora;
 pub mod model;
 pub mod nn;

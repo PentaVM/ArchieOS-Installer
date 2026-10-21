@@ -4,7 +4,16 @@
 //! archie-iris-serve --weights iris-beta21-step132000.pt --text-tower <dir> [--port 8765]
 //!                   [--sha256 <hex>] [--device auto|cpu|cuda] [--rem-spool <dir>]
 //!                   [--skills-dir <dir>] [--text-device cpu|model] [--phrase-cache <dir>]
+//!                   [--live-max-fps <n>] [--live-max-priority <class>]
+//!                   [--record-expert-usage]
 //! ```
+//!
+//! `--record-expert-usage` counts how often each MoE expert is chosen, per layer, and
+//! `GET /experts` reports it: the routing histograms residency decisions are made from.
+//!
+//! `/live` answers every frame of a focus at once (damage, tracking) and reads it with the
+//! model only as often as the focus's budget allows; `--live-max-fps` and
+//! `--live-max-priority` are the envelope no request or advice can exceed.
 //!
 //! `--text-tower` is a directory with SigLIP2's `model.safetensors`, `tokenizer.json` and
 //! `tokenizer_config.json`. `--phrase-table <dir>` instead serves only the phrases in a
@@ -15,6 +24,8 @@
 //! phrase features on disk, so a restart encodes nothing it encoded before. The everyday
 //! vocabulary is encoded before the server says it is ready.
 
+use archie_accel::advice::Envelope;
+use archie_accel::plan::Priority;
 use archie_iris_runtime::act::Actor;
 use archie_iris_runtime::detect::{Detector, EVERYDAY_VOCABULARY};
 use archie_iris_runtime::model::IrisModel;
@@ -30,7 +41,9 @@ fn usage() -> ! {
     eprintln!(
         "usage: archie-iris-serve --weights <file.pt> (--text-tower <dir> | --phrase-table <dir>) \
          [--port 8765] [--sha256 <hex>] [--device auto|cpu|cuda] [--rem-spool <dir>] [--skills-dir <dir>] \
-         [--text-device cpu|model] [--phrase-cache <dir>]"
+         [--text-device cpu|model] [--phrase-cache <dir>] [--live-max-fps <n>] \
+         [--live-max-priority background|wanda_interactive|active_focus|voice_reflex] \
+         [--record-expert-usage]"
     );
     std::process::exit(2);
 }
@@ -41,6 +54,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut weights, mut tower, mut table, mut sha256) = (None, None, None, None);
     let (mut rem_spool, mut skills_dir, mut phrase_cache) = (None, None, None);
     let mut text_device = "cpu".to_owned();
+    let mut record_usage = false;
+    let mut envelope = Envelope {
+        max_priority: Priority::ActiveFocus,
+        max_fps: 30.0,
+        max_vram_bytes: 0,
+        allow_partial_experts: false,
+        expert_floor: 0.5,
+    };
     let (mut port, mut device) = (8765u16, "auto".to_owned());
     while let Some(flag) = args.next() {
         let mut value = || args.next().unwrap_or_else(|| usage());
@@ -55,6 +76,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--skills-dir" => skills_dir = Some(PathBuf::from(value())),
             "--text-device" => text_device = value(),
             "--phrase-cache" => phrase_cache = Some(PathBuf::from(value())),
+            "--record-expert-usage" => record_usage = true,
+            "--live-max-fps" => envelope.max_fps = value().parse().unwrap_or_else(|_| usage()),
+            "--live-max-priority" => {
+                envelope.max_priority = match value().as_str() {
+                    "background" => Priority::Background,
+                    "wanda_interactive" => Priority::WandaInteractive,
+                    "active_focus" => Priority::ActiveFocus,
+                    "voice_reflex" => Priority::VoiceReflex,
+                    _ => usage(),
+                }
+            }
             _ => usage(),
         }
     }
@@ -93,6 +125,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         phrases.encode(&vocabulary)?;
     }
     let model = IrisModel::load(&loaded)?;
+    model.record_expert_usage(record_usage);
     let actor = match Actor::load(&loaded) {
         Ok(actor) => Some(actor),
         Err(Error::Weights(_)) => None,
@@ -116,8 +149,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "rem_recording": rem_spool.is_some(),
     });
     drop(loaded);
-    let mut service =
-        Service::new(Detector::new(model, phrases), actor, info).with_rem_spool(rem_spool);
+    let mut service = Service::new(Detector::new(model, phrases), actor, info)
+        .with_rem_spool(rem_spool)
+        .with_live_envelope(envelope);
     if let Some(dir) = skills_dir {
         service = service.with_skills_dir(dir);
     }
