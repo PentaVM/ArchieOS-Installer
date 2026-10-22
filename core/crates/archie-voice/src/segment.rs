@@ -41,9 +41,15 @@ impl Segmenter {
 
     /// Takes the next fragment and returns whatever it completed.
     pub fn push(&mut self, fragment: &str) -> Vec<Spoken> {
+        self.push_up_to(fragment, usize::MAX)
+    }
+
+    /// Append a fragment and release at most `limit` pieces. A realtime caller can
+    /// subsequently pass an empty fragment to drain the retained text incrementally.
+    pub fn push_up_to(&mut self, fragment: &str, limit: usize) -> Vec<Spoken> {
         self.buffer.push_str(fragment);
         let mut out = Vec::new();
-        loop {
+        while out.len() < limit {
             if let Some(end) = sentence_end(&self.buffer) {
                 let piece: String = self.buffer.drain(..end).collect();
                 if let Some(spoken) = clean(&piece, true) {

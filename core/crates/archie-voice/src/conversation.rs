@@ -22,6 +22,7 @@
 //!   is dropped, the turn is cancelled as an interruption, and what was not said stays in
 //!   the commit log, unsaid.
 
+use crate::actions::{ActionDispatcher, InlineActions, PendingAction};
 use crate::asr::SpeechRecognizer;
 use crate::audio::{loudness, AudioError, VoiceActivity};
 #[cfg(feature = "pulse")]
@@ -36,7 +37,7 @@ use archie_orb::{publish, semantic_features, signal, SignalKind};
 use archie_speech::{
     FloorAction, SessionEvent, SpeechBudget, SpeechSession, SpeechToolIntentCandidate,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
@@ -87,7 +88,19 @@ impl Hearing {
             // A network stalls; the loop must not. An empty frame keeps the voice and the
             // turn moving while no sound arrives, and advances no audio time.
             Self::Stream(frames) => match frames.recv_timeout(Duration::from_millis(40)) {
-                Ok(frame) => Ok(Some((frame, crate::audio::CAPTURE_RATE))),
+                Ok(frame) => {
+                    // Reject malformed input before it enters VAD or the native ASR.
+                    // Network chunks may vary, but one packet is at most one second.
+                    if frame.len() > crate::audio::CAPTURE_RATE as usize
+                        || frame.iter().any(|s| !s.is_finite() || s.abs() > 1.0)
+                    {
+                        return Err(AudioError::new(
+                            "reading streamed audio",
+                            "invalid PCM or chunk exceeds one second",
+                        ));
+                    }
+                    Ok(Some((frame, crate::audio::CAPTURE_RATE)))
+                }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     Ok(Some((Vec::new(), crate::audio::CAPTURE_RATE)))
                 }
@@ -286,6 +299,13 @@ impl Default for Setup {
 /// What the loop reports as it goes: printed by the command line, kept by a test.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Moment {
+    /// Monotonic time since this turn was admitted, not an audible latency claim.
+    Timing {
+        turn_id: String,
+        phase: &'static str,
+        elapsed_ms: u128,
+        queued_segments: usize,
+    },
     Heard {
         text: String,
         at_ms: u128,
@@ -350,7 +370,6 @@ enum FromVoice {
         stopped: bool,
     },
     Failed(String),
-    Idle,
 }
 
 /// Runs the conversation until a recording runs out, or `stop` is set.
@@ -366,10 +385,41 @@ pub fn converse<S: TurnSource>(
     ears: &dyn SpeechRecognizer,
     rehear: Option<&dyn SpeechRecognizer>,
     voice: Box<dyn Speaks>,
-    mut hearing: Hearing,
+    hearing: Hearing,
     saying: Saying,
     session: &mut SpeechSession<NemotronCognitive<S>>,
     act: &mut dyn FnMut(&SpeechToolIntentCandidate) -> String,
+    context: &mut dyn FnMut() -> String,
+    stop: Arc<AtomicBool>,
+    report: &mut dyn FnMut(Moment),
+) -> Result<(), String> {
+    converse_with_actions(
+        setup,
+        ears,
+        rehear,
+        voice,
+        hearing,
+        saying,
+        session,
+        &mut InlineActions(act),
+        context,
+        stop,
+        report,
+    )
+}
+
+/// Interactive entry point: pending tool futures do not block audio or floor decisions.
+/// A superseded turn drops its pending future and its queued proposals together.
+#[allow(clippy::too_many_arguments)]
+pub fn converse_with_actions<S: TurnSource>(
+    setup: &Setup,
+    ears: &dyn SpeechRecognizer,
+    rehear: Option<&dyn SpeechRecognizer>,
+    voice: Box<dyn Speaks>,
+    mut hearing: Hearing,
+    saying: Saying,
+    session: &mut SpeechSession<NemotronCognitive<S>>,
+    act: &mut dyn ActionDispatcher,
     context: &mut dyn FnMut() -> String,
     stop: Arc<AtomicBool>,
     report: &mut dyn FnMut(Moment),
@@ -470,7 +520,7 @@ pub fn converse<S: TurnSource>(
             audio_ms += (frame.len() as u64 * 1000) / rate.max(1) as u64;
             let level = loudness(&frame);
             // An empty frame is a stream that has sent nothing yet, not a quiet room.
-            let voiced = !frame.is_empty() && activity.hear(level);
+            let voiced = activity.hear_audio(&frame, rate);
             frames += 1;
             if frames % 5 == 0 {
                 report(Moment::Level { level, voiced });
@@ -558,9 +608,21 @@ pub fn converse<S: TurnSource>(
                     if is_acknowledgement(&said) {
                         continue;
                     }
+                    // A named correction while the model/tool is thinking has no audio
+                    // to overlap. It still supersedes the old turn immediately.
+                    let named_now = names_archie(&streamed) || names_archie(&said);
+                    if turn.is_some() && speaking == 0 && (named_now || setup.always) {
+                        if let Some(old) = &turn {
+                            report(old.timing("cancelled", speaking));
+                        }
+                        session.cancel(archie_speech::CancelReason::Superseded);
+                        generation.fetch_add(1, Ordering::SeqCst);
+                        turn = None; // abort owned future; queued proposals never start
+                        report(Moment::Interrupted);
+                    }
                     let previous = deferred.take();
-                    let named = names_archie(&streamed)
-                        || previous.as_ref().is_some_and(|utterance| utterance.named);
+                    let named =
+                        named_now || previous.as_ref().is_some_and(|utterance| utterance.named);
                     let joined = match previous {
                         Some(previous) => format!("{} {said}", previous.text),
                         None => said,
@@ -610,6 +672,9 @@ pub fn converse<S: TurnSource>(
                         trace_id: format!("voz-{turn_number}"),
                         working_set: BTreeMap::new(),
                     }));
+                    if let Some(old) = &turn {
+                        report(old.timing("cancelled", speaking));
+                    }
                     turn = None;
                 }
             }
@@ -663,8 +728,12 @@ pub fn converse<S: TurnSource>(
     })();
 
     if stop.load(Ordering::Relaxed) || result.is_err() {
+        if let Some(old) = &turn {
+            report(old.timing("cancelled", speaking));
+        }
         generation.fetch_add(1, Ordering::SeqCst);
         session.cancel(archie_speech::CancelReason::Shutdown);
+        drop(turn.take());
         let _ = to_voice.send(ToVoice::Hush);
     }
     let _ = to_voice.send(ToVoice::Finish);
@@ -692,6 +761,23 @@ struct Answering {
     steps: usize,
     results: Vec<(String, String)>,
     finished: bool,
+    model_finished: bool,
+    proposed: usize,
+    queued: VecDeque<SpeechToolIntentCandidate>,
+    action: Option<(String, PendingAction)>,
+    started: Instant,
+    first_segment: bool,
+}
+
+impl Answering {
+    fn timing(&self, phase: &'static str, queued_segments: usize) -> Moment {
+        Moment::Timing {
+            turn_id: self.id.clone(),
+            phase,
+            elapsed_ms: self.started.elapsed().as_millis(),
+            queued_segments,
+        }
+    }
 }
 
 struct PendingUtterance {
@@ -735,6 +821,7 @@ fn begin_pending<S: TurnSource>(
         );
     }
     let decision = session.floor_decision(&state);
+    let started = Instant::now();
     let id = format!("voz-{}", *turn_number + 1);
     let decision = if matches!(decision.budget, SpeechBudget::Sentence | SpeechBudget::Full) {
         session.cognitive_mut().set_context(context());
@@ -763,6 +850,12 @@ fn begin_pending<S: TurnSource>(
     }
     let utterance = pending.take().expect("pending utterance");
     *turn_number += 1;
+    report(Moment::Timing {
+        turn_id: id.clone(),
+        phase: "request",
+        elapsed_ms: started.elapsed().as_millis(),
+        queued_segments: 0,
+    });
     publish(&signal(SignalKind::Think {
         active: true,
         trace_id: id.clone(),
@@ -775,6 +868,12 @@ fn begin_pending<S: TurnSource>(
         steps: 1,
         results: Vec::new(),
         finished: false,
+        model_finished: false,
+        proposed: 0,
+        queued: VecDeque::new(),
+        action: None,
+        started,
+        first_segment: false,
     }))
 }
 
@@ -785,7 +884,7 @@ fn advance<S: TurnSource>(
     session: &mut SpeechSession<NemotronCognitive<S>>,
     turn: &mut Option<Answering>,
     setup: &Setup,
-    act: &mut dyn FnMut(&SpeechToolIntentCandidate) -> String,
+    act: &mut dyn ActionDispatcher,
     context: &mut dyn FnMut() -> String,
     to_voice: &Sender<ToVoice>,
     generation: &AtomicU64,
@@ -797,6 +896,7 @@ fn advance<S: TurnSource>(
     };
     if answering.finished {
         if *speaking == 0 {
+            report(answering.timing("complete", 0));
             let heard_from_archie = session.heard_text();
             let heard = answering.heard.clone();
             session.cognitive_mut().remember(&heard, &heard_from_archie);
@@ -804,10 +904,34 @@ fn advance<S: TurnSource>(
         }
         return Ok(());
     }
-    for event in session.pump() {
+    if let Some((id, pending)) = answering.action.as_mut() {
+        if let Some(outcome) = pending.poll() {
+            report(Moment::Did {
+                report: outcome.clone(),
+            });
+            answering.results.push((id.clone(), outcome));
+            answering.action = None;
+            report(answering.timing("tool_finished", *speaking));
+        }
+    }
+    if answering.action.is_none() {
+        if let Some(intent) = answering.queued.pop_front() {
+            let id = intent.correlation_id.clone();
+            answering.action = Some((id, act.start(intent)));
+            report(answering.timing("tool_started", *speaking));
+        }
+    }
+    // At most two released segments may be queued/playing. Polling also has a
+    // bounded work budget, so a fast model cannot monopolize the hearing loop.
+    let capacity = 2usize.saturating_sub(*speaking);
+    for event in session.pump_up_to(capacity) {
         match event {
             SessionEvent::Speak(segment) => {
                 *speaking += 1;
+                if !answering.first_segment {
+                    answering.first_segment = true;
+                    report(answering.timing("first_segment", *speaking));
+                }
                 let features = semantic_features(&segment.text);
                 let _ = to_voice.send(ToVoice::Say {
                     generation: generation.load(Ordering::SeqCst),
@@ -822,42 +946,62 @@ fn advance<S: TurnSource>(
                     tool: intent.tool_name.clone(),
                     arguments: intent.raw_arguments.clone(),
                 });
-                let outcome = act(&intent);
-                report(Moment::Did {
-                    report: outcome.clone(),
-                });
-                answering
-                    .results
-                    .push((intent.correlation_id.clone(), outcome));
+                answering.proposed += 1;
+                if answering.proposed <= 16 {
+                    answering.queued.push_back(intent);
+                } else {
+                    answering.results.push((
+                        intent.correlation_id,
+                        "No se hizo: se alcanzó el límite de herramientas de este turno.".into(),
+                    ));
+                }
             }
             SessionEvent::Withheld { .. } => {}
-            SessionEvent::Alert(message) => report(Moment::Alert(message)),
-            SessionEvent::Finished => {
-                if session.cognitive().awaiting_results() && answering.steps < setup.steps {
-                    answering.steps += 1;
-                    let results = std::mem::take(&mut answering.results);
-                    let budget = answering.budget;
-                    let id = answering.id.clone();
-                    let facts = context();
-                    let cognitive = session.cognitive_mut();
-                    cognitive.set_context(facts);
-                    cognitive
-                        .follow_up(id, &results, budget)
-                        .map_err(|error| error.to_string())?;
-                } else {
-                    // The model is done; history is committed only after playback receipts.
-                    archie_orb::publish(&archie_orb::signal(SignalKind::Think {
-                        active: false,
-                        trace_id: answering.id.clone(),
-                        working_set: BTreeMap::new(),
-                    }));
+            SessionEvent::Alert(message) => {
+                report(Moment::Alert(message));
+                if session.turn_finished() {
+                    finish_thinking(&answering.id);
                     answering.finished = true;
+                    answering.queued.clear();
+                    answering.action = None;
+                    report(answering.timing("failed", *speaking));
                     return Ok(());
                 }
             }
+            SessionEvent::Finished => {
+                answering.model_finished = true;
+            }
+        }
+    }
+    if answering.model_finished && answering.action.is_none() && answering.queued.is_empty() {
+        if session.cognitive().awaiting_results() && answering.steps < setup.steps {
+            answering.model_finished = false;
+            answering.steps += 1;
+            let results = std::mem::take(&mut answering.results);
+            let budget = answering.budget;
+            let id = answering.id.clone();
+            let facts = context();
+            let cognitive = session.cognitive_mut();
+            cognitive.set_context(facts);
+            cognitive
+                .follow_up(id, &results, budget)
+                .map_err(|error| error.to_string())?;
+        } else {
+            // The model is done; history is committed only after playback receipts.
+            finish_thinking(&answering.id);
+            answering.finished = true;
+            return Ok(());
         }
     }
     Ok(())
+}
+
+fn finish_thinking(turn_id: &str) {
+    publish(&signal(SignalKind::Think {
+        active: false,
+        trace_id: turn_id.to_string(),
+        working_set: BTreeMap::new(),
+    }));
 }
 
 fn pump_voice<C: archie_speech::CognitiveModelAdapter>(
@@ -895,9 +1039,6 @@ fn pump_voice<C: archie_speech::CognitiveModelAdapter>(
                 });
             }
             Ok(FromVoice::Began { text }) => report(Moment::Speaking { text }),
-            Ok(FromVoice::Idle) => {
-                *speaking = 0;
-            }
             Ok(FromVoice::Failed(message)) => {
                 *speaking = speaking.saturating_sub(1);
                 report(Moment::Alert(message.clone()));
@@ -1027,7 +1168,9 @@ fn speak(
             }
             ToVoice::Hush => {
                 saying.hush();
-                let _ = outbox.send(FromVoice::Idle);
+                // Every queued Say reports its own Spoke, including cancellation.
+                // An unscoped Idle could arrive after new speech was enqueued and
+                // incorrectly erase that generation's outstanding segment count.
             }
             ToVoice::Finish => break,
         }
@@ -1059,6 +1202,43 @@ mod receipt_tests {
     };
 
     struct FirstFailure(Arc<AtomicU64>);
+
+    #[test]
+    fn a_delayed_hush_has_no_unscoped_receipt_to_clear_new_speech() {
+        let (send, inbox) = mpsc::channel();
+        send.send(ToVoice::Hush).unwrap();
+        send.send(ToVoice::Say {
+            generation: 1,
+            turn_id: "new".into(),
+            sequence: 0,
+            text: "Hola.".into(),
+            semantic_features: vec![],
+        })
+        .unwrap();
+        send.send(ToVoice::Finish).unwrap();
+        let (outbox, events) = mpsc::channel();
+        speak(
+            Box::new(ShortVoice),
+            Saying::Recording {
+                path: std::env::temp_dir().join("archie-hush-unused.wav"),
+                samples: vec![],
+                rate: 16_000,
+            },
+            inbox,
+            outbox,
+            Arc::new(AtomicU64::new(1)),
+        );
+        let events: Vec<_> = events.try_iter().collect();
+        assert_eq!(
+            events.len(),
+            2,
+            "only Began and the turn-scoped Spoke may change playback accounting"
+        );
+        assert!(matches!(&events[0], FromVoice::Began { .. }));
+        assert!(
+            matches!(&events[1], FromVoice::Spoke { turn_id, stopped: false, .. } if turn_id == "new")
+        );
+    }
     impl Speaks for FirstFailure {
         fn sample_rate(&self) -> u32 {
             16_000
@@ -1228,6 +1408,23 @@ mod receipt_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn streamed_audio_rejects_invalid_or_oversized_chunks_before_asr() {
+        for frame in [
+            vec![f32::NAN],
+            vec![f32::INFINITY],
+            vec![1.1],
+            vec![0.0; 16_001],
+        ] {
+            let (send, recv) = mpsc::channel();
+            send.send(frame).unwrap();
+            assert!(Hearing::Stream(recv).frame().is_err());
+        }
+        let (send, recv) = mpsc::channel();
+        send.send(vec![]).unwrap();
+        assert!(Hearing::Stream(recv).frame().unwrap().unwrap().0.is_empty());
+    }
 
     #[test]
     fn a_run_of_punctuation_through_silence_becomes_one_mark() {

@@ -980,16 +980,25 @@ fn live(asking: Asking, speech: SpeechFlags, flags: LiveFlags) -> Result<ExitCod
     cognitive.put_context_beside_utterance();
     let mut session =
         SpeechSession::new(plan, FloorPolicy::default(), cognitive).map_err(|e| e.to_string())?;
-    let mut act = |intent: &archie_speech::SpeechToolIntentCandidate| -> String {
-        runtime
-            .block_on(senses.handle_tool(&intent.tool_name, &intent.raw_arguments))
-            .unwrap_or_else(|| {
-                format!(
-                    "No se hizo: aquí no tengo la herramienta {}.",
-                    intent.tool_name
-                )
-            })
-    };
+    let tool_senses = senses.clone();
+    let mut act = archie_voice::actions::AsyncActions::new(
+        runtime.handle().clone(),
+        Duration::from_secs(90),
+        move |intent: archie_speech::SpeechToolIntentCandidate| {
+            let senses = tool_senses.clone();
+            async move {
+                senses
+                    .handle_tool(&intent.tool_name, &intent.raw_arguments)
+                    .await
+                    .unwrap_or_else(|| {
+                        format!(
+                            "No se hizo: aquí no tengo la herramienta {}.",
+                            intent.tool_name
+                        )
+                    })
+            }
+        },
+    );
     let mut context = || senses.context(&clock);
     let started = Instant::now();
     let mut report = |moment: conversation::Moment| {
@@ -999,6 +1008,14 @@ fn live(asking: Asking, speech: SpeechFlags, flags: LiveFlags) -> Result<ExitCod
         senses.publish(live::moment_json(&moment));
         let at = started.elapsed().as_millis();
         match &moment {
+            conversation::Moment::Timing {
+                turn_id,
+                phase,
+                elapsed_ms,
+                queued_segments,
+            } => println!(
+                "{at:>7} ms  timing   {turn_id} {phase} +{elapsed_ms} ms queue={queued_segments}"
+            ),
             conversation::Moment::Heard { text, .. } => println!("{at:>7} ms  oí       {text}"),
             conversation::Moment::Said { text, .. } => println!("{at:>7} ms  dije     {text}"),
             conversation::Moment::Proposed { tool, arguments } => {
@@ -1027,7 +1044,7 @@ fn live(asking: Asking, speech: SpeechFlags, flags: LiveFlags) -> Result<ExitCod
             "answering when named, or within the follow-up window"
         }
     );
-    conversation::converse(
+    conversation::converse_with_actions(
         &setup,
         &ears,
         rehear
@@ -1072,7 +1089,6 @@ fn converse(
     use archie_voice::audio::{Microphone, Speaker};
     use archie_voice::conversation::{self, Hearing, Moment, Saying, Setup};
     use archie_voice::native::{Ears, Voice, VoiceFiles};
-    use std::cell::RefCell;
     use std::path::Path;
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
@@ -1181,25 +1197,47 @@ fn converse(
     let mut session =
         SpeechSession::new(plan, FloorPolicy::default(), cognitive).map_err(|e| e.to_string())?;
 
-    let stage = RefCell::new(stage);
-    let mut act = |intent: &SpeechToolIntentCandidate| -> String {
-        let mut stage = stage.borrow_mut();
-        let Some((hands, policy)) = stage.as_mut() else {
-            return "No se hizo: en esta conversación no tengo el escritorio conectado.".into();
-        };
-        match archie_voice::decide(intent, policy, hands.front().as_deref()) {
-            Ok(plan) => runtime.block_on(hands.perform(&plan)).report,
-            Err(refusal) => format!("No se hizo: {}", refusal.spoken),
-        }
-    };
+    // Context never waits on a tool holding the Stage across an await. Mark cached
+    // focus unknown during an operation; the next action still checks Stage policy.
+    let front = Arc::new(std::sync::Mutex::new(
+        stage.as_ref().and_then(|(hands, _)| hands.front()),
+    ));
+    let stage = Arc::new(tokio::sync::Mutex::new(stage));
+    let action_front = front.clone();
+    let mut act = archie_voice::actions::AsyncActions::new(
+        runtime.handle().clone(),
+        Duration::from_secs(90),
+        move |intent: SpeechToolIntentCandidate| {
+            let stage = stage.clone();
+            let front = action_front.clone();
+            async move {
+                // Own the transport while awaiting an operation. Cancellation drops
+                // it instead of reusing a possibly half-read protocol connection.
+                let Some(mut connection) = stage.lock().await.take() else {
+                    return "No se hizo: el escritorio no está conectado o su operación fue interrumpida. Vuelve a iniciar la sesión de voz para reconectarlo.".into();
+                };
+                *front.lock().expect("front lock") = None;
+                let (hands, policy) = &mut connection;
+                let outcome = match archie_voice::decide(&intent, policy, hands.front().as_deref())
+                {
+                    Ok(plan) => hands.perform(&plan).await.report,
+                    Err(refusal) => format!("No se hizo: {}", refusal.spoken),
+                };
+                *front.lock().expect("front lock") = hands.front();
+                *stage.lock().await = Some(connection);
+                outcome
+            }
+        },
+    );
     let mut context = || {
-        let front = stage.borrow().as_ref().and_then(|(hands, _)| hands.front());
+        let front = front.lock().expect("front lock").clone();
         context_for(&clock, front, &openable)
     };
     let started = Instant::now();
     let mut report = |moment: Moment| {
         let at = started.elapsed().as_millis();
         match moment {
+            Moment::Timing { turn_id, phase, elapsed_ms, queued_segments } => println!("{at:>7} ms  timing   {turn_id} {phase} +{elapsed_ms} ms queue={queued_segments}"),
             Moment::Heard { text, .. } => println!("{at:>7} ms  oí       {text}"),
             Moment::Floor {
                 action,
@@ -1249,7 +1287,7 @@ fn converse(
             ""
         }
     );
-    conversation::converse(
+    conversation::converse_with_actions(
         &setup,
         &ears,
         None,

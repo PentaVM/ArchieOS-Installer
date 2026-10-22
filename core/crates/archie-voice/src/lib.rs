@@ -24,6 +24,7 @@
 //! the others noticing.
 
 pub mod act;
+pub mod actions;
 pub mod addressee;
 pub mod asr;
 pub mod audio;
