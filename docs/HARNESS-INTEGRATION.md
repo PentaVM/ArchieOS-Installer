@@ -104,9 +104,27 @@ not answered.
 Twelve earlier runs that night stopped on reply shapes the worker refused. They exposed
 the defects fixed in the branch: the plain-text seed, unbounded reasoning, the pinned role,
 the key prefix, list and object fields, a fenced reply, a guardrails newline, an unreadable
-proposal and `NO_ENTRY`. Bonsai's output still varies between runs. The robust next step
-is schema-constrained decoding for JSON stages: llama.cpp honoured a `json_schema`
-`response_format` with reasoning on in a direct probe.
+proposal and `NO_ENTRY`. Bonsai's output still varies between runs.
+
+### Schema-constrained JSON stages
+
+The solver's `artifact` reply and the proposer's `harness` reply are JSON, so an API
+runner now decodes them under a JSON Schema. `harness2::reply_schema` gives each stage
+exactly the keys the worker reads, every one a string; the proposal's map names the four
+files of the worker's own `ALLOWED` set. The reflection is upstream's tagged text and
+gets no schema.
+
+- The substrate attaches the schema only for API runners, after the bridge has matched
+  the stage's format to the pinned schedule. Codex receives none.
+- `archie-model-runtime` sends it only on the OpenAI wire, as
+  `response_format: {type: "json_schema", json_schema: {name, strict: true, schema}}`,
+  next to the manifest's reasoning switch. llama.cpp turns it into a grammar; vLLM and
+  the hosted OpenAI-compatible APIs accept the same form. Anthropic never receives it.
+- An operator's request cannot carry a schema: `InferenceRequest.reply_schema` is never
+  serialized, and a schema that does not describe an object or is over 16 KiB is
+  refused before any connection.
+- The worker still checks every reply. The schema keeps a small local model from
+  writing a shape the worker would refuse; it proves nothing about the content.
 
 ## HarnessRouter (UHP)
 

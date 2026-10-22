@@ -1045,3 +1045,105 @@ thinking = "on"
     drop(service);
     drop(rt);
 }
+
+/// The same run against a real llama.cpp server, so an operator can try a local model
+/// such as Bonsai: `ARCHIE_TEST_LLAMA_URL` (its OpenAI base URL, loopback) and
+/// `ARCHIE_TEST_LLAMA_MODEL` (the alias it serves) are required;
+/// `ARCHIE_TEST_LLAMA_THINKING` (`on`/`off`, default `on`) and
+/// `ARCHIE_TEST_LLAMA_MAX_OUTPUT` (default 4096) are optional. It proves that every
+/// stage's reply had a shape the worker accepts, not that the model answered well.
+#[test]
+#[ignore = "requires isolated PG18 extensions, ARCHIE_HARNESS2_PYTHON and a real llama.cpp server"]
+fn harness2_completes_on_a_real_llama_cpp_server_under_reply_schemas() {
+    use archie_workstation::harness_runtime::{
+        create_program_config, load_program, run_harness, HarnessRunRequest,
+    };
+    let python = std::path::PathBuf::from(
+        std::env::var_os("ARCHIE_HARNESS2_PYTHON").expect("explicit supported interpreter"),
+    );
+    let base_url = std::env::var("ARCHIE_TEST_LLAMA_URL").expect("a llama.cpp base URL");
+    let alias = std::env::var("ARCHIE_TEST_LLAMA_MODEL").expect("the alias it serves");
+    let thinking = std::env::var("ARCHIE_TEST_LLAMA_THINKING").unwrap_or_else(|_| "on".into());
+    let max_output: u32 = std::env::var("ARCHIE_TEST_LLAMA_MAX_OUTPUT")
+        .map(|value| value.parse().unwrap())
+        .unwrap_or(4096);
+    let database = Database::new();
+    let dir = tempfile::tempdir().unwrap();
+    let domain = ContextDomain::personal("fixture").unwrap();
+    RuntimeProfile::for_domain(domain.clone())
+        .create(&dir.path().join("policy.toml"))
+        .unwrap();
+    let source = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .canonicalize()
+        .unwrap()
+        .join("tools/harness2");
+    let worker = dir.path().join("worker");
+    stage_private_worker(&source, &worker);
+    let config = dir.path().join("inference/harness2.toml");
+    create_program_config(&config, &python, &worker.join("worker.py")).unwrap();
+    let program = load_program(&config, dir.path().join("harness-state"), None).unwrap();
+    std::fs::create_dir_all(dir.path().join("models/local")).unwrap();
+    std::fs::write(
+        dir.path().join("models/local/real.toml"),
+        format!(
+            r#"id = "local.real-llama"
+display_name = "Real llama.cpp model"
+provider = "llama-cpp"
+locality = "local"
+context_window = 16384
+max_output_tokens = {max_output}
+capabilities = ["cognition.reasoning"]
+max_privacy_grade = "restricted"
+availability = "ready"
+quality_tier = 55
+
+[cost]
+input_micros_per_mtok = 0
+output_micros_per_mtok = 0
+
+[labels]
+base-url = "{base_url}"
+provider-model = "{alias}"
+thinking = "{thinking}"
+"#
+        ),
+    )
+    .unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let mut service = runtime(&database, dir.path());
+    let request = HarnessRunRequest {
+        domain,
+        focus: "real-llama".into(),
+        task_family: "summaries".into(),
+        run_id: "real-llama-schema".into(),
+        prompt: "Summarize in one sentence: ArchieOS keeps private context on the machine.".into(),
+        runner: RunnerChoice::ApiPinned {
+            model: "local.real-llama".into(),
+        },
+        duration_ms: 300_000,
+    };
+    let started = Instant::now();
+    let outcome = rt
+        .block_on(run_harness(&mut service, &program, &request, None))
+        .unwrap();
+    eprintln!(
+        "real llama.cpp Harness² run: {:?}, status {}, ledger {}, promotion {:?}",
+        started.elapsed(),
+        outcome.result.status,
+        outcome.result.ledger,
+        outcome.result.promotion
+    );
+    assert_eq!(outcome.result.ledger["R"], 4);
+    assert_eq!(outcome.result.ledger["P"], 3);
+    assert_eq!(outcome.receipts.len(), 8);
+    assert!(outcome
+        .receipts
+        .iter()
+        .all(|receipt| receipt.status == InferenceStatus::Completed));
+    drop(service);
+    drop(rt);
+}
