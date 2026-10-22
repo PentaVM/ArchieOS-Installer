@@ -9,7 +9,7 @@ Tech stack: existing Rust workspace, Tokio/reqwest, PostgreSQL18 and Vault, offi
 ## Tasks and gates
 
 - [x] Audit actual code, open PR exclusions and primary provider/upstream documentation. Persist scope and continuation.
-- [ ] Baseline: `cargo test --locked -p archie-router -p archie-model-runtime -p archie-memory -p archie-workstation`, inspect all results.
+- [x] Baseline: `cargo test --locked -p archie-router -p archie-model-runtime -p archie-memory -p archie-workstation`,229passed3ignored,22 suites,exit0.
 - [ ] Catalog/transports (provider agent): tests first for provider config becoming routable, native Anthropic JSON/SSE, locality spoofing, bounded reads and total deadlines. Implement in model-runtime, keep workstation provider compatibility. Expose `Routed::from_paths` and announce public signatures; root adds live Core/CLI callers. Commit scoped deliverable after its focused tests.
 - [ ] Domain persistence (memory agent): tests first for exact domain/account binding, receipt/checkpoint CAS and rollback/reopen; add typed memory contract, additive PostgreSQL migration and StateStore methods. Expose signatures before root consumes them. Run real disposable-PostgreSQL tests through coordinated fixture. Commit scoped deliverable.
 - [ ] Google Harness² (harness agent): pin/import actual upstream, implement safe custom proposer/substrate/BenchmarkAdapter, worker/bridge protocol, global budget/resume and domain namespaces. Prove k1 PPC R4/P3 and second-task library reuse, negative path/policy/script/domain cases. Do not claim model improvement. Commit scoped deliverable.

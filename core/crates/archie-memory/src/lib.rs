@@ -33,6 +33,8 @@ pub mod evidence;
 pub mod execution;
 pub mod floor;
 pub mod graph;
+pub mod inference;
+pub mod resume;
 pub mod shared_thought;
 pub mod storage;
 pub mod utility;

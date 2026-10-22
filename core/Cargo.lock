@@ -184,10 +184,13 @@ dependencies = [
  "archie-core",
  "archie-fabric",
  "archie-iris",
+ "archie-memory",
  "archie-model-runtime",
  "archie-orb",
+ "archie-policy",
  "archie-state",
  "archie-types",
+ "archie-vault",
  "archie-workstation",
  "clap",
  "serde_json",
@@ -202,6 +205,7 @@ dependencies = [
  "archie-execution",
  "archie-fabric",
  "archie-memory",
+ "archie-model-runtime",
  "archie-observability",
  "archie-orb",
  "archie-policy",
@@ -211,6 +215,7 @@ dependencies = [
  "archie-sentry",
  "archie-state",
  "archie-types",
+ "archie-workstation",
  "async-trait",
  "fs2",
  "hex",
@@ -433,6 +438,7 @@ dependencies = [
 name = "archie-memory"
 version = "0.1.0"
 dependencies = [
+ "archie-vault",
  "serde",
  "serde_json",
  "sha2",
@@ -453,8 +459,11 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "sha2",
+ "tempfile",
  "thiserror 2.0.20",
  "tokio",
+ "toml",
 ]
 
 [[package]]
@@ -525,6 +534,7 @@ name = "archie-postgres"
 version = "0.1.0"
 dependencies = [
  "archie-memory",
+ "archie-vault",
  "postgres",
  "serde",
  "serde_json",
@@ -832,12 +842,18 @@ name = "archie-workstation"
 version = "0.1.0"
 dependencies = [
  "archie-cerebra",
+ "archie-memory",
  "archie-model-runtime",
  "archie-notices",
  "archie-policy",
+ "archie-registry",
+ "archie-router",
+ "archie-state",
  "archie-types",
  "archie-vault",
  "axum",
+ "fs2",
+ "postgres",
  "reqwest",
  "ring",
  "serde",

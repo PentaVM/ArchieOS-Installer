@@ -419,7 +419,10 @@ impl Runtime {
         // a manifest that does not load is a failure, because a typo that dropped the
         // only local model would later look like private requests being refused for no
         // reason.
-        let models = match ModelRegistry::load_from_dir(paths.models()) {
+        let models = match archie_model_runtime::provider::load_catalog(
+            paths.models(),
+            paths.inference_providers(),
+        ) {
             Ok(registry) => {
                 if registry.is_empty() {
                     report.push(BootStage::skipped(stages::MODELS, "no models installed"));
@@ -695,6 +698,11 @@ impl Runtime {
             .increment(&format!("control.request.{}", request.name()), 1);
 
         match request {
+            ControlRequest::AiInfer { .. }
+            | ControlRequest::AiRecall { .. }
+            | ControlRequest::AiHarness { .. } => {
+                ControlResponse::error("authenticated local operator session required")
+            }
             ControlRequest::Ping => ControlResponse::Pong {
                 node_id: self.node_id().to_string(),
                 version: ARCHIEOS_VERSION.to_string(),

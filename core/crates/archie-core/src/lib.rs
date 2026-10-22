@@ -17,6 +17,7 @@
 
 #![forbid(unsafe_code)]
 
+mod ai_control;
 pub mod boot;
 pub mod cognitive_context;
 pub mod config;

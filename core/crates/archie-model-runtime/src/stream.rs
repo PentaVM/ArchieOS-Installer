@@ -102,10 +102,34 @@ pub struct ToolChatRequest {
 pub const MAX_STREAM_MESSAGES: usize = 64;
 pub const MAX_STREAM_TOOLS: usize = 32;
 pub const MAX_STREAM_TOKENS: u32 = 4096;
+pub const MAX_STREAM_CONTENT_BYTES: usize = 2 * 1024 * 1024;
+
+struct ByteBudget(usize);
+
+impl ByteBudget {
+    fn consume(&mut self, bytes: usize) -> Result<(), &'static str> {
+        self.0 = self
+            .0
+            .checked_sub(bytes)
+            .ok_or("streamed input exceeds its byte budget")?;
+        Ok(())
+    }
+}
+
+impl std::io::Write for ByteBudget {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.consume(bytes.len()).map_err(std::io::Error::other)?;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
 
 impl ToolChatRequest {
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.model.trim().is_empty() {
+        if self.model.trim().is_empty() || self.model.len() > 256 {
             return Err("no model named");
         }
         if self.messages.is_empty() || self.messages.len() > MAX_STREAM_MESSAGES {
@@ -119,6 +143,41 @@ impl ToolChatRequest {
         }
         if !(0.0..=2.0).contains(&self.temperature) {
             return Err("temperature outside 0 to 2");
+        }
+        let mut budget = ByteBudget(MAX_STREAM_CONTENT_BYTES);
+        budget.consume(self.model.len())?;
+        for message in &self.messages {
+            match message {
+                ToolChatMessage::System(text) | ToolChatMessage::User(text) => {
+                    budget.consume(text.len())?
+                }
+                ToolChatMessage::Assistant {
+                    content,
+                    tool_calls,
+                } => {
+                    if tool_calls.len() > MAX_STREAM_TOOLS {
+                        return Err("too many tool calls");
+                    }
+                    if let Some(text) = content {
+                        budget.consume(text.len())?;
+                    }
+                    for call in tool_calls {
+                        budget.consume(call.id.len())?;
+                        budget.consume(call.name.len())?;
+                        budget.consume(call.arguments.len())?;
+                    }
+                }
+                ToolChatMessage::Tool { call_id, content } => {
+                    budget.consume(call_id.len())?;
+                    budget.consume(content.len())?;
+                }
+            }
+        }
+        for tool in &self.tools {
+            budget.consume(tool.name.len())?;
+            budget.consume(tool.description.len())?;
+            serde_json::to_writer(&mut budget, &tool.parameters)
+                .map_err(|_| "tool schema exceeds streamed input budget")?;
         }
         Ok(())
     }
@@ -206,14 +265,16 @@ impl SseAssembler {
 
     /// Takes the next piece of the stream and returns what it completed.
     pub fn feed(&mut self, bytes: &[u8]) -> Result<Vec<StreamEvent>, SseError> {
-        self.pending.extend_from_slice(bytes);
         let mut events = Vec::new();
-        while let Some(end) = self.pending.iter().position(|byte| *byte == b'\n') {
-            let line: Vec<u8> = self.pending.drain(..=end).collect();
-            self.line(&line, &mut events)?;
-        }
-        if self.pending.len() > MAX_EVENT_LINE {
-            return Err(SseError::LineTooLong);
+        for piece in bytes.split_inclusive(|b| *b == b'\n') {
+            if self.pending.len().saturating_add(piece.len()) > MAX_EVENT_LINE {
+                return Err(SseError::LineTooLong);
+            }
+            self.pending.extend_from_slice(piece);
+            if self.pending.last() == Some(&b'\n') {
+                let line = std::mem::take(&mut self.pending);
+                self.line(&line, &mut events)?;
+            }
         }
         Ok(events)
     }
@@ -226,9 +287,9 @@ impl SseAssembler {
             self.line(&line, &mut events)?;
         }
         if !self.finished {
-            self.release_calls(&mut events);
-            events.push(StreamEvent::Finished { reason: None });
-            self.finished = true;
+            return Err(SseError::Malformed(
+                "stream closed without a terminal event".into(),
+            ));
         }
         Ok(events)
     }
