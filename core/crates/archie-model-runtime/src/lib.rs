@@ -560,13 +560,12 @@ impl InferenceClient {
             return anthropic::decode(&bytes);
         }
         let url = self.endpoint.url("chat/completions")?;
-        let response = match llama_thinking(descriptor)? {
-            Some(thinking) => {
-                let mut body = serde_json::to_value(request)?;
-                body["chat_template_kwargs"] = template_switch(thinking);
-                self.send(url, Some(&body)).await?
-            }
-            None => self.send(url, Some(request)).await?,
+        let response = if llama_thinking(descriptor)?.is_some() {
+            let mut body = serde_json::to_value(request)?;
+            pin_llama_reasoning(descriptor, &mut body, request.max_tokens)?;
+            self.send(url, Some(&body)).await?
+        } else {
+            self.send(url, Some(request)).await?
         };
         let status = response.status();
         let bytes = self.bounded_body(response).await?;
@@ -693,9 +692,7 @@ impl InferenceClient {
             anthropic::tool_body(request)?
         } else {
             let mut body = request.body();
-            if let Some(thinking) = llama_thinking(descriptor)? {
-                body["chat_template_kwargs"] = template_switch(thinking);
-            }
+            pin_llama_reasoning(descriptor, &mut body, Some(request.max_tokens))?;
             body
         };
         let response = self
@@ -878,10 +875,31 @@ fn llama_thinking(descriptor: &ModelDescriptor) -> Result<Option<bool>, RuntimeE
     }
 }
 
+/// What llama.cpp says when a model's reasoning budget runs out, before the answer.
+const REASONING_BUDGET_MESSAGE: &str =
+    "\n\nTime is up. I will stop thinking and give the final answer now.\n";
+
 /// llama.cpp reads the reasoning switch from the chat template's own arguments. Other
-/// OpenAI-compatible servers never receive the field.
-fn template_switch(thinking: bool) -> serde_json::Value {
-    serde_json::json!({ "enable_thinking": thinking })
+/// OpenAI-compatible servers never receive these fields.
+///
+/// With reasoning on, the thought may spend half of the output budget and the other half
+/// is kept for the answer; llama.cpp closes a thought that reaches it with the message
+/// above. Unbounded, Bonsai reasoned past 4,096 tokens on a Harness² proposal and never
+/// answered (2026-10-22).
+fn pin_llama_reasoning(
+    descriptor: &ModelDescriptor,
+    body: &mut serde_json::Value,
+    max_tokens: Option<u32>,
+) -> Result<(), RuntimeError> {
+    let Some(thinking) = llama_thinking(descriptor)? else {
+        return Ok(());
+    };
+    body["chat_template_kwargs"] = serde_json::json!({ "enable_thinking": thinking });
+    if let (true, Some(max_tokens)) = (thinking, max_tokens) {
+        body["thinking_budget_tokens"] = (max_tokens / 2).into();
+        body["reasoning_budget_message"] = REASONING_BUDGET_MESSAGE.into();
+    }
+    Ok(())
 }
 
 /// Resolves the provider-facing model name from a trusted router descriptor. Archie model
@@ -1108,6 +1126,18 @@ mod tests {
                 request_text.contains(&format!(
                     "\"chat_template_kwargs\":{{\"enable_thinking\":{expected}}}"
                 )),
+                "{label}: {request_text}"
+            );
+            // Reasoning may spend half of the output budget; the other half is the
+            // answer's, and llama.cpp closes the thought with Archie's message.
+            assert_eq!(
+                request_text.contains("\"thinking_budget_tokens\":16"),
+                label == "on",
+                "{label}: {request_text}"
+            );
+            assert_eq!(
+                request_text.contains("\"reasoning_budget_message\":"),
+                label == "on",
                 "{label}: {request_text}"
             );
         }

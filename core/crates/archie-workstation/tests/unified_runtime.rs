@@ -502,6 +502,78 @@ fn original_policy_lease_clamps_transport_and_expired_result_stays_failed() {
     assert!(receipt.result_ref.is_none());
 }
 
+/// Harness² pins Bonsai with its reasoning on, a manifest that offers reasoning and not
+/// direct answers. The pinned model answers with the switch its manifest sets; a request
+/// that pins nothing does not drift onto it.
+#[test]
+#[ignore = "requires isolated PG18 extensions and captured HTTP runner"]
+fn a_pinned_reasoning_model_answers_with_its_manifest_switch() {
+    let database = Database::new();
+    let dir = tempfile::tempdir().unwrap();
+    let domain = ContextDomain::personal("fixture").unwrap();
+    RuntimeProfile::for_domain(domain.clone())
+        .create(&dir.path().join("policy.toml"))
+        .unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let listener = rt
+        .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
+        .unwrap();
+    let address = listener.local_addr().unwrap();
+    std::fs::create_dir_all(dir.path().join("models/local")).unwrap();
+    std::fs::write(
+        dir.path().join("models/local/reasoner.toml"),
+        format!(
+            r#"id = "local.fixture-reasoner"
+display_name = "Fixture reasoner"
+provider = "llama-cpp"
+locality = "local"
+context_window = 16384
+max_output_tokens = 4096
+capabilities = ["cognition.reasoning"]
+max_privacy_grade = "restricted"
+availability = "ready"
+quality_tier = 55
+
+[cost]
+input_micros_per_mtok = 0
+output_micros_per_mtok = 0
+
+[labels]
+base-url = "http://{address}/v1/"
+provider-model = "fixture-model"
+thinking = "on"
+"#
+        ),
+    )
+    .unwrap();
+    let (send, recv) = std::sync::mpsc::channel();
+    rt.spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        send.send(read_http(&mut stream).await).unwrap();
+        reply_http(&mut stream, "reasoned proposal SIGMA-3").await;
+    });
+    let mut service = runtime(&database, dir.path());
+    assert!(rt
+        .block_on(service.execute(&request(domain.clone(), "unpinned request"), None))
+        .is_err());
+    let mut pinned = request(domain, "pinned reasoning request");
+    pinned.runner = RunnerChoice::ApiPinned {
+        model: "local.fixture-reasoner".into(),
+    };
+    let result = rt.block_on(service.execute(&pinned, None)).unwrap();
+    assert_eq!(result.receipt.status, InferenceStatus::Completed);
+    assert_eq!(result.receipt.model_id, "local.fixture-reasoner");
+    assert_eq!(result.text.as_deref(), Some("reasoned proposal SIGMA-3"));
+    let wire = recv.recv().unwrap();
+    assert!(wire.contains("pinned reasoning request"));
+    assert!(wire.contains("\"chat_template_kwargs\":{\"enable_thinking\":true}"));
+    drop(service);
+    drop(rt);
+}
+
 #[test]
 #[ignore = "requires isolated PG18 extensions and captured HTTP runner"]
 fn lowering_the_privacy_ceiling_hides_previously_sealed_restricted_results() {

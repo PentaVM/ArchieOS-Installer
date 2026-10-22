@@ -34,7 +34,9 @@ output_micros_per_mtok = 0
 [labels]
 base-url = "http://127.0.0.1:8081/v1/"
 provider-model = "bonsai"
-# Reasoning on: the mail trial asked the right question only with it.
+# Reasoning on: the mail trial asked the right question only with it. The runtime gives
+# the thought half of each request's output budget and keeps the other half for the
+# answer; unbounded, a Harness2 proposal reasoned past 4,096 tokens and never answered.
 thinking = "on"
 weights = "Ternary-Bonsai-2-9B-PTQ1_0.gguf"
 weights_sha256 = "3561df7ac7d26a71ffa991ac2db740b10841c3a350aa2676ccd3ff5d428b4e8b"

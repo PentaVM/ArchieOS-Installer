@@ -369,8 +369,23 @@ impl UnifiedRuntime {
                     .await
             }
             RunnerChoice::Api | RunnerChoice::ApiPinned { .. } => {
+                // A pinned model is asked in the role its manifest offers: one that only
+                // reasons (Bonsai with its reasoning on) is a reasoning worker. The router
+                // still applies the privacy, locality and context gates to it.
+                let role = match &request.runner {
+                    RunnerChoice::ApiPinned { model } => model
+                        .parse()
+                        .ok()
+                        .and_then(|id| self.catalog.registry().get(&id))
+                        .filter(|descriptor| {
+                            !descriptor.provides(&ModelRole::CognitiveResponse.capability())
+                                && descriptor.provides(&ModelRole::ReasoningWorker.capability())
+                        })
+                        .map_or(ModelRole::CognitiveResponse, |_| ModelRole::ReasoningWorker),
+                    _ => ModelRole::CognitiveResponse,
+                };
                 let question = Question {
-                    role: ModelRole::CognitiveResponse,
+                    role,
                     privacy: request.privacy,
                     system: SYSTEM,
                     user: &request.prompt,
