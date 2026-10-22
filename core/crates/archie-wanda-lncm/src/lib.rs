@@ -15,8 +15,10 @@
 //!    behaves or feels) comes from a model, as delta lines that are validated before they
 //!    touch the state. The state per person is kept: what they have seen, and what to expect
 //!    of them. Memory does not grow with the length of the conversation.
-//! 3. **State 1.** A decision head answers closed questions at once (yes/no, one of the
-//!    options, or "I cannot know"), with a calibrated confidence.
+//! 3. **State 1.** A question the state answers by itself (does X know, what does X believe,
+//!    an expectation it names) is read from the bookkeeping ([`exact`]). Otherwise a decision
+//!    head answers closed questions at once (yes/no, one of the options, or "I cannot know"),
+//!    with a calibrated confidence.
 //! 4. **State 2.** The next-concept generator writes the long answer — a short plan, then the
 //!    words — conditioned on the question, the state and, when there is one, a language
 //!    model's draft. Names it writes are checked against the people in the state.
@@ -33,6 +35,7 @@ pub mod codec;
 pub mod config;
 pub mod data;
 pub mod distill;
+pub mod exact;
 pub mod generator;
 pub mod model;
 pub mod nn;
@@ -45,7 +48,7 @@ pub mod vq;
 
 pub use codec::{Codec, Special};
 pub use config::LncmConfig;
-pub use model::{Composition, Decision, Lncm, QuickAnswer};
+pub use model::{AnswerSource, Composition, Decision, Lncm, QuickAnswer};
 pub use reader::{Interpreter, ReadReport, Turn, TurnKind};
 pub use state::{Expectation, PersonState, SocialState, Standing};
 

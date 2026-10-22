@@ -180,13 +180,27 @@ pub struct Decision {
     pub confidence: f32,
 }
 
-/// State 1's answer to a yes/no question, ready to be spoken.
+/// Where a state 1 answer came from.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnswerSource {
+    /// The decision head.
+    #[default]
+    Model,
+    /// The social state's bookkeeping ([`crate::exact`]).
+    State,
+}
+
+/// State 1's answer, ready to be spoken.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QuickAnswer {
     pub text: String,
-    /// `Some(true)` yes, `Some(false)` no, `None` cannot know.
+    /// `Some(true)` yes, `Some(false)` no, `None` cannot know (or, from the state, an answer
+    /// about what someone believes, which the text gives).
     pub answer: Option<bool>,
     pub confidence: f32,
+    #[serde(default)]
+    pub source: AnswerSource,
 }
 
 /// State 2's answer.
@@ -460,6 +474,7 @@ impl Lncm {
             text,
             answer,
             confidence: decision.confidence,
+            source: AnswerSource::Model,
         }))
     }
 

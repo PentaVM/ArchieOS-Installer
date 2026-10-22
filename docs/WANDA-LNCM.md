@@ -40,7 +40,9 @@ and `core/crates/archie-wanda/src/social.rs` (service integration). Training gui
    ▼
  Cerebra/router: local reasoning model (draft recommendations)
    ▼
- LNCM gate ─► state 1: decision head (yes / no / cannot know + confidence)   ─► voice now
+ LNCM gate ─► state 1: does X know / what does X believe / an expectation it names?
+          │            yes ─► read from the state, with the reason            ─► voice now
+          │            no  ─► decision head (yes / no / cannot know + confidence)
           └─► state 2: NCM generator (plan, then words), name guard           ─► voice next
    ▼
  Inferences stay hypotheses; Cerebra ▸ Policy ▸ lease ▸ Stage hold every authority they had.
@@ -56,6 +58,7 @@ and `core/crates/archie-wanda/src/social.rs` (service integration). Training gui
 | `nn.rs` | Linear layers with optional LoRA (zero-initialised `B`), RMSNorm, attention with additive masks and prefix cache, GELU MLP. |
 | `model.rs` | Checkpoint loading with SHA-256 verification of every file and of each adapter against its base; `gate`, `decide`, `quick`, `compose` (MBR over candidates, name guard), `update`. |
 | `state.rs` | `SocialState`: exact exposure per person and topic, expectations as decayed Beta counts (capped at 0.95 unless declared by the person), mood, behaviour statistics; the delta-line grammar and its validation; "pack v3" rendering. |
+| `exact.rs` | State 1 from the bookkeeping: "does X know …", "what does X believe about …" and questions that name one of X's expectations are answered from the state, with the reason; a person the conversations never show saw nothing in them. Anything it does not recognise with certainty goes to the decision head. |
 | `reader.rs` | Chunked read–update loop with constant memory, idempotent by turn number, records chunks for training. |
 | `synth.rs` | Owned ES/EN worlds with hidden traits, fact changes while people are absent, "I already told X", moods; exact labels for all four tasks. |
 | `data.rs` | Closed JSONL schemas (`Example`, `Case`), provenance rules, Python `chat-v1` tranche import, evaluation-overlap guard. |

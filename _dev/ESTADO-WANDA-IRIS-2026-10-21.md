@@ -18,7 +18,8 @@ Cada afirmación lleva cómo se verificó:
 | Voz con Wanda sobre el ruteo y el veil de #35 | hecho | **prueba** `the_routed_voice_offers_wanda_only_if_every_restricted_choice_is_loopback`; clippy |
 | Texto de pantalla → estado social (`read_scene`, `SceneSink`, `POST /v1/scene/text`) | hecho | **prueba** en `tests/lncm.rs`; **medido** en vivo con la demo |
 | Entrenamiento del generador | en curso | llegó al paso 46 700 de 60 000; un corte por disco lleno lo obligó a retomar desde el guardado del 46 000 a las 17:43 del 2026-10-21. Pausas por temperatura a 85 °C. Al ritmo medido (~3 000 pasos/h con pausas), termina cerca de las 22:30 (estimado) |
-| Evaluación del generador (paso 46 000, 200 ejemplos por tarea) | — | **medido**: gate y sí/no 1.0; detección de cambio 0.995; redacción F1 0.733 (subiendo); decisión 0.55 (estancada desde el 30 000); ECE 0.082; **escritura del estado (`update_line_f1`) 0.01, el punto débil** |
+| Respuestas exactas desde el estado (`exact.rs`): "¿sabe X…?", "¿qué cree X…?" y expectativas que la pregunta nombra | hecho | **prueba**: en 32 mundos sintéticos, todas las preguntas de "sabe" y "cree" se responden y coinciden con el simulador. **Medido** con el checkpoint del paso 48 000 en CPU, sobre 600 preguntas de desarrollo: sabe 0.740 → 1.000, cree 0.285 → 1.000, expectativas 0.620 → 0.835 |
+| Evaluación del generador (paso 46 000, 200 ejemplos por tarea) | — | **medido**: gate y sí/no 1.0; detección de cambio 0.995; redacción F1 0.733 (subiendo); decisión 0.55 (estancada desde el 30 000); ECE 0.082; **escritura del estado (`update_line_f1`) 0.01, el punto débil**. La redacción se compara con las plantillas propias del simulador, no con un maestro: contra 200 respuestas de Nemotron 3 Ultra da 0.27 (paso 48 000, CPU), cuando dos respuestas de Nemotron al mismo caso se parecen 0.51 y las plantillas 0.31 |
 
 ### IRIS
 

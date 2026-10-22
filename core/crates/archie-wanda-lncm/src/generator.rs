@@ -406,7 +406,9 @@ impl Generator {
             let codes = Tensor::from_vec(codes, (rows, l), device)?;
             acc = (acc + vq.code_embedding(k, &codes)?)?;
         }
-        (0..rows).map(|i| vq.tokens(&acc.narrow(0, i, 1)?)).collect()
+        (0..rows)
+            .map(|i| vq.tokens(&acc.narrow(0, i, 1)?))
+            .collect()
     }
 
     pub fn levels(&self) -> &[usize] {
@@ -576,7 +578,9 @@ mod tests {
     #[test]
     fn batched_candidates_match_one_at_a_time() {
         let (_config, _map, vq, gen) = build();
-        let cache = gen.encode_prompt(&vq, &[3u32, 4, 5, 6, 7], &Device::Cpu).unwrap();
+        let cache = gen
+            .encode_prompt(&vq, &[3u32, 4, 5, 6, 7], &Device::Cpu)
+            .unwrap();
         let mut rng = rand::rngs::StdRng::seed_from_u64(3);
         let alone = gen
             .generate(&vq, &cache, Sampling::GREEDY, &mut rng)
@@ -585,7 +589,10 @@ mod tests {
             .generate_many(&vq, &cache, &[Sampling::GREEDY; 3], &mut rng)
             .unwrap();
         assert_eq!(many.len(), 3);
-        assert!(many.iter().all(|row| *row == alone), "greedy rows equal the single pass");
+        assert!(
+            many.iter().all(|row| *row == alone),
+            "greedy rows equal the single pass"
+        );
         let sampled = Sampling {
             temperature: 1.0,
             top_k: 4,

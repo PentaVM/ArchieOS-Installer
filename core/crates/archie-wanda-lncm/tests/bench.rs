@@ -103,7 +103,10 @@ fn runtime_entry_points() {
                 let mut rng = StdRng::seed_from_u64(seed);
                 (0..count).map(|_| rng.gen_range(-0.04f32..0.04)).collect()
             };
-            (name.clone(), Tensor::from_vec(values, shape, &device).unwrap())
+            (
+                name.clone(),
+                Tensor::from_vec(values, shape, &device).unwrap(),
+            )
         })
         .collect();
     let vb = VarBuilder::from_tensors(tensors, DType::F32, &device);
@@ -116,29 +119,52 @@ fn runtime_entry_points() {
         .unwrap_or(10);
 
     let state = (0..14)
-        .map(|i| format!("- Persona{i}: vio que la cena = jueves; sabe que el presupuesto = {} pesos.", 1000 + i))
+        .map(|i| {
+            format!(
+                "- Persona{i}: vio que la cena = jueves; sabe que el presupuesto = {} pesos.",
+                1000 + i
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n");
     let state = format!("Personas: Ana, Pedro, Luis\nLo que cada persona ha visto:\n{state}");
     let draft = "Sí, conviene avisarle: no estaba cuando se cambió la fecha de la cena.";
     let question = "¿Tengo que avisar a Ana de que la cena pasó al jueves?";
     let chunk = (0..20)
-        .map(|t| format!("[{t}] Pedro: la cena pasa al jueves y el presupuesto sube a {} pesos", 1000 + t))
+        .map(|t| {
+            format!(
+                "[{t}] Pedro: la cena pasa al jueves y el presupuesto sube a {} pesos",
+                1000 + t
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n");
     let roster = vec!["Ana".to_string(), "Pedro".to_string(), "Luis".to_string()];
 
     println!(
         "device {device:?}, prompt_len {}, target_len {}, levels {:?}, d_model {}, layers {}",
-        config.prompt_len, config.target_len, config.levels, config.generator.d_model, config.generator.layers
+        config.prompt_len,
+        config.target_len,
+        config.levels,
+        config.generator.d_model,
+        config.generator.layers
     );
     measure("gate", runs, || model.gate(Lang::Es, question).unwrap());
     measure("quick (gate + decide)", runs, || {
-        model.quick(Lang::Es, question, Some(&state), Some(draft)).unwrap()
+        model
+            .quick(Lang::Es, question, Some(&state), Some(draft))
+            .unwrap()
     });
     measure("compose 1 candidate", runs, || {
         model
-            .compose(Lang::Es, question, Some(&state), Some(draft), &roster, ComposeOptions::default())
+            .compose(
+                Lang::Es,
+                question,
+                Some(&state),
+                Some(draft),
+                &roster,
+                ComposeOptions::default(),
+            )
             .unwrap()
     });
     measure("compose 4 candidates", runs.div_ceil(2), || {
@@ -161,9 +187,18 @@ fn runtime_entry_points() {
     });
     measure("service answer (all)", runs.div_ceil(2), || {
         let gate = model.gate(Lang::Es, question).unwrap();
-        let quick = model.quick(Lang::Es, question, Some(&state), Some(draft)).unwrap();
+        let quick = model
+            .quick(Lang::Es, question, Some(&state), Some(draft))
+            .unwrap();
         let composed = model
-            .compose(Lang::Es, question, Some(&state), Some(draft), &roster, ComposeOptions::default())
+            .compose(
+                Lang::Es,
+                question,
+                Some(&state),
+                Some(draft),
+                &roster,
+                ComposeOptions::default(),
+            )
             .unwrap();
         (gate, quick, composed)
     });

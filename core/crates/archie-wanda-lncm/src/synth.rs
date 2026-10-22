@@ -708,7 +708,25 @@ pub fn generate(config: &SynthConfig) -> Result<SynthOutput> {
     Ok(out)
 }
 
-fn emit(world: &World, config: &SynthConfig, out: &mut SynthOutput) -> Result<()> {
+/// [`generate`], keeping each world's final state by world id: the state its questions were
+/// asked against, for checks that read it directly.
+pub fn generate_with_states(
+    config: &SynthConfig,
+) -> Result<(SynthOutput, BTreeMap<String, SocialState>)> {
+    let mut out = SynthOutput::default();
+    let mut states = BTreeMap::new();
+    for index in 0..config.worlds {
+        for &lang in &config.langs {
+            let world = build_world(config.seed, index, lang, config);
+            let state = emit(&world, config, &mut out)?;
+            states.insert(world.id.clone(), state);
+        }
+    }
+    Ok((out, states))
+}
+
+/// Writes a world's examples and cases; returns its final state.
+fn emit(world: &World, config: &SynthConfig, out: &mut SynthOutput) -> Result<SocialState> {
     let lang = world.lang;
     let l = li(lang);
     let split = split_for(&world.id, config.dev_share);
@@ -980,7 +998,7 @@ fn emit(world: &World, config: &SynthConfig, out: &mut SynthOutput) -> Result<()
         yes_no_kind,
         &provenance,
     ));
-    Ok(())
+    Ok(state)
 }
 
 fn gate_example(

@@ -461,10 +461,14 @@ pub fn answer(
     }
     let (state, _) = load_cached(store, domain, &lncm.owner_label, now_ms)?;
     let (text, roster) = context_for(&state, question, lncm.lang);
-    let quick = model
-        .quick_after_gate(&gate, lncm.lang, question, Some(&text), draft)
-        .ok()
-        .flatten();
+    // What the bookkeeping answers by itself is not left to the decision head.
+    let quick = match archie_wanda_lncm::exact::resolve(&state, question) {
+        Some(exact) => Some(exact.quick(lncm.lang)),
+        None => model
+            .quick_after_gate(&gate, lncm.lang, question, Some(&text), draft)
+            .ok()
+            .flatten(),
+    };
     let refined = model
         .compose(
             lncm.lang,
