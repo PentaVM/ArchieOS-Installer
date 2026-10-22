@@ -304,18 +304,11 @@ mod tests {
             PrivacyGrade::Public
         )
         .permits_private_context());
-        let remote =
-            ProviderEndpoint::nvidia_nim("https://inference.example/v1", Locality::Local).unwrap();
-        assert!(!WandaVoiceAccess::from_selected(
-            &remote,
-            &descriptor(
-                ProviderKind::NvidiaNim,
-                Locality::Local,
-                PrivacyGrade::Restricted
-            ),
-            PrivacyGrade::Restricted
-        )
-        .permits_private_context());
+        // A remote host labelled Local is now refused when the endpoint is built,
+        // so it can never reach the access decision at all.
+        assert!(
+            ProviderEndpoint::nvidia_nim("https://inference.example/v1", Locality::Local).is_err()
+        );
         let endpoint =
             ProviderEndpoint::nvidia_nim("http://localhost:8000/v1", Locality::Local).unwrap();
         assert!(!WandaVoiceAccess::from_selected(

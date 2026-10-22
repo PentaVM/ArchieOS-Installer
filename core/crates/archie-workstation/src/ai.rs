@@ -817,23 +817,28 @@ impl InferenceStorage {
                 .map_err(|_| "cannot seal model proposal")?;
             vault_io::persist_vault(&self.vault_dir, &vault)
                 .map_err(|_| "cannot persist sealed proposal")?;
+            // Each open holds the Vault's own transaction lock until dropped, so
+            // release the writer before reopening from disk in this same process.
+            drop(vault);
             // Verify actual disk artifact before committing its authority-free receipt.
-            let mut reopened = vault_io::open_vault(&self.vault_dir)
-                .map_err(|_| "cannot reopen sealed proposal")?;
-            match reopened
-                .disclose(
-                    "verify output artifact",
-                    &reference,
-                    PrivacyGrade::Restricted,
-                    now,
+            let verified = {
+                let mut reopened = vault_io::open_vault(&self.vault_dir)
+                    .map_err(|_| "cannot reopen sealed proposal")?;
+                matches!(
+                    reopened
+                        .disclose(
+                            "verify output artifact",
+                            &reference,
+                            PrivacyGrade::Restricted,
+                            now,
+                        )
+                        .map_err(|_| "cannot verify sealed proposal")?,
+                    Disclosure::Content { text: restored, .. } if restored == *text
                 )
-                .map_err(|_| "cannot verify sealed proposal")?
-            {
-                Disclosure::Content { text: restored, .. } if restored == *text => {}
-                _ => {
-                    self.remove_staged(&reference, "unverifiable staged output")?;
-                    return Err("sealed proposal integrity mismatch".into());
-                }
+            };
+            if !verified {
+                self.remove_staged(&reference, "unverifiable staged output")?;
+                return Err("sealed proposal integrity mismatch".into());
             }
             output_sha256 = Some(sha256(text.as_bytes()));
             result_ref = Some(ScopedReference {
