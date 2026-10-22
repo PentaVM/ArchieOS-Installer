@@ -111,8 +111,9 @@ proposal and `NO_ENTRY`. Bonsai's output still varies between runs.
 The solver's `artifact` reply and the proposer's `harness` reply are JSON, so an API
 runner now decodes them under a JSON Schema. `harness2::reply_schema` gives each stage
 exactly the keys the worker reads, every one a string; the proposal's map names the four
-files of the worker's own `ALLOWED` set. The reflection is upstream's tagged text and
-gets no schema.
+files of the worker's own `ALLOWED` set, and its `guardrails.md` may only be the base
+harness's exact text, because the worker aborts the run on any edit to it. The
+reflection is upstream's tagged text and gets no schema.
 
 - The substrate attaches the schema only for API runners, after the bridge has matched
   the stage's format to the pinned schedule. Codex receives none.

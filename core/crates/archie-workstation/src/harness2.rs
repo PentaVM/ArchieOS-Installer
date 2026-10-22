@@ -26,25 +26,42 @@ const FILES: [&str; 4] = [
 
 /// The JSON Schema a stage's reply must match, for a runtime that decodes under one.
 /// `artifact` and `harness` are the worker's JSON replies and get exactly the keys it
-/// reads, every one a string; the reflection's `experience` is upstream's tagged text
-/// and gets none. The worker still checks every reply: the schema only keeps a small
-/// local model from writing a shape the worker would refuse.
-pub fn reply_schema(response_format: &str) -> Option<Value> {
+/// reads, every one a string; the proposal's `guardrails.md` may only be the base's exact
+/// text, because the worker aborts the run on any other. The reflection's `experience` is
+/// upstream's tagged text and gets none. The worker still checks every reply: the schema
+/// only keeps a small local model from writing what the worker would refuse.
+pub fn reply_schema(response_format: &str, base: &BTreeMap<String, String>) -> Option<Value> {
     let text = || serde_json::json!({ "type": "string" });
     match response_format {
         "artifact" => Some(strict_object(vec![
             ("artifact", text()),
             ("trajectory", text()),
         ])),
-        "harness" => Some(strict_object(vec![
-            (
-                "harness",
-                strict_object(FILES.iter().map(|file| (*file, text())).collect()),
-            ),
-            ("notes", text()),
-        ])),
+        "harness" => {
+            let guardrails = base.get("guardrails.md")?;
+            let files = FILES
+                .iter()
+                .map(|file| match *file {
+                    "guardrails.md" if pinnable(guardrails) => (
+                        *file,
+                        serde_json::json!({ "type": "string", "enum": [guardrails] }),
+                    ),
+                    _ => (*file, text()),
+                })
+                .collect();
+            Some(strict_object(vec![
+                ("harness", strict_object(files)),
+                ("notes", text()),
+            ]))
+        }
         _ => None,
     }
+}
+
+/// Guardrails are pinned only while their JSON text stays well inside the runtime's
+/// 16 KiB schema cap; longer ones are left as plain text, which the worker still checks.
+fn pinnable(guardrails: &str) -> bool {
+    serde_json::to_string(guardrails).is_ok_and(|json| json.len() <= 8 * 1024)
 }
 
 /// An object with exactly these keys, all required, in the form OpenAI's strict
@@ -959,6 +976,13 @@ mod tests {
             .collect()
     }
 
+    fn base() -> BTreeMap<String, String> {
+        FILES
+            .iter()
+            .map(|file| ((*file).to_owned(), format!("base text of {file}")))
+            .collect()
+    }
+
     fn strict(schema: &Value) {
         assert_eq!(schema["type"], "object");
         assert_eq!(schema["additionalProperties"], false);
@@ -967,7 +991,7 @@ mod tests {
 
     #[test]
     fn the_artifact_schema_names_exactly_what_the_solver_reads() {
-        let schema = reply_schema("artifact").unwrap();
+        let schema = reply_schema("artifact", &base()).unwrap();
         strict(&schema);
         assert_eq!(
             keys(&schema),
@@ -982,7 +1006,7 @@ mod tests {
 
     #[test]
     fn the_harness_schema_names_the_four_files_the_worker_accepts() {
-        let schema = reply_schema("harness").unwrap();
+        let schema = reply_schema("harness", &base()).unwrap();
         strict(&schema);
         assert_eq!(
             keys(&schema),
@@ -993,14 +1017,61 @@ mod tests {
         assert_eq!(keys(files), worker_files());
         assert_eq!(worker_files().len(), FILES.len());
         assert_eq!(schema["properties"]["notes"]["type"], "string");
+        for file in FILES {
+            let expected = if file == "guardrails.md" {
+                serde_json::json!({ "type": "string", "enum": ["base text of guardrails.md"] })
+            } else {
+                serde_json::json!({ "type": "string" })
+            };
+            assert_eq!(files["properties"][file], expected, "{file}");
+        }
+    }
+
+    /// The worker aborts the run on any edit to the guardrails, so a proposal may only
+    /// copy them; without base guardrails there is nothing to pin and no schema.
+    #[test]
+    fn the_proposal_can_only_copy_the_base_guardrails() {
+        let mut base = base();
+        base.insert(
+            "guardrails.md".into(),
+            "Core and Policy alone grant authority.".into(),
+        );
+        let schema = reply_schema("harness", &base).unwrap();
+        assert_eq!(
+            schema["properties"]["harness"]["properties"]["guardrails.md"]["enum"],
+            serde_json::json!(["Core and Policy alone grant authority."])
+        );
+        base.remove("guardrails.md");
+        assert_eq!(reply_schema("harness", &base), None);
+        assert!(reply_schema("artifact", &base).is_some());
+    }
+
+    /// Guardrails too long to pin, counted as escaped JSON, leave the field plain text
+    /// rather than a schema the runtime would refuse.
+    #[test]
+    fn guardrails_too_long_to_pin_stay_plain_text() {
+        let mut base = base();
+        for (guardrails, pinned) in [
+            ("g".repeat(8 * 1024 - 2), true),
+            ("g".repeat(8 * 1024 - 1), false),
+            ("\"".repeat(4 * 1024), false),
+            ("g".repeat(20_000), false),
+        ] {
+            base.insert("guardrails.md".into(), guardrails);
+            let schema = reply_schema("harness", &base).unwrap();
+            let field = &schema["properties"]["harness"]["properties"]["guardrails.md"];
+            assert_eq!(field.get("enum").is_some(), pinned);
+            assert_eq!(field["type"], "string");
+            assert!(serde_json::to_vec(&schema).unwrap().len() <= 16 * 1024);
+        }
     }
 
     #[test]
     fn tagged_and_reserved_stages_get_no_schema() {
-        assert_eq!(reply_schema("experience"), None);
-        assert_eq!(reply_schema("selection"), None);
-        assert_eq!(reply_schema("Artifact"), None);
-        assert_eq!(reply_schema(""), None);
+        assert_eq!(reply_schema("experience", &base()), None);
+        assert_eq!(reply_schema("selection", &base()), None);
+        assert_eq!(reply_schema("Artifact", &base()), None);
+        assert_eq!(reply_schema("", &base()), None);
     }
 
     /// Every JSON stage the protocol documents has a schema; the tagged one does not.
@@ -1015,7 +1086,11 @@ mod tests {
         assert_eq!(formats, ["artifact", "harness", "selection", "experience"]);
         for format in formats {
             let expected = matches!(format, "artifact" | "harness");
-            assert_eq!(reply_schema(format).is_some(), expected, "{format}");
+            assert_eq!(
+                reply_schema(format, &base()).is_some(),
+                expected,
+                "{format}"
+            );
         }
     }
 }

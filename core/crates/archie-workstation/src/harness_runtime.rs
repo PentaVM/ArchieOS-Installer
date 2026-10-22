@@ -378,6 +378,8 @@ struct Substrate<'a> {
     deadline: tokio::time::Instant,
     cancel: watch::Receiver<bool>,
     receipts: Vec<InferenceReceipt>,
+    /// The base harness the worker was started with; its guardrails pin the proposal schema.
+    base_harness: BTreeMap<String, String>,
 }
 
 impl Harness2Handler for Substrate<'_> {
@@ -420,7 +422,7 @@ impl Harness2Handler for Substrate<'_> {
                 reply_schema: match self.request.runner {
                     RunnerChoice::Codex { .. } => None,
                     RunnerChoice::Api | RunnerChoice::ApiPinned { .. } => {
-                        crate::harness2::reply_schema(&stage.response_format)
+                        crate::harness2::reply_schema(&stage.response_format, &self.base_harness)
                     }
                 },
             };
@@ -540,6 +542,7 @@ pub async fn run_harness(
         },
     };
     let (stop, stopped) = watch::channel(false);
+    let base_harness = task.base_harness.clone();
     let mut handler = Substrate {
         runtime,
         request,
@@ -551,6 +554,7 @@ pub async fn run_harness(
         deadline: expires,
         cancel: stopped,
         receipts: vec![],
+        base_harness,
     };
     let result = {
         let worker = run_worker(program, task, &mut handler);

@@ -1004,7 +1004,11 @@ thinking = "on"
             seen.push(schema.cloned());
             reply_http(&mut stream, &reply_by_schema(schema, &base)).await;
         }
-        seen
+        let base: std::collections::BTreeMap<String, String> = base
+            .into_iter()
+            .map(|(file, text)| (file, text.as_str().unwrap().to_owned()))
+            .collect();
+        (seen, base)
     });
     let mut service = runtime(&database, dir.path());
     let request = HarnessRunRequest {
@@ -1021,7 +1025,7 @@ thinking = "on"
     let outcome = rt
         .block_on(run_harness(&mut service, &program, &request, None))
         .unwrap();
-    let seen = rt.block_on(server).unwrap();
+    let (seen, seen_base) = rt.block_on(server).unwrap();
     assert_eq!(outcome.result.ledger["R"], 4);
     assert_eq!(outcome.result.ledger["P"], 3);
     assert_eq!(outcome.receipts.len(), 8);
@@ -1030,8 +1034,14 @@ thinking = "on"
         .iter()
         .all(|receipt| receipt.status == InferenceStatus::Completed
             && receipt.model_id == "local.fixture-reasoner"));
-    let artifact = reply_schema("artifact").unwrap();
-    let harness = reply_schema("harness").unwrap();
+    let base: std::collections::BTreeMap<String, String> = seen_base;
+    let artifact = reply_schema("artifact", &base).unwrap();
+    let harness = reply_schema("harness", &base).unwrap();
+    assert_eq!(
+        harness["properties"]["harness"]["properties"]["guardrails.md"]["enum"][0],
+        base["guardrails.md"].as_str(),
+        "the proposal schema pins the worker's own base guardrails"
+    );
     let count = |expected: Option<&serde_json::Value>| {
         seen.iter()
             .filter(|schema| schema.as_ref() == expected)
@@ -1049,8 +1059,9 @@ thinking = "on"
 /// The same run against a real llama.cpp server, so an operator can try a local model
 /// such as Bonsai: `ARCHIE_TEST_LLAMA_URL` (its OpenAI base URL, loopback) and
 /// `ARCHIE_TEST_LLAMA_MODEL` (the alias it serves) are required;
-/// `ARCHIE_TEST_LLAMA_THINKING` (`on`/`off`, default `on`) and
-/// `ARCHIE_TEST_LLAMA_MAX_OUTPUT` (default 4096) are optional. It proves that every
+/// `ARCHIE_TEST_LLAMA_THINKING` (`on`/`off`, default `on`), `ARCHIE_TEST_LLAMA_MAX_OUTPUT`
+/// (default 4096) and `ARCHIE_TEST_LLAMA_STAGE_MS` (each stage's deadline, default the
+/// profile's minute, at most its 600000) are optional. It proves that every
 /// stage's reply had a shape the worker accepts, not that the model answered well.
 #[test]
 #[ignore = "requires isolated PG18 extensions, ARCHIE_HARNESS2_PYTHON and a real llama.cpp server"]
@@ -1070,9 +1081,12 @@ fn harness2_completes_on_a_real_llama_cpp_server_under_reply_schemas() {
     let database = Database::new();
     let dir = tempfile::tempdir().unwrap();
     let domain = ContextDomain::personal("fixture").unwrap();
-    RuntimeProfile::for_domain(domain.clone())
-        .create(&dir.path().join("policy.toml"))
-        .unwrap();
+    // A model on a CPU may need more than the default minute per stage.
+    let mut profile = RuntimeProfile::for_domain(domain.clone());
+    if let Ok(stage_ms) = std::env::var("ARCHIE_TEST_LLAMA_STAGE_MS") {
+        profile.max_duration_ms = stage_ms.parse().unwrap();
+    }
+    profile.create(&dir.path().join("policy.toml")).unwrap();
     let source = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
         .canonicalize()
