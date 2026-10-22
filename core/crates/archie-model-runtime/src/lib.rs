@@ -320,11 +320,36 @@ fn valid_reply_schema(schema: &serde_json::Value) -> bool {
 }
 
 /// OpenAI's structured-output form, which llama.cpp, vLLM and the hosted APIs accept.
-fn attach_reply_schema(body: &mut serde_json::Value, schema: &serde_json::Value) {
+/// llama.cpp's grammar converter enforces a string's `minLength` and `maxLength`; strict
+/// validators elsewhere differ in whether they accept them, so other servers receive the
+/// schema without them and the caller's own check still refuses a reply that breaks them.
+fn attach_reply_schema(
+    descriptor: &ModelDescriptor,
+    body: &mut serde_json::Value,
+    schema: &serde_json::Value,
+) {
+    let mut schema = schema.clone();
+    if descriptor.provider != ProviderKind::LlamaCpp {
+        drop_string_lengths(&mut schema);
+    }
     body["response_format"] = serde_json::json!({
         "type": "json_schema",
         "json_schema": { "name": "reply", "strict": true, "schema": schema },
     });
+}
+
+fn drop_string_lengths(schema: &mut serde_json::Value) {
+    match schema {
+        serde_json::Value::Object(map) => {
+            if map.get("type").and_then(serde_json::Value::as_str) == Some("string") {
+                map.remove("minLength");
+                map.remove("maxLength");
+            }
+            map.values_mut().for_each(drop_string_lengths);
+        }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(drop_string_lengths),
+        _ => {}
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -591,7 +616,7 @@ impl InferenceClient {
             let mut body = serde_json::to_value(request)?;
             pin_llama_reasoning(descriptor, &mut body, request.max_tokens)?;
             if let Some(schema) = &request.reply_schema {
-                attach_reply_schema(&mut body, schema);
+                attach_reply_schema(descriptor, &mut body, schema);
             }
             self.send(url, Some(&body)).await?
         } else {
@@ -1202,12 +1227,19 @@ mod tests {
         serde_json::json!({
             "type": "object",
             "properties": {
-                "artifact": { "type": "string" },
+                "artifact": { "type": "string", "minLength": 1 },
                 "trajectory": { "type": "string" },
             },
             "required": ["artifact", "trajectory"],
             "additionalProperties": false,
         })
+    }
+
+    /// The same shape without the string lengths only llama.cpp is known to enforce.
+    fn portable_reply_shape() -> serde_json::Value {
+        let mut shape = reply_shape();
+        shape["properties"]["artifact"] = serde_json::json!({ "type": "string" });
+        shape
     }
 
     fn schema_request(model: &str, reply_schema: Option<serde_json::Value>) -> ChatRequest {
@@ -1291,7 +1323,8 @@ mod tests {
         assert!(sent.get("response_format").is_none());
         assert!(sent.get("reply_schema").is_none());
 
-        // Another OpenAI-compatible server without a reasoning switch gets the schema too.
+        // Another OpenAI-compatible server without a reasoning switch gets the schema too,
+        // without the string lengths its strict validator might refuse.
         let (base_url, observed) = one_response(body).await;
         let endpoint = ProviderEndpoint::nvidia_nim(&base_url, Locality::Local).unwrap();
         let model = descriptor(ProviderKind::NvidiaNim, Locality::Local);
@@ -1307,9 +1340,39 @@ mod tests {
         let sent = wire_body(&observed.await.unwrap());
         assert_eq!(
             sent["response_format"]["json_schema"]["schema"],
-            reply_shape()
+            portable_reply_shape()
         );
         assert!(sent.get("chat_template_kwargs").is_none());
+    }
+
+    /// Only a string schema loses its lengths: a property that happens to be named
+    /// `minLength` stays, at any depth.
+    #[test]
+    fn only_string_lengths_are_dropped() {
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "minLength": { "type": "string", "minLength": 1, "maxLength": 9 },
+                "list": { "type": "array", "items": { "type": "string", "minLength": 2 } },
+                "count": { "type": "integer", "minimum": 1 },
+            },
+            "required": ["minLength", "list", "count"],
+            "additionalProperties": false,
+        });
+        drop_string_lengths(&mut schema);
+        assert_eq!(
+            schema,
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "minLength": { "type": "string" },
+                    "list": { "type": "array", "items": { "type": "string" } },
+                    "count": { "type": "integer", "minimum": 1 },
+                },
+                "required": ["minLength", "list", "count"],
+                "additionalProperties": false,
+            })
+        );
     }
 
     /// Anthropic's Messages API has no such field; its body never carries the schema.

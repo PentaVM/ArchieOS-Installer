@@ -112,15 +112,19 @@ The solver's `artifact` reply and the proposer's `harness` reply are JSON, so an
 runner now decodes them under a JSON Schema. `harness2::reply_schema` gives each stage
 exactly the keys the worker reads, every one a string; the proposal's map names the four
 files of the worker's own `ALLOWED` set, and its `guardrails.md` may only be the base
-harness's exact text, because the worker aborts the run on any edit to it. The
-reflection is upstream's tagged text and gets no schema.
+harness's exact text, because the worker aborts the run on any edit to it. The artifact,
+the trajectory and every editable file are at least one character long, because the
+worker aborts the run on an empty one; a proposal's notes may be empty. The reflection is
+upstream's tagged text and gets no schema.
 
 - The substrate attaches the schema only for API runners, after the bridge has matched
   the stage's format to the pinned schedule. Codex receives none.
 - `archie-model-runtime` sends it only on the OpenAI wire, as
   `response_format: {type: "json_schema", json_schema: {name, strict: true, schema}}`,
   next to the manifest's reasoning switch. llama.cpp turns it into a grammar; vLLM and
-  the hosted OpenAI-compatible APIs accept the same form. Anthropic never receives it.
+  the hosted OpenAI-compatible APIs accept the same form, without the string
+  `minLength`, which only llama.cpp's converter is known to enforce and a strict
+  validator elsewhere may refuse. Anthropic never receives it.
 - An operator's request cannot carry a schema: `InferenceRequest.reply_schema` is never
   serialized, and a schema that does not describe an object or is over 16 KiB is
   refused before any connection.

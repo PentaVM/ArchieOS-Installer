@@ -26,16 +26,18 @@ const FILES: [&str; 4] = [
 
 /// The JSON Schema a stage's reply must match, for a runtime that decodes under one.
 /// `artifact` and `harness` are the worker's JSON replies and get exactly the keys it
-/// reads, every one a string; the proposal's `guardrails.md` may only be the base's exact
-/// text, because the worker aborts the run on any other. The reflection's `experience` is
-/// upstream's tagged text and gets none. The worker still checks every reply: the schema
-/// only keeps a small local model from writing what the worker would refuse.
+/// reads, every one a string, and nonempty wherever the worker aborts the run on an empty
+/// one; the proposal's `guardrails.md` may only be the base's exact text, because the
+/// worker aborts the run on any other. The reflection's `experience` is upstream's tagged
+/// text and gets none. The worker still checks every reply: the schema only keeps a small
+/// local model from writing what the worker would refuse.
 pub fn reply_schema(response_format: &str, base: &BTreeMap<String, String>) -> Option<Value> {
     let text = || serde_json::json!({ "type": "string" });
+    let filled = || serde_json::json!({ "type": "string", "minLength": 1 });
     match response_format {
         "artifact" => Some(strict_object(vec![
-            ("artifact", text()),
-            ("trajectory", text()),
+            ("artifact", filled()),
+            ("trajectory", filled()),
         ])),
         "harness" => {
             let guardrails = base.get("guardrails.md")?;
@@ -46,7 +48,7 @@ pub fn reply_schema(response_format: &str, base: &BTreeMap<String, String>) -> O
                         *file,
                         serde_json::json!({ "type": "string", "enum": [guardrails] }),
                     ),
-                    _ => (*file, text()),
+                    _ => (*file, filled()),
                 })
                 .collect();
             Some(strict_object(vec![
@@ -997,11 +999,12 @@ mod tests {
             keys(&schema),
             BTreeSet::from(["artifact".into(), "trajectory".into()])
         );
+        // The worker aborts the run on an empty artifact or trajectory.
         assert!(schema["properties"]
             .as_object()
             .unwrap()
             .values()
-            .all(|field| field == &serde_json::json!({ "type": "string" })));
+            .all(|field| field == &serde_json::json!({ "type": "string", "minLength": 1 })));
     }
 
     #[test]
@@ -1016,12 +1019,16 @@ mod tests {
         strict(files);
         assert_eq!(keys(files), worker_files());
         assert_eq!(worker_files().len(), FILES.len());
-        assert_eq!(schema["properties"]["notes"]["type"], "string");
+        // Notes may be empty; every file must be nonempty or the worker aborts the run.
+        assert_eq!(
+            schema["properties"]["notes"],
+            serde_json::json!({ "type": "string" })
+        );
         for file in FILES {
             let expected = if file == "guardrails.md" {
                 serde_json::json!({ "type": "string", "enum": ["base text of guardrails.md"] })
             } else {
-                serde_json::json!({ "type": "string" })
+                serde_json::json!({ "type": "string", "minLength": 1 })
             };
             assert_eq!(files["properties"][file], expected, "{file}");
         }
@@ -1060,6 +1067,12 @@ mod tests {
             base.insert("guardrails.md".into(), guardrails);
             let schema = reply_schema("harness", &base).unwrap();
             let field = &schema["properties"]["harness"]["properties"]["guardrails.md"];
+            if !pinned {
+                assert_eq!(
+                    field,
+                    &serde_json::json!({ "type": "string", "minLength": 1 })
+                );
+            }
             assert_eq!(field.get("enum").is_some(), pinned);
             assert_eq!(field["type"], "string");
             assert!(serde_json::to_vec(&schema).unwrap().len() <= 16 * 1024);
