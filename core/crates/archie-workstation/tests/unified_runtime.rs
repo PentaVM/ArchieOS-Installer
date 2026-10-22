@@ -64,6 +64,7 @@ fn request(domain: ContextDomain, prompt: &str) -> InferenceRequest {
         max_output_tokens: 128,
         budget: Default::default(),
         recall_memory: true,
+        reply_schema: None,
     }
 }
 
@@ -848,4 +849,199 @@ fn an_expired_prepared_grant_never_dispatches_after_waiting_for_vault() {
             .status,
         InferenceStatus::Failed
     );
+}
+
+/// A private copy of the pinned worker: launch refuses files others may write.
+fn stage_private_worker(source: &std::path::Path, target: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(target).unwrap();
+    std::fs::set_permissions(target, std::fs::Permissions::from_mode(0o700)).unwrap();
+    for entry in std::fs::read_dir(source).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name();
+        if name == "__pycache__" || name == "tests" {
+            continue;
+        }
+        let destination = target.join(&name);
+        if entry.file_type().unwrap().is_dir() {
+            stage_private_worker(&entry.path(), &destination);
+        } else {
+            std::fs::copy(entry.path(), &destination).unwrap();
+            std::fs::set_permissions(destination, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+    }
+}
+
+/// The reply a schema-constrained server can give: built only from the schema it was
+/// sent, so a stage that arrives without one gets the reflection's tagged text.
+fn reply_by_schema(
+    schema: Option<&serde_json::Value>,
+    base: &serde_json::Map<String, serde_json::Value>,
+) -> String {
+    let Some(schema) = schema else {
+        return "<experience>\ncue: fixture\nlesson: keep the reply shape\nevidence: observed fixture artifact\nconfidence: limited\n</experience>".into();
+    };
+    let keys: Vec<&str> = schema["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|key| key.as_str().unwrap())
+        .collect();
+    match keys.as_slice() {
+        ["artifact", "trajectory"] => serde_json::json!({
+            "artifact": "Schema-shaped fixture artifact",
+            "trajectory": "[ACTION] Read the admitted task\n[OBSERVATION] Fixture evidence only",
+        })
+        .to_string(),
+        ["harness", "notes"] => {
+            let mut harness = serde_json::Map::new();
+            for file in schema["properties"]["harness"]["required"]
+                .as_array()
+                .unwrap()
+            {
+                let file = file.as_str().unwrap();
+                let text = if file == "LongTermMEMORY.md" {
+                    serde_json::json!("Keep every reply in the shape the stage names.")
+                } else {
+                    base[file].clone()
+                };
+                harness.insert(file.to_owned(), text);
+            }
+            serde_json::json!({ "harness": harness, "notes": "Deterministic fixture." }).to_string()
+        }
+        other => panic!("unexpected reply schema {other:?}"),
+    }
+}
+
+/// Harness² on the unified service against a pinned llama.cpp manifest with reasoning on.
+/// Every JSON stage reaches the server with the worker's own reply schema as
+/// `response_format`; the reflection, which is tagged text, arrives with none. The server
+/// answers only from the schema it sees, and the actual pinned upstream run completes.
+#[test]
+#[ignore = "requires isolated PG18 extensions, ARCHIE_HARNESS2_PYTHON (POSIX Python 3.12/3.13) and captured HTTP runner"]
+fn harness2_json_stages_reach_llama_cpp_with_their_reply_schema() {
+    use archie_workstation::{
+        harness2::reply_schema,
+        harness_runtime::{create_program_config, load_program, run_harness, HarnessRunRequest},
+    };
+    let python = std::path::PathBuf::from(
+        std::env::var_os("ARCHIE_HARNESS2_PYTHON").expect("explicit supported interpreter"),
+    );
+    let database = Database::new();
+    let dir = tempfile::tempdir().unwrap();
+    let domain = ContextDomain::personal("fixture").unwrap();
+    RuntimeProfile::for_domain(domain.clone())
+        .create(&dir.path().join("policy.toml"))
+        .unwrap();
+    let source = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .canonicalize()
+        .unwrap()
+        .join("tools/harness2");
+    let worker = dir.path().join("worker");
+    stage_private_worker(&source, &worker);
+    let config = dir.path().join("inference/harness2.toml");
+    create_program_config(&config, &python, &worker.join("worker.py")).unwrap();
+    let program = load_program(&config, dir.path().join("harness-state"), None).unwrap();
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let listener = rt
+        .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
+        .unwrap();
+    let address = listener.local_addr().unwrap();
+    std::fs::create_dir_all(dir.path().join("models/local")).unwrap();
+    // The fixture accepts the complete upstream proposer prompt.
+    std::fs::write(
+        dir.path().join("models/local/reasoner.toml"),
+        format!(
+            r#"id = "local.fixture-reasoner"
+display_name = "Fixture reasoner"
+provider = "llama-cpp"
+locality = "local"
+context_window = 32768
+max_output_tokens = 4096
+capabilities = ["cognition.reasoning"]
+max_privacy_grade = "restricted"
+availability = "ready"
+quality_tier = 55
+
+[cost]
+input_micros_per_mtok = 0
+output_micros_per_mtok = 0
+
+[labels]
+base-url = "http://{address}/v1/"
+provider-model = "fixture-model"
+thinking = "on"
+"#
+        ),
+    )
+    .unwrap();
+    let server = rt.spawn(async move {
+        let mut base = serde_json::Map::new();
+        let mut seen = Vec::new();
+        for _ in 0..8 {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let body: serde_json::Value =
+                serde_json::from_str(&read_http(&mut stream).await).unwrap();
+            assert_eq!(body["chat_template_kwargs"]["enable_thinking"], true);
+            let message = body["messages"][1]["content"].as_str().unwrap();
+            let stage: serde_json::Value =
+                serde_json::from_str(message.rsplit("Current request:\n").next().unwrap()).unwrap();
+            if base.is_empty() {
+                if let Some(harness) = stage["harness"].as_object() {
+                    base = harness.clone();
+                }
+            }
+            let format = &body["response_format"];
+            let schema = (!format.is_null()).then(|| {
+                assert_eq!(format["type"], "json_schema");
+                &format["json_schema"]["schema"]
+            });
+            seen.push(schema.cloned());
+            reply_http(&mut stream, &reply_by_schema(schema, &base)).await;
+        }
+        seen
+    });
+    let mut service = runtime(&database, dir.path());
+    let request = HarnessRunRequest {
+        domain: domain.clone(),
+        focus: "schema-fixture".into(),
+        task_family: "summaries".into(),
+        run_id: "schema-constrained-fixture".into(),
+        prompt: "Summarize only this public deterministic fixture.".into(),
+        runner: RunnerChoice::ApiPinned {
+            model: "local.fixture-reasoner".into(),
+        },
+        duration_ms: 120_000,
+    };
+    let outcome = rt
+        .block_on(run_harness(&mut service, &program, &request, None))
+        .unwrap();
+    let seen = rt.block_on(server).unwrap();
+    assert_eq!(outcome.result.ledger["R"], 4);
+    assert_eq!(outcome.result.ledger["P"], 3);
+    assert_eq!(outcome.receipts.len(), 8);
+    assert!(outcome
+        .receipts
+        .iter()
+        .all(|receipt| receipt.status == InferenceStatus::Completed
+            && receipt.model_id == "local.fixture-reasoner"));
+    let artifact = reply_schema("artifact").unwrap();
+    let harness = reply_schema("harness").unwrap();
+    let count = |expected: Option<&serde_json::Value>| {
+        seen.iter()
+            .filter(|schema| schema.as_ref() == expected)
+            .count()
+    };
+    assert_eq!(count(Some(&artifact)), 4, "four solver rollouts");
+    assert_eq!(count(Some(&harness)), 3, "three proposals");
+    assert_eq!(count(None), 1, "one tagged reflection");
+    // The run is the last stage: the reflection, without a schema.
+    assert_eq!(seen.last().unwrap(), &None);
+    drop(service);
+    drop(rt);
 }

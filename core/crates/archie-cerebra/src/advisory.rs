@@ -206,7 +206,7 @@ impl AdvisoryInterpreter {
                 ChatMessage { role: MessageRole::System, content: serde_json::json!({"hypothesis_id": assessment.hypothesis_id(), "produced_at_ms": now_ms}).to_string() },
                 ChatMessage { role: MessageRole::User, content: context },
             ],
-            max_tokens: Some(2048.min(descriptor.max_output_tokens)), temperature: Some(0.0), stream: false,
+            max_tokens: Some(2048.min(descriptor.max_output_tokens)), temperature: Some(0.0), stream: false, reply_schema: None,
         };
         match self.client.chat(descriptor, privacy, &request).await {
             Ok(response)

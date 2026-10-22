@@ -69,6 +69,10 @@ pub struct InferenceRequest {
     pub budget: InferenceBudget,
     #[serde(default = "recall_by_default")]
     pub recall_memory: bool,
+    /// The JSON Schema an API runner's reply must match. Only trusted code in this process
+    /// sets it, so an operator's request never carries one; the Codex runner ignores it.
+    #[serde(skip)]
+    pub reply_schema: Option<serde_json::Value>,
 }
 fn recall_by_default() -> bool {
     true
@@ -458,6 +462,7 @@ impl UnifiedRuntime {
                         max_tokens: Some(request.max_output_tokens),
                         temperature: None,
                         stream: false,
+                        reply_schema: request.reply_schema.clone(),
                     };
                     // Count the full recalled capsule, not only the fresh question.
                     // A small model must not block a larger fallback candidate.

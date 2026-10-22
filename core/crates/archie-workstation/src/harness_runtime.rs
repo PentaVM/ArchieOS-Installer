@@ -415,6 +415,14 @@ impl Harness2Handler for Substrate<'_> {
                 max_output_tokens: stage.max_output_tokens as u32,
                 recall_memory: false,
                 budget,
+                // The bridge already matched this stage's format to the pinned schedule.
+                // Only an API runner can decode under a schema; Codex gets none.
+                reply_schema: match self.request.runner {
+                    RunnerChoice::Codex { .. } => None,
+                    RunnerChoice::Api | RunnerChoice::ApiPinned { .. } => {
+                        crate::harness2::reply_schema(&stage.response_format)
+                    }
+                },
             };
             let outcome = self
                 .runtime

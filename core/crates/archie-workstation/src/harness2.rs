@@ -24,6 +24,45 @@ const FILES: [&str; 4] = [
     "tool_descriptions/tool_guidance.md",
 ];
 
+/// The JSON Schema a stage's reply must match, for a runtime that decodes under one.
+/// `artifact` and `harness` are the worker's JSON replies and get exactly the keys it
+/// reads, every one a string; the reflection's `experience` is upstream's tagged text
+/// and gets none. The worker still checks every reply: the schema only keeps a small
+/// local model from writing a shape the worker would refuse.
+pub fn reply_schema(response_format: &str) -> Option<Value> {
+    let text = || serde_json::json!({ "type": "string" });
+    match response_format {
+        "artifact" => Some(strict_object(vec![
+            ("artifact", text()),
+            ("trajectory", text()),
+        ])),
+        "harness" => Some(strict_object(vec![
+            (
+                "harness",
+                strict_object(FILES.iter().map(|file| (*file, text())).collect()),
+            ),
+            ("notes", text()),
+        ])),
+        _ => None,
+    }
+}
+
+/// An object with exactly these keys, all required, in the form OpenAI's strict
+/// structured output and llama.cpp's grammar converter both accept.
+fn strict_object(fields: Vec<(&str, Value)>) -> Value {
+    let required: Vec<&str> = fields.iter().map(|(key, _)| *key).collect();
+    let properties: serde_json::Map<String, Value> = fields
+        .into_iter()
+        .map(|(key, value)| (key.to_owned(), value))
+        .collect();
+    serde_json::json!({
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": false,
+    })
+}
+
 /// Trusted launch configuration. Arguments precede the worker path. Windows WSL
 /// callers explicitly configure Linux paths and a non-login `env -i` launcher.
 #[derive(Debug, Clone)]
@@ -881,4 +920,102 @@ pub async fn run_worker<H: Harness2Handler>(
     timeout_at(deadline, run_inner(program, &task, handler))
         .await
         .map_err(|_| Harness2Error::Deadline)?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The four files the worker accepts, read from the worker itself.
+    fn worker_files() -> BTreeSet<String> {
+        let worker = include_str!("../../../../tools/harness2/worker.py");
+        let start = worker
+            .find("ALLOWED = frozenset((")
+            .expect("worker names its files");
+        let end = start + worker[start..].find("))").expect("closed file set");
+        worker[start..end]
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .map(str::to_owned)
+            .collect()
+    }
+
+    fn keys(schema: &Value) -> BTreeSet<String> {
+        schema["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    fn required(schema: &Value) -> BTreeSet<String> {
+        schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|key| key.as_str().unwrap().to_owned())
+            .collect()
+    }
+
+    fn strict(schema: &Value) {
+        assert_eq!(schema["type"], "object");
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(keys(schema), required(schema));
+    }
+
+    #[test]
+    fn the_artifact_schema_names_exactly_what_the_solver_reads() {
+        let schema = reply_schema("artifact").unwrap();
+        strict(&schema);
+        assert_eq!(
+            keys(&schema),
+            BTreeSet::from(["artifact".into(), "trajectory".into()])
+        );
+        assert!(schema["properties"]
+            .as_object()
+            .unwrap()
+            .values()
+            .all(|field| field == &serde_json::json!({ "type": "string" })));
+    }
+
+    #[test]
+    fn the_harness_schema_names_the_four_files_the_worker_accepts() {
+        let schema = reply_schema("harness").unwrap();
+        strict(&schema);
+        assert_eq!(
+            keys(&schema),
+            BTreeSet::from(["harness".into(), "notes".into()])
+        );
+        let files = &schema["properties"]["harness"];
+        strict(files);
+        assert_eq!(keys(files), worker_files());
+        assert_eq!(worker_files().len(), FILES.len());
+        assert_eq!(schema["properties"]["notes"]["type"], "string");
+    }
+
+    #[test]
+    fn tagged_and_reserved_stages_get_no_schema() {
+        assert_eq!(reply_schema("experience"), None);
+        assert_eq!(reply_schema("selection"), None);
+        assert_eq!(reply_schema("Artifact"), None);
+        assert_eq!(reply_schema(""), None);
+    }
+
+    /// Every JSON stage the protocol documents has a schema; the tagged one does not.
+    #[test]
+    fn every_documented_reply_format_is_covered() {
+        let protocol: Value =
+            serde_json::from_str(include_str!("../../../../tools/harness2/protocol.json")).unwrap();
+        let formats = protocol["messages"]["inference"]["fields"]["response_format"]
+            .as_str()
+            .unwrap();
+        let formats: Vec<&str> = formats.split('|').collect();
+        assert_eq!(formats, ["artifact", "harness", "selection", "experience"]);
+        for format in formats {
+            let expected = matches!(format, "artifact" | "harness");
+            assert_eq!(reply_schema(format).is_some(), expected, "{format}");
+        }
+    }
 }

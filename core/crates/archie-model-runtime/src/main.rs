@@ -152,6 +152,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_tokens: Some(1024),
         temperature: Some(0.2),
         stream: false,
+        reply_schema: None,
     };
     let response = client.chat(&descriptor, privacy, &request).await?;
     print!("{}", response.choices[0].message.content);

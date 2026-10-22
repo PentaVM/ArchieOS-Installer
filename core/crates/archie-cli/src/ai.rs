@@ -336,6 +336,7 @@ pub async fn run(command: &AiCommand, paths: &StatePaths, json: bool) -> Result<
                 runner: choice(runner, model)?,
                 max_output_tokens: max_tokens.unwrap_or(1024),
                 recall_memory: true,
+                reply_schema: None,
                 budget: budget(runner, *max_tokens, *managed_byte_limit)?,
             };
             let result = match daemon(
