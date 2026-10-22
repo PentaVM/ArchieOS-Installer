@@ -272,7 +272,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|request| {
                 let found = detector
                     .detect_frame(
-                        &request.frame,
+                        &request.frame(size),
                         &request.phrases,
                         request.threshold,
                         20,
@@ -298,13 +298,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(wait) = due.checked_duration_since(Instant::now()) {
             std::thread::sleep(wait);
         }
-        let frame = Frame::new(camera[index % camera.len()].clone(), size);
+        let frame = &camera[index % camera.len()];
         let answered = Instant::now();
         let (reply, request) =
             live.hub
                 .lock()
                 .expect("hub")
-                .observe("camera:bench", &frame, live.now_ms())?;
+                .observe("camera:bench", frame, live.now_ms())?;
         if let Some(request) = request {
             live.submit(request);
         }

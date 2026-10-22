@@ -405,13 +405,13 @@ fn the_live_pipeline_runs_with_a_real_detector() {
             .iter()
             .map(|r| {
                 detector
-                    .detect_frame(&r.frame, &r.phrases, r.threshold, 3, 0.5, false)
+                    .detect_frame(&r.frame(64), &r.phrases, r.threshold, 3, 0.5, false)
                     .map_err(|e| e.to_string())
             })
             .collect()
     });
     // The first frame asks for a read; wait for the worker to finish it.
-    let first = Frame::new(picture(160, 120, 0), 64);
+    let first = picture(160, 120, 0);
     let (_, request) = live
         .hub
         .lock()
@@ -434,7 +434,7 @@ fn the_live_pipeline_runs_with_a_real_detector() {
     let mut sources = Vec::new();
     let mut inferred = false;
     for i in 1..40 {
-        let frame = Frame::new(picture(160, 120, i), 64);
+        let frame = picture(160, 120, i);
         let (reply, request) = live
             .hub
             .lock()

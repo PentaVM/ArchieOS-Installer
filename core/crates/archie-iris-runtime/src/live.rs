@@ -15,7 +15,7 @@
 //! matching), or `lost` (the match failed; the box stays where it was last seen).
 
 use crate::detect::{round_to, Detection};
-use crate::preprocess::Frame;
+use crate::preprocess::{Frame, Rgb};
 use crate::Error;
 use archie_accel::advice::{Envelope, ResourceAdvice};
 use archie_accel::damage::{Damage, DamageConfig, Luma};
@@ -62,11 +62,13 @@ pub struct LiveDetection {
     pub frames: u32,
 }
 
-/// A frame the model should read for a focus.
+/// A frame the model should read for a focus. It carries the decoded image only: the
+/// letterboxed canvas (18 ms for a 1280 x 720 frame on the container's CPU) is built by
+/// the worker, off the path that answers every frame.
 #[derive(Debug, Clone)]
 pub struct InferRequest {
     pub focus: String,
-    pub frame: Frame,
+    pub image: Rgb,
     pub phrases: Vec<String>,
     pub open: bool,
     pub threshold: f32,
@@ -118,33 +120,46 @@ fn phrase_key(phrase: &str) -> u64 {
     })
 }
 
-/// The frame's luma, shrunk by a whole factor so its longest side is at most
-/// [`LUMA_SIDE`]; returns it with the factor.
-fn luma_of(frame: &Frame) -> Result<(Luma, f32), Error> {
-    let image = &frame.image;
+impl InferRequest {
+    /// The frame the model reads, letterboxed onto a `canvas`-sized square.
+    pub fn frame(&self, canvas: usize) -> Frame {
+        Frame::new(self.image.clone(), canvas)
+    }
+}
+
+/// The image's luma, shrunk by a whole factor so its longest side is at most
+/// [`LUMA_SIDE`]; returns it with the factor. Each output pixel is the mean of a whole
+/// `factor x factor` block (the size is truncated to whole blocks), rows in parallel.
+fn luma_of(image: &Rgb) -> Result<(Luma, f32), Error> {
+    use rayon::prelude::*;
     let factor = image.width.max(image.height).div_ceil(LUMA_SIDE).max(1);
-    let (width, height) = (image.width / factor, image.height / factor);
-    let (width, height) = (width.max(1), height.max(1));
-    let mut pixels = Vec::with_capacity(width * height);
-    for y in 0..height {
-        for x in 0..width {
-            let mut sum = 0u32;
-            let mut count = 0u32;
+    let (width, height) = (
+        (image.width / factor).max(1),
+        (image.height / factor).max(1),
+    );
+    let stride = image.width * 3;
+    let count = (factor * factor) as u32;
+    let mut pixels = vec![0u8; width * height];
+    pixels
+        .par_chunks_mut(width)
+        .enumerate()
+        .for_each(|(y, row)| {
+            let mut sums = vec![0u32; width];
             for dy in 0..factor {
-                for dx in 0..factor {
-                    let (px, py) = (x * factor + dx, y * factor + dy);
-                    if px < image.width && py < image.height {
-                        let p = &image.pixels[(py * image.width + px) * 3..][..3];
-                        sum +=
-                            (77 * u32::from(p[0]) + 150 * u32::from(p[1]) + 29 * u32::from(p[2]))
-                                >> 8;
-                        count += 1;
+                let source = (y * factor + dy).min(image.height - 1);
+                let line = &image.pixels[source * stride..(source + 1) * stride];
+                for (x, sum) in sums.iter_mut().enumerate() {
+                    for dx in 0..factor {
+                        let at = (x * factor + dx).min(image.width - 1) * 3;
+                        let (r, g, b) = (line[at], line[at + 1], line[at + 2]);
+                        *sum += (77 * u32::from(r) + 150 * u32::from(g) + 29 * u32::from(b)) >> 8;
                     }
                 }
             }
-            pixels.push((sum / count.max(1)) as u8);
-        }
-    }
+            for (out, sum) in row.iter_mut().zip(sums) {
+                *out = (sum / count) as u8;
+            }
+        });
     let luma = Luma::new(width as u32, height as u32, pixels)
         .map_err(|error| Error::Image(error.to_string()))?;
     Ok((luma, factor as f32))
@@ -200,7 +215,7 @@ impl LiveHub {
     pub fn observe(
         &mut self,
         focus: &str,
-        frame: &Frame,
+        image: &Rgb,
         now_ms: u64,
     ) -> Result<(LiveReply, Option<InferRequest>), Error> {
         let config = self.config;
@@ -208,7 +223,7 @@ impl LiveHub {
             .foci
             .get_mut(focus)
             .ok_or_else(|| Error::Refused(format!("no live focus {focus}")))?;
-        let (luma, scale) = luma_of(frame)?;
+        let (luma, scale) = luma_of(image)?;
         if (scale - entry.scale).abs() > f32::EPSILON && entry.previous.is_some() {
             // A new frame size: what was tracked is in other coordinates.
             entry.state.last_inference_ms = None;
@@ -250,7 +265,7 @@ impl LiveHub {
                 let known = entry.labels.get(&t.id)?;
                 let b = t.bbox.map(|v| f64::from(v * scale));
                 let clip = |v: f64, limit: usize| v.clamp(0.0, limit as f64);
-                let (w, h) = (frame.image.width, frame.image.height);
+                let (w, h) = (image.width, image.height);
                 let bbox = [
                     round_to(clip(b[0], w), 1),
                     round_to(clip(b[1], h), 1),
@@ -275,7 +290,7 @@ impl LiveHub {
         let request = match decision {
             Decision::Infer { open } => Some(InferRequest {
                 focus: focus.to_owned(),
-                frame: frame.clone(),
+                image: image.clone(),
                 phrases: entry.phrases.clone(),
                 open,
                 threshold: entry.threshold,
@@ -528,11 +543,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::preprocess::Rgb;
     use archie_accel::plan::{FocusMode, Priority};
 
     /// A grey frame with a textured square at (x, y).
-    fn frame(width: usize, height: usize, x: usize, y: usize, side: usize) -> Frame {
+    fn frame(width: usize, height: usize, x: usize, y: usize, side: usize) -> Rgb {
         let mut pixels = vec![90u8; width * height * 3];
         for py in y..(y + side).min(height) {
             for px in x..(x + side).min(width) {
@@ -545,7 +559,7 @@ mod tests {
                 ]);
             }
         }
-        Frame::new(Rgb::new(width, height, pixels).unwrap(), 64)
+        Rgb::new(width, height, pixels).unwrap()
     }
 
     fn budget(fps: f32) -> FocusBudget {
@@ -786,5 +800,53 @@ mod tests {
         }
         shared.shutdown();
         worker.join().unwrap();
+    }
+
+    /// `cargo test --release -p archie-iris-runtime answer_path -- --ignored --nocapture`
+    #[test]
+    #[ignore = "timing, run in release"]
+    fn answer_path_timing() {
+        use crate::preprocess::letterbox;
+        use sha2::{Digest, Sha256};
+        let mut hub = LiveHub::new(LiveConfig::default());
+        hub.set_focus(budget(10.0), vec!["taza".into()], 0.35);
+        let frames: Vec<Rgb> = (0..30)
+            .map(|i| frame(1280, 720, 300 + 4 * i, 200 + 2 * i, 160))
+            .collect();
+        let (_, request) = hub.observe("camera:desk", &frames[0], 0).unwrap();
+        let boxes: Vec<Detection> = (0..20)
+            .map(|i| {
+                found(
+                    40.0 + (i % 5) as f64 * 240.0,
+                    40.0 + (i / 5) as f64 * 160.0,
+                    120.0,
+                )
+            })
+            .collect();
+        hub.complete(&request.unwrap(), boxes, 1);
+        let started = std::time::Instant::now();
+        for (i, f) in frames.iter().enumerate().skip(1) {
+            hub.observe("camera:desk", f, 2 + i as u64).unwrap();
+        }
+        let answer = started.elapsed().as_secs_f64() * 1000.0 / 29.0;
+        let started = std::time::Instant::now();
+        for f in &frames[..10] {
+            std::hint::black_box(luma_of(f).unwrap());
+        }
+        println!("luma {:.2} ms", started.elapsed().as_secs_f64() * 100.0);
+        let started = std::time::Instant::now();
+        for f in &frames[..10] {
+            std::hint::black_box(letterbox(f, 512));
+        }
+        let letterboxed = started.elapsed().as_secs_f64() * 100.0;
+        let canvas = letterbox(&frames[0], 512).0;
+        let started = std::time::Instant::now();
+        for _ in 0..10 {
+            std::hint::black_box(Sha256::digest(&canvas.pixels));
+        }
+        let digest = started.elapsed().as_secs_f64() * 100.0;
+        println!(
+            "1280x720, 20 boxes: answer {answer:.2} ms per frame; letterbox {letterboxed:.2} ms; canvas digest {digest:.2} ms"
+        );
     }
 }
