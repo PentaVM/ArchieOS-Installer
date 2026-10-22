@@ -973,7 +973,7 @@ fn push_evidence(evidence: &mut Vec<String>, item: String) {
     }
 }
 
-fn human_duration(ms: f64, lang: Lang) -> String {
+pub(crate) fn human_duration(ms: f64, lang: Lang) -> String {
     let minutes = ms / 60_000.0;
     match (lang, minutes) {
         (Lang::Es, m) if m < 1.0 => "menos de un minuto".into(),

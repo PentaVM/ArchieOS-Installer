@@ -1,9 +1,11 @@
 //! State 1 from the bookkeeping: the questions the social state answers by itself.
 //!
-//! Who saw what is counted, not inferred ([`crate::state`]). So "does X know that …" and
-//! "what does X believe about …" need no model: the answer is read from the state, with the
-//! reason it holds; someone the conversations never show saw nothing in them. "Will X …" is
-//! read from one of X's expectations when the question names it clearly. Anything not
+//! Who saw what is counted, not inferred ([`crate::state`]). So "does X know that …", "do I
+//! need to tell X how … ended up" and "what does X believe about …" need no model: the answer
+//! is read from the state, with the reason it holds; someone the conversations never show saw
+//! nothing in them. "What should I keep in mind before asking X" is answered from what X
+//! missed, what X has shown clearly and how long X takes to reply. "Will X …" is read from one
+//! of X's expectations when the question names it clearly. Anything not
 //! recognised with certainty (no person or two, no topic or two, a value other than the current
 //! one, an expectation named only in passing) is left to the model.
 //!
@@ -12,12 +14,33 @@
 //! [`MAX_INFERRED_CONFIDENCE`], like any inference about a person.
 
 use crate::model::{AnswerSource, Decision, QuickAnswer};
-use crate::state::{PersonState, SeenHow, SocialState};
+use crate::state::{human_duration, PersonState, SeenHow, SocialState};
 use crate::{Lang, MAX_INFERRED_CONFIDENCE};
 use std::collections::BTreeSet;
 
 /// Evidence an expectation needs before it answers yes or no.
 pub const MIN_EVIDENCE: usize = 2;
+/// How far from even odds an expectation must be to be mentioned in a brief.
+const CLEAR: f32 = 0.15;
+
+const TELL: &[&str] = &[
+    "avisar",
+    "avisarle",
+    "avisarles",
+    "avísale",
+    "decirle",
+    "contarle",
+    "comentarle",
+    "informarle",
+    "tell",
+    "inform",
+];
+const BRIEF: &[&str] = &[
+    "tener en cuenta",
+    "antes de pedirle",
+    "keep in mind",
+    "before asking",
+];
 
 const KNOW: &[&str] = &[
     "sabe", "sabía", "enteró", "enterado", "enterada", "know", "knows", "aware", "heard",
@@ -36,13 +59,26 @@ const COMMON: &[&str] = &[
 /// What the state says, for one recognised question.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Exact {
-    /// Whether `person` saw the current value of `topic`.
+    /// Whether `person` saw the current value of `topic`. With `tell`, the question is whether
+    /// they need to be told, which is the opposite.
     Knows {
         person: String,
         topic: String,
         current: String,
         /// The last value they saw, and how.
         seen: Option<(String, SeenHow)>,
+        tell: bool,
+    },
+    /// What to keep in mind before asking `person` for something.
+    Brief {
+        person: String,
+        /// (topic, the value they saw, the value it has now).
+        missed: Vec<(String, String, String)>,
+        /// Topics they never saw anything about.
+        never: Vec<String>,
+        /// (statement, confidence, whether the evidence is for it) of clear expectations.
+        traits: Vec<(String, f32, bool)>,
+        reply_ms: Option<f64>,
     },
     /// The last value of `topic` that `person` saw. `asked` is the value a yes/no question
     /// names ("does X think the trip is in July?").
@@ -65,7 +101,9 @@ pub enum Exact {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Knows,
+    Tell,
     Believes,
+    Brief,
     Other,
 }
 
@@ -74,8 +112,10 @@ pub fn resolve(state: &SocialState, question: &str) -> Option<Exact> {
     let q = question.to_lowercase();
     let kind = kind(&q);
     let person = named_person(state, &q).and_then(|id| state.people.get(id));
-    if kind == Kind::Other {
-        return expectation(person?, &q);
+    match kind {
+        Kind::Other => return expectation(person?, &q),
+        Kind::Brief => return Some(brief(state, person?)),
+        _ => {}
     }
     let (topic, asked) = named_topic(state, &q)?;
     // Someone the conversations never show saw nothing in them.
@@ -83,7 +123,7 @@ pub fn resolve(state: &SocialState, question: &str) -> Option<Exact> {
         Some(p) => (p.label.clone(), p.seen.get(&topic)),
         None => (unknown_person(state, question)?, None),
     };
-    if kind == Kind::Knows {
+    if kind == Kind::Knows || kind == Kind::Tell {
         let current = state.facts.get(&topic)?.current()?.value.clone();
         if asked.as_ref().is_some_and(|a| *a != current) {
             return None;
@@ -93,6 +133,7 @@ pub fn resolve(state: &SocialState, question: &str) -> Option<Exact> {
             topic,
             current,
             seen: seen.map(|s| (s.value.clone(), s.how)),
+            tell: kind == Kind::Tell,
         })
     } else {
         Some(Exact::Believes {
@@ -109,9 +150,13 @@ impl Exact {
     /// question asks what someone believes rather than yes or no.
     pub fn answer(&self) -> Option<bool> {
         match self {
-            Exact::Knows { current, seen, .. } => {
-                Some(seen.as_ref().is_some_and(|(v, _)| v == current))
-            }
+            Exact::Knows {
+                current,
+                seen,
+                tell,
+                ..
+            } => Some(seen.as_ref().is_some_and(|(v, _)| v == current) != *tell),
+            Exact::Brief { .. } => None,
             Exact::Believes { value, asked, .. } => match (value, asked) {
                 (Some(v), Some(a)) => Some(v == a),
                 _ => None,
@@ -148,6 +193,40 @@ impl Exact {
                 topic,
                 current,
                 seen,
+                tell: true,
+            } => match seen {
+                Some((v, _)) if v == current && es => {
+                    format!("No hace falta: {person} ya sabe que {topic} es {current}.")
+                }
+                Some((v, _)) if v == current => {
+                    format!("No need: {person} already knows {topic} is {current}.")
+                }
+                Some((v, _)) if es => format!(
+                    "Sí: {person} vio que {topic} era {v} y no vio el cambio. Avísale que ahora es {current}."
+                ),
+                Some((v, _)) => format!(
+                    "Yes: {person} saw that {topic} was {v} and missed the change. Tell them it is now {current}."
+                ),
+                None if es => format!(
+                    "Sí: {person} no vio nada sobre {topic} en las conversaciones. Avísale que es {current}."
+                ),
+                None => format!(
+                    "Yes: {person} saw nothing about {topic} in the conversations. Tell them it is {current}."
+                ),
+            },
+            Exact::Brief {
+                person,
+                missed,
+                never,
+                traits,
+                reply_ms,
+            } => brief_text(person, missed, never, traits, *reply_ms, lang),
+            Exact::Knows {
+                person,
+                topic,
+                current,
+                seen,
+                ..
             } => match seen {
                 Some((v, how)) if v == current => match (*how, es) {
                     (SeenHow::Said, true) => format!("Sí. Lo dijo {person}."),
@@ -235,6 +314,9 @@ impl Exact {
     /// The answer among explicit options, as the decision head would give it. `None` when an
     /// option the answer needs is not offered.
     pub fn choose(&self, lang: Lang, options: &[String]) -> Option<Decision> {
+        if matches!(self, Exact::Brief { .. }) {
+            return None;
+        }
         let index = |wanted: &str| {
             options
                 .iter()
@@ -274,7 +356,11 @@ fn kind(q: &str) -> Kind {
         .filter(|w| !w.is_empty())
         .collect();
     let has = |list: &[&str]| list.iter().any(|w| words.contains(w));
-    if has(BELIEVE) {
+    if BRIEF.iter().any(|p| q.contains(p)) {
+        Kind::Brief
+    } else if has(TELL) || (words.contains("let") && has(KNOW)) {
+        Kind::Tell
+    } else if has(BELIEVE) {
         Kind::Believes
     } else if has(KNOW) || q.contains("al tanto") {
         if has(WHAT) {
@@ -287,8 +373,121 @@ fn kind(q: &str) -> Kind {
     }
 }
 
+/// What `person` missed, what they have clearly shown and how long they take to reply.
+fn brief(state: &SocialState, person: &PersonState) -> Exact {
+    let mut missed = Vec::new();
+    let mut never = Vec::new();
+    for (topic, fact) in &state.facts {
+        let Some(current) = fact.current() else {
+            continue;
+        };
+        match person.seen.get(topic) {
+            None => never.push(topic.clone()),
+            Some(s) if s.value != current.value => {
+                missed.push((topic.clone(), s.value.clone(), current.value.clone()))
+            }
+            Some(_) => {}
+        }
+    }
+    let traits = person
+        .what_to_expect()
+        .into_iter()
+        .filter(|e| e.evidence.len() >= MIN_EVIDENCE)
+        .filter_map(|e| {
+            let c = e.confidence();
+            ((c - 0.5).abs() >= CLEAR).then(|| (e.statement.clone(), c, c > 0.5))
+        })
+        .take(3)
+        .collect();
+    let reply_ms = person
+        .behaviour
+        .reply_latency_ms
+        .filter(|_| person.behaviour.messages >= 3);
+    Exact::Brief {
+        person: person.label.clone(),
+        missed,
+        never,
+        traits,
+        reply_ms,
+    }
+}
+
+fn brief_text(
+    person: &str,
+    missed: &[(String, String, String)],
+    never: &[String],
+    traits: &[(String, f32, bool)],
+    reply_ms: Option<f64>,
+    lang: Lang,
+) -> String {
+    let es = lang == Lang::Es;
+    let mut sentences = Vec::new();
+    let gaps: Vec<String> = missed
+        .iter()
+        .map(|(topic, seen, current)| {
+            if es {
+                format!("que {topic} cambió de {seen} a {current}")
+            } else {
+                format!("that {topic} changed from {seen} to {current}")
+            }
+        })
+        .chain(never.iter().map(|topic| {
+            if es {
+                format!("nada sobre {topic}")
+            } else {
+                format!("anything about {topic}")
+            }
+        }))
+        .collect();
+    if !gaps.is_empty() {
+        sentences.push(if es {
+            format!(
+                "{person} no vio {}: ponlo al día antes de pedirle algo.",
+                gaps.join(", ni ")
+            )
+        } else {
+            format!(
+                "{person} missed {}: bring them up to date before you ask.",
+                gaps.join(", nor ")
+            )
+        });
+    }
+    let shown: Vec<String> = traits
+        .iter()
+        .map(|(statement, c, positive)| match (positive, es) {
+            (true, true) => format!("{statement} (confianza {c:.2})"),
+            (true, false) => format!("{statement} (confidence {c:.2})"),
+            (false, true) => format!("va en contra de «{statement}» (confianza {c:.2})"),
+            (false, false) => format!("goes against “{statement}” (confidence {c:.2})"),
+        })
+        .collect();
+    if !shown.is_empty() {
+        sentences.push(if es {
+            format!("Lo que se ha visto de {person}: {}.", shown.join("; "))
+        } else {
+            format!("What {person} has shown: {}.", shown.join("; "))
+        });
+    }
+    if let Some(ms) = reply_ms {
+        let d = human_duration(ms, lang);
+        sentences.push(if es {
+            format!("Suele responder en {d}.")
+        } else {
+            format!("Usually replies in {d}.")
+        });
+    }
+    if sentences.is_empty() {
+        return if es {
+            format!("No hay nada en las conversaciones que cambie cómo pedírselo a {person}.")
+        } else {
+            format!("Nothing in the conversations changes how to ask {person}.")
+        };
+    }
+    sentences.join(" ")
+}
+
 /// Where `needle` occurs in `hay` as whole words.
-fn find_phrase(hay: &str, needle: &str) -> Option<(usize, usize)> {
+pub(crate) fn find_phrase(hay: &str, needle: &str) -> Option<(usize, usize)> {
     if needle.is_empty() {
         return None;
     }

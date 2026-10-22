@@ -97,9 +97,17 @@ $B train tokenizer --dir $D --examples data/synth/examples.jsonl --examples data
 $B train generator --dir $D --examples data/synth/examples.jsonl --examples data/distilled.jsonl \
    --device cuda:0 --steps 60000 --batch 16 --lr 3e-4 --mix gate=0.1,update=0.3,decide=0.3,compose=0.3
 $B train adapter --dir $D --name personal-owner --examples data/personal-owner.jsonl --device cuda:0 --steps 5000
+$B train pointer --dir $D --examples data/synth/examples.jsonl --examples data/distilled.jsonl \
+   --device cuda:0 --steps 3000 --batch 4 --accumulate 2 --lr 1e-3
+$B train ngram --dir $D --examples data/synth/examples.jsonl --examples data/distilled.jsonl
 $B calibrate --dir $D --examples data/synth/examples.jsonl --device cuda:0
 $B eval --dir $D --examples data/synth/examples.jsonl --device cuda:0
 ```
+
+- `pointer` trains the copy head alone on the finished generator and binds it to the
+  generator's digest: retrain it whenever the generator changes, or the checkpoint is refused.
+- `ngram` trains nothing: it indexes the composed answers and collects the topics, values and
+  traits of the training states, which the checks of state 2 use.
 
 - Stages resume from their last save (`--no-resume` starts over). Metrics go to
   `$D/train-log.jsonl`; final metrics, data digests and file digests go to `$D/manifest.json`.

@@ -6,6 +6,8 @@
 //! | `tokenizer` | the multiscale VQ-VAE           | codec                  | `vq.safetensors`           |
 //! | `generator` | generator and the state-1 heads | tokenizer              | `generator.safetensors`    |
 //! | `adapter`   | one domain's low-rank adapters  | tokenizer, generator   | `lora/<name>.safetensors`  |
+//! | `pointer`   | the copy head                   | tokenizer, generator   | `pointer.safetensors`      |
+//! | `ngram`     | nothing: indexes the answers    | everything             | `answers.ngram`            |
 //! | `calibrate` | the decision temperature        | everything             | `config.toml`              |
 //!
 //! Every stage records the SHA-256 of what it wrote and of the data it read in the manifest,
@@ -1119,6 +1121,349 @@ pub fn train_adapter(
     });
     manifest.save(dir)?;
     Ok(report)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Copy head and n-gram index
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct PointerMetrics {
+    pub loss: f64,
+    /// Of the positions whose token is in the prompt, the share whose highest-scoring prompt
+    /// token is that token.
+    pub copy_accuracy: f64,
+    /// Share of answer positions where the gate agrees with the label.
+    pub gate_accuracy: f64,
+    /// Share of answer positions labelled as copies.
+    pub copy_share: f64,
+    pub examples: usize,
+}
+
+impl PointerMetrics {
+    fn metrics(&self) -> BTreeMap<String, f64> {
+        [
+            ("loss", self.loss),
+            ("copy_accuracy", self.copy_accuracy),
+            ("gate_accuracy", self.gate_accuracy),
+            ("copy_share", self.copy_share),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect()
+    }
+}
+
+/// The `n` commonest tokens of the targets: what the copy head leaves to the generator.
+fn common_tokens(
+    codec: &Codec,
+    prepared: &[Prepared],
+    n: usize,
+) -> std::collections::BTreeSet<u32> {
+    let mut counts: BTreeMap<u32, usize> = BTreeMap::new();
+    for t in prepared.iter().filter_map(|p| p.target.as_ref()) {
+        for &id in t.iter().filter(|&&id| !codec.is_special(id)) {
+            *counts.entry(id).or_default() += 1;
+        }
+    }
+    let mut ranked: Vec<(u32, usize)> = counts.into_iter().collect();
+    ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    ranked.into_iter().take(n).map(|(id, _)| id).collect()
+}
+
+struct PointerBatch {
+    scores: Tensor,
+    gate: Tensor,
+    copy: Tensor,
+    valid: Tensor,
+    gold: Tensor,
+    prompts: Vec<Vec<u32>>,
+    targets: Vec<Vec<u32>>,
+}
+
+/// The frozen generator's finest level over `rows` (coarser codes corrupted as in training,
+/// so the head learns on the states it will see), scored by the head.
+#[allow(clippy::too_many_arguments)]
+fn pointer_batch(
+    models: &Models<'_>,
+    head: &crate::pointer::PointerHead,
+    codec: &Codec,
+    common: &std::collections::BTreeSet<u32>,
+    rows: &[&Prepared],
+    pad: u32,
+    rng: &mut StdRng,
+    corruption: bool,
+) -> Result<PointerBatch> {
+    let batch = models.batch(rows, pad)?;
+    let width = batch.width()?;
+    let targets: Vec<Vec<u32>> = rows
+        .iter()
+        .map(|p| p.target.clone().unwrap_or_default())
+        .collect();
+    let codes = models
+        .vq
+        .codes_for(&nn::ids_tensor(&targets, models.device)?)?;
+    let codes = if corruption {
+        corrupt(
+            &codes,
+            &models.config.corruption,
+            models.config.codebook_size,
+            rng,
+        )?
+    } else {
+        codes
+    };
+    let inputs = models.generator.level_inputs(models.vq, &codes)?;
+    let hidden = models
+        .generator
+        .forward(models.vq, &batch, Some(&inputs), Ctx::EVAL)?;
+    let answer = hidden
+        .levels
+        .last()
+        .ok_or_else(|| LncmError::Config("no levels".into()))?
+        .detach();
+    let prompt = hidden.prompt.detach();
+    let prompts: Vec<Vec<u32>> = rows.iter().map(|p| p.prompt.ids.clone()).collect();
+    let mut copyable = Vec::with_capacity(rows.len() * width);
+    let (mut copy, mut valid, mut gold) = (Vec::new(), Vec::new(), Vec::new());
+    for (p, t) in prompts.iter().zip(&targets) {
+        copyable.extend(crate::pointer::copyable(codec, p, width));
+        let l = crate::pointer::labels(codec, p, width, t, common);
+        copy.extend(l.copy);
+        valid.extend(l.valid);
+        gold.extend(l.gold);
+    }
+    let (b, len) = (rows.len(), models.config.target_len);
+    let copyable = Tensor::from_vec(copyable, (b, width), models.device)?;
+    let (scores, gate) = head.scores(&answer, &prompt, &copyable)?;
+    Ok(PointerBatch {
+        scores,
+        gate,
+        copy: Tensor::from_vec(copy, (b, len), models.device)?,
+        valid: Tensor::from_vec(valid, (b, len), models.device)?,
+        gold: Tensor::from_vec(gold, (b, len, width), models.device)?,
+        prompts,
+        targets,
+    })
+}
+
+/// Trains the copy head ([`crate::pointer`]); the tokenizer and the generator stay exactly as
+/// they were, and the head is bound to the generator's digest.
+pub fn train_pointer(
+    dir: &Path,
+    examples: &[Example],
+    data: &[PathBuf],
+    opts: &TrainOptions,
+    device: &Device,
+) -> Result<PointerMetrics> {
+    use crate::pointer::{PointerHead, POINTER_BASE_FILE, POINTER_FILE};
+    let (config, codec, manifest) = open_config(dir)?;
+    manifest.verify(dir, VQ_FILE)?;
+    let base = manifest.verify(dir, GENERATOR_FILE)?;
+    let mut tensors = load_tensors(&dir.join(VQ_FILE), device)?;
+    tensors.extend(load_tensors(&dir.join(GENERATOR_FILE), device)?);
+    let vb = VarBuilder::from_tensors(tensors, DType::F32, device);
+    let vq = VqVae::new(&vb, &config)?;
+    let generator = Generator::new(&vb, &config)?;
+    let mut map = VarMap::new();
+    let head = PointerHead::new(
+        &VarBuilder::from_varmap(&map, DType::F32, device),
+        config.generator.d_model,
+    )?;
+    let mut start = 0;
+    if opts.resume && dir.join(POINTER_FILE).exists() {
+        map.load(dir.join(POINTER_FILE))?;
+        start = load_progress(dir, "pointer");
+    }
+    let generating = |split| -> Vec<Prepared> {
+        prepare_all(&codec, &config, examples, split)
+            .0
+            .into_iter()
+            .filter(|p| p.target.is_some())
+            .collect()
+    };
+    let train = generating(Split::Train);
+    let dev = generating(Split::Dev);
+    if train.is_empty() {
+        return Err(LncmError::Data(
+            "no generating examples to train the copy head".into(),
+        ));
+    }
+    let common = common_tokens(&codec, &train, 100);
+    let models = Models {
+        vq: &vq,
+        generator: &generator,
+        config: &config,
+        device,
+    };
+    let pad = codec.special(crate::Special::Pad);
+    let vars = map.all_vars();
+    let mut opt = optimiser(vars.clone(), opts)?;
+    let mut rng = StdRng::seed_from_u64(opts.seed ^ 0xC0FF ^ start);
+    let started = Instant::now();
+    log(
+        dir,
+        serde_json::json!({"stage": "pointer", "start": start, "examples": train.len(), "base": base}),
+    )?;
+    for step_no in start..opts.steps {
+        if pause_or_stop(dir, opts, step_no)? {
+            save_varmap(dir, &map, POINTER_FILE, "pointer", step_no)?;
+            return Err(stopped("pointer", step_no));
+        }
+        opt.set_learning_rate(learning_rate(opts, step_no));
+        let parts = opts.accumulate.max(1);
+        let mut total: Option<GradStore> = None;
+        let mut value = 0f32;
+        for _ in 0..parts {
+            let rows = draw(&train, opts.batch, &mut rng);
+            let b = pointer_batch(&models, &head, &codec, &common, &rows, pad, &mut rng, true)?;
+            let loss = crate::pointer::loss(&b.scores, &b.gate, &b.copy, &b.valid, &b.gold)?;
+            value += nn::scalar(&loss)? / parts as f32;
+            let part = (loss / parts as f64)?.backward()?;
+            total = Some(match total {
+                None => part,
+                Some(sum) => add_gradients(sum, &part, &vars)?,
+            });
+        }
+        let norm = apply_gradients(&mut opt, &vars, total.expect("one part"), opts.clip)?;
+        if (step_no + 1) % 50 == 0 || step_no + 1 == opts.steps {
+            log(
+                dir,
+                serde_json::json!({"stage": "pointer", "step": step_no + 1, "loss": value, "grad_norm": norm,
+                    "lr": learning_rate(opts, step_no), "seconds": started.elapsed().as_secs_f32()}),
+            )?;
+        }
+        if (step_no + 1) % opts.save_every == 0 {
+            save_varmap(dir, &map, POINTER_FILE, "pointer", step_no + 1)?;
+        }
+    }
+    save_varmap(dir, &map, POINTER_FILE, "pointer", opts.steps)?;
+    let report = measure_pointer(
+        &models,
+        &head,
+        &codec,
+        &common,
+        &dev,
+        opts.eval_limit.max(1),
+        pad,
+    )?;
+    write_atomic(
+        &dir.join(POINTER_BASE_FILE),
+        serde_json::to_string_pretty(&crate::model::PointerBase {
+            generator_sha256: base,
+        })?
+        .as_bytes(),
+    )?;
+    finish_stage(
+        dir,
+        POINTER_FILE,
+        "pointer",
+        opts.steps,
+        data,
+        report.metrics(),
+    )?;
+    let mut manifest = Manifest::load(dir)?;
+    manifest.record(dir, POINTER_BASE_FILE)?;
+    manifest.save(dir)?;
+    log(
+        dir,
+        serde_json::json!({"stage": "pointer", "final_eval": report}),
+    )?;
+    Ok(report)
+}
+
+/// The head on development examples, teacher-forced (no corruption).
+fn measure_pointer(
+    models: &Models<'_>,
+    head: &crate::pointer::PointerHead,
+    codec: &Codec,
+    common: &std::collections::BTreeSet<u32>,
+    dev: &[Prepared],
+    limit: usize,
+    pad: u32,
+) -> Result<PointerMetrics> {
+    let mut rng = StdRng::seed_from_u64(0);
+    let rows: Vec<&Prepared> = dev.iter().take(limit).collect();
+    let (mut loss, mut batches) = (0f64, 0usize);
+    let (mut copies, mut copied_right, mut counted, mut gate_right) =
+        (0usize, 0usize, 0usize, 0usize);
+    for chunk in rows.chunks(8) {
+        let b = pointer_batch(models, head, codec, common, chunk, pad, &mut rng, false)?;
+        loss += f64::from(nn::scalar(&crate::pointer::loss(
+            &b.scores, &b.gate, &b.copy, &b.valid, &b.gold,
+        )?)?);
+        batches += 1;
+        let best = b.scores.argmax(D::Minus1)?.to_vec2::<u32>()?;
+        let gate = b.gate.to_vec2::<f32>()?;
+        let copy = b.copy.to_vec2::<f32>()?;
+        let valid = b.valid.to_vec2::<f32>()?;
+        for r in 0..chunk.len() {
+            for i in 0..models.config.target_len {
+                if valid[r][i] == 0.0 {
+                    continue;
+                }
+                counted += 1;
+                let labelled = copy[r][i] == 1.0;
+                gate_right += usize::from((gate[r][i] > 0.0) == labelled);
+                if labelled {
+                    copies += 1;
+                    let j = best[r][i] as usize;
+                    copied_right += usize::from(b.prompts[r].get(j) == b.targets[r].get(i));
+                }
+            }
+        }
+    }
+    let share = |a: usize, n: usize| a as f64 / n.max(1) as f64;
+    Ok(PointerMetrics {
+        loss: loss / batches.max(1) as f64,
+        copy_accuracy: share(copied_right, copies),
+        gate_accuracy: share(gate_right, counted),
+        copy_share: share(copies, counted),
+        examples: rows.len(),
+    })
+}
+
+/// Builds the n-gram index of the training answers and the lexicon of the training states
+/// ([`crate::ngram`]), and records it in the manifest.
+pub fn build_ngram(
+    dir: &Path,
+    examples: &[Example],
+    data: &[PathBuf],
+) -> Result<serde_json::Value> {
+    use crate::ngram::{NgramIndex, NGRAM_FILE};
+    let (_, codec, _) = open_config(dir)?;
+    let mut lexicon = crate::verify::Lexicon::default();
+    let mut answers = Vec::new();
+    for e in examples.iter().filter(|e| e.split == Split::Train) {
+        if let Some(state) = &e.state {
+            lexicon.add_state(state);
+        }
+        if e.task == Task::Compose {
+            if let Some(text) = &e.target.text {
+                answers.push(codec.encode(text));
+            }
+        }
+    }
+    if answers.is_empty() {
+        return Err(LncmError::Data("no composed answers to index".into()));
+    }
+    let index = NgramIndex::build(&answers, lexicon);
+    index.save(&dir.join(NGRAM_FILE))?;
+    let tokens: usize = answers.iter().map(Vec::len).sum();
+    let topics = index.lexicon.topics.len();
+    finish_stage(
+        dir,
+        NGRAM_FILE,
+        "ngram",
+        0,
+        data,
+        [
+            ("answers".to_string(), answers.len() as f64),
+            ("tokens".to_string(), tokens as f64),
+            ("topics".to_string(), topics as f64),
+        ]
+        .into(),
+    )?;
+    Ok(serde_json::json!({"answers": answers.len(), "tokens": tokens, "topics": topics}))
 }
 
 // ---------------------------------------------------------------------------------------------

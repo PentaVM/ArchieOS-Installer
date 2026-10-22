@@ -15,13 +15,17 @@
 //!    behaves or feels) comes from a model, as delta lines that are validated before they
 //!    touch the state. The state per person is kept: what they have seen, and what to expect
 //!    of them. Memory does not grow with the length of the conversation.
-//! 3. **State 1.** A question the state answers by itself (does X know, what does X believe,
-//!    an expectation it names) is read from the bookkeeping ([`exact`]). Otherwise a decision
-//!    head answers closed questions at once (yes/no, one of the options, or "I cannot know"),
-//!    with a calibrated confidence.
+//! 3. **State 1.** A question the state answers by itself (does X know, do I need to tell X,
+//!    what does X believe, what to keep in mind before asking X, an expectation it names) is
+//!    read from the bookkeeping ([`exact`]). Otherwise a decision head answers closed
+//!    questions at once (yes/no, one of the options, or "I cannot know"), with a calibrated
+//!    confidence.
 //! 4. **State 2.** The next-concept generator writes the long answer — a short plan, then the
 //!    words — conditioned on the question, the state and, when there is one, a language
-//!    model's draft. Names it writes are checked against the people in the state.
+//!    model's draft. A copy head ([`pointer`]) takes values and names from the prompt where
+//!    the codes would only approximate them; every value is then checked against the state
+//!    and corrected or refused ([`verify`]), noise is told from text by an n-gram index of the
+//!    training answers ([`ngram`]), and names are checked against the people in the state.
 //!
 //! Nothing here acts. Inferences about people are hypotheses; only the person concerned can
 //! turn one into a declaration. Policy, leases and Cerebra keep every authority they had.
@@ -38,12 +42,15 @@ pub mod distill;
 pub mod exact;
 pub mod generator;
 pub mod model;
+pub mod ngram;
 pub mod nn;
+pub mod pointer;
 pub mod reader;
 pub mod safety;
 pub mod state;
 pub mod synth;
 pub mod train;
+pub mod verify;
 pub mod vq;
 
 pub use codec::{Codec, Special};

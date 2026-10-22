@@ -40,10 +40,15 @@ and `core/crates/archie-wanda/src/social.rs` (service integration). Training gui
    ▼
  Cerebra/router: local reasoning model (draft recommendations)
    ▼
- LNCM gate ─► state 1: does X know / what does X believe / an expectation it names?
-          │            yes ─► read from the state, with the reason            ─► voice now
-          │            no  ─► decision head (yes / no / cannot know + confidence)
-          └─► state 2: NCM generator (plan, then words), name guard           ─► voice next
+ LNCM gate ─► state 1: does X know / do I need to tell X / what does X believe /
+          │            what to keep in mind before asking X / an expectation it names?
+          │            yes ─► read from the state, with the reason; this is the whole answer
+          │            no  ─► decision head (yes / no / cannot know + confidence)  ─► voice now
+          └─► state 2: NCM generator (plan, then words) in one batch of candidates
+                       ─► copy head: values and names taken from the prompt
+                       ─► check against the state: wrong values corrected, invented topics,
+                          traits or unanswered questions refused; noise refused by n-grams
+                       ─► name guard ─► spoken only if it passed and state 1 did not answer
    ▼
  Inferences stay hypotheses; Cerebra ▸ Policy ▸ lease ▸ Stage hold every authority they had.
 ```
@@ -56,9 +61,12 @@ and `core/crates/archie-wanda/src/social.rs` (service integration). Training gui
 | `vq.rs` | Multiscale residual VQ-VAE: per-level residual quantisation at `ℓ_k` positions, straight-through gradients, commitment and codebook losses, nested dropout. |
 | `generator.rs` | Prefix-LM transformer: the prompt reads itself; each level's block reads the prompt and itself. All levels are trained in one pass from corrupted coarser codes (eq. 10 weighting); generation runs one pass per level with the prompt's keys and values cached. Heads: gate, yes/no kind, chunk change, decision with abstention. |
 | `nn.rs` | Linear layers with optional LoRA (zero-initialised `B`), RMSNorm, attention with additive masks and prefix cache, GELU MLP. |
-| `model.rs` | Checkpoint loading with SHA-256 verification of every file and of each adapter against its base; `gate`, `decide`, `quick`, `compose` (MBR over candidates, name guard), `update`. |
+| `model.rs` | Checkpoint loading with SHA-256 verification of every file and of each adapter and the copy head against its base; `gate`, `decide`, `quick`, `compose` (candidates in one batch, copy head, checks, consensus among those that pass, name guard), `update` (with the copy head). |
 | `state.rs` | `SocialState`: exact exposure per person and topic, expectations as decayed Beta counts (capped at 0.95 unless declared by the person), mood, behaviour statistics; the delta-line grammar and its validation; "pack v3" rendering. |
-| `exact.rs` | State 1 from the bookkeeping: "does X know …", "what does X believe about …" and questions that name one of X's expectations are answered from the state, with the reason; a person the conversations never show saw nothing in them. Anything it does not recognise with certainty goes to the decision head. |
+| `exact.rs` | State 1 from the bookkeeping: "does X know …", "do I need to tell X how … ended up", "what does X believe about …", "what to keep in mind before asking X" (what X missed, X's clear expectations, X's reply time) and questions that name one of X's expectations are answered from the state, with the reason; a person the conversations never show saw nothing in them. Anything it does not recognise with certainty goes to the decision head. |
+| `pointer.rs` | The copy head: each position of the finest level points at a prompt token (keys are the prompt's cached hidden states) or keeps its own; runs are copied as contiguous spans, and a value inside the state is taken whole. Trained alone on the frozen generator, bound to its digest. |
+| `verify.rs` | Reads a rendered state back (who saw which value, what each topic is now, what to expect of whom) and checks an answer against it: values corrected by who they are about and what the words before them claim, invented topics and traits and answers that skip the question refused. |
+| `ngram.rs` | Suffix-array n-gram index of the training answers, to refuse noise (unseen trigrams, loops), and the lexicon of topics, values and traits the training states held. |
 | `reader.rs` | Chunked read–update loop with constant memory, idempotent by turn number, records chunks for training. |
 | `synth.rs` | Owned ES/EN worlds with hidden traits, fact changes while people are absent, "I already told X", moods; exact labels for all four tasks. |
 | `data.rs` | Closed JSONL schemas (`Example`, `Case`), provenance rules, Python `chat-v1` tranche import, evaluation-overlap guard. |

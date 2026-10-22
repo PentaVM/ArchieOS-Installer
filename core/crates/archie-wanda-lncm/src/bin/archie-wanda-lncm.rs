@@ -227,6 +227,11 @@ enum TrainStage {
         #[arg(long)]
         name: String,
     },
+    /// The copy head, on the frozen generator.
+    Pointer(Common),
+    /// The n-gram index of the training answers and the lexicon of their states (no
+    /// training; only --dir and --examples are read).
+    Ngram(Common),
 }
 
 fn lang(text: &str) -> Result<Lang> {
@@ -403,7 +408,10 @@ async fn run(cli: Cli) -> Result<()> {
         }
         Command::Train { stage } => {
             let (common, name) = match &stage {
-                TrainStage::Tokenizer(c) | TrainStage::Generator(c) => (c.clone(), None),
+                TrainStage::Tokenizer(c)
+                | TrainStage::Generator(c)
+                | TrainStage::Pointer(c)
+                | TrainStage::Ngram(c) => (c.clone(), None),
                 TrainStage::Adapter { common, name } => (common.clone(), Some(name.clone())),
             };
             let device = train::device(&common.device)?;
@@ -433,6 +441,18 @@ async fn run(cli: Cli) -> Result<()> {
                     &opts,
                     &mix(common.mix.as_deref())?,
                     &device,
+                )?),
+                TrainStage::Pointer(_) => print(&train::train_pointer(
+                    &common.dir,
+                    &examples,
+                    &common.examples,
+                    &opts,
+                    &device,
+                )?),
+                TrainStage::Ngram(_) => print(&train::build_ngram(
+                    &common.dir,
+                    &examples,
+                    &common.examples,
                 )?),
             }
         }

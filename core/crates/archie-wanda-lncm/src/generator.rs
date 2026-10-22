@@ -104,6 +104,13 @@ pub struct PromptCache {
     len: usize,
 }
 
+impl PromptCache {
+    /// The prompt's hidden states after the final norm `(1, P, d)`: the copy head's keys.
+    pub fn hidden(&self) -> &Tensor {
+        &self.hidden
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Sampling {
     /// 0 picks the most likely code everywhere.
@@ -374,13 +381,26 @@ impl Generator {
         sampling: &[Sampling],
         rng: &mut R,
     ) -> Result<Vec<Vec<u32>>> {
-        let rows = sampling.len();
-        if rows <= 1 {
+        if sampling.len() <= 1 {
             return sampling
                 .iter()
                 .map(|&s| self.generate(vq, cache, s, rng))
                 .collect();
         }
+        Ok(self.generate_rows(vq, cache, sampling, rng)?.0)
+    }
+
+    /// [`Generator::generate_many`] for any number of rows, also returning the finest level's
+    /// hidden states `(rows, L, d)`, which the copy head reads ([`crate::pointer`]). One row
+    /// draws exactly as [`Generator::generate`] does.
+    pub fn generate_rows<R: Rng>(
+        &self,
+        vq: &VqVae,
+        cache: &PromptCache,
+        sampling: &[Sampling],
+        rng: &mut R,
+    ) -> Result<(Vec<Vec<u32>>, Tensor)> {
+        let rows = sampling.len().max(1);
         let device = cache.hidden.device();
         let kv = cache
             .kv
@@ -388,12 +408,15 @@ impl Generator {
             .map(|(k, v)| Ok((k.repeat((rows, 1, 1, 1))?, v.repeat((rows, 1, 1, 1))?)))
             .collect::<Result<Vec<_>>>()?;
         let mut acc = Tensor::zeros((rows, self.target_len, self.code_dim), DType::F32, device)?;
+        let mut last = None;
         for (k, &l) in self.levels.iter().enumerate() {
             let mut x = self.level_input(k, l, &acc)?;
             for (block, (pk, pv)) in self.blocks.iter().zip(&kv) {
                 x = block.forward_with_prefix(&x, pk, pv)?;
             }
-            let logits = self.code_heads[k].forward(&self.norm.forward(&x)?)?;
+            let hidden = self.norm.forward(&x)?;
+            let logits = self.code_heads[k].forward(&hidden)?;
+            last = Some(hidden);
             let codes = if sampling.iter().all(|s| s.temperature <= 0.0) {
                 logits.argmax(D::Minus1)?.flatten_all()?.to_vec1::<u32>()?
             } else {
@@ -406,9 +429,15 @@ impl Generator {
             let codes = Tensor::from_vec(codes, (rows, l), device)?;
             acc = (acc + vq.code_embedding(k, &codes)?)?;
         }
-        (0..rows)
+        let ids = (0..rows)
             .map(|i| vq.tokens(&acc.narrow(0, i, 1)?))
-            .collect()
+            .collect::<Result<Vec<_>>>()?;
+        let last = last.ok_or_else(|| candle_core::Error::Msg("no levels".into()))?;
+        Ok((ids, last))
+    }
+
+    pub fn d_model(&self) -> usize {
+        self.pos.dim(1).unwrap_or(0)
     }
 
     pub fn levels(&self) -> &[usize] {

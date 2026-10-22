@@ -145,7 +145,20 @@ pub struct Refined {
     /// context. When any is present the answer is not spoken.
     pub unverified_names: Vec<String>,
     pub seconds: f32,
+    /// The answer passed the checks against the state and the n-gram index. When it did not,
+    /// it is not spoken.
+    #[serde(default)]
+    pub verified: bool,
+    /// Values the checks replaced: (what the expert wrote, what the state says).
+    #[serde(default)]
+    pub corrected_values: Vec<(String, String)>,
+    /// Why it is not spoken, when it is not.
+    #[serde(default)]
+    pub problems: Vec<String>,
 }
+
+/// A refined answer this close to state 1's (character trigram F1) says nothing new.
+pub const REPEATS_QUICK: f32 = 0.5;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueryResponse {
@@ -164,18 +177,25 @@ pub const QUICK_CONFIDENCE: f32 = 0.6;
 impl QueryResponse {
     pub fn speech_text(&self) -> String {
         let mut spoken = Vec::new();
-        if let Some(quick) = self
+        let quick = self
             .quick
             .as_ref()
-            .filter(|q| q.confidence >= QUICK_CONFIDENCE)
-        {
+            .filter(|q| q.confidence >= QUICK_CONFIDENCE);
+        if let Some(quick) = quick {
             spoken.push(quick.text.clone());
         }
-        if let Some(refined) = self
-            .refined
-            .as_ref()
-            .filter(|r| r.unverified_names.is_empty() && !r.answer.trim().is_empty())
-        {
+        // What the state answers by itself is the whole answer: a long answer could only repeat
+        // it or contradict it.
+        let from_state = quick.is_some_and(|q| q.source == archie_wanda_lncm::AnswerSource::State);
+        if let Some(refined) = self.refined.as_ref().filter(|r| {
+            !from_state
+                && r.verified
+                && r.unverified_names.is_empty()
+                && !r.answer.trim().is_empty()
+                && quick.is_none_or(|q| {
+                    archie_wanda_lncm::model::char_ngram_f1(&q.text, &r.answer) < REPEATS_QUICK
+                })
+        }) {
             spoken.push(refined.answer.clone());
         }
         if !spoken.is_empty() {
@@ -216,4 +236,50 @@ pub struct WandaView {
     pub recommendations: Vec<Recommendation>,
     pub sources: Vec<SourceView>,
     pub pending_events: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use archie_wanda_lncm::{AnswerSource, QuickAnswer};
+
+    fn response(source: AnswerSource, confidence: f32, verified: bool) -> QueryResponse {
+        QueryResponse {
+            recommendations: Vec::new(),
+            model: None,
+            state: "answered".into(),
+            reason: None,
+            quick: Some(QuickAnswer {
+                text: "No hace falta: Héctor ya sabe que la cena es martes.".into(),
+                answer: Some(false),
+                confidence,
+                source,
+            }),
+            refined: Some(Refined {
+                plan: None,
+                answer: "Pregúntale si le viene bien el horario.".into(),
+                unverified_names: Vec::new(),
+                seconds: 0.1,
+                verified,
+                corrected_values: Vec::new(),
+                problems: Vec::new(),
+            }),
+        }
+    }
+
+    #[test]
+    fn the_state_speaks_alone_and_only_a_checked_long_answer_is_spoken() {
+        let state = response(AnswerSource::State, 0.95, true).speech_text();
+        assert_eq!(
+            state,
+            "No hace falta: Héctor ya sabe que la cena es martes."
+        );
+        let model = response(AnswerSource::Model, 0.9, true).speech_text();
+        assert!(
+            model.ends_with("Pregúntale si le viene bien el horario."),
+            "{model}"
+        );
+        let unchecked = response(AnswerSource::Model, 0.9, false).speech_text();
+        assert!(!unchecked.contains("Pregúntale"), "{unchecked}");
+    }
 }

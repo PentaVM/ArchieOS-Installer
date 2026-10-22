@@ -72,6 +72,13 @@ pub struct LncmBinding {
     /// How the owner is named in the state the expert reads.
     #[serde(default = "owner_label")]
     pub owner_label: String,
+    /// Long answers drawn per question, in one batch; one that passes the checks against the
+    /// state is kept. More cost more on a CPU, little on a GPU.
+    #[serde(default = "one")]
+    pub compose_candidates: usize,
+}
+fn one() -> usize {
+    1
 }
 impl std::fmt::Debug for LncmBinding {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

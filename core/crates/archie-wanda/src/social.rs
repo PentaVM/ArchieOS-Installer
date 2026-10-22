@@ -41,6 +41,7 @@ pub struct LncmRuntime {
     pub gate_threshold: f32,
     pub update_threshold: f32,
     pub owner_label: String,
+    pub compose_candidates: usize,
 }
 
 impl std::fmt::Debug for LncmRuntime {
@@ -70,6 +71,7 @@ impl LncmRuntime {
             gate_threshold: binding.gate_threshold,
             update_threshold: binding.update_threshold,
             owner_label: binding.owner_label.clone(),
+            compose_candidates: binding.compose_candidates.clamp(1, 8),
         })
     }
 
@@ -469,15 +471,17 @@ pub fn answer(
             .ok()
             .flatten(),
     };
+    // Several candidates come from one batch; the model keeps one that passes the checks.
+    let options = ComposeOptions {
+        candidates: lncm.compose_candidates,
+        sampling: archie_wanda_lncm::generator::Sampling {
+            temperature: 0.7,
+            top_k: 20,
+        },
+        seed: u64::try_from(now_ms).unwrap_or(0),
+    };
     let refined = model
-        .compose(
-            lncm.lang,
-            question,
-            Some(&text),
-            draft,
-            &roster,
-            ComposeOptions::default(),
-        )
+        .compose(lncm.lang, question, Some(&text), draft, &roster, options)
         .ok()
         .filter(|c| !c.answer.is_empty())
         .map(|c| Refined {
@@ -485,6 +489,9 @@ pub fn answer(
             answer: c.answer,
             unverified_names: c.unverified_names,
             seconds: c.seconds,
+            verified: c.verified,
+            corrected_values: c.corrected_values,
+            problems: c.problems,
         });
     Ok(Some((quick, refined)))
 }

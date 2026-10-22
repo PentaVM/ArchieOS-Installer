@@ -94,6 +94,40 @@ fn the_state_answers_knowledge_and_belief_as_the_simulator_labels_it() {
 }
 
 #[test]
+fn telling_and_briefing_questions_are_answered_from_the_state() {
+    let config = SynthConfig {
+        worlds: 8,
+        ..SynthConfig::default()
+    };
+    let (out, states) = generate_with_states(&config).unwrap();
+    let (mut tells, mut briefs) = (0, 0);
+    for e in out.examples.iter().filter(|e| e.task == Task::Compose) {
+        let found = exact::resolve(&states[world(e)], e.question.as_deref().unwrap());
+        let target = e.target.text.as_deref().unwrap();
+        match kind(e) {
+            "tell" => {
+                tells += 1;
+                let found = found.unwrap_or_else(|| panic!("{} is answered", e.id));
+                assert!(matches!(found, exact::Exact::Knows { tell: true, .. }));
+                // The simulator's answer starts with yes or no; the state's must agree.
+                let yes = target.starts_with("Sí") || target.starts_with("Yes");
+                assert_eq!(found.answer(), Some(yes), "{}: {target}", e.id);
+            }
+            "expect" => {
+                briefs += 1;
+                assert!(
+                    matches!(found, Some(exact::Exact::Brief { .. })),
+                    "{} is a brief",
+                    e.id
+                );
+            }
+            _ => {}
+        }
+    }
+    assert!(tells > 5 && briefs > 5, "{tells} tell, {briefs} brief");
+}
+
+#[test]
 #[ignore = "needs WANDA_DEV and WANDA_LNCM"]
 fn development_questions_with_and_without_the_state() {
     let dev = PathBuf::from(std::env::var("WANDA_DEV").expect("WANDA_DEV"));

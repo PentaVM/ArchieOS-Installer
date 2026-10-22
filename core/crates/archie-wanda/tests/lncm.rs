@@ -74,6 +74,7 @@ fn config(dir: &Path, checkpoint: &Path) -> WandaConfig {
             gate_threshold: 0.0,
             update_threshold: 0.0,
             owner_label: "Yo".into(),
+            compose_candidates: 1,
         }),
     }
 }

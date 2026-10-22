@@ -8,16 +8,22 @@
 //! vq.safetensors         tokenizer weights
 //! generator.safetensors  generator and head weights
 //! lora/<name>.safetensors adapters, one per context domain
+//! pointer.safetensors    optional copy head, with pointer.json naming its generator
+//! answers.ngram          optional n-gram index of the training answers, and their lexicon
 //! manifest.json          SHA-256 of every file, what trained it, how it measured
 //! ```
 //!
-//! Opening a checkpoint checks every file against the manifest, and an adapter against the
-//! generator it was trained on: weights that do not match what was measured are never served.
+//! Opening a checkpoint checks every file against the manifest, and an adapter or the copy
+//! head against the generator it was trained on: weights that do not match what was measured
+//! are never served.
 
 use crate::codec::{Codec, PromptParts};
 use crate::config::LncmConfig;
 use crate::generator::{Generator, PromptCache, Sampling};
+use crate::ngram::{NgramIndex, NGRAM_FILE};
 use crate::nn;
+use crate::pointer::{PointerHead, POINTER_BASE_FILE, POINTER_FILE};
+use crate::verify;
 use crate::vq::VqVae;
 use crate::{Lang, LncmError, Result, Task};
 use candle_core::{DType, Device, Tensor};
@@ -26,6 +32,7 @@ use rand::SeedableRng;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Instant;
 
 pub const MANIFEST_FORMAT: u16 = 1;
@@ -214,6 +221,19 @@ pub struct Composition {
     /// appear nowhere in the context. A caller may prefer the draft when this is not empty.
     pub unverified_names: Vec<String>,
     pub seconds: f32,
+    /// Whether the answer was checked against the state and the n-gram index and passed.
+    /// `false` also when there was no state to check it against.
+    #[serde(default)]
+    pub verified: bool,
+    /// Values the check replaced: (what the model wrote, what the state says).
+    #[serde(default)]
+    pub corrected_values: Vec<(String, String)>,
+    /// Why the answer should not be spoken, when it should not.
+    #[serde(default)]
+    pub problems: Vec<String>,
+    /// Spans the copy head took from the prompt.
+    #[serde(default)]
+    pub copied: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -261,6 +281,15 @@ pub struct Lncm {
     dir: Option<PathBuf>,
     generator_sha256: String,
     adapter: Option<String>,
+    pointer: Option<PointerHead>,
+    ngram: Option<Arc<NgramIndex>>,
+}
+
+/// What `pointer.json` holds.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PointerBase {
+    pub generator_sha256: String,
 }
 
 impl Lncm {
@@ -285,8 +314,36 @@ impl Lncm {
         let vb = VarBuilder::from_tensors(tensors, DType::F32, device);
         let vq = VqVae::new(&vb, &config)?;
         let generator = Generator::new(&vb, &config)?;
+        let generator_sha256 = manifest.files[GENERATOR_FILE].clone();
+        let pointer = if manifest.files.contains_key(POINTER_FILE) {
+            manifest.verify(dir, POINTER_FILE)?;
+            manifest.verify(dir, POINTER_BASE_FILE)?;
+            let base: PointerBase = serde_json::from_str(&crate::codec::read_bounded(
+                &dir.join(POINTER_BASE_FILE),
+                4096,
+            )?)?;
+            if base.generator_sha256 != generator_sha256 {
+                return Err(LncmError::Checkpoint(
+                    "the copy head was trained on other generator weights".into(),
+                ));
+            }
+            let vb = VarBuilder::from_tensors(
+                load_tensors(&dir.join(POINTER_FILE), device)?,
+                DType::F32,
+                device,
+            );
+            Some(PointerHead::new(&vb, config.generator.d_model)?)
+        } else {
+            None
+        };
+        let ngram = if manifest.files.contains_key(NGRAM_FILE) {
+            manifest.verify(dir, NGRAM_FILE)?;
+            Some(Arc::new(NgramIndex::load(&dir.join(NGRAM_FILE))?))
+        } else {
+            None
+        };
         Ok(Self {
-            generator_sha256: manifest.files[GENERATOR_FILE].clone(),
+            generator_sha256,
             config,
             codec,
             vq,
@@ -294,7 +351,65 @@ impl Lncm {
             device: device.clone(),
             dir: Some(dir.to_path_buf()),
             adapter: None,
+            pointer,
+            ngram,
         })
+    }
+
+    /// The same model with a copy head (training and tests; [`Lncm::load`] reads it from the
+    /// checkpoint).
+    pub fn with_pointer(mut self, pointer: Option<PointerHead>) -> Self {
+        self.pointer = pointer;
+        self
+    }
+
+    /// The same model with an n-gram index for the checks of state 2.
+    pub fn with_ngram(mut self, ngram: Option<Arc<NgramIndex>>) -> Self {
+        self.ngram = ngram;
+        self
+    }
+
+    pub fn has_pointer(&self) -> bool {
+        self.pointer.is_some()
+    }
+
+    /// Generates `sampling.len()` answers from one prompt and, with a copy head, copies into
+    /// each. Returns each answer's ids and how many spans were copied into it.
+    fn generate_copying(
+        &self,
+        cache: &PromptCache,
+        prompt: &[u32],
+        sampling: &[Sampling],
+        rng: &mut rand::rngs::StdRng,
+    ) -> Result<Vec<(Vec<u32>, usize)>> {
+        let Some(pointer) = &self.pointer else {
+            return Ok(self
+                .generator
+                .generate_many(&self.vq, cache, sampling, rng)?
+                .into_iter()
+                .map(|ids| (ids, 0))
+                .collect());
+        };
+        let (rows, hidden) = self
+            .generator
+            .generate_rows(&self.vq, cache, sampling, rng)?;
+        let n = rows.len();
+        let width = prompt.len();
+        let keys = cache.hidden().repeat((n, 1, 1))?;
+        let copyable = crate::pointer::copyable(&self.codec, prompt, width);
+        let copyable = Tensor::from_vec(copyable, (1, width), &self.device)?.repeat((n, 1))?;
+        let (scores, gate) = pointer.scores(&hidden, &keys, &copyable)?;
+        let scores = scores.to_dtype(DType::F32)?.to_vec3::<f32>()?;
+        let gate = gate.to_dtype(DType::F32)?.to_vec2::<f32>()?;
+        Ok(rows
+            .iter()
+            .enumerate()
+            .map(|(i, ids)| {
+                let copied = crate::pointer::apply(&self.codec, ids, prompt, &scores[i], &gate[i]);
+                let runs = copied.runs.len();
+                (copied.ids, runs)
+            })
+            .collect())
     }
 
     /// Assembles a model from parts already in memory (training and tests).
@@ -314,6 +429,8 @@ impl Lncm {
             dir: None,
             generator_sha256: String::new(),
             adapter: None,
+            pointer: None,
+            ngram: None,
         }
     }
 
@@ -509,29 +626,69 @@ impl Lncm {
                 }
             })
             .collect();
-        let mut candidates: Vec<(Option<String>, String)> = self
-            .generator
-            .generate_many(&self.vq, &cache, &sampling, &mut rng)?
+        let generated = self.generate_copying(&cache, &prompt.ids, &sampling, &mut rng)?;
+        // Each candidate is checked against the state and the corpus: values the state
+        // contradicts are corrected, and a candidate that still fails is only kept if no other
+        // passes. The consensus is then taken among the ones that passed.
+        let lexicon = self.ngram.as_deref().map(|n| &n.lexicon);
+        let mut candidates: Vec<Candidate> = generated
             .iter()
-            .map(|ids| self.codec.decode_target(ids))
+            .map(|(ids, copied)| {
+                let (plan, answer) = self.codec.decode_target(ids);
+                let answer = clean(&answer);
+                let mut verdict = match state {
+                    Some(s) => verify::check(&answer, question, s, lexicon),
+                    None => verify::Verdict {
+                        text: answer.clone(),
+                        problems: vec!["no state to check against".into()],
+                        ..Default::default()
+                    },
+                };
+                if let Some(index) = &self.ngram {
+                    let fluency = index.fluency(&self.codec.encode(&verdict.text));
+                    if fluency.is_noise() {
+                        verdict.problems.push(format!(
+                            "texto sin sentido ({:.0} % de trigramas nunca vistos{})",
+                            100.0 * fluency.unseen,
+                            if fluency.looped { ", repetido" } else { "" }
+                        ));
+                    }
+                }
+                Candidate {
+                    plan,
+                    verdict,
+                    copied: *copied,
+                }
+            })
             .collect();
-        let best = minimum_bayes_risk(
-            &candidates
+        let passing: Vec<usize> = (0..candidates.len())
+            .filter(|&i| candidates[i].verdict.problems.is_empty())
+            .collect();
+        let pool: Vec<usize> = if passing.is_empty() {
+            (0..candidates.len()).collect()
+        } else {
+            passing
+        };
+        let best = pool[minimum_bayes_risk(
+            &pool
                 .iter()
-                .map(|(_, a)| a.as_str())
+                .map(|&i| candidates[i].verdict.text.as_str())
                 .collect::<Vec<_>>(),
-        );
-        let (plan, answer) = candidates.swap_remove(best);
-        let plan = plan.map(|p| clean(&p)).filter(|p| !p.is_empty());
-        let answer = clean(&answer);
+        )];
+        let chosen = candidates.swap_remove(best);
+        let plan = chosen.plan.map(|p| clean(&p)).filter(|p| !p.is_empty());
         let context = [question, state.unwrap_or(""), draft.unwrap_or("")].join("\n");
-        let guarded = guard_names(&answer, roster, &context);
+        let guarded = guard_names(&chosen.verdict.text, roster, &context);
         Ok(Composition {
             plan,
             answer: guarded.text,
             corrected_names: guarded.corrected,
             unverified_names: guarded.unverified,
             seconds: started.elapsed().as_secs_f32(),
+            verified: chosen.verdict.problems.is_empty(),
+            corrected_values: chosen.verdict.corrected,
+            problems: chosen.verdict.problems,
+            copied: chosen.copied,
         })
     }
 
@@ -560,8 +717,9 @@ impl Lncm {
         }
         let mut rng = rand::rngs::StdRng::seed_from_u64(0);
         let ids = self
-            .generator
-            .generate(&self.vq, &cache, Sampling::GREEDY, &mut rng)?;
+            .generate_copying(&cache, &prompt.ids, &[Sampling::GREEDY], &mut rng)?
+            .swap_remove(0)
+            .0;
         let (_, body) = self.codec.decode_target(&ids);
         Ok(UpdateOutput {
             change,
@@ -580,6 +738,12 @@ impl Lncm {
         let ids = self.vq.tokens(&q.full)?;
         Ok(self.codec.decode_target(&ids).1)
     }
+}
+
+struct Candidate {
+    plan: Option<String>,
+    verdict: verify::Verdict,
+    copied: usize,
 }
 
 /// Generated text without control characters (a model can emit any byte), trimmed.
