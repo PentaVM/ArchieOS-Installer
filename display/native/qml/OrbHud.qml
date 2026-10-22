@@ -76,6 +76,75 @@ Item {
         }
     }
 
+    // The content sphere's labels, as on Xavi's desktop: the top-level folders in mono
+    // capitals beside their orbs, and the root's name with what the folder holds.
+    Item {
+        id: contentLabels
+        anchors.fill: parent
+        visible: hud.labelsVisible && !!hud.controller.look.content && !!hud.s.contentName
+        property var places: []
+        // Positions follow the field every frame; the delegates stay, only their places move.
+        Connections {
+            target: hud.controller
+            enabled: contentLabels.visible
+            function onFrameAdvanced() { contentLabels.places = hud.controller.labelAnchors() }
+        }
+        function screenOf(x, y, z) {
+            return hud.view.mapFrom3DScene(hud.orbScene.field.mapPositionToScene(Qt.vector3d(x, y, z)))
+        }
+        function sizeText(bytes) {
+            if (bytes >= 1e9) return Math.round(bytes / 1e9) + " GB"
+            if (bytes >= 1e6) return Math.round(bytes / 1e6) + " MB"
+            return Math.max(1, Math.round(bytes / 1e3)) + " KB"
+        }
+        Repeater {
+            model: contentLabels.places.length
+            Text {
+                readonly property var place: contentLabels.places[index] || ({ x: 0, y: 0, z: 0, name: "" })
+                readonly property vector3d at: contentLabels.screenOf(place.x, place.y, place.z)
+                visible: at.z > 0
+                x: at.x + 7
+                y: at.y - height / 2
+                text: String(place.name).toUpperCase()
+                color: "#d9e1ea"
+                opacity: 0.86
+                font.family: "monospace"
+                font.pixelSize: 11
+                font.letterSpacing: 0.4
+                style: Text.Outline
+                styleColor: "#d0000000"
+            }
+        }
+        Column {
+            // Re-read with every frame's places, so it follows the camera like the folders.
+            readonly property vector3d at: contentLabels.places.length >= 0 ? contentLabels.screenOf(0, 0, 0) : Qt.vector3d(0, 0, -1)
+            visible: at.z > 0
+            x: at.x + 52
+            y: at.y - 62
+            spacing: 3
+            Text {
+                text: String(hud.s.contentName || "").toUpperCase()
+                color: "#46d8ea"
+                font.family: "monospace"
+                font.pixelSize: 13
+                font.weight: Font.DemiBold
+                font.letterSpacing: 0.6
+                style: Text.Outline
+                styleColor: "#c0000000"
+            }
+            Rectangle { width: 170; height: 1; color: "#46d8ea"; opacity: 0.55 }
+            Text {
+                text: Number(hud.s.contentElements || 0).toFixed(0) + " ELEMENTOS  ·  "
+                      + contentLabels.sizeText(Number(hud.s.contentBytes || 0))
+                color: "#cfd8e3"
+                font.family: "monospace"
+                font.pixelSize: 11
+                style: Text.Outline
+                styleColor: "#c0000000"
+            }
+        }
+    }
+
     // A name beside the pointer, nothing more.
     Text {
         visible: hud.labelsVisible && !!hud.controller.hovered.id && hover.hovered

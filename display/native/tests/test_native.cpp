@@ -3,7 +3,10 @@
 #include "LumenGeometry.h"
 #include <cstring>
 #include <QCoreApplication>
+#include <QDir>
+#include <QFile>
 #include <QSignalSpy>
+#include <QTemporaryDir>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QtTest>
@@ -52,6 +55,39 @@ private slots:
         QCOMPARE(field.settings(),original);
         field.applyProfile(QStringLiteral("crown"));
         QCOMPARE(field.profile(),QStringLiteral("crown"));
+    }
+    void contentSphereListsItsFolderWithoutTheObserver() {
+        // Xavi's desktop sphere: the holograma preset lists a folder (read-only, in Rust)
+        // and draws it, with no archie-displayd behind the display.
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        QDir root(dir.path());
+        QVERIFY(root.mkpath(QStringLiteral("core/src")) && root.mkpath(QStringLiteral("docs")) && root.mkpath(QStringLiteral(".git")));
+        for (const auto &name : {"core/src/lib.rs", "core/Cargo.toml", "docs/a.md", ".git/HEAD", "README.md"}) {
+            QFile file(root.filePath(QString::fromLatin1(name)));
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write("x");
+        }
+        LumenField field(nullptr, QUrl(QStringLiteral("http://127.0.0.1:9/api/orb/lumen")));
+        field.setContentRoot(dir.path());
+        QVERIFY(field.applyProfile(QStringLiteral("holograma")));
+        QCOMPARE(field.settings().value(QStringLiteral("fieldSource")).toString(), QStringLiteral("content"));
+        QVERIFY(field.look().value(QStringLiteral("graded")).toBool());
+        field.setActive(true);
+        QTRY_VERIFY_WITH_TIMEOUT(field.loaded(), 5000);
+        QVERIFY(field.error().isEmpty());
+        // ., core, core/src, core/src/lib.rs, core/Cargo.toml, docs, docs/a.md, README.md
+        QCOMPARE(field.scene().value(QStringLiteral("nodeCount")).toInt(), 8);
+        QCOMPARE(field.scene().value(QStringLiteral("contentBytes")).toDouble(), 4.0);
+        QVERIFY(field.positionOf(QStringLiteral(".git/HEAD")).isNull());
+        QStringList labelled;
+        for (const auto &row : field.labelAnchors())
+            labelled.push_back(row.toMap().value(QStringLiteral("name")).toString());
+        labelled.sort();
+        QCOMPARE(labelled, (QStringList{QStringLiteral("core"), QStringLiteral("docs")}));
+        field.setActive(false);
+        field.applyProfile(QStringLiteral("field"));
+        QCOMPARE(field.settings().value(QStringLiteral("fieldSource")).toString(), QStringLiteral("tfog"));
     }
     void ribbonGeometryPreservesBothEndpointsAndBounds() {
         LumenGeometry line;

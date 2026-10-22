@@ -74,6 +74,62 @@ pub unsafe extern "C" fn design_shell(
     }))
     .unwrap_or(false)
 }
+#[repr(C)]
+pub struct DesignContentOptions {
+    pub limit: u32,
+    pub files_per_folder: u32,
+    pub category_pull: f32,
+    pub hierarchy_pull: f32,
+    pub radial_layers: f32,
+    pub size_influence: f32,
+    pub scale: f32,
+}
+/// Lists the folder `root` (UTF-8, `root_len` bytes, no NUL needed) read-only and writes
+/// its laid-out scene JSON to `out`. Returns the bytes written, or 0 when the folder
+/// cannot be listed or the scene does not fit in `capacity`.
+///
+/// # Safety
+/// `root` points to `root_len` readable bytes, `options` to a valid aligned value and
+/// `out` to `capacity` writable bytes that overlap neither.
+#[no_mangle]
+pub unsafe extern "C" fn design_content_scene(
+    root: *const u8,
+    root_len: usize,
+    options: *const DesignContentOptions,
+    generated_at_ms: i64,
+    out: *mut u8,
+    capacity: usize,
+) -> usize {
+    catch_unwind(AssertUnwindSafe(|| {
+        if root.is_null() || root_len == 0 || root_len > 4096 || !aligned(options) || out.is_null()
+        {
+            return 0;
+        }
+        let Ok(path) = std::str::from_utf8(unsafe { slice::from_raw_parts(root, root_len) }) else {
+            return 0;
+        };
+        let o = unsafe { options.read() };
+        let options = crate::content::ContentOptions {
+            limit: o.limit as usize,
+            files_per_folder: o.files_per_folder as usize,
+            category_pull: f64::from(o.category_pull),
+            hierarchy_pull: f64::from(o.hierarchy_pull),
+            radial_layers: f64::from(o.radial_layers),
+            size_influence: f64::from(o.size_influence),
+            scale: f64::from(o.scale),
+        };
+        let Some(field) = crate::content::scan(std::path::Path::new(path), options) else {
+            return 0;
+        };
+        let json = crate::content::scene_json(&field, generated_at_ms);
+        if json.len() > capacity {
+            return 0;
+        }
+        unsafe { ptr::copy_nonoverlapping(json.as_ptr(), out, json.len()) };
+        json.len()
+    }))
+    .unwrap_or(0)
+}
 fn aligned<T>(p: *const T) -> bool {
     !p.is_null() && (p as usize) % align_of::<T>() == 0
 }

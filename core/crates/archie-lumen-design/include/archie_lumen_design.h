@@ -38,6 +38,15 @@ typedef struct DesignShellInput {
 // Caller provides distinct aligned input/output allocations; Rust retains nothing.
 bool design_shell(const DesignShellInput *input,float *vertices,size_t vertex_capacity,
     uint32_t *indices,size_t index_capacity,size_t *vertex_count,size_t *index_count,float *radius);
+// Content sphere (Xavi's desktop): read-only, bounded listing of a folder laid out by
+// field.js buildField ("regions"). Writes the scene JSON LumenField::accept reads into
+// out and returns its length, or 0 if the folder is unreadable or it does not fit.
+typedef struct DesignContentOptions {
+    uint32_t limit, files_per_folder;
+    float category_pull, hierarchy_pull, radial_layers, size_influence, scale;
+} DesignContentOptions;
+size_t design_content_scene(const char *root, size_t root_len, const DesignContentOptions *options,
+    int64_t generated_at_ms, char *out, size_t capacity);
 #ifdef __cplusplus
 }
 #endif

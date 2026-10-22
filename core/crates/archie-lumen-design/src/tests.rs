@@ -538,3 +538,163 @@ fn springless_free_motion_and_constrained_targets_reach_source_rest() {
     assert_eq!(integrate(&mut bodies, None, 1. / 60., motion), 0);
     assert_eq!(bodies[0].position.x, 2.);
 }
+
+mod content_sphere {
+    use crate::content::{classify, scan, scene_json, ContentOptions};
+    use std::fs;
+    use std::path::PathBuf;
+
+    fn tree(tag: &str) -> PathBuf {
+        let root =
+            std::env::temp_dir().join(format!("archie-content-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        for dir in [
+            "core/src",
+            "display/native",
+            "docs",
+            ".git/objects",
+            "target/release",
+        ] {
+            fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        for (file, bytes) in [
+            ("core/src/lib.rs", 120),
+            ("core/Cargo.toml", 40),
+            ("display/native/main.cpp", 300),
+            ("docs/a.md", 10),
+            ("docs/b.md", 10),
+            ("docs/c.png", 5000),
+            ("README.md", 64),
+            (".git/objects/x", 9),
+            ("target/release/big.so", 999),
+        ] {
+            fs::write(root.join(file), vec![b'x'; bytes]).unwrap();
+        }
+        root
+    }
+
+    #[test]
+    fn classify_follows_the_design_table() {
+        assert_eq!(classify("lib.rs"), 0);
+        assert_eq!(classify("README.MD"), 1);
+        assert_eq!(classify("c.png"), 2);
+        assert_eq!(classify("Cargo.toml"), 3);
+        assert_eq!(classify("x.tar"), 4);
+        assert_eq!(classify("run.ps1"), 5);
+        assert_eq!(classify(".gitignore"), 6);
+        assert_eq!(classify("Makefile"), 6);
+    }
+
+    #[test]
+    fn scan_skips_hidden_and_build_output_and_is_deterministic() {
+        let root = tree("skip");
+        let field = scan(&root, ContentOptions::default()).unwrap();
+        let ids: Vec<&str> = field.nodes.iter().map(|n| n.id.as_str()).collect();
+        assert!(ids.contains(&"core/src/lib.rs") && ids.contains(&"docs/c.png"));
+        assert!(!ids
+            .iter()
+            .any(|id| id.starts_with(".git") || id.starts_with("target")));
+        assert_eq!(field.nodes[0].id, ".");
+        assert_eq!(field.nodes[0].position, [0.0; 3]);
+        assert_eq!(field.bytes, 120 + 40 + 300 + 10 + 10 + 5000 + 64);
+        // Every node inside the field and in front of nothing random: same input, same scene.
+        for node in &field.nodes {
+            let r =
+                (node.position[0].powi(2) + node.position[1].powi(2) + node.position[2].powi(2))
+                    .sqrt();
+            assert!(r <= field.radius * 0.9 + 1e-6, "{} at {r}", node.id);
+        }
+        let again = scan(&root, ContentOptions::default()).unwrap();
+        assert_eq!(scene_json(&field, 7), scene_json(&again, 7));
+        let docs = field.nodes.iter().find(|n| n.id == "docs").unwrap();
+        assert_eq!(docs.subtree, 4);
+        assert_eq!(docs.category, 1, "documents dominate docs/");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn scan_respects_node_and_per_folder_bounds() {
+        let root = tree("bounds");
+        for k in 0..50 {
+            fs::write(root.join(format!("docs/n{k:02}.txt")), b"y").unwrap();
+        }
+        let options = ContentOptions {
+            limit: 20,
+            files_per_folder: 5,
+            ..ContentOptions::default()
+        };
+        let field = scan(&root, options).unwrap();
+        assert!(field.nodes.len() <= 20);
+        let docs = field.nodes.iter().position(|n| n.id == "docs").unwrap();
+        assert!(
+            field
+                .nodes
+                .iter()
+                .filter(|n| n.parent == Some(docs) && !n.dir)
+                .count()
+                <= 5
+        );
+        assert!(field.truncated);
+        assert!(field.elements >= 50);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn ffi_writes_the_scene_or_nothing() {
+        let root = tree("ffi");
+        let path = root.to_string_lossy().into_owned();
+        let options = crate::DesignContentOptions {
+            limit: 2500,
+            files_per_folder: 30,
+            category_pull: 0.44,
+            hierarchy_pull: 0.59,
+            radial_layers: 0.63,
+            size_influence: 0.09,
+            scale: 1.0,
+        };
+        let mut out = vec![0u8; 1 << 20];
+        let n = unsafe {
+            crate::design_content_scene(
+                path.as_ptr(),
+                path.len(),
+                &options,
+                1,
+                out.as_mut_ptr(),
+                out.len(),
+            )
+        };
+        assert!(n > 0);
+        let text = std::str::from_utf8(&out[..n]).unwrap();
+        assert!(text.starts_with("{\"generated_at_ms\":1,\"lens\":\"content\""));
+        assert!(text.contains("\"kind\":\"root\"") && text.contains("\"content\":{\"name\":"));
+        let mut small = vec![0u8; 16];
+        assert_eq!(
+            unsafe {
+                crate::design_content_scene(
+                    path.as_ptr(),
+                    path.len(),
+                    &options,
+                    1,
+                    small.as_mut_ptr(),
+                    small.len(),
+                )
+            },
+            0
+        );
+        let missing = "/definitely/not/here";
+        assert_eq!(
+            unsafe {
+                crate::design_content_scene(
+                    missing.as_ptr(),
+                    missing.len(),
+                    &options,
+                    1,
+                    out.as_mut_ptr(),
+                    out.len(),
+                )
+            },
+            0
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+}

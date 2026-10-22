@@ -124,9 +124,30 @@ Node {
         }
     }
 
+    // --- The hologram's frame (Xavi's desktop sphere): it stays put while the field turns ---
+    Node {
+        id: holoFrame
+        visible: !!scene.look.holoFrame
+        LineLayer { name: "holoRings"; tint: scene.look.cool; alpha: Number(scene.look.holoOpacity || 0); intensity: 1.4 }
+        LineLayer { name: "holoBeam"; tint: scene.look.cool; alpha: Number(scene.look.holoOpacity || 0) * 0.12; intensity: 1.2 }
+        LineLayer { name: "holoCore"; tint: scene.look.warm; alpha: Math.min(1, Number(scene.look.holoOpacity || 0) * 2.2); intensity: 2.6 }
+    }
+
     Node {
         id: field
         eulerRotation: Qt.vector3d(0, scene.controller.spin, 0)
+
+        // --- The core: one bright star at the centre, and a faint haze behind the sphere ---
+        GlowBall {
+            readonly property real r: scene.controller.fieldRadius * 0.05 * Number(scene.look.coreGlow || 0)
+            scale: Qt.vector3d(r / 50, r / 50, r / 50)
+            tint: Qt.vector3d(1.0, 0.93, 0.82); gain: 4.0; alpha: 1.0; sharpness: 9.0
+        }
+        GlowBall {
+            readonly property real r: scene.controller.fieldRadius * 0.95
+            scale: Qt.vector3d(r / 50, r / 50, r / 50)
+            tint: scene.look.warm; gain: 0.1 * Number(scene.look.coreGlow || 0); alpha: 1.0; sharpness: 2.2
+        }
 
         // --- The membrane ---
         Model {
@@ -173,7 +194,10 @@ Node {
         }
 
         // --- Links and relations ---
-        LineLayer { name: "backbone"; tint: Qt.vector3d(0.26, 0.38, 0.39); alpha: scene.look.linkOpacity * 4; visible: scene.look.links }
+        // The content sphere's links are its filaments: warm and lit (cyan under the hologram's grade).
+        LineLayer { name: "backbone"; tint: scene.look.content ? scene.look.warm : Qt.vector3d(0.26, 0.38, 0.39)
+                    alpha: Math.min(1, scene.look.linkOpacity * (scene.look.content ? 3.0 : 4)); intensity: scene.look.content ? 2.0 : 1.0
+                    visible: scene.look.links }
         LineLayer { name: "fibres"; tint: scene.look.cool; alpha: 0.14; visible: scene.look.links }
         LineLayer { name: "observed"; tint: scene.look.warm; alpha: 0.4; intensity: 1.8; visible: scene.look.links }
         LineLayer { name: "semantic"; tint: scene.look.cool; alpha: 0.22; intensity: 1.6; visible: scene.look.links }
@@ -216,13 +240,14 @@ Node {
             geometry: LumenGeometry { id: moduleHaloQuad }
             instancing: moduleTable
             Component.onCompleted: scene.controller.bindLayer("quad", moduleHaloQuad)
-            materials: SpriteMaterial { grow: 2.8; alpha: 0.3 + scene.look.bloomStrength * 0.16; sharpness: 1.8; haloGain: 0.9 }
+            // On the content sphere the halos are the beads of light along its filaments.
+            materials: SpriteMaterial { grow: scene.look.content ? 2.4 : 2.8; alpha: scene.look.content ? 0.95 : 0.3 + scene.look.bloomStrength * 0.16; sharpness: 1.8; haloGain: 0.9 }
         }
         Model {
             geometry: LumenGeometry { id: entityHaloQuad }
             instancing: entityTable
             Component.onCompleted: scene.controller.bindLayer("quad", entityHaloQuad)
-            materials: SpriteMaterial { grow: 3.3; alpha: 0.28 + scene.look.bloomStrength * 0.16; sharpness: 1.7; haloGain: 1.1 }
+            materials: SpriteMaterial { grow: scene.look.content ? 2.6 : 3.3; alpha: scene.look.content ? 0.95 : 0.28 + scene.look.bloomStrength * 0.16; sharpness: 1.7; haloGain: 1.1 }
         }
 
         // --- Signals travelling along real links ---
@@ -260,7 +285,7 @@ Node {
         property vector3d tint: Qt.vector3d(1, 1, 1)
         property real alpha: 0.2
         property real intensity: 1.0
-        geometry: LumenGeometry { id: lines; ribbons: Number(scene.look.linkStyleId || 0) > 0 && layer.name !== "guides" }
+        geometry: LumenGeometry { id: lines; ribbons: Number(scene.look.linkStyleId || 0) > 0 && layer.name !== "guides" && !layer.name.startsWith("holo") }
         Component.onCompleted: scene.controller.bindLayer(name, lines)
         materials: CustomMaterial {
             shadingMode: CustomMaterial.Unshaded
@@ -289,6 +314,29 @@ Node {
             property real fieldRadius: scene.controller.fieldRadius
             vertexShader: lines.ribbons ? "qrc:/archie/shaders/xavi_ribbon.vert" : "qrc:/archie/shaders/lumen_line.vert"
             fragmentShader: lines.ribbons ? "qrc:/archie/shaders/xavi_ribbon.frag" : "qrc:/archie/shaders/lumen_line.frag"
+        }
+    }
+
+    component GlowBall: Model {
+        property vector3d tint: Qt.vector3d(1, 1, 1)
+        property real gain: 1.0
+        property real alpha: 1.0
+        property real sharpness: 4.0
+        id: ball
+        visible: Number(scene.look.coreGlow || 0) > 0
+        source: "#Sphere"
+        materials: CustomMaterial {
+            shadingMode: CustomMaterial.Unshaded
+            sourceBlend: CustomMaterial.SrcAlpha
+            destinationBlend: CustomMaterial.One
+            cullMode: Material.BackFaceCulling
+            depthDrawMode: Material.NeverDepthDraw
+            property vector3d tint: ball.tint
+            property real gain: ball.gain
+            property real alpha: ball.alpha
+            property real sharpness: ball.sharpness
+            vertexShader: "qrc:/archie/shaders/lumen_glow.vert"
+            fragmentShader: "qrc:/archie/shaders/lumen_glow.frag"
         }
     }
 
