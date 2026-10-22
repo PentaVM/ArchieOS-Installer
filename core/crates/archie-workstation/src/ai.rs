@@ -496,7 +496,8 @@ impl UnifiedRuntime {
                                         if let Some(text)=text {(InferenceStatus::Completed,Some(text),None,reply.usage.map(|u|(u.prompt_tokens,u.completion_tokens)))}
                                         else {(InferenceStatus::Failed,None,Some("empty_response".into()),None)}
                                     },
-                                    _=>(InferenceStatus::Failed,None,Some("provider_failed".into()),None),
+                                    Ok(Err(error))=>(InferenceStatus::Failed,None,Some(provider_error_code(&error).into()),None),
+                                    Err(_)=>(InferenceStatus::Failed,None,Some("deadline_expired".into()),None),
                                 },
                                 ()=wait_cancel(cancel.clone())=>(InferenceStatus::Cancelled,None,Some("cancelled".into()),None),
                             }
@@ -1040,6 +1041,26 @@ pub fn api_account(descriptor: &ModelDescriptor) -> String {
         sha256(format!("{endpoint}\0{secret}").as_bytes())
     )
 }
+/// A stable, credential-free code for why a provider attempt failed, so a receipt
+/// says which boundary refused it without carrying the provider's own text.
+fn provider_error_code(error: &archie_model_runtime::RuntimeError) -> &'static str {
+    use archie_model_runtime::RuntimeError as E;
+    match error {
+        E::ProviderMismatch | E::LocalityMismatch | E::PrivacyDenied { .. } => "provider_refused",
+        E::InvalidRequest | E::StreamRequest(_) => "provider_request_invalid",
+        E::MissingCredential(_) | E::CloudCredentialRequired | E::InvalidCredentialEnvironment => {
+            "provider_credential_missing"
+        }
+        E::HttpStatus(_) => "provider_http_status",
+        E::Transport(_) => "provider_transport",
+        E::DeadlineExceeded => "deadline_expired",
+        E::ResponseTooLarge => "output_exceeds_result_budget",
+        E::EmptyCompletion => "empty_response",
+        E::Decode(_) | E::NativeProtocol(_) | E::Stream(_) => "provider_protocol",
+        E::InvalidEndpoint | E::InsecureEndpoint | E::InvalidLimits => "provider_endpoint_invalid",
+    }
+}
+
 async fn wait_cancel(mut cancel: Option<watch::Receiver<bool>>) {
     if let Some(receiver) = &mut cancel {
         loop {

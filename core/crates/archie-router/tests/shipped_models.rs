@@ -106,9 +106,39 @@ fn thinking_is_asked_of_a_reasoning_model_and_never_of_iris() {
 /// sent to a cloud model, and it is not handed to IRIS because IRIS happens to be local.
 #[test]
 fn a_private_question_is_refused_when_no_local_model_reasons() {
-    let registry = shipped();
+    let mut registry = shipped();
+    let local: Vec<_> = registry
+        .iter()
+        .filter(|m| {
+            m.locality == Locality::Local && m.provides(&ModelRole::ReasoningWorker.capability())
+        })
+        .map(|m| m.id.clone())
+        .collect();
+    assert!(!local.is_empty(), "a local reasoning model is shipped");
+    for id in &local {
+        registry.remove(id);
+    }
     let request = RoutingRequest::new(PrivacyGrade::Restricted, 400, 2000)
         .requiring(ModelRole::ReasoningWorker.capability());
     let outcome = Router::new(Weights::default()).route(&registry, &request);
     assert_eq!(outcome.selected_model(), None, "{}", outcome.explain());
+}
+
+/// The shipped local model reasons over private context, so a restricted request is
+/// answered on the machine and never routed to a cloud model.
+#[test]
+fn a_private_question_is_reasoned_by_the_local_model() {
+    let registry = shipped();
+    let request = RoutingRequest::new(PrivacyGrade::Restricted, 400, 2000)
+        .requiring(ModelRole::ReasoningWorker.capability());
+    let outcome = Router::new(Weights::default()).route(&registry, &request);
+    let chosen = outcome
+        .selected_model()
+        .unwrap_or_else(|| panic!("{}", outcome.explain()));
+    let model = registry.iter().find(|m| &m.id == chosen).unwrap();
+    assert_eq!(model.locality, Locality::Local);
+    assert!(
+        chosen.as_str().starts_with("local.bonsai"),
+        "chose {chosen}"
+    );
 }

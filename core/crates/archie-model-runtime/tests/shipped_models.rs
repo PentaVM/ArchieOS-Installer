@@ -92,12 +92,19 @@ async fn the_routed_planner_answers_with_a_plan_for_iris() {
     assert!(plan["skill"].is_string());
     assert!(!plan["steps"].as_array().unwrap().is_empty());
 
-    // Private data has no local reasoning model to go to here, so it is refused, not sent.
+    // Private data stays on the machine: only the shipped local reasoning model may take it.
     let private = Question {
         privacy: PrivacyGrade::Restricted,
         ..question
     };
-    assert!(routed.candidates(&private).is_err());
+    for id in routed.candidates(&private).unwrap() {
+        let model = routed.registry().get(&id).unwrap();
+        assert_eq!(
+            model.locality,
+            Locality::Local,
+            "{id} would see private data"
+        );
+    }
 }
 
 mod private {
@@ -109,6 +116,38 @@ mod private {
     use std::collections::BTreeMap;
 
     const KEY: &str = "sk-live-7Hq2ZxVb91LmTn4cRw8yKd3PfAeU6sGj";
+
+    fn copy_tree(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_type().unwrap().is_dir() {
+                copy_tree(&entry.path(), &to.join(entry.file_name()));
+            } else {
+                std::fs::copy(entry.path(), to.join(entry.file_name())).unwrap();
+            }
+        }
+    }
+
+    /// The shipped manifests without the node's own models: what a node routes between
+    /// before its local weights are installed. These tests are about what may leave.
+    fn shipped_models() -> PathBuf {
+        static CLOUD: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+        CLOUD
+            .get_or_init(|| {
+                let dir = tempfile::tempdir().unwrap();
+                for family in std::fs::read_dir(super::shipped_models()).unwrap() {
+                    let family = family.unwrap();
+                    if family.file_name() == "local" || !family.file_type().unwrap().is_dir() {
+                        continue;
+                    }
+                    copy_tree(&family.path(), &dir.path().join(family.file_name()));
+                }
+                dir
+            })
+            .path()
+            .to_path_buf()
+    }
 
     /// The shipped models with their key present: cloud only.
     fn cloud_only() -> Routed {

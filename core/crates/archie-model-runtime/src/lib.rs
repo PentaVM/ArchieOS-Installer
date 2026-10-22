@@ -52,6 +52,7 @@ impl ProviderFamily {
                 | (Self::NebiusTokenFactory, ProviderKind::NebiusTokenFactory)
                 | (Self::OpenAiCompatible, ProviderKind::OpenAiCompatible)
                 | (Self::OpenAiCompatible, ProviderKind::OpenAi)
+                | (Self::OpenAiCompatible, ProviderKind::LlamaCpp)
                 | (Self::OpenAiCompatible, ProviderKind::NebiusTokenFactory)
                 | (Self::Anthropic, ProviderKind::Anthropic)
         )
@@ -204,6 +205,17 @@ impl ProviderEndpoint {
                 descriptor.locality,
                 label("credential-env").map(str::to_string),
             ),
+            // llama.cpp's server speaks the OpenAI wire format. It is a local model by
+            // definition, so it takes no credential and the locality checks refuse
+            // any base URL that is not on this machine.
+            ProviderKind::LlamaCpp => {
+                llama_thinking(descriptor)?;
+                Self::openai_compatible(
+                    label("base-url").unwrap_or("http://127.0.0.1:8081/v1/"),
+                    Locality::Local,
+                    None,
+                )
+            }
             ProviderKind::Anthropic => Self::anthropic(
                 label("base-url").unwrap_or("https://api.anthropic.com/v1/"),
                 Some(
@@ -547,9 +559,15 @@ impl InferenceClient {
             }
             return anthropic::decode(&bytes);
         }
-        let response = self
-            .send(self.endpoint.url("chat/completions")?, Some(request))
-            .await?;
+        let url = self.endpoint.url("chat/completions")?;
+        let response = match llama_thinking(descriptor)? {
+            Some(thinking) => {
+                let mut body = serde_json::to_value(request)?;
+                body["chat_template_kwargs"] = template_switch(thinking);
+                self.send(url, Some(&body)).await?
+            }
+            None => self.send(url, Some(request)).await?,
+        };
         let status = response.status();
         let bytes = self.bounded_body(response).await?;
         if !status.is_success() {
@@ -674,7 +692,11 @@ impl InferenceClient {
         let body = if native {
             anthropic::tool_body(request)?
         } else {
-            request.body()
+            let mut body = request.body();
+            if let Some(thinking) = llama_thinking(descriptor)? {
+                body["chat_template_kwargs"] = template_switch(thinking);
+            }
+            body
         };
         let response = self
             .send(
@@ -839,6 +861,27 @@ impl InferenceClient {
         }
         Ok(output)
     }
+}
+
+/// The reasoning mode a llama.cpp manifest pins with `thinking = "on" | "off"`. The
+/// mode belongs to the manifest the router chose, never to the prompt. Any other value
+/// is refused: a misspelt switch would silently leave the template's default on.
+fn llama_thinking(descriptor: &ModelDescriptor) -> Result<Option<bool>, RuntimeError> {
+    if descriptor.provider != ProviderKind::LlamaCpp {
+        return Ok(None);
+    }
+    match descriptor.labels.get("thinking").map(String::as_str) {
+        None => Ok(None),
+        Some("on") => Ok(Some(true)),
+        Some("off") => Ok(Some(false)),
+        Some(_) => Err(RuntimeError::InvalidRequest),
+    }
+}
+
+/// llama.cpp reads the reasoning switch from the chat template's own arguments. Other
+/// OpenAI-compatible servers never receive the field.
+fn template_switch(thinking: bool) -> serde_json::Value {
+    serde_json::json!({ "enable_thinking": thinking })
 }
 
 /// Resolves the provider-facing model name from a trusted router descriptor. Archie model
@@ -1031,6 +1074,107 @@ mod tests {
         assert!(request_text.contains("\"model\":\"test.model\""));
         assert!(request_text.contains("\"content\":\"status\""));
         assert!(!request_text.to_ascii_lowercase().contains("authorization:"));
+    }
+
+    #[tokio::test]
+    async fn llama_cpp_manifest_pins_the_reasoning_switch_on_the_wire() {
+        let body = r#"{"model":"bonsai","choices":[{"message":{"role":"assistant","content":"ready"},"finish_reason":"stop"}]}"#;
+        for (label, expected) in [("off", "false"), ("on", "true")] {
+            let (base_url, observed) = one_response(body).await;
+            let mut model = descriptor(ProviderKind::LlamaCpp, Locality::Local);
+            model.labels.insert("base-url".into(), base_url.clone());
+            model
+                .labels
+                .insert("provider-model".into(), "bonsai".into());
+            model.labels.insert("thinking".into(), label.into());
+            let client =
+                InferenceClient::new(ProviderEndpoint::for_model(&model).unwrap()).unwrap();
+            let request = ChatRequest {
+                model: "bonsai".into(),
+                messages: vec![ChatMessage {
+                    role: MessageRole::User,
+                    content: "status".into(),
+                }],
+                max_tokens: Some(32),
+                temperature: None,
+                stream: false,
+            };
+            client
+                .chat(&model, PrivacyGrade::Restricted, &request)
+                .await
+                .unwrap();
+            let request_text = observed.await.unwrap();
+            assert!(
+                request_text.contains(&format!(
+                    "\"chat_template_kwargs\":{{\"enable_thinking\":{expected}}}"
+                )),
+                "{label}: {request_text}"
+            );
+        }
+        // An OpenAI-compatible server that is not llama.cpp never sees the field.
+        let (base_url, observed) = one_response(body).await;
+        let endpoint = ProviderEndpoint::nvidia_nim(&base_url, Locality::Local).unwrap();
+        let mut model = descriptor(ProviderKind::NvidiaNim, Locality::Local);
+        model.labels.insert("thinking".into(), "off".into());
+        let request = ChatRequest {
+            model: model.id.to_string(),
+            messages: vec![ChatMessage {
+                role: MessageRole::User,
+                content: "status".into(),
+            }],
+            max_tokens: Some(32),
+            temperature: None,
+            stream: false,
+        };
+        InferenceClient::new(endpoint)
+            .unwrap()
+            .chat(&model, PrivacyGrade::Restricted, &request)
+            .await
+            .unwrap();
+        assert!(!observed.await.unwrap().contains("chat_template_kwargs"));
+    }
+
+    /// Voice streams its answers, so a streamed request to the direct manifest must not
+    /// fall back to the template's default and start reasoning.
+    #[tokio::test]
+    async fn llama_cpp_streaming_carries_the_same_reasoning_switch() {
+        let body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"ready\"},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let (base_url, observed) = one_response(body).await;
+        let mut model = descriptor(ProviderKind::LlamaCpp, Locality::Local);
+        model.labels.insert("base-url".into(), base_url);
+        model
+            .labels
+            .insert("provider-model".into(), "bonsai".into());
+        model.labels.insert("thinking".into(), "off".into());
+        let request = stream::ToolChatRequest {
+            model: "bonsai".into(),
+            messages: vec![stream::ToolChatMessage::User("status".into())],
+            tools: vec![],
+            max_tokens: 32,
+            temperature: 0.2,
+        };
+        InferenceClient::new(ProviderEndpoint::for_model(&model).unwrap())
+            .unwrap()
+            .chat_stream(&model, PrivacyGrade::Restricted, &request, |_| {})
+            .await
+            .unwrap();
+        assert!(observed
+            .await
+            .unwrap()
+            .contains("\"chat_template_kwargs\":{\"enable_thinking\":false}"));
+    }
+
+    #[test]
+    fn a_misspelt_reasoning_switch_is_refused_before_any_call() {
+        let mut model = descriptor(ProviderKind::LlamaCpp, Locality::Local);
+        model.labels.insert("thinking".into(), "true".into());
+        assert!(matches!(
+            ProviderEndpoint::for_model(&model),
+            Err(RuntimeError::InvalidRequest)
+        ));
     }
 
     #[tokio::test]
