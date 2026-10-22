@@ -729,3 +729,13 @@ fn fact_values_are_bounded_not_unbounded() {
         other => panic!("unexpected payload {other:?}"),
     }
 }
+
+#[test]
+fn cache_only_candidates_do_not_generate_fresh_device_seen_events() {
+    let json = serde_json::json!({"format":"archie-lan-inventory-v1","scanned_unix":42,
+      "devices":[{"address":"10.0.0.42","class":null,"name":"","manufacturer":"",
+        "model":"","services":[],"seen_by":["neighbor-cache"],
+        "state":{"neighbor.status":"STALE"}}]})
+    .to_string();
+    assert!(from_lan_inventory(&json).unwrap().is_empty());
+}

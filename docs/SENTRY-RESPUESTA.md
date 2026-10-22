@@ -46,20 +46,22 @@ port-scan, un túnel DNS o alguien reclamando la dirección del router, sí.
   equipo está reclamando la dirección del router; el tráfico podría estar pasando por
   él.»*
 
-## Contrato para la voz (pendiente de quien lleva `archie-voice`)
+## Cómo los dice la voz (`archie-voice`)
 
-El modo `live` de `archie-voice` necesita el SDK de NeMo y no compila en el entorno
-donde se hizo esto, así que no se tocó. Lo que la voz tiene que hacer:
+En `archie-voice::conversation::converse` (`Setup::notices`, por defecto
+`<state>/cerebra/notices.json` en `converse` y `live`, o `--notices <ruta>` /
+`ARCHIE_NOTICES`):
 
-Lo más simple es `archie sentry-notices --claim`. Imprime como JSON el siguiente aviso
-que hay que decir (o `null`) y lo marca como dicho bajo el lock: dos voces nunca dicen
-el mismo. La voz dice su campo `spoken` y nada más. Desde Rust es lo mismo:
+1. Cuando no hay turno en curso, nadie está hablando y la sala lleva en silencio al menos
+   `setup.end_after` (800 ms por defecto), lee `Board::load` y toma el primer aviso de
+   `board.unspoken()` (pendientes no dichos, primero los más graves).
+2. Envía `notice.spoken` literal a la voz — nunca `detail`, nunca pasando por el modelo.
+3. Sólo cuando la reproducción termina sin cortarse (`FromVoice::Spoke { stopped: false }`),
+   marca `spoken_ms` en disco bajo el lock exclusivo (`Board::update(path, |b| b.mark_spoken(&id, now_ms))`).
+   Si la síntesis falla, el aviso sigue sin decirse.
 
-1. `Board::load(<state>/cerebra/notices.json)` y `board.unspoken()`: los pendientes no
-   dichos, primero los más graves.
-2. Decir `notice.spoken`, **y nada más**, respetando el turno de palabra y el silencio.
-3. `Board::update(path, |b| b.mark_spoken(&id, now_ms))`.
-
+Desde fuera de Rust sigue existiendo `archie sentry-notices --claim`, que imprime como
+JSON el siguiente aviso que hay que decir (o `null`) y lo marca como dicho bajo el lock.
 Un aviso acusado nunca se dice. El dueño acusa con `archie sentry-notices --ack <id>`
 o `--ack-all`.
 
@@ -78,10 +80,42 @@ curl 127.0.0.1:7666/api/notices             # lo que lee el Observatory
 ## Qué no está verificado
 
 - No hay panel QML que dibuje `/api/notices`: la GUI es de Claude/Xavi.
-- La voz no los dice todavía (ver el contrato).
 - En la ISO, `archie-sentry-follow.service` (instalado, no habilitado) corre el
   follower como `archie` y deja el tablón 0640. Displayd (`archie-display`, grupo
   `archie`) lo lee. Si se despliega de otra forma y no puede leerlo, `/api/notices`
   responde `unavailable` con el error de permisos, nunca un vacío.
 - Las pruebas son con alertas sintéticas y archivos temporales. Nada se probó contra
   tráfico real.
+
+## Bloquear un dispositivo: `Intent` aprobado
+
+La segunda respuesta corta el tráfico de un equipo en el router. Va siempre como
+`Command::DeviceBlock { mac, blocked }`, por el mismo camino que cualquier acto de
+Sentry: `prepare` → revisión humana del digest → `approve` → adaptador → postcondición
+medida. No existe atajo desde el tablón, el follower ni Cerebra.
+
+```
+archie sentry-node block   <router> aa:bb:cc:dd:ee:ff   # prepara el Intent; pide aprobación
+archie sentry-node unblock <router> aa:bb:cc:dd:ee:ff
+```
+
+- **Qué hace en el router** (canal SSH, argv exacto, sin shell): en cada cortafuegos
+  que responde a `-S FORWARD` (`iptables`, `ip6tables`) pone
+  `-I FORWARD -m mac --mac-source <mac> -m comment --comment archie-sentry-block -j DROP`
+  solo si `-C` dice que falta. Desbloquear borra con `-D` hasta que `-C` dice que no
+  queda, y solo reglas con ese comentario y esa MAC: nunca toca las del router.
+- **Postcondición:** `-C` en todos los cortafuegos. Todos con la regla = bloqueado;
+  ninguno = desbloqueado; desacuerdo o error = no verifica nada (el recibo falla).
+- **Rechazos antes de tocar nada:** MAC que no sea una sola dirección de equipo en
+  minúsculas (multicast, broadcast y ceros incluidos), recurso sin la capacidad, y
+  cualquier MAC de `[sentry.router] protected_macs` (este nodo, el propio router).
+  Desbloquear una protegida sí se permite: solo puede devolver acceso.
+- **Honesto si no puede:** router sin SSH o sin cortafuegos que responda →
+  `Unsupported`; ssh caído (255) o `-C` con otro código (falta el módulo `mac`) →
+  `Unavailable`.
+- **Sin verificar en hardware.** Probado con un cortafuegos simulado con estado. No
+  sabemos si el firmware del MitraStar trae `iptables` con los módulos `mac` y
+  `comment`; si no, la respuesta será `Unavailable`, no un bloqueo fingido.
+- La regla no sobrevive a un reinicio del router (no se escribe en su configuración
+  persistente). Es deliberado: un bloqueo equivocado se arregla reiniciando.
+

@@ -24,6 +24,7 @@
 pub mod capability;
 pub mod error;
 pub mod ids;
+pub mod lan;
 pub mod model;
 pub mod model_role;
 pub mod module;

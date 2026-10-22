@@ -297,6 +297,11 @@ pub struct RouterBinding {
     /// The SSH admin channel, when the firmware exposes one.
     #[serde(default)]
     pub ssh: Option<RouterSshBinding>,
+    /// Hardware addresses a `DeviceBlock` may never cut off: this node, the
+    /// router itself, anything the owner cannot afford to lose. Lowercase
+    /// `aa:bb:cc:dd:ee:ff`.
+    #[serde(default)]
+    pub protected_macs: Vec<String>,
 }
 
 /// SSH access to the router: key-based only, matching `SshConfig` — no password
@@ -373,15 +378,72 @@ impl RouterBinding {
             radio_tools: Vec::new(),
             dhcp_leases_path: None,
             firmware_hint: None,
+            // Asked on the router at the first block, read-only: configuration
+            // cannot say which firewall the firmware ships.
+            firewall_tools: Vec::new(),
         };
+        if self
+            .protected_macs
+            .iter()
+            .any(|mac| archie_sentry::contracts::validate_mac(mac).is_err())
+        {
+            return Err(AdapterError::Protocol);
+        }
         Ok((
             RouterConfig {
                 control_url: self.control_url.clone(),
                 lan_client,
                 ssh,
+                protected_macs: self.protected_macs.clone(),
             },
             capabilities,
         ))
+    }
+
+    /// Runs [`archie_sentry::adapters::router::probe_router`] against the configured
+    /// IGD and SSH channels so the controller hands the adapter only the capabilities
+    /// and tools (`radio_tools`, `dhcp_leases_path`, `firmware_hint`) that actually
+    /// answered on the router.
+    pub async fn probe_router_config(
+        &self,
+        runner: Arc<dyn archie_sentry::adapters::process::CommandRunner>,
+    ) -> Result<(RouterConfig, RouterCapabilities), AdapterError> {
+        use archie_sentry::adapters::router::{probe_router, IgdClient, SshChannel};
+        let (config, _) = self.to_router_config()?;
+        let igd = match &config.control_url {
+            Some(url) => Some(IgdClient::new(url)?),
+            None => None,
+        };
+        let ssh = config
+            .ssh
+            .as_ref()
+            .map(|cfg| SshChannel::new(cfg.clone(), runner));
+        let capabilities = probe_router(igd.as_ref(), ssh.as_ref()).await;
+        Ok((config, capabilities))
+    }
+
+    /// Binds a discovered UPnP `WANIPConnection:1` control URL (such as
+    /// `device.state["upnp.igd_control_url"]` from `archie-lan`) when `control_url` is
+    /// not yet set in static configuration, verifying that its host matches `self.host`
+    /// and that `IgdClient::new` accepts it.
+    pub fn with_discovered_igd_url(&self, discovered_url: &str) -> Result<Self, AdapterError> {
+        use archie_sentry::adapters::router::IgdClient;
+        let host: std::net::Ipv4Addr = self.host.parse().map_err(|_| AdapterError::Protocol)?;
+        IgdClient::new(discovered_url)?;
+        let rest = discovered_url
+            .strip_prefix("http://")
+            .ok_or(AdapterError::Protocol)?;
+        let authority = rest.split('/').next().unwrap_or(rest);
+        let url_host = authority.split(':').next().unwrap_or(authority);
+        if url_host.parse::<std::net::Ipv4Addr>().ok() != Some(host) {
+            return Err(AdapterError::Protocol);
+        }
+        let mut updated = self.clone();
+        if updated.control_url.is_none() {
+            updated.control_url = Some(discovered_url.to_string());
+        }
+        updated.validate()?;
+        Ok(updated)
     }
 }
 
@@ -811,6 +873,9 @@ impl SentrySection {
                     // The adapter declares Unsupported for the radio until an
                     // on-site probe names a tool; configuration alone does not.
                     capabilities.push(CommandKind::WifiSet);
+                    // Blocking asks the router's firewall itself, read-only,
+                    // before writing; a router without one says Unsupported.
+                    capabilities.push(CommandKind::DeviceBlock);
                 }
                 if !capabilities.is_empty() {
                     return Some(("router", capabilities));

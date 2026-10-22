@@ -121,6 +121,10 @@ pub struct CommandSpec {
 /// answers. `wl0_radio` / `nvram_wl0_radio` are also the radio state reads.
 pub const READ_COMMANDS: &[CommandSpec] = &[
     CommandSpec {
+        name: "ubus_wireless_status",
+        argv: &["ubus", "call", "network.wireless", "status"],
+    },
+    CommandSpec {
         name: "ip_neigh",
         argv: &["ip", "neigh"],
     },
@@ -156,7 +160,58 @@ pub const READ_COMMANDS: &[CommandSpec] = &[
         name: "wl0_radio",
         argv: &["wl", "-i", "wl0", "radio"],
     },
+    CommandSpec {
+        name: "iptables_forward",
+        argv: &["iptables", "-S", "FORWARD"],
+    },
+    CommandSpec {
+        name: "ip6tables_forward",
+        argv: &["ip6tables", "-S", "FORWARD"],
+    },
 ];
+
+/// Firewalls a router may expose over SSH, each with the read-only command that
+/// shows it answers. Blocking a device writes to every one that answers, so an
+/// IPv4 block is never silently undone by IPv6.
+pub const FIREWALL_TOOLS: &[(&str, &str)] = &[
+    ("iptables", "iptables_forward"),
+    ("ip6tables", "ip6tables_forward"),
+];
+
+/// The comment on every rule this system adds: it only ever checks, inserts or
+/// deletes rules carrying it, never the router's own.
+pub const BLOCK_COMMENT: &str = "archie-sentry-block";
+
+/// The remote argv that checks (`-C`), inserts (`-I`) or deletes (`-D`) the drop rule
+/// for one device in a firewall's FORWARD chain. `None` for anything but a known
+/// tool, one of those three operations and a valid single-device hardware address,
+/// so no other text ever reaches the router's shell.
+pub fn block_rule(tool: &str, op: &str, mac: &str) -> Option<Vec<String>> {
+    let known = FIREWALL_TOOLS.iter().any(|(name, _)| *name == tool);
+    if !known || !matches!(op, "-C" | "-I" | "-D") || crate::contracts::validate_mac(mac).is_err() {
+        return None;
+    }
+    Some(
+        [
+            tool,
+            op,
+            "FORWARD",
+            "-m",
+            "mac",
+            "--mac-source",
+            mac,
+            "-m",
+            "comment",
+            "--comment",
+            BLOCK_COMMENT,
+            "-j",
+            "DROP",
+        ]
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect(),
+    )
+}
 
 /// The bounded write surface: how to switch the radio with a given tool.
 /// `state_read` names a [`READ_COMMANDS`] entry whose output
@@ -170,6 +225,12 @@ pub struct RadioStrategy {
     pub off: &'static [&'static [&'static str]],
 }
 pub const RADIO_STRATEGIES: &[RadioStrategy] = &[
+    RadioStrategy {
+        tool: "openwrt-ubus",
+        state_read: "ubus_wireless_status",
+        on: &[&["ubus", "call", "network.wireless", "up"]],
+        off: &[&["ubus", "call", "network.wireless", "down"]],
+    },
     RadioStrategy {
         tool: "wl",
         state_read: "wl0_radio",
@@ -215,6 +276,31 @@ pub fn lease_path_of(spec: &CommandSpec) -> Option<&'static str> {
 /// never a guess. `wl` prints a number (often hex like `0x0001`); nvram
 /// prints `1`/`0`.
 pub fn parse_radio_state(tool: &str, output: &str) -> Option<bool> {
+    if tool == "openwrt-ubus" {
+        if output.len() > 65_536 {
+            return None;
+        }
+        let value: serde_json::Value = serde_json::from_str(output).ok()?;
+        let radios = value.as_object()?;
+        if radios.is_empty() || radios.len() > 32 {
+            return None;
+        }
+        let mut state = None;
+        for radio in radios.values() {
+            if radio
+                .get("pending")
+                .is_some_and(|p| p.as_bool() != Some(false))
+            {
+                return None;
+            }
+            let up = radio.get("up")?.as_bool()?;
+            if state.is_some_and(|s| s != up) {
+                return None;
+            }
+            state = Some(up);
+        }
+        return state;
+    }
     let token = output.split_whitespace().next()?;
     let value: u64 = if let Some(hex) = token.strip_prefix("0x") {
         u64::from_str_radix(hex, 16).ok()?
@@ -313,6 +399,78 @@ impl SshChannel {
         }
         let argv = self.argv(remote);
         Self::finish(self.runner.run(&argv, self.timeout())?)
+    }
+    /// Run a remote command and return its exit status instead of failing on a
+    /// non-zero one, for commands whose status is the answer (`iptables -C`).
+    /// Status 255 is ssh's own failure (no connection, key refused) and is
+    /// `Unavailable`, never an answer.
+    async fn run_status_async(&self, remote: Vec<String>) -> Result<i32, AdapterError> {
+        if remote.is_empty()
+            || remote
+                .iter()
+                .any(|arg| arg.is_empty() || arg.len() > 256 || arg.bytes().any(|b| b < 0x20))
+        {
+            return Err(AdapterError::Protocol);
+        }
+        let borrowed: Vec<&str> = remote.iter().map(String::as_str).collect();
+        let argv = self.argv(&borrowed);
+        let runner = Arc::clone(&self.runner);
+        let timeout = self.timeout();
+        let output = tokio::task::spawn_blocking(move || runner.run(&argv, timeout))
+            .await
+            .map_err(|_| AdapterError::Unavailable)??;
+        if output.status == 255 {
+            return Err(AdapterError::Unavailable);
+        }
+        Ok(output.status)
+    }
+    /// Whether the firewall `tool` answers on this router at all.
+    pub async fn firewall_answers(&self, tool: &str) -> bool {
+        match FIREWALL_TOOLS.iter().find(|(name, _)| *name == tool) {
+            Some((_, read)) => self.run_named_async(read).await.is_ok(),
+            None => false,
+        }
+    }
+    /// Whether this system's drop rule for `mac` is in `tool`'s FORWARD chain, as
+    /// `-C` answers: exit 0 present, 1 absent. Any other status (the mac match
+    /// module missing, the tool refusing) is `Unavailable`: the router could not say.
+    pub async fn block_present(&self, tool: &str, mac: &str) -> Result<bool, AdapterError> {
+        let check = block_rule(tool, "-C", mac).ok_or(AdapterError::Protocol)?;
+        match self.run_status_async(check).await? {
+            0 => Ok(true),
+            1 => Ok(false),
+            _ => Err(AdapterError::Unavailable),
+        }
+    }
+    /// Make `tool`'s FORWARD chain hold exactly one drop rule for `mac`
+    /// (`blocked`) or none of this system's (`!blocked`). Idempotent: the rule is
+    /// inserted only when absent, and removed until `-C` says it is gone.
+    pub async fn set_blocked(
+        &self,
+        tool: &str,
+        mac: &str,
+        blocked: bool,
+    ) -> Result<(), AdapterError> {
+        let present = self.block_present(tool, mac).await?;
+        if blocked && !present {
+            let insert = block_rule(tool, "-I", mac).ok_or(AdapterError::Protocol)?;
+            if self.run_status_async(insert).await? != 0 {
+                return Err(AdapterError::Unavailable);
+            }
+        }
+        if !blocked && present {
+            // A rule added twice by hand would survive one delete; a few passes
+            // remove every copy this system's comment marks, and no more.
+            for _ in 0..8 {
+                let delete = block_rule(tool, "-D", mac).ok_or(AdapterError::Protocol)?;
+                if self.run_status_async(delete).await? != 0
+                    || !self.block_present(tool, mac).await?
+                {
+                    break;
+                }
+            }
+        }
+        Ok(())
     }
     async fn run_argv_async(&self, remote: &[&str]) -> Result<String, AdapterError> {
         if remote.is_empty()

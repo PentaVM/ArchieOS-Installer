@@ -15,25 +15,36 @@
 //!   An answer from a public address is dropped, and a description is fetched only from
 //!   the host that announced it. Scanning the internet tells you a device is exposed,
 //!   which is a finding about somebody else's network (RFC-008).
-//! * **Probe.** No port scan, no address sweep, no default passwords, no vendor cloud. A
-//!   device that does not announce itself is not found, and that is the intended limit.
+//! * **Unbounded probes.** TCP presence is opt-in, private, at most 256 addresses,
+//!   sixteen workers, and sends no application payload. No passwords or vendor cloud.
+//!   The neighbor cache is observed by Sentry itself with its cached provenance.
 //! * **Act.** Everything here observes. Changing a device's state is
 //!   `DeviceAdapterOperation::ApplyDesiredState`, which needs an operator's grant and is
 //!   not in this crate.
-//! * **Name people.** A phone on the network is a device of class `mobile`. Whose it is, is
-//!   not asked.
+//! * **Name people.** Published device types are claims. Neither Spotify playback nor
+//!   a hardware address proves who owns a device.
 
 #![forbid(unsafe_code)]
 
 pub mod audit;
+pub mod autonomy;
+pub mod beacon;
 pub mod capture;
 pub mod classify;
+pub mod dns_sd;
+pub mod fingerprint;
 pub mod http;
 pub mod inventory;
+pub mod leases;
 pub mod mdns;
+pub mod neighbors;
+pub mod presence;
 pub mod roku;
+pub mod router;
+pub mod spotify;
 pub mod ssdp;
 pub mod upnp;
+pub mod wsdiscovery;
 
 pub use inventory::{Device, Inventory};
 
@@ -66,9 +77,23 @@ pub fn lan_address() -> std::io::Result<Ipv4Addr> {
     socket.connect((Ipv4Addr::new(192, 0, 2, 1), 9))?;
     match socket.local_addr()?.ip() {
         IpAddr::V4(address) if is_lan_v4(address) => Ok(address),
-        other => Err(std::io::Error::other(format!(
-            "this machine's route out is {other}, which is not a local network"
-        ))),
+        other => {
+            if let Ok(interfaces) = if_addrs::get_if_addrs() {
+                if let Some(address) =
+                    interfaces
+                        .into_iter()
+                        .find_map(|iface| match iface.addr.ip() {
+                            IpAddr::V4(v4) if !iface.is_loopback() && is_lan_v4(v4) => Some(v4),
+                            _ => None,
+                        })
+                {
+                    return Ok(address);
+                }
+            }
+            Err(std::io::Error::other(format!(
+                "this machine's route out is {other}, which is not a local network"
+            )))
+        }
     }
 }
 

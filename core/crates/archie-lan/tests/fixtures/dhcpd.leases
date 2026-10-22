@@ -1,0 +1,13 @@
+# pfSense /var/dhcpd/var/db/dhcpd.leases (ISC dhcpd)
+lease 192.168.1.10 {
+  starts 5 2026/10/16 10:00:00;
+  ends 5 2026/10/16 12:00:00;
+  binding state active;
+  hardware ethernet 00:11:22:33:44:55;
+  client-hostname "nas";
+}
+lease 192.168.1.11 {
+  ends never;
+  binding state free;
+  hardware ethernet 00:11:22:33:44:66;
+}
