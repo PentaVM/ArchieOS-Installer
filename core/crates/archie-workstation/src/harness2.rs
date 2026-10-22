@@ -380,12 +380,9 @@ fn validate_task(task: &Harness2Task) -> Result<(), Harness2Error> {
         || !(4096..=MAX_FRAME).contains(&l.max_frame_bytes)
         || !(1..=500_000).contains(&l.per_call_input_tokens)
         || !(1..=32_768).contains(&l.per_call_output_tokens)
-        || [
-            l.max_input_tokens,
-            l.max_output_tokens,
-        ]
-        .into_iter()
-        .any(|n| n == 0 || n > (1u64 << 53) - 1)
+        || [l.max_input_tokens, l.max_output_tokens]
+            .into_iter()
+            .any(|n| n == 0 || n > (1u64 << 53) - 1)
         || l.max_cost_micros.is_some() != l.per_call_cost_micros.is_some()
         || [l.max_cost_micros, l.per_call_cost_micros]
             .into_iter()
@@ -584,7 +581,10 @@ impl RunState<'_> {
             stage.max_output_tokens,
             usage.output_tokens,
         )?;
-        match (&mut self.usage.charged_cost_micros, stage.reserved_cost_micros) {
+        match (
+            &mut self.usage.charged_cost_micros,
+            stage.reserved_cost_micros,
+        ) {
             (Some(charged), Some(reserve)) => settle(
                 charged,
                 &mut self.usage.observed_cost_micros,
@@ -592,7 +592,9 @@ impl RunState<'_> {
                 usage.cost_micros,
             ),
             (None, None) => {
-                self.usage.observed_cost_micros = self.usage.observed_cost_micros
+                self.usage.observed_cost_micros = self
+                    .usage
+                    .observed_cost_micros
                     .zip(usage.cost_micros)
                     .and_then(|(previous, actual)| previous.checked_add(actual));
                 Ok(())

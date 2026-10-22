@@ -484,7 +484,7 @@ mod tests {
         let paths = StatePaths::rooted(&root);
         let listener = endpoint::bind(&paths).await.unwrap();
         let server = tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut stream = endpoint::accept(&listener).await.unwrap();
             use tokio::io::AsyncReadExt;
             let mut bytes = [0; 1024];
             assert!(stream.read(&mut bytes).await.unwrap() > 0);

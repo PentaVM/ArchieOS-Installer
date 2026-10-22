@@ -5,9 +5,9 @@
 
 #![forbid(unsafe_code)]
 
-pub mod board_api;
 pub mod ai;
 pub mod ai_policy;
+pub mod board_api;
 pub mod codex;
 pub mod enterprise_bridge;
 pub mod freecad;

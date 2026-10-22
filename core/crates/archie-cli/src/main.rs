@@ -17,8 +17,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Stdio};
 
-mod visual;
 mod ai;
+mod visual;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -44,7 +44,7 @@ enum Command {
     /// Run admitted AI inference, scoped memory and the pinned Harness2 engine.
     Ai {
         #[command(subcommand)]
-        command:ai::AiCommand,
+        command: ai::AiCommand,
     },
     /// Validate the local workstation boundary and optional runtimes.
     Doctor,
@@ -738,7 +738,12 @@ fn read_bounded(path: &Path, maximum: u64) -> Result<Vec<u8>, String> {
     std::fs::read(path).map_err(|error| error.to_string())
 }
 
-async fn local_command(command: &Command, root: &Path, paths: &StatePaths, json: bool) -> std::process::ExitCode {
+async fn local_command(
+    command: &Command,
+    root: &Path,
+    paths: &StatePaths,
+    json: bool,
+) -> std::process::ExitCode {
     use archie_workstation::harness::{HarnessKind, HarnessSpec};
     match command {
         Command::Doctor => {
@@ -827,8 +832,14 @@ async fn local_command(command: &Command, root: &Path, paths: &StatePaths, json:
                     };
                     match client.models().await {
                         Ok(models) => {
-                            let mut updated=p.clone();updated.models=models.data.into_iter().map(|m|m.id).collect();
-                            if let Err(error)=archie_workstation::provider::save_provider(&path,updated){eprintln!("archie: {error}");return std::process::ExitCode::FAILURE;}
+                            let mut updated = p.clone();
+                            updated.models = models.data.into_iter().map(|m| m.id).collect();
+                            if let Err(error) =
+                                archie_workstation::provider::save_provider(&path, updated)
+                            {
+                                eprintln!("archie: {error}");
+                                return std::process::ExitCode::FAILURE;
+                            }
                             println!("provider {id}: model catalog saved; inference entitlement remains untested");
                             std::process::ExitCode::SUCCESS
                         }
@@ -1138,10 +1149,13 @@ async fn main() -> std::process::ExitCode {
         None => StatePaths::from_env(),
     };
 
-    if let Command::Ai{command}=&cli.command {
-        return match ai::run(command,&paths,cli.json).await {
-            Ok(())=>std::process::ExitCode::SUCCESS,
-            Err(error)=>{eprintln!("archie: {error}");std::process::ExitCode::FAILURE},
+    if let Command::Ai { command } = &cli.command {
+        return match ai::run(command, &paths, cli.json).await {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("archie: {error}");
+                std::process::ExitCode::FAILURE
+            }
         };
     }
 
@@ -1245,7 +1259,15 @@ async fn main() -> std::process::ExitCode {
                 *once,
                 cli.json,
             ),
-            other => local_command(other, &workstation_root(cli.root.as_deref()), &paths, cli.json).await,
+            other => {
+                local_command(
+                    other,
+                    &workstation_root(cli.root.as_deref()),
+                    &paths,
+                    cli.json,
+                )
+                .await
+            }
         };
     };
 

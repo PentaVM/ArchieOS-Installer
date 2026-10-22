@@ -191,7 +191,7 @@ pub fn load_program(
     trusted_ancestors(&state_root, operator_uid)?;
     Ok(WorkerProgram {
         executable: spec.python,
-        arguments: vec!["-I".into(), "-B".into()],
+        arguments: vec!["-I".into(), "-S".into(), "-B".into()],
         worker: spec.worker,
         state_root,
     })
@@ -563,14 +563,11 @@ mod tests {
         let config = dir.path().join("harness2.toml");
         create_program_config(&config, &python, &worker).unwrap();
         let program = load_program(&config, dir.path().join("state"), None).unwrap();
-        assert_eq!(program.arguments, ["-I", "-B"]);
+        assert_eq!(program.arguments, ["-I", "-S", "-B"]);
         assert!(create_program_config(&config, &python, &worker).is_err());
         std::fs::write(
             &config,
-            format!(
-                "python = {:?}\nworker = {:?}\narguments = ['-c', 'bad']\n",
-                python, worker
-            ),
+            format!("python = {python:?}\nworker = {worker:?}\narguments = ['-c', 'bad']\n"),
         )
         .unwrap();
         assert!(load_program(&config, dir.path().join("state"), None).is_err());

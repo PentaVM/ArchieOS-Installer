@@ -112,7 +112,7 @@ async fn pinned_engine_runs_through_rust_bridge_and_default_refuses_promotion() 
     let directory = tempfile::tempdir().unwrap();
     let program = WorkerProgram {
         executable,
-        arguments: vec!["-I".into(), "-B".into()],
+        arguments: vec!["-I".into(), "-S".into(), "-B".into()],
         worker: root.join("tools/harness2/worker.py"),
         state_root: directory.path().to_path_buf(),
     };
@@ -138,17 +138,28 @@ async fn pinned_engine_runs_through_rust_bridge_and_default_refuses_promotion() 
 #[tokio::test]
 #[ignore = "requires configured POSIX Python 3.12/3.13; set ARCHIE_HARNESS2_PYTHON"]
 async fn pinned_engine_preserves_unknown_monetary_bounds_through_rust() {
-    let executable = PathBuf::from(std::env::var_os("ARCHIE_HARNESS2_PYTHON")
-        .expect("ARCHIE_HARNESS2_PYTHON must explicitly name a supported interpreter"));
+    let executable = PathBuf::from(
+        std::env::var_os("ARCHIE_HARNESS2_PYTHON")
+            .expect("ARCHIE_HARNESS2_PYTHON must explicitly name a supported interpreter"),
+    );
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../..").canonicalize().unwrap();
+        .join("../../..")
+        .canonicalize()
+        .unwrap();
     let directory = tempfile::tempdir().unwrap();
-    let program = WorkerProgram { executable, arguments: vec!["-I".into(), "-B".into()],
-        worker: root.join("tools/harness2/worker.py"), state_root: directory.path().to_path_buf() };
+    let program = WorkerProgram {
+        executable,
+        arguments: vec!["-I".into(), "-S".into(), "-B".into()],
+        worker: root.join("tools/harness2/worker.py"),
+        state_root: directory.path().to_path_buf(),
+    };
     let mut request = task();
     request.limits.max_cost_micros = None;
     request.limits.per_call_cost_micros = None;
-    let mut parent = Parent { tree: request.base_harness.clone(), calls: 0 };
+    let mut parent = Parent {
+        tree: request.base_harness.clone(),
+        calls: 0,
+    };
     let result = run_worker(&program, request, &mut parent).await.unwrap();
     assert_eq!(result.status, "completed");
     assert_eq!(parent.calls, 8);
@@ -256,8 +267,13 @@ async fn unknown_monetary_ceiling_still_admits_a_bounded_stage() {
     encoded["limits"]["per_call_cost_micros"] = serde_json::Value::Null;
     let request: Harness2Task = serde_json::from_value(encoded)
         .expect("unknown monetary bounds are explicit null rather than fictional reserves");
-    let mut parent = Parent { tree: request.base_harness.clone(), calls: 0 };
-    let error = run_worker(&program, request, &mut parent).await.unwrap_err();
+    let mut parent = Parent {
+        tree: request.base_harness.clone(),
+        calls: 0,
+    };
+    let error = run_worker(&program, request, &mut parent)
+        .await
+        .unwrap_err();
     assert_eq!(error.code(), "fixture_terminal");
     assert_eq!(parent.calls, 1);
 }
@@ -265,16 +281,28 @@ async fn unknown_monetary_ceiling_still_admits_a_bounded_stage() {
 #[tokio::test]
 async fn inconsistent_monetary_bounds_are_rejected_before_launch() {
     let directory = tempfile::tempdir().unwrap();
-    let program = WorkerProgram { executable: directory.path().join("must-not-launch"),
-        arguments: vec![], worker: directory.path().join("worker.py"),
-        state_root: directory.path().to_path_buf() };
-    for (maximum, per_call) in [(None, Some(1000)), (Some(12000), None),
-                                (Some(0), Some(1000)), (Some(12000), Some(0))] {
+    let program = WorkerProgram {
+        executable: directory.path().join("must-not-launch"),
+        arguments: vec![],
+        worker: directory.path().join("worker.py"),
+        state_root: directory.path().to_path_buf(),
+    };
+    for (maximum, per_call) in [
+        (None, Some(1000)),
+        (Some(12000), None),
+        (Some(0), Some(1000)),
+        (Some(12000), Some(0)),
+    ] {
         let mut request = task();
         request.limits.max_cost_micros = maximum;
         request.limits.per_call_cost_micros = per_call;
-        let mut parent = Parent { tree: request.base_harness.clone(), calls: 0 };
-        let error = run_worker(&program, request, &mut parent).await.unwrap_err();
+        let mut parent = Parent {
+            tree: request.base_harness.clone(),
+            calls: 0,
+        };
+        let error = run_worker(&program, request, &mut parent)
+            .await
+            .unwrap_err();
         assert_eq!(error.code(), "invalid_request");
         assert_eq!(parent.calls, 0);
     }
