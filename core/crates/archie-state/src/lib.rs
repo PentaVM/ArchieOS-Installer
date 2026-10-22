@@ -15,6 +15,7 @@
 
 mod adapters;
 pub mod cognitive;
+pub mod inference;
 pub mod paths;
 mod query;
 pub mod snapshots;

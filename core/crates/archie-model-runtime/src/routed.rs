@@ -35,6 +35,8 @@ use thiserror::Error;
 pub enum RoutedError {
     #[error(transparent)]
     Registry(#[from] ModelRegistryError),
+    #[error(transparent)]
+    ProviderConfig(#[from] crate::provider::ProviderConfigError),
     /// The router's own words for why nothing may serve the request.
     #[error("no model may answer this: {0}")]
     NoModel(String),
@@ -109,6 +111,8 @@ pub struct Answered {
     pub text: String,
     pub seconds: f32,
     pub completion_tokens: u64,
+    /// Provider terminal reason. A semantic refusal is terminal, not a transport retry.
+    pub finish_reason: Option<String>,
 }
 
 /// The node's models and the router over them.
@@ -136,6 +140,13 @@ impl Routed {
     /// From the node's model manifests, e.g. `/etc/archie/models`.
     pub fn from_dir(models: impl AsRef<Path>) -> Result<Self, RoutedError> {
         Ok(Self::new(ModelRegistry::load_from_dir(models)?))
+    }
+
+    pub fn from_paths(
+        models: impl AsRef<Path>,
+        providers: impl AsRef<Path>,
+    ) -> Result<Self, RoutedError> {
+        Ok(Self::new(crate::provider::load_catalog(models, providers)?))
     }
 
     pub fn registry(&self) -> &ModelRegistry {
@@ -477,17 +488,33 @@ impl Routed {
         models: Vec<ModelId>,
         question: &Question<'_>,
     ) -> Result<Answered, RoutedError> {
+        Self::ask_among_with(models, question.timeout, |model, timeout| async move {
+            self.ask_one(&model, question, timeout).await
+        })
+        .await
+    }
+
+    async fn ask_among_with<F, Fut>(
+        models: Vec<ModelId>,
+        timeout: Duration,
+        mut runner: F,
+    ) -> Result<Answered, RoutedError>
+    where
+        F: FnMut(ModelId, Duration) -> Fut,
+        Fut: std::future::Future<Output = Result<Answered, RuntimeError>>,
+    {
         let started = Instant::now();
         let mut failures = Vec::new();
         for model in models {
-            let left = question.timeout.saturating_sub(started.elapsed());
+            let left = timeout.saturating_sub(started.elapsed());
             if left.is_zero() {
                 failures.push((model, "no time left".to_string()));
                 continue;
             }
-            match self.ask_one(&model, question, left).await {
-                Ok(answered) => return Ok(answered),
-                Err(error) => failures.push((model, error.to_string())),
+            match tokio::time::timeout(left, runner(model.clone(), left)).await {
+                Ok(Ok(answered)) => return Ok(answered),
+                Ok(Err(error)) => failures.push((model, error.to_string())),
+                Err(_) => failures.push((model, RuntimeError::DeadlineExceeded.to_string())),
             }
         }
         Err(RoutedError::AllFailed(failures))
@@ -545,20 +572,29 @@ impl Routed {
                 client.chat(descriptor, question.privacy, &request).await?
             }
         };
-        let text = response
+        Self::answer_from_response(model, response, asked.elapsed().as_secs_f32())
+    }
+
+    fn answer_from_response(
+        model: &ModelId,
+        response: crate::ChatResponse,
+        seconds: f32,
+    ) -> Result<Answered, RuntimeError> {
+        let (text, finish_reason) = response
             .choices
             .into_iter()
             .next()
-            .map(|choice| choice.message.content)
+            .map(|choice| (choice.message.content, choice.finish_reason))
             .unwrap_or_default();
-        if text.trim().is_empty() {
+        if text.trim().is_empty() && finish_reason.as_deref() != Some("refusal") {
             return Err(RuntimeError::EmptyCompletion);
         }
         Ok(Answered {
             model: model.clone(),
             text,
-            seconds: asked.elapsed().as_secs_f32(),
+            seconds,
             completion_tokens: response.usage.map_or(0, |usage| usage.completion_tokens),
+            finish_reason,
         })
     }
 }
@@ -614,4 +650,64 @@ fn kinds(found: &[Kind]) -> String {
     names.sort_unstable();
     names.dedup();
     names.join(", ").to_lowercase()
+}
+
+#[cfg(test)]
+mod refusal_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn native_refusal_terminates_routing_without_contacting_the_next_provider() {
+        let (client, descriptor, observed) = crate::anthropic::tests::http_fixture(
+            r#"{"type":"message","role":"assistant","model":"m","content":[{"type":"text","text":"I cannot help with that."}],"stop_reason":"refusal","usage":{"input_tokens":7,"output_tokens":6}}"#,
+        ).await;
+        let fallback = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let fallback_url = format!("http://{}/v1/", fallback.local_addr().unwrap());
+        let first = descriptor.id.clone();
+        let ids = vec![first.clone(), ModelId::parse("fallback.provider").unwrap()];
+        let request = ChatRequest {
+            model: "m".into(),
+            messages: vec![ChatMessage {
+                role: MessageRole::User,
+                content: "question".into(),
+            }],
+            max_tokens: Some(128),
+            temperature: Some(0.2),
+            stream: false,
+        };
+        let answered = Routed::ask_among_with(ids, Duration::from_secs(1), |id, _| {
+            let client = &client;
+            let descriptor = &descriptor;
+            let request = &request;
+            let first = &first;
+            let fallback_url = &fallback_url;
+            async move {
+                if &id == first {
+                    let response = client
+                        .chat(descriptor, PrivacyGrade::Public, request)
+                        .await?;
+                    Routed::answer_from_response(&id, response, 0.0)
+                } else {
+                    let other = InferenceClient::new(ProviderEndpoint::openai_compatible(
+                        fallback_url,
+                        Locality::Local,
+                        None,
+                    )?)?;
+                    other.models().await?;
+                    Err(RuntimeError::EmptyCompletion)
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(answered.finish_reason.as_deref(), Some("refusal"));
+        assert_eq!(answered.text, "I cannot help with that.");
+        assert_eq!(answered.completion_tokens, 6);
+        assert!(observed.await.unwrap().starts_with("POST /v1/messages "));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), fallback.accept())
+                .await
+                .is_err()
+        );
+    }
 }

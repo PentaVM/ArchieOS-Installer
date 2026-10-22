@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Stdio};
 
+mod ai;
 mod visual;
 
 #[derive(Debug, Parser)]
@@ -40,6 +41,11 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Run admitted AI inference, scoped memory and the pinned Harness2 engine.
+    Ai {
+        #[command(subcommand)]
+        command: ai::AiCommand,
+    },
     /// Validate the local workstation boundary and optional runtimes.
     Doctor,
     /// Create the local runtime directories and show first-run state.
@@ -595,7 +601,8 @@ impl Command {
     /// means adding another cannot produce an `unreachable!` that is one day reached.
     fn to_request(&self) -> Option<ControlRequest> {
         Some(match self {
-            Self::Doctor
+            Self::Ai { .. }
+            | Self::Doctor
             | Self::Setup
             | Self::Start
             | Self::Stop
@@ -758,7 +765,12 @@ fn read_bounded(path: &Path, maximum: u64) -> Result<Vec<u8>, String> {
     std::fs::read(path).map_err(|error| error.to_string())
 }
 
-async fn local_command(command: &Command, root: &Path, json: bool) -> std::process::ExitCode {
+async fn local_command(
+    command: &Command,
+    root: &Path,
+    paths: &StatePaths,
+    json: bool,
+) -> std::process::ExitCode {
     use archie_workstation::harness::{HarnessKind, HarnessSpec};
     match command {
         Command::Doctor => {
@@ -789,7 +801,7 @@ async fn local_command(command: &Command, root: &Path, json: bool) -> std::proce
         Command::Start => run_process("sudo", &["systemctl", "start", "archie-workstation.target"]),
         Command::Stop => run_process("sudo", &["systemctl", "stop", "archie-workstation.target"]),
         Command::Provider { command } => {
-            let path = root.join("state/providers.toml");
+            let path = paths.inference_providers();
             match command {
                 ProviderCommand::List => {
                     match archie_workstation::provider::load_providers(&path) {
@@ -831,7 +843,7 @@ async fn local_command(command: &Command, root: &Path, json: bool) -> std::proce
                         eprintln!("archie: provider not configured");
                         return std::process::ExitCode::FAILURE;
                     };
-                    let endpoint = match p.openai_endpoint() {
+                    let endpoint = match p.endpoint() {
                         Ok(value) => value,
                         Err(e) => {
                             eprintln!("archie: {e}");
@@ -847,7 +859,15 @@ async fn local_command(command: &Command, root: &Path, json: bool) -> std::proce
                     };
                     match client.models().await {
                         Ok(models) => {
-                            println!("provider {id}: {} model(s) discovered", models.data.len());
+                            let mut updated = p.clone();
+                            updated.models = models.data.into_iter().map(|m| m.id).collect();
+                            if let Err(error) =
+                                archie_workstation::provider::save_provider(&path, updated)
+                            {
+                                eprintln!("archie: {error}");
+                                return std::process::ExitCode::FAILURE;
+                            }
+                            println!("provider {id}: model catalog saved; inference entitlement remains untested");
                             std::process::ExitCode::SUCCESS
                         }
                         Err(e) => {
@@ -859,7 +879,7 @@ async fn local_command(command: &Command, root: &Path, json: bool) -> std::proce
             }
         }
         Command::Harness { command } => {
-            let config_path = root.join("state/harnesses.toml");
+            let config_path = paths.inference_harnesses();
             let kind = |id: &str| match id {
                 "codex" => Some(HarnessKind::Codex),
                 "claude" => Some(HarnessKind::Claude),
@@ -1156,6 +1176,16 @@ async fn main() -> std::process::ExitCode {
         None => StatePaths::from_env(),
     };
 
+    if let Command::Ai { command } = &cli.command {
+        return match ai::run(command, &paths, cli.json).await {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("archie: {error}");
+                std::process::ExitCode::FAILURE
+            }
+        };
+    }
+
     // `sentry print` stages the document locally before its intent can exist:
     // the SHA-256 of the staged bytes is part of the prepared command.
     let request = match &cli.command {
@@ -1256,7 +1286,15 @@ async fn main() -> std::process::ExitCode {
                 *once,
                 cli.json,
             ),
-            other => local_command(other, &workstation_root(cli.root.as_deref()), cli.json).await,
+            other => {
+                local_command(
+                    other,
+                    &workstation_root(cli.root.as_deref()),
+                    &paths,
+                    cli.json,
+                )
+                .await
+            }
         };
     };
 
@@ -2276,6 +2314,8 @@ fn render(response: &ControlResponse) -> String {
         ControlResponse::Pong { node_id, version } => {
             format!("archied {version} is running (node {})\n", short(node_id))
         }
+        ControlResponse::AiResult { outcome } => format!("{}\nreceipt={} status={:?}\n", outcome.text.as_deref().unwrap_or(""), outcome.receipt.receipt_id, outcome.receipt.status),
+        ControlResponse::AiHarnessResult { outcome } => format!("Harness2 {}: {} stages; promotion={} (improvement_verified={})\n", outcome.result.status, outcome.receipts.len(), outcome.result.promotion.status, outcome.result.promotion.improvement_verified),
         ControlResponse::Error { message } => format!("error: {message}\n"),
     }
 }

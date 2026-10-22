@@ -125,6 +125,38 @@ impl StatePaths {
         self.config_dir.join("models")
     }
 
+    /// Shared inference-provider catalog consumed by CLI and Core. Prefer the
+    /// canonical node state; preserve an existing workstation catalog in place.
+    pub fn inference_providers(&self) -> PathBuf {
+        let canonical = self.state_dir.join("inference/providers.toml");
+        let legacy = self
+            .config_dir
+            .parent()
+            .unwrap_or(&self.config_dir)
+            .join("state/providers.toml");
+        if !canonical.exists() && legacy.is_file() {
+            legacy
+        } else {
+            canonical
+        }
+    }
+
+    /// Operator-configured process runners. Preserve an existing workstation
+    /// catalog in place while new nodes use the canonical inference directory.
+    pub fn inference_harnesses(&self) -> PathBuf {
+        let canonical = self.state_dir.join("inference/harnesses.toml");
+        let legacy = self
+            .config_dir
+            .parent()
+            .unwrap_or(&self.config_dir)
+            .join("state/harnesses.toml");
+        if !canonical.exists() && legacy.is_file() {
+            legacy
+        } else {
+            canonical
+        }
+    }
+
     /// The daemon control socket the CLI connects to.
     pub fn control_socket(&self) -> PathBuf {
         self.runtime_dir.join("archied.sock")

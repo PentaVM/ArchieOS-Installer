@@ -19,7 +19,9 @@ pub use stream::{
     ToolChatRequest, ToolDefinition,
 };
 
+mod anthropic;
 pub mod llama_slots;
+pub mod provider;
 pub mod routed;
 
 /// Nebius Token Factory's OpenAI-compatible API.
@@ -39,6 +41,7 @@ pub enum ProviderFamily {
     NvidiaNim,
     NebiusTokenFactory,
     OpenAiCompatible,
+    Anthropic,
 }
 
 impl ProviderFamily {
@@ -48,6 +51,9 @@ impl ProviderFamily {
             (Self::NvidiaNim, ProviderKind::NvidiaNim)
                 | (Self::NebiusTokenFactory, ProviderKind::NebiusTokenFactory)
                 | (Self::OpenAiCompatible, ProviderKind::OpenAiCompatible)
+                | (Self::OpenAiCompatible, ProviderKind::OpenAi)
+                | (Self::OpenAiCompatible, ProviderKind::NebiusTokenFactory)
+                | (Self::Anthropic, ProviderKind::Anthropic)
         )
     }
 }
@@ -63,6 +69,15 @@ pub struct ProviderEndpoint {
 }
 
 impl ProviderEndpoint {
+    /// Native Anthropic Messages API. The model remains cloud-backed behind a proxy.
+    pub fn anthropic(base_url: &str, credential_env: Option<String>) -> Result<Self, RuntimeError> {
+        Self::new(
+            ProviderFamily::Anthropic,
+            base_url,
+            Locality::Cloud,
+            credential_env,
+        )
+    }
     pub fn nvidia_nim(base_url: &str, locality: Locality) -> Result<Self, RuntimeError> {
         let credential = (locality == Locality::Cloud).then(|| "NVIDIA_API_KEY".to_string());
         Self::new(ProviderFamily::NvidiaNim, base_url, locality, credential)
@@ -107,7 +122,25 @@ impl ProviderEndpoint {
 
         let loopback = base_url
             .host_str()
-            .is_some_and(|host| matches!(host, "localhost" | "127.0.0.1" | "::1"));
+            .is_some_and(|host| matches!(host, "localhost" | "127.0.0.1" | "::1" | "[::1]"));
+        if locality == Locality::Local && !loopback {
+            return Err(RuntimeError::LocalityMismatch);
+        }
+        // These are service endpoints, not arbitrary operator-controlled deployments.
+        // Generic local/fabric servers still use their explicit operator declaration.
+        let known_cloud_host = base_url.host_str().is_some_and(|host| {
+            matches!(
+                host.trim_end_matches('.').to_ascii_lowercase().as_str(),
+                "api.openai.com"
+                    | "api.tokenfactory.nebius.com"
+                    | "api.cerebras.ai"
+                    | "openrouter.ai"
+                    | "api.anthropic.com"
+            )
+        });
+        if known_cloud_host && locality != Locality::Cloud {
+            return Err(RuntimeError::LocalityMismatch);
+        }
         match base_url.scheme() {
             "https" => {}
             "http" if locality == Locality::Local && loopback => {}
@@ -143,9 +176,25 @@ impl ProviderEndpoint {
     pub fn for_model(descriptor: &ModelDescriptor) -> Result<Self, RuntimeError> {
         let label = |name: &str| descriptor.labels.get(name).map(String::as_str);
         match &descriptor.provider {
-            ProviderKind::NebiusTokenFactory => {
-                Self::nebius(label("base-url").unwrap_or(NEBIUS_BASE_URL))
-            }
+            ProviderKind::NebiusTokenFactory => Self::new(
+                ProviderFamily::NebiusTokenFactory,
+                label("base-url").unwrap_or(NEBIUS_BASE_URL),
+                Locality::Cloud,
+                Some(
+                    label("credential-env")
+                        .unwrap_or("NEBIUS_TOKEN_FACTORY_KEY")
+                        .to_string(),
+                ),
+            ),
+            ProviderKind::OpenAi => Self::openai_compatible(
+                label("base-url").unwrap_or("https://api.openai.com/v1/"),
+                Locality::Cloud,
+                Some(
+                    label("credential-env")
+                        .unwrap_or("OPENAI_API_KEY")
+                        .to_string(),
+                ),
+            ),
             ProviderKind::NvidiaNim => Self::nvidia_nim(
                 label("base-url").ok_or(RuntimeError::InvalidEndpoint)?,
                 descriptor.locality,
@@ -154,6 +203,14 @@ impl ProviderEndpoint {
                 label("base-url").ok_or(RuntimeError::InvalidEndpoint)?,
                 descriptor.locality,
                 label("credential-env").map(str::to_string),
+            ),
+            ProviderKind::Anthropic => Self::anthropic(
+                label("base-url").unwrap_or("https://api.anthropic.com/v1/"),
+                Some(
+                    label("credential-env")
+                        .unwrap_or("ANTHROPIC_API_KEY")
+                        .to_string(),
+                ),
             ),
             _ => Err(RuntimeError::ProviderMismatch),
         }
@@ -303,12 +360,18 @@ impl VisionChatRequest<'_> {
 impl ChatRequest {
     pub fn validate(&self) -> Result<(), RuntimeError> {
         if self.model.trim().is_empty()
+            || self.model.len() > 256
             || self.messages.is_empty()
             || self.messages.len() > MAX_MESSAGES
             || self.stream
             || self.messages.iter().any(|message| {
                 message.content.is_empty() || message.content.len() > MAX_CONTENT_BYTES
             })
+            || self
+                .messages
+                .iter()
+                .fold(0_usize, |n, m| n.saturating_add(m.content.len()))
+                > MAX_CONTENT_BYTES
             || self.max_tokens == Some(0)
             || self
                 .temperature
@@ -370,6 +433,8 @@ pub enum RuntimeError {
     MissingCredential(String),
     #[error("transport limits must be greater than zero")]
     InvalidLimits,
+    #[error("inference exceeded its total deadline")]
+    DeadlineExceeded,
     #[error("inference request is empty, streaming, or outside supported bounds")]
     InvalidRequest,
     #[error("model descriptor does not match the configured provider endpoint")]
@@ -384,6 +449,8 @@ pub enum RuntimeError {
     ResponseTooLarge,
     #[error("provider response did not contain a completion")]
     EmptyCompletion,
+    #[error("native provider protocol error: {0}")]
+    NativeProtocol(&'static str),
     #[error("provider transport failed: {0}")]
     Transport(#[from] reqwest::Error),
     #[error("provider returned invalid JSON: {0}")]
@@ -420,6 +487,10 @@ impl InferenceClient {
     }
 
     pub async fn ready(&self) -> Result<bool, RuntimeError> {
+        self.with_deadline(self.ready_inner()).await
+    }
+
+    async fn ready_inner(&self) -> Result<bool, RuntimeError> {
         let response = self
             .send::<()>(self.endpoint.url("health/ready")?, None)
             .await?;
@@ -427,12 +498,30 @@ impl InferenceClient {
     }
 
     pub async fn models(&self) -> Result<ModelList, RuntimeError> {
+        self.with_deadline(self.models_inner()).await
+    }
+
+    async fn models_inner(&self) -> Result<ModelList, RuntimeError> {
         let response = self.send::<()>(self.endpoint.url("models")?, None).await?;
+        let status = response.status();
         let bytes = self.bounded_body(response).await?;
+        if !status.is_success() {
+            return Err(RuntimeError::HttpStatus(status));
+        }
         Ok(serde_json::from_slice(&bytes)?)
     }
 
     pub async fn chat(
+        &self,
+        descriptor: &ModelDescriptor,
+        privacy: PrivacyGrade,
+        request: &ChatRequest,
+    ) -> Result<ChatResponse, RuntimeError> {
+        self.with_deadline(self.chat_inner(descriptor, privacy, request))
+            .await
+    }
+
+    async fn chat_inner(
         &self,
         descriptor: &ModelDescriptor,
         privacy: PrivacyGrade,
@@ -445,6 +534,18 @@ impl InferenceClient {
         // here, and only the first means anything to Nebius.
         if request.model != provider_model_id(descriptor)? {
             return Err(RuntimeError::ProviderMismatch);
+        }
+        if self.endpoint.family == ProviderFamily::Anthropic {
+            let body = anthropic::chat_body(request)?;
+            let response = self
+                .send(self.endpoint.url("messages")?, Some(&body))
+                .await?;
+            let status = response.status();
+            let bytes = self.bounded_body(response).await?;
+            if !status.is_success() {
+                return Err(RuntimeError::HttpStatus(status));
+            }
+            return anthropic::decode(&bytes);
         }
         let response = self
             .send(self.endpoint.url("chat/completions")?, Some(request))
@@ -467,31 +568,64 @@ impl InferenceClient {
         privacy: PrivacyGrade,
         request: &VisionChatRequest<'_>,
     ) -> Result<ChatResponse, RuntimeError> {
+        self.with_deadline(self.vision_chat_inner(descriptor, privacy, request))
+            .await
+    }
+
+    async fn vision_chat_inner(
+        &self,
+        descriptor: &ModelDescriptor,
+        privacy: PrivacyGrade,
+        request: &VisionChatRequest<'_>,
+    ) -> Result<ChatResponse, RuntimeError> {
         request.validate()?;
         self.authorize(descriptor, privacy)?;
         let provider_model = provider_model_id(descriptor)?;
         let encoded = base64::engine::general_purpose::STANDARD.encode(request.image.bytes);
         let data_url = format!("data:{};base64,{encoded}", request.image.mime.as_str());
-        let body = serde_json::json!({
-            "model": provider_model,
-            "messages": [
-                {"role": "system", "content": request.instruction},
-                {"role": "user", "content": [
-                    {"type": "text", "text": request.context},
-                    {"type": "image_url", "image_url": {"url": data_url}}
-                ]}
-            ],
-            "max_tokens": request.max_tokens,
-            "temperature": 0.0,
-            "stream": false
-        });
+        let native = self.endpoint.family == ProviderFamily::Anthropic;
+        let body = if native {
+            serde_json::json!({
+                "model":provider_model,
+                "system":request.instruction,
+                "messages":[{"role":"user","content":[
+                    {"type":"text","text":request.context},
+                    {"type":"image","source":{"type":"base64","media_type":request.image.mime.as_str(),"data":encoded}}
+                ]}],
+                "max_tokens":request.max_tokens,"temperature":0.0,"stream":false
+            })
+        } else {
+            serde_json::json!({
+                "model": provider_model,
+                "messages": [
+                    {"role": "system", "content": request.instruction},
+                    {"role": "user", "content": [
+                        {"type": "text", "text": request.context},
+                        {"type": "image_url", "image_url": {"url": data_url}}
+                    ]}
+                ],
+                "max_tokens": request.max_tokens,
+                "temperature": 0.0,
+                "stream": false
+            })
+        };
         let response = self
-            .send(self.endpoint.url("chat/completions")?, Some(&body))
+            .send(
+                self.endpoint.url(if native {
+                    "messages"
+                } else {
+                    "chat/completions"
+                })?,
+                Some(&body),
+            )
             .await?;
         let status = response.status();
         let bytes = self.bounded_body(response).await?;
         if !status.is_success() {
             return Err(RuntimeError::HttpStatus(status));
+        }
+        if native {
+            return anthropic::decode(&bytes);
         }
         let decoded: ChatResponse = serde_json::from_slice(&bytes)?;
         if decoded.choices.is_empty() {
@@ -512,6 +646,20 @@ impl InferenceClient {
         descriptor: &ModelDescriptor,
         privacy: PrivacyGrade,
         request: &stream::ToolChatRequest,
+        on_event: F,
+    ) -> Result<(), RuntimeError>
+    where
+        F: FnMut(stream::StreamEvent),
+    {
+        self.with_deadline(self.chat_stream_inner(descriptor, privacy, request, on_event))
+            .await
+    }
+
+    async fn chat_stream_inner<F>(
+        &self,
+        descriptor: &ModelDescriptor,
+        privacy: PrivacyGrade,
+        request: &stream::ToolChatRequest,
         mut on_event: F,
     ) -> Result<(), RuntimeError>
     where
@@ -522,10 +670,20 @@ impl InferenceClient {
         if request.model != provider_model_id(descriptor)? {
             return Err(RuntimeError::ProviderMismatch);
         }
+        let native = self.endpoint.family == ProviderFamily::Anthropic;
+        let body = if native {
+            anthropic::tool_body(request)?
+        } else {
+            request.body()
+        };
         let response = self
             .send(
-                self.endpoint.url("chat/completions")?,
-                Some(&request.body()),
+                self.endpoint.url(if native {
+                    "messages"
+                } else {
+                    "chat/completions"
+                })?,
+                Some(&body),
             )
             .await?;
         let status = response.status();
@@ -533,6 +691,7 @@ impl InferenceClient {
             return Err(RuntimeError::HttpStatus(status));
         }
         let mut assembler = stream::SseAssembler::new();
+        let mut native_assembler = anthropic::AnthropicSse::new();
         let mut received = 0_usize;
         let mut bytes = response.bytes_stream();
         while let Some(chunk) = bytes.next().await {
@@ -541,17 +700,42 @@ impl InferenceClient {
             if received > self.endpoint.max_response_bytes {
                 return Err(RuntimeError::ResponseTooLarge);
             }
-            for event in assembler.feed(&chunk).map_err(RuntimeError::Stream)? {
+            let events = if native {
+                native_assembler.feed(&chunk)
+            } else {
+                assembler.feed(&chunk)
+            }
+            .map_err(RuntimeError::Stream)?;
+            for event in events {
                 on_event(event);
             }
-            if assembler.is_finished() {
+            if if native {
+                native_assembler.is_finished()
+            } else {
+                assembler.is_finished()
+            } {
                 break;
             }
         }
-        for event in assembler.close().map_err(RuntimeError::Stream)? {
+        let events = if native {
+            native_assembler.close()
+        } else {
+            assembler.close()
+        }
+        .map_err(RuntimeError::Stream)?;
+        for event in events {
             on_event(event);
         }
         Ok(())
+    }
+
+    async fn with_deadline<T>(
+        &self,
+        operation: impl std::future::Future<Output = Result<T, RuntimeError>>,
+    ) -> Result<T, RuntimeError> {
+        tokio::time::timeout(self.endpoint.timeout, operation)
+            .await
+            .map_err(|_| RuntimeError::DeadlineExceeded)?
     }
 
     fn authorize(
@@ -586,7 +770,14 @@ impl InferenceClient {
                 None => self.client.get(url.clone()),
             };
             if let Some(credential) = self.endpoint.credential()? {
-                request = request.bearer_auth(credential);
+                request = if self.endpoint.family == ProviderFamily::Anthropic {
+                    request.header("x-api-key", credential)
+                } else {
+                    request.bearer_auth(credential)
+                };
+            }
+            if self.endpoint.family == ProviderFamily::Anthropic {
+                request = request.header("anthropic-version", "2023-06-01");
             }
             let response = request.send().await?;
 

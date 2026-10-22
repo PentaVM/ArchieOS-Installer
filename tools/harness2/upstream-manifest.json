@@ -1,0 +1,109 @@
+{
+  "commit": "1cfe254e8d25b15f37048c3730134686abe60335",
+  "upstream": "https://github.com/google-research/harness2",
+  "license": "Apache-2.0",
+  "files": [
+    {
+      "git_blob_sha": "d645695673349e3947e8e5ae42332d0ac3164cd7",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "path": "LICENSE",
+      "bytes": 11358
+    },
+    {
+      "git_blob_sha": "e2bf767dbe010e23fd18e416ea21f438b1a1fc93",
+      "sha256": "de20a79ef3cf3974bf32cb6afdbb32608655676e749a466ffd6c7c173bb7e26a",
+      "path": "harness2/__init__.py",
+      "bytes": 639
+    },
+    {
+      "git_blob_sha": "59e0703d11f3904e63c526bb2d7ebaf3ce2bb53d",
+      "sha256": "0db5ba0c42b87f5b14cbff2d11aaecddda1cd45500903c1d61741232bd1e0a88",
+      "path": "harness2/config.py",
+      "bytes": 6615
+    },
+    {
+      "git_blob_sha": "d59d80d5c6ccb02d7d224fce5435fe4d928125c8",
+      "sha256": "ce487673e00fd8921139e3afb688c566fc43d9b07acba048d2102663a81f7151",
+      "path": "harness2/core/__init__.py",
+      "bytes": 802
+    },
+    {
+      "git_blob_sha": "72f2868b06c13e30c031cb91c0f04dcd80293ec9",
+      "sha256": "63dd482e5d9467d7e659d186a11289fc7861d08c8aed603244ff0cee92de91f3",
+      "path": "harness2/core/context.py",
+      "bytes": 21597
+    },
+    {
+      "git_blob_sha": "cf4e7b9fe2b603421fce6519808deb81bc3ec9c0",
+      "sha256": "0f8cd6f4ec659f5d5976bdad4ccdc432651f51486c3fbbee36be53a6d619fbba",
+      "path": "harness2/core/judge.py",
+      "bytes": 5005
+    },
+    {
+      "git_blob_sha": "319a6697758d05294dab9f42e8f8700759d7e6f6",
+      "sha256": "7059de5d90fc9fb8d4b3b799ff075f09d34f182ba0fdb56eb9d8b8383d0bbf55",
+      "path": "harness2/core/ledger.py",
+      "bytes": 4536
+    },
+    {
+      "git_blob_sha": "39e50684b4044e483a3c16a447958044d4b5e6de",
+      "sha256": "00219fda201a030f43b35b49c4e73ccf336aedc81164144c435b4b06a1256dd3",
+      "path": "harness2/core/library.py",
+      "bytes": 8449
+    },
+    {
+      "git_blob_sha": "9ccacf23b64ac15b06a1939f26224960f56d757c",
+      "sha256": "d1f4f8db4ab4cb4addcbca175b548db2270375499fda727ac95d271c63cc2504",
+      "path": "harness2/core/prompts.py",
+      "bytes": 66499
+    },
+    {
+      "git_blob_sha": "4a235075cae72059fa701001f31bf4505cbbc3ba",
+      "sha256": "475ef49d72228e249d7172d793f8362913774412402dfd259ae6e01c6586e175",
+      "path": "harness2/core/proposer.py",
+      "bytes": 18560
+    },
+    {
+      "git_blob_sha": "dda6b98cd5af100b8941f33cbb079462299c5280",
+      "sha256": "b299813b5334f2c0f89024a7f14162f0fdd5418ebd4413be93920b5334a204c1",
+      "path": "harness2/core/recursion.py",
+      "bytes": 18895
+    },
+    {
+      "git_blob_sha": "b7ecf6e42a1061218b0eb8cde9c441c136e28e72",
+      "sha256": "9d5b119ec93dc6b2c6341095130103ab4ba2f2dc6867c4b7ea759fca5de3cac9",
+      "path": "harness2/core/report.py",
+      "bytes": 6183
+    },
+    {
+      "git_blob_sha": "1de5794b40f043e40ecba66be08a65a5787ebbb1",
+      "sha256": "99a7c3f0b023623224c3376bc0390e985b8e6608f0928d34b821ffe6c36f9175",
+      "path": "harness2/core/runmark.py",
+      "bytes": 3783
+    },
+    {
+      "git_blob_sha": "f91f450b1d01011982069f4b41e6e3a77abcc9cc",
+      "sha256": "6e46c5ab1e4ac111818ff3acd6b636e39d650898189ac0c21802a8233ad4cd38",
+      "path": "harness2/core/schedule.py",
+      "bytes": 30524
+    },
+    {
+      "git_blob_sha": "2cf04f50e35fd82d7abaea279a83b4a7eb4c2193",
+      "sha256": "2cb3353b2fd4ec72e6322f2c1f35db1ff2cdab88b0b50c8809d1841d235cb92f",
+      "path": "harness2/core/selection.py",
+      "bytes": 18262
+    },
+    {
+      "git_blob_sha": "e58d14852490b2d4ae3aa6da1c1c796e3e961b48",
+      "sha256": "f245ec9e314778e2a1a51594b906584255b9eed8340c073b864a8a6f2c8dc400",
+      "path": "harness2/core/spec.py",
+      "bytes": 9720
+    },
+    {
+      "git_blob_sha": "c9bf1341226aac448f6ec82038cb6d3896799412",
+      "sha256": "c2a15690b1b6b02156e922c5e0b1a215c5065d7bea5a3bae2e56b47309197552",
+      "path": "harness2/core/tree.py",
+      "bytes": 16265
+    }
+  ]
+}

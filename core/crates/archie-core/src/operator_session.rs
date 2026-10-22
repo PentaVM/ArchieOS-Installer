@@ -454,6 +454,7 @@ pub async fn serve_operator_connection(
     use crate::control::{decode, encode, MAX_CONTROL_MESSAGE_BYTES};
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     let peer = KernelOperator::from_stream(&stream, &core.config.sentry.operator_uids).ok();
+    let ai_peer = crate::ai_control::AiOperator::from_stream(&stream);
     let mut session = OperatorSession {
         core,
         peer,
@@ -485,6 +486,25 @@ pub async fn serve_operator_connection(
             continue;
         }
         let response = match decode::<ControlRequest>(&line) {
+            Ok(request) if request.is_ai() => {
+                // EOF or pipelined input cancels this exact inference. Give the
+                // attributed service a bounded chance to persist cancellation;
+                // dropping the future also drops its owned model transport.
+                let (cancel, cancelled) = tokio::sync::watch::channel(false);
+                let operation =
+                    session
+                        .core
+                        .handle_operator_ai(ai_peer.as_ref(), request, cancelled);
+                tokio::pin!(operation);
+                tokio::select! { biased;
+                    _ = reader.fill_buf() => {
+                        let _ = cancel.send(true);
+                        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), operation).await;
+                        return Ok(());
+                    }
+                    response = &mut operation => response,
+                }
+            }
             Ok(request) if request.is_mutating() => {
                 tokio::select! { biased;
                     _ = reader.fill_buf() => { return Ok(()); }
