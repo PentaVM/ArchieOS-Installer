@@ -142,6 +142,13 @@ impl ProviderSpec {
                 digest.update(remote.as_bytes());
                 let id = ModelId::parse(format!("catalog.m{:x}", digest.finalize()))
                     .map_err(|_| ProviderConfigError::InvalidId)?;
+                // A local server that forwards a model to a cloud service (Ollama's
+                // `*-cloud` tags) does not make that model local.
+                let locality = if forwards_to_cloud(remote) {
+                    Locality::Cloud
+                } else {
+                    self.locality
+                };
                 let mut labels = BTreeMap::from([
                     ("provider-id".into(), self.id.clone()),
                     ("provider-model".into(), remote.to_string()),
@@ -167,12 +174,12 @@ impl ProviderSpec {
                         }
                         ProviderProtocol::Anthropic => ProviderKind::Anthropic,
                     },
-                    locality: self.locality,
+                    locality,
                     node: None,
                     context_window: 4096,
                     max_output_tokens: 1024,
                     capabilities: vec![Capability::known("cognition.response")],
-                    max_privacy_grade: match self.locality {
+                    max_privacy_grade: match locality {
                         Locality::Local => PrivacyGrade::Restricted,
                         Locality::Fabric => PrivacyGrade::Sensitive,
                         Locality::Cloud => PrivacyGrade::Public,
@@ -192,6 +199,16 @@ impl ProviderSpec {
             })
             .collect()
     }
+}
+
+/// Ollama names the models it forwards to ollama.com with a `cloud` tag, as in
+/// `gpt-oss:120b-cloud` or `glm-4.6:cloud`.
+fn forwards_to_cloud(remote: &str) -> bool {
+    let tag = remote
+        .rsplit_once(':')
+        .map_or("", |(_, tag)| tag)
+        .to_ascii_lowercase();
+    tag == "cloud" || tag.ends_with("-cloud")
 }
 
 fn valid_model_id(value: &str) -> bool {
@@ -326,6 +343,33 @@ mod tests {
             assert_eq!(provider.locality, Locality::Local);
             assert!(provider.credential_env.is_none());
             assert!(provider.validate().is_ok());
+        }
+    }
+
+    /// Ollama lists the cloud models a user pulled (`gpt-oss:120b-cloud`) beside local ones
+    /// and forwards them to ollama.com. A loopback address does not make them local, so they
+    /// never see more than public text (review of 2026-10-22).
+    #[test]
+    fn a_cloud_model_behind_a_local_server_is_not_local() {
+        let mut provider = builtin_provider("ollama").unwrap();
+        provider.models = vec![
+            "llama3.2:3b".into(),
+            "gpt-oss:120b-cloud".into(),
+            "glm-4.6:cloud".into(),
+        ];
+        for model in provider.descriptors(&[]).unwrap() {
+            let remote = model.labels["provider-model"].as_str();
+            if remote == "llama3.2:3b" {
+                assert_eq!(model.locality, Locality::Local);
+                assert_eq!(model.max_privacy_grade, PrivacyGrade::Restricted);
+            } else {
+                assert_eq!(model.locality, Locality::Cloud, "{remote}");
+                assert_eq!(model.max_privacy_grade, PrivacyGrade::Public, "{remote}");
+                assert!(
+                    crate::ProviderEndpoint::for_model(&model).is_ok_and(|e| !e.is_configured())
+                        || crate::ProviderEndpoint::for_model(&model).is_err()
+                );
+            }
         }
     }
 

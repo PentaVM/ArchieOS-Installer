@@ -574,6 +574,53 @@ thinking = "on"
     drop(rt);
 }
 
+/// A restricted answer in a focus is never recalled into a lower-grade request there, and
+/// it does not block that request either (review of 2026-10-22: it used to abort it).
+#[test]
+#[ignore = "requires isolated PG18 extensions and captured HTTP runner"]
+fn a_restricted_memory_is_left_out_of_a_public_request_not_fatal_to_it() {
+    let database = Database::new();
+    let dir = tempfile::tempdir().unwrap();
+    let domain = ContextDomain::personal("fixture").unwrap();
+    RuntimeProfile::for_domain(domain.clone())
+        .create(&dir.path().join("policy.toml"))
+        .unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let listener = rt
+        .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
+        .unwrap();
+    configure_api(dir.path(), listener.local_addr().unwrap());
+    let (send, recv) = std::sync::mpsc::channel();
+    rt.spawn(async move {
+        for answer in ["restricted proposal RHO-9", "public proposal PI-2"] {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            send.send(read_http(&mut stream).await).unwrap();
+            reply_http(&mut stream, answer).await;
+        }
+    });
+    let mut service = runtime(&database, dir.path());
+    let mut restricted = request(domain.clone(), "restricted local request");
+    restricted.privacy = PrivacyGrade::Restricted;
+    let sealed = rt.block_on(service.execute(&restricted, None)).unwrap();
+    assert_eq!(sealed.receipt.status, InferenceStatus::Completed);
+    recv.recv().unwrap();
+    let public = rt
+        .block_on(service.execute(&request(domain, "public follow-up"), None))
+        .unwrap();
+    assert_eq!(public.receipt.status, InferenceStatus::Completed);
+    assert!(!recv.recv().unwrap().contains("RHO-9"));
+    assert!(!public
+        .receipt
+        .admitted_evidence_refs
+        .iter()
+        .any(|r| Some(r) == sealed.receipt.result_ref.as_ref()));
+    drop(service);
+    drop(rt);
+}
+
 #[test]
 #[ignore = "requires isolated PG18 extensions and captured HTTP runner"]
 fn lowering_the_privacy_ceiling_hides_previously_sealed_restricted_results() {

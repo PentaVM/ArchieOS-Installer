@@ -74,6 +74,8 @@ class DeterministicParent:
                 trajectory = [{"step": 1, "action": "read", "observed": "Reference A"}]
             text = json.dumps({"artifact": "Reference A: a supported summary.",
                                "trajectory": trajectory if self.listed_notes else "\n".join(trajectory)})
+        elif form == "experience" and self.no_entry == "garbage":
+            text = "I could not decide."
         elif form == "experience" and self.no_entry:
             text = "<edits>\n</edits>\n<experience>\nNO_ENTRY\n</experience>"
         elif form == "experience":
@@ -182,6 +184,15 @@ class WorkerTests(unittest.TestCase):
             self.assertEqual(result["library"]["committed"], [])
             self.assertFalse(any(e["type"] == "promotion" for e in events))
             self.assertFalse(list(Path(directory).rglob("EXPERIENCE.md")))
+
+    def test_an_unreadable_reflection_is_not_reported_as_no_lesson(self):
+        # Only an explicit NO_ENTRY means "nothing transfers"; a reflection that says
+        # nothing usable is a failed run (review of 2026-10-22).
+        with tempfile.TemporaryDirectory() as directory:
+            result, events = self.run_worker(request(Path(directory)), DeterministicParent(no_entry="garbage"))
+        self.assertEqual(result["status"], "failed", result)
+        self.assertEqual(result["error_code"], "missing_experience")
+        self.assertFalse(any(e["type"] == "promotion" for e in events))
 
     def test_real_upstream_ppc_and_complete_library_reuse(self):
         # Removing actual upstream recursion or dropping the full library tree breaks this.

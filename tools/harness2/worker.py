@@ -526,6 +526,7 @@ def engine(req, bridge, transient, prior_library):
         attempts = 1
         project = ""
         region = ""
+        declined = False  # The reflection wrote upstream's explicit NO_ENTRY line.
 
         def call(self, mission, context_dir, label, *, system="", timeout=None, max_attempts=None, harvest=None):
             evidence = read_files(Path(context_dir))
@@ -540,6 +541,8 @@ def engine(req, bridge, transient, prior_library):
             prompt = canonical(dict(instruction=instruction, mission=mission, system=system,
                                     context_files=evidence))
             text = bridge.infer(label, "proposer" if harvest else "reflection" if form == "experience" else "selector", form, prompt)
+            if form == "experience":
+                self.declined = re.search(r"(?m)^\s*NO_ENTRY\s*$", text) is not None
             workspace = None
             if harvest:
                 # A reply that is not a readable proposal is upstream's ProposerError: the
@@ -582,8 +585,11 @@ def engine(req, bridge, transient, prior_library):
         raise Fault("upstream_failed")
     selection = result.selections["seq"]
     # Upstream asks for NO_ENTRY when no execution contrast transfers. Such a run is
-    # complete with nothing to offer: no promotion request and no library entry.
+    # complete with nothing to offer: no promotion request and no library entry. A
+    # reflection without a usable lesson that did not say NO_ENTRY is a failure.
     lesson = library.has_experience(selection.get("experience"))
+    if not lesson and not proposer.declined:
+        raise Fault("missing_experience")
     adopted_tree = domain_library.tree_of(req["task_id"]) if lesson else dict(req["base_harness"])
     validate_tree(adopted_tree, req["base_harness"])
     base_artifact = adapter.deliverable_text(Path(result.base[0]["run_dir"]))

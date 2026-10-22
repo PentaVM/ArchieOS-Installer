@@ -6,7 +6,7 @@
 
 use archie_registry::ModelRegistry;
 use archie_router::{Router, RoutingRequest, Weights};
-use archie_types::{Locality, ModelRole, PrivacyGrade};
+use archie_types::{Availability, Locality, ModelRole, PrivacyGrade};
 use std::path::{Path, PathBuf};
 
 fn shipped_models() -> PathBuf {
@@ -102,33 +102,39 @@ fn thinking_is_asked_of_a_reasoning_model_and_never_of_iris() {
     }
 }
 
-/// With only cloud reasoning models installed, a private request is refused. It is not
-/// sent to a cloud model, and it is not handed to IRIS because IRIS happens to be local.
+/// Bonsai ships offline, so as staged onto a node without llama-server only cloud
+/// reasoning models are usable and a private request is refused. It is not sent to a
+/// cloud model, and it is not handed to IRIS because IRIS happens to be local.
 #[test]
 fn a_private_question_is_refused_when_no_local_model_reasons() {
-    let mut registry = shipped();
-    let local: Vec<_> = registry
-        .iter()
-        .filter(|m| {
-            m.locality == Locality::Local && m.provides(&ModelRole::ReasoningWorker.capability())
-        })
-        .map(|m| m.id.clone())
-        .collect();
-    assert!(!local.is_empty(), "a local reasoning model is shipped");
-    for id in &local {
-        registry.remove(id);
-    }
+    let registry = shipped();
+    assert!(
+        registry.iter().any(|m| m.locality == Locality::Local
+            && m.provides(&ModelRole::ReasoningWorker.capability())
+            && m.availability == Availability::Offline),
+        "Bonsai is shipped, offline"
+    );
     let request = RoutingRequest::new(PrivacyGrade::Restricted, 400, 2000)
         .requiring(ModelRole::ReasoningWorker.capability());
     let outcome = Router::new(Weights::default()).route(&registry, &request);
     assert_eq!(outcome.selected_model(), None, "{}", outcome.explain());
 }
 
-/// The shipped local model reasons over private context, so a restricted request is
-/// answered on the machine and never routed to a cloud model.
+/// On a node whose llama-server serves Bonsai, its installed manifests say ready; the
+/// local model then reasons over private context and nothing goes to a cloud model.
 #[test]
 fn a_private_question_is_reasoned_by_the_local_model() {
-    let registry = shipped();
+    let mut registry = shipped();
+    let offline: Vec<_> = registry
+        .iter()
+        .filter(|m| m.availability == Availability::Offline)
+        .cloned()
+        .collect();
+    for mut model in offline {
+        registry.remove(&model.id);
+        model.availability = Availability::Ready;
+        registry.register(model).unwrap();
+    }
     let request = RoutingRequest::new(PrivacyGrade::Restricted, 400, 2000)
         .requiring(ModelRole::ReasoningWorker.capability());
     let outcome = Router::new(Weights::default()).route(&registry, &request);

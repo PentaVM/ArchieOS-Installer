@@ -19,8 +19,10 @@ max_output_tokens = 4096
 capabilities = ["cognition.response"]
 max_privacy_grade = "restricted"
 
-# Registered, not loaded: archie-bonsai.service starts only when the weights are present.
-availability = "cold"
+# Shipped offline: the router chooses it only on a node whose llama-server serves these
+# weights, which sets availability = "ready" in its installed copy. Cold would route every
+# private and voice request to a server that may not be there.
+availability = "offline"
 
 # Assigned by hand, below the cloud reasoning models it stands in for. latency_ema_ms is
 # the RTX 3070 prompt-plus-answer time for a short question, not a CPU figure.

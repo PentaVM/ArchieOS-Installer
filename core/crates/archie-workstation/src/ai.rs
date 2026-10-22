@@ -713,7 +713,8 @@ impl InferenceStorage {
         locality: Locality,
     ) -> Result<AdmittedContext, String> {
         let _vault_lock = self.lock_vault()?;
-        let mut references = request.evidence.clone();
+        let references = request.evidence.clone();
+        let mut recalled = Vec::new();
         if request.recall_memory {
             for receipt in self
                 .store
@@ -721,8 +722,10 @@ impl InferenceStorage {
                 .map_err(|e| e.to_string())?
             {
                 if let Some(result) = receipt.result_ref {
-                    if !references.contains(&result.reference) {
-                        references.push(result.reference);
+                    if !references.contains(&result.reference)
+                        && !recalled.contains(&result.reference)
+                    {
+                        recalled.push(result.reference);
                     }
                 }
             }
@@ -730,18 +733,30 @@ impl InferenceStorage {
         let mut vault =
             vault_io::open_vault(&self.vault_dir).map_err(|_| "cannot open runtime Vault")?;
         let entries = vault.sealed_entries();
-        for reference in &references {
-            if !binding.domain.contains(reference) {
+        let mut admitted = Vec::with_capacity(references.len() + recalled.len());
+        for (reference, cited) in references
+            .into_iter()
+            .map(|r| (r, true))
+            .chain(recalled.into_iter().map(|r| (r, false)))
+        {
+            if !binding.domain.contains(&reference) {
                 return Err("recalled evidence crosses domain".into());
             }
             let entry = entries
                 .iter()
-                .find(|e| e.reference == *reference)
+                .find(|e| e.reference == reference)
                 .ok_or("recalled evidence is missing")?;
             if entry.grade > request.privacy {
-                return Err("recalled evidence exceeds request privacy grade".into());
+                // Cited evidence above the request's grade is refused. The focus's own
+                // memory above it is left out: never disclosed, and never blocking.
+                if cited {
+                    return Err("recalled evidence exceeds request privacy grade".into());
+                }
+                continue;
             }
+            admitted.push(reference);
         }
+        let references = admitted;
         let mut context_request = ContextRequest::new(
             &binding.task_id,
             &binding.task_id,

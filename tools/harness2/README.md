@@ -81,7 +81,9 @@ stderr contains exception types rather than private response payloads.
    refusal should return `admitted:false` and matching shape, or terminate/cancel.
 4. If the reflection writes upstream's `NO_ENTRY` (no execution contrast that
    transfers), nothing is offered: no `promotion` request, no library entry, and the
-   result says `baseline_retained` with `reason_code: no_lesson`.
+   result says `baseline_retained` with `reason_code: no_lesson`. A reflection
+   without a usable lesson that does not say `NO_ENTRY` fails the run
+   (`missing_experience`).
    Otherwise, after upstream adoption/reflection, worker sends `promotion` containing the
    complete proposed harness, experience, baseline/final artifacts and hashes.
    Parent separately admits those exact bytes and checks baseline acceptability.
