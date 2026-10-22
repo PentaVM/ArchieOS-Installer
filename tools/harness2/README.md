@@ -43,7 +43,17 @@ The substrate and model channel are `archie_mediated`. No upstream OpenCode, Cod
 or Claude executor is invoked. Skills, subagents, scripts, plugins and hooks are
 disabled. Proposals return a JSON map of text files; they never edit the host
 filesystem or execute generated code. All four files must be present, nonempty and
-within the 24,000-byte combined cap. A malformed or off-surface edit aborts the run.
+within the 24,000-byte combined cap. An off-surface edit, or any edit to
+`guardrails.md`, aborts the run. A proposal reply that is not readable JSON of the
+right shape is upstream's `ProposerError`: that stage keeps the base harness, the
+call stays charged, and the run continues.
+The instructions name the four keys exactly, because the context lists the files
+under `harness/` and a real model copied that prefix. A solver's `trajectory` and a
+proposal's `notes` only record what was observed, so a list of strings is read as its
+lines and any other list or object as its canonical JSON. A copy of
+`guardrails.md` that differs from the base only in surrounding whitespace is replaced
+by the exact base bytes; any other difference aborts. The artifact and the editable
+files are never reinterpreted.
 
 The worker owns no Policy, credentials, provider network endpoint or model weights.
 The parent must launch it in OS confinement with a minimal environment, restricted
@@ -69,7 +79,10 @@ stderr contains exception types rather than private response payloads.
 3. Parent sends `inference_result` with matching domain/policy/request ID and
    `admitted:true`. Unknown usage is JSON `null`, never invented zero. An admission
    refusal should return `admitted:false` and matching shape, or terminate/cancel.
-4. After upstream adoption/reflection, worker sends `promotion` containing the
+4. If the reflection writes upstream's `NO_ENTRY` (no execution contrast that
+   transfers), nothing is offered: no `promotion` request, no library entry, and the
+   result says `baseline_retained` with `reason_code: no_lesson`.
+   Otherwise, after upstream adoption/reflection, worker sends `promotion` containing the
    complete proposed harness, experience, baseline/final artifacts and hashes.
    Parent separately admits those exact bytes and checks baseline acceptability.
    Parent replies `promotion_result`. Refusal retains the baseline and commits no

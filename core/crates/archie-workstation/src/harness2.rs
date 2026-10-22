@@ -667,18 +667,32 @@ impl RunState<'_> {
             return Err(Harness2Error::Protocol);
         }
         if r.status == "completed" {
-            let promotion = self.promotion.as_ref().ok_or(Harness2Error::Protocol)?;
-            if self.seen.len() != 8
-                || r.usage != self.usage
-                || r.promotion.status
-                    != if promotion.approved {
-                        "promoted"
-                    } else {
-                        "baseline_retained"
-                    }
-                || r.promotion.reason_code != promotion.reason_code
-            {
+            if self.seen.len() != 8 || r.usage != self.usage {
                 return Err(Harness2Error::Protocol);
+            }
+            match self.promotion.as_ref() {
+                Some(promotion) => {
+                    if r.promotion.status
+                        != if promotion.approved {
+                            "promoted"
+                        } else {
+                            "baseline_retained"
+                        }
+                        || r.promotion.reason_code != promotion.reason_code
+                    {
+                        return Err(Harness2Error::Protocol);
+                    }
+                }
+                // A reflection that found no lesson (upstream's NO_ENTRY) offers nothing:
+                // the baseline stays and nothing can have been committed.
+                None => {
+                    if r.promotion.status != "baseline_retained"
+                        || r.promotion.reason_code != "no_lesson"
+                        || !r.library.committed.is_empty()
+                    {
+                        return Err(Harness2Error::Protocol);
+                    }
+                }
             }
         } else if r.status != "resumed" || !self.seen.is_empty() || self.promotion.is_some() {
             return Err(Harness2Error::Protocol);

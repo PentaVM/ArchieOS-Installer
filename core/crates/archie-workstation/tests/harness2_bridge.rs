@@ -96,6 +96,61 @@ impl Harness2Handler for Parent {
     }
 }
 
+/// The same parent, whose reflection finds no lesson that transfers: upstream asks for
+/// NO_ENTRY then, and Bonsai's unchanged proposals gave exactly that (2026-10-22).
+struct NoLessonParent(Parent);
+
+impl Harness2Handler for NoLessonParent {
+    fn infer<'a>(&'a mut self, stage: &'a StageRequest) -> StageFuture<'a> {
+        if stage.response_format != "experience" {
+            return self.0.infer(stage);
+        }
+        self.0.calls += 1;
+        Box::pin(async {
+            Ok(StageReply {
+                text: "<edits>\n</edits>\n<experience>\nNO_ENTRY\n</experience>".into(),
+                usage: StageUsage {
+                    input_tokens: Some(20),
+                    output_tokens: Some(20),
+                    cost_micros: None,
+                },
+            })
+        })
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires configured POSIX Python 3.12/3.13; set ARCHIE_HARNESS2_PYTHON"]
+async fn a_run_without_a_lesson_completes_with_the_baseline_and_offers_nothing() {
+    let executable = PathBuf::from(
+        std::env::var_os("ARCHIE_HARNESS2_PYTHON")
+            .expect("ARCHIE_HARNESS2_PYTHON must explicitly name a supported interpreter"),
+    );
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .canonicalize()
+        .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let program = WorkerProgram {
+        executable,
+        arguments: vec!["-I".into(), "-S".into(), "-B".into()],
+        worker: root.join("tools/harness2/worker.py"),
+        state_root: directory.path().to_path_buf(),
+    };
+    let task = task();
+    let mut parent = NoLessonParent(Parent {
+        tree: task.base_harness.clone(),
+        calls: 0,
+    });
+    let result = run_worker(&program, task, &mut parent).await.unwrap();
+    assert_eq!(result.status, "completed");
+    assert_eq!(parent.0.calls, 8);
+    assert_eq!(result.promotion.status, "baseline_retained");
+    assert_eq!(result.promotion.reason_code, "no_lesson");
+    assert!(!result.promotion.improvement_verified);
+    assert!(result.library.committed.is_empty());
+}
+
 /// Explicit opt-in rather than a silent skip: run with --ignored after setting
 /// ARCHIE_HARNESS2_PYTHON to a POSIX Python 3.12/3.13 executable. No model calls.
 #[tokio::test]

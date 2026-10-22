@@ -42,11 +42,16 @@ def request(root, task="task-a", domain="work/acme/project"):
 
 
 class DeterministicParent:
-    def __init__(self, mutation=None, approve=True, unknown_usage=False):
+    def __init__(self, mutation=None, approve=True, unknown_usage=False, listed_notes=False,
+                 fenced=False, broken_first_proposal=False, no_entry=False):
+        self.no_entry = no_entry
         self.events = []
         self.mutation = mutation
         self.approve = approve
         self.unknown_usage = unknown_usage
+        self.listed_notes = listed_notes
+        self.fenced = fenced
+        self.broken_first_proposal = broken_first_proposal
 
     def reply(self, event):
         self.events.append(event)
@@ -61,10 +66,16 @@ class DeterministicParent:
             tree["LongTermMEMORY.md"] = "Lesson sentinel: keep source evidence-a."
             if self.mutation:
                 self.mutation(tree)
-            text = json.dumps({"harness": tree, "notes": "Evidence-a remains attributed."})
+            notes = "Evidence-a remains attributed."
+            text = json.dumps({"harness": tree, "notes": [notes] if self.listed_notes else notes})
         elif form == "artifact":
+            trajectory = ["[ACTION] Read admitted evidence-a", "[OBSERVATION] Reference A"]
+            if self.listed_notes == "objects":
+                trajectory = [{"step": 1, "action": "read", "observed": "Reference A"}]
             text = json.dumps({"artifact": "Reference A: a supported summary.",
-                               "trajectory": "[ACTION] Read admitted evidence-a\n[OBSERVATION] Reference A"})
+                               "trajectory": trajectory if self.listed_notes else "\n".join(trajectory)})
+        elif form == "experience" and self.no_entry:
+            text = "<edits>\n</edits>\n<experience>\nNO_ENTRY\n</experience>"
         elif form == "experience":
             text = ("<edits>Preserve source references.</edits>\n<experience>\n"
                     "cue: a source summary\nlesson: Lesson sentinel: keep source evidence-a.\n"
@@ -72,6 +83,11 @@ class DeterministicParent:
                     "</experience>")
         else:
             raise AssertionError(f"Unexpected stage format {form}")
+        if self.fenced and form in ("harness", "artifact"):
+            text = "```json\n" + text + "\n```"
+        if self.broken_first_proposal and form == "harness":
+            self.broken_first_proposal = False
+            text = text[:-3] + '"}}'  # The unterminated notes string a real proposal sent.
         usage = {"input_tokens": 20, "output_tokens": 20, "cost_micros": 2}
         if self.unknown_usage:
             usage = dict.fromkeys(usage)
@@ -106,6 +122,66 @@ class WorkerTests(unittest.TestCase):
         process.stderr.close()
         self.assertIsNotNone(result, f"Worker failed to return a result: exit={code}: {error}")
         return result, parent.events
+
+    def test_reply_contract_names_the_exact_keys_and_string_fields(self):
+        # Bonsai copied the context listing's harness/ folder into its keys and returned
+        # notes and trajectory as lists (2026-10-22); the instructions leave neither open.
+        with tempfile.TemporaryDirectory() as directory:
+            _, events = self.run_worker(request(Path(directory)))
+        instructions = {}
+        for event in events:
+            if event["type"] == "inference":
+                instructions.setdefault(event["response_format"],
+                                        json.loads(event["prompt"])["instruction"])
+        for key in BASE:
+            self.assertIn(key, instructions["harness"])
+        self.assertIn("without the harness/ folder", instructions["harness"])
+        self.assertIn("notes (one JSON string)", instructions["harness"])
+        self.assertIn("each one JSON string", instructions["artifact"])
+        # The reflection is tagged text; a real Bonsai reflection came back as JSON instead.
+        self.assertIn("<experience>", instructions["experience"])
+        self.assertIn("never JSON", instructions["experience"])
+
+    def test_listed_notes_and_trajectory_are_read_as_lines(self):
+        # Bonsai returned both as lists of strings, and once a trajectory as a list of
+        # objects (2026-10-22). Neither field is executed or adopted; the artifact and the
+        # harness tree stay strict.
+        for listed in (True, "objects"):
+            with self.subTest(listed=listed), tempfile.TemporaryDirectory() as directory:
+                result, _ = self.run_worker(request(Path(directory)), DeterministicParent(listed_notes=listed))
+                self.assertEqual(result["status"], "completed", result)
+                self.assertEqual(result["ledger"]["R"], 4)
+                self.assertEqual(result["ledger"]["P"], 3)
+
+    def test_a_reply_inside_one_markdown_fence_is_read_as_its_json(self):
+        # A real Bonsai proposal came back as ```json ... ``` (2026-10-22).
+        with tempfile.TemporaryDirectory() as directory:
+            result, _ = self.run_worker(request(Path(directory)), DeterministicParent(fenced=True))
+        self.assertEqual(result["status"], "completed", result)
+
+    def test_an_unreadable_proposal_keeps_the_base_for_its_stage(self):
+        # Upstream's own contract: a proposer call without a usable reply falls back to the
+        # base harness for that stage. Only unsafe edits abort the run.
+        with tempfile.TemporaryDirectory() as directory:
+            result, events = self.run_worker(request(Path(directory)),
+                                              DeterministicParent(broken_first_proposal=True))
+        self.assertEqual(result["status"], "completed", result)
+        proposals = [e for e in events if e.get("response_format") == "harness"]
+        self.assertGreaterEqual(len(proposals), 3)
+        self.assertEqual(result["usage"]["calls"], sum(1 for e in events if e["type"] == "inference"))
+
+    def test_a_reflection_without_a_lesson_completes_with_the_baseline(self):
+        # Upstream asks for NO_ENTRY when no execution contrast transfers; Bonsai's
+        # unchanged proposals gave exactly that (2026-10-22). Nothing is offered or kept.
+        with tempfile.TemporaryDirectory() as directory:
+            result, events = self.run_worker(request(Path(directory)), DeterministicParent(no_entry=True))
+            self.assertEqual(result["status"], "completed", result)
+            self.assertEqual(result["usage"]["calls"], 8)
+            self.assertEqual(result["promotion"], {"status": "baseline_retained", "reason_code": "no_lesson",
+                                                   "improvement_verified": False})
+            self.assertEqual(result["library"]["committed"], [])
+            self.assertFalse(any(e["type"] == "promotion" for e in events))
+            self.assertFalse(list(Path(directory).rglob("EXPERIENCE.md")))
 
     def test_real_upstream_ppc_and_complete_library_reuse(self):
         # Removing actual upstream recursion or dropping the full library tree breaks this.
@@ -175,6 +251,16 @@ class WorkerTests(unittest.TestCase):
                 self.assertEqual(result["error_code"], "unsafe_harness")
                 self.assertFalse(list(Path(directory).rglob("EXPERIENCE.md")))
                 self.assertFalse(any(e["type"] == "promotion" for e in events))
+
+    def test_a_guardrails_copy_with_a_trailing_newline_is_the_base_file(self):
+        # A real Bonsai proposal kept the guardrails word for word and added "\n" (2026-10-22).
+        newline = lambda t: t.update({"guardrails.md": t["guardrails.md"] + "\n"})
+        with tempfile.TemporaryDirectory() as directory:
+            result, events = self.run_worker(request(Path(directory)),
+                                              DeterministicParent(mutation=newline))
+        self.assertEqual(result["status"], "completed", result)
+        promotion = next(e for e in events if e["type"] == "promotion")
+        self.assertEqual(promotion["harness"]["guardrails.md"], BASE["guardrails.md"])
 
     def test_unknown_cost_has_no_fictional_charge_but_still_enforces_call_limit(self):
         with tempfile.TemporaryDirectory() as directory:
