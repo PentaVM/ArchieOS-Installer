@@ -203,7 +203,17 @@ entrada; `Restricted` nunca a Nebius) y el `Cargo.lock`. No revisó: internos de
 LNCM y el entrenamiento de Wanda, los adaptadores de Sentry, SQL, el instalador, el display
 ni los scripts de la WSL.
 
-**Pasada final sobre el código de esta rama:** (ver §5.1)
+### 5.1 Pasada final sobre `91e362e`
+
+| Paso | Resultado |
+|---|---|
+| `cargo fmt --all -- --check` | limpio |
+| `cargo clippy --workspace --all-targets -- -D warnings` | limpio |
+| `cargo test --workspace` | 2850 pasan, 0 fallan, 148 ignoradas |
+| PostgreSQL ignoradas (`--test-threads=1`) | `archie-postgres` 17, `archie-state` 56, `archie-core` 13, `archie-workstation` 13; 0 fallas |
+| Python del worker de Harness² | 25/25 |
+
+Este commit solo cambia este documento.
 
 ## 6. Qué no se probó
 
