@@ -276,7 +276,9 @@ impl UnifiedRuntime {
                     InferenceBudget::ManagedByteTime { max_output_bytes } => max_output_bytes,
                     InferenceBudget::StrictTokens => unreachable!("validated above"),
                 };
-                let completed = if let Ok(granted) = prepared.grant.dispatch() {
+                let dispatched = self.storage.authority.dispatch(&mut prepared.grant);
+                let refused = dispatched.is_err();
+                let completed = if let Ok(granted) = dispatched {
                     let remaining = granted.min(timeout.saturating_sub(start.elapsed()));
                     if remaining.is_zero() {
                         Err(crate::codex::CodexError::Timeout)
@@ -331,7 +333,14 @@ impl UnifiedRuntime {
                         InferenceStatus::Failed,
                         None,
                         None,
-                        Some("deadline_expired".into()),
+                        Some(
+                            if refused {
+                                "dispatch_refused"
+                            } else {
+                                "deadline_expired"
+                            }
+                            .into(),
+                        ),
                     ),
                     Err(_) => (
                         InferenceStatus::Failed,
@@ -374,6 +383,7 @@ impl UnifiedRuntime {
                     .candidates(&question)
                     .map_err(|e| e.to_string())?;
                 let mut last = None;
+                let mut too_large = false;
                 let candidates: Vec<_> = candidates
                     .into_iter()
                     .filter(|id| match &request.runner {
@@ -435,13 +445,19 @@ impl UnifiedRuntime {
                         stream: false,
                     };
                     // Count the full recalled capsule, not only the fresh question.
+                    // A small model must not block a larger fallback candidate.
                     if !descriptor.fits_context(
                         ((SYSTEM.len() + prompt.len()) / 3 + 1).min(u32::MAX as usize) as u32,
                         request.max_output_tokens,
                     ) {
-                        return Err("assembled context exceeds selected model budget".into());
+                        too_large = true;
+                        continue;
                     }
-                    let granted = prepared.grant.dispatch().unwrap_or(Duration::ZERO);
+                    let granted = self
+                        .storage
+                        .authority
+                        .dispatch(&mut prepared.grant)
+                        .unwrap_or(Duration::ZERO);
                     let remaining = granted.min(timeout.saturating_sub(start.elapsed()));
                     let outcome = if remaining.is_zero() {
                         (
@@ -477,7 +493,7 @@ impl UnifiedRuntime {
                                 result=tokio::time::timeout(remaining,operation)=>match result {
                                     Ok(Ok(reply))=> {
                                         let text=reply.choices.first().map(|c|c.message.content.clone()).filter(|s|!s.is_empty());
-                                        if let Some(text)=text {(InferenceStatus::Completed,Some(text),None,reply.usage.map(|u|u.completion_tokens))}
+                                        if let Some(text)=text {(InferenceStatus::Completed,Some(text),None,reply.usage.map(|u|(u.prompt_tokens,u.completion_tokens)))}
                                         else {(InferenceStatus::Failed,None,Some("empty_response".into()),None)}
                                     },
                                     _=>(InferenceStatus::Failed,None,Some("provider_failed".into()),None),
@@ -500,9 +516,9 @@ impl UnifiedRuntime {
                             session: None,
                             error: outcome.2,
                             usage: ObservedUsage {
-                                output_tokens: outcome.3,
+                                input_tokens: outcome.3.map(|u| u.0),
+                                output_tokens: outcome.3.map(|u| u.1),
                                 duration_ms: Some(start.elapsed().as_millis() as u64),
-                                ..Default::default()
                             },
                         })
                         .await?;
@@ -511,7 +527,13 @@ impl UnifiedRuntime {
                     }
                     last = Some(result);
                 }
-                last.ok_or_else(|| "no model attempt completed within its budget".into())
+                last.ok_or_else(|| {
+                    if too_large {
+                        "assembled context exceeds every candidate model budget".into()
+                    } else {
+                        "no model attempt completed within its budget".into()
+                    }
+                })
             }
         }
     }
@@ -752,6 +774,14 @@ impl InferenceStorage {
             session = None;
             error = Some("original_lease_expired".into());
         }
+        // A valid but oversized answer is a durable failed attempt, never an
+        // unattributed abort that skips the receipt and the next candidate.
+        if text.as_ref().is_some_and(|t| t.len() > 262144) {
+            status = InferenceStatus::Failed;
+            text = None;
+            session = None;
+            error = Some("output_exceeds_result_budget".into());
+        }
         // A changed profile, paused Focus or emergency pause can never publish a
         // newly successful recalled answer merely because inference completed.
         let pinned = self.authority.admit(binding, request.privacy, model, now)?;
@@ -765,8 +795,8 @@ impl InferenceStorage {
         let mut result_ref = None;
         let mut output_sha256 = None;
         if let Some(text) = &text {
-            if text.is_empty() || text.len() > 262144 {
-                return Err("model output exceeds result budget".into());
+            if text.is_empty() {
+                return Err("empty model output cannot be sealed".into());
             }
             let reference = binding
                 .domain
@@ -800,7 +830,10 @@ impl InferenceStorage {
                 .map_err(|_| "cannot verify sealed proposal")?
             {
                 Disclosure::Content { text: restored, .. } if restored == *text => {}
-                _ => return Err("sealed proposal integrity mismatch".into()),
+                _ => {
+                    self.remove_staged(&reference, "unverifiable staged output")?;
+                    return Err("sealed proposal integrity mismatch".into());
+                }
             }
             output_sha256 = Some(sha256(text.as_bytes()));
             result_ref = Some(ScopedReference {
@@ -870,15 +903,7 @@ impl InferenceStorage {
                     // attempt's staged output, retain a failed audit checkpoint,
                     // and never renew the original model grant at completion.
                     if let Some(result) = &receipt.result_ref {
-                        let mut vault = vault_io::open_vault(&self.vault_dir)
-                            .map_err(|_| "cannot open expired output for cleanup")?;
-                        vault.remove(
-                            "expired inference attempt",
-                            &result.reference,
-                            Timestamp::now().as_millis(),
-                        );
-                        vault_io::persist_vault(&self.vault_dir, &vault)
-                            .map_err(|_| "cannot remove expired staged output")?;
+                        self.remove_staged(&result.reference, "expired inference attempt")?;
                     }
                     receipt.status = InferenceStatus::Failed;
                     receipt.error_code = Some("original_lease_expired".into());
@@ -894,7 +919,14 @@ impl InferenceStorage {
                         .commit_inference(&receipt, &checkpoint, expected)
                         .map_err(|e| e.to_string())?;
                 }
-                Err(error) => return Err(error.to_string()),
+                Err(error) => {
+                    // The transaction rolled back (CAS loss, storage error): the
+                    // staged output can never be recalled, so it must not linger.
+                    if let Some(result) = &receipt.result_ref {
+                        self.remove_staged(&result.reference, "uncommitted inference attempt")?;
+                    }
+                    return Err(error.to_string());
+                }
             }
         } else {
             self.store
@@ -919,12 +951,22 @@ impl InferenceStorage {
         })
     }
 
+    /// Caller holds the Vault lock.
+    fn remove_staged(&self, reference: &VaultRef, reason: &str) -> Result<(), String> {
+        let mut vault = vault_io::open_vault(&self.vault_dir)
+            .map_err(|_| "cannot open staged output for cleanup")?;
+        vault.remove(reason, reference, Timestamp::now().as_millis());
+        vault_io::persist_vault(&self.vault_dir, &vault)
+            .map_err(|_| "cannot remove staged output".to_owned())
+    }
+
     pub fn recall(
         &self,
         binding: &InferenceBinding,
         receipt_id: &str,
     ) -> Result<InferenceOutcome, String> {
         let _vault_lock = self.lock_vault()?;
+        let (profile, _) = self.authority.profile()?;
         self.authority
             .admit(binding, PrivacyGrade::Public, "memory-recall", now())?;
         resume_context(
@@ -942,11 +984,13 @@ impl InferenceStorage {
             result.validate_for(binding)?;
             let mut vault =
                 vault_io::open_vault(&self.vault_dir).map_err(|_| "cannot open runtime Vault")?;
+            // Disclose under today's ceiling, not the one in force when the
+            // answer was sealed: lowering max_privacy also hides old results.
             match vault
                 .disclose(
                     "operator scoped recall",
                     &result.reference,
-                    PrivacyGrade::Restricted,
+                    profile.max_privacy,
                     now(),
                 )
                 .map_err(|_| "Vault refused recall")?

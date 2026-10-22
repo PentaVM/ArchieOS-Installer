@@ -502,6 +502,55 @@ fn original_policy_lease_clamps_transport_and_expired_result_stays_failed() {
     assert!(receipt.result_ref.is_none());
 }
 
+#[test]
+#[ignore = "requires isolated PG18 extensions and captured HTTP runner"]
+fn lowering_the_privacy_ceiling_hides_previously_sealed_restricted_results() {
+    let database = Database::new();
+    let dir = tempfile::tempdir().unwrap();
+    let domain = ContextDomain::personal("fixture").unwrap();
+    let profile = RuntimeProfile::for_domain(domain.clone());
+    profile.create(&dir.path().join("policy.toml")).unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let listener = rt
+        .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
+        .unwrap();
+    configure_api(dir.path(), listener.local_addr().unwrap());
+    rt.spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        read_http(&mut stream).await;
+        reply_http(&mut stream, "restricted proposal RHO-7").await;
+    });
+    let mut service = runtime(&database, dir.path());
+    let mut restricted = request(domain, "restricted local request");
+    restricted.privacy = PrivacyGrade::Restricted;
+    let sealed = rt.block_on(service.execute(&restricted, None)).unwrap();
+    assert_eq!(sealed.receipt.status, InferenceStatus::Completed);
+    let binding = sealed.receipt.binding.clone();
+    let receipt = sealed.receipt.receipt_id.clone();
+    assert_eq!(
+        rt.block_on(service.recall(binding.clone(), receipt.clone()))
+            .unwrap()
+            .text
+            .as_deref(),
+        Some("restricted proposal RHO-7")
+    );
+    let lowered = RuntimeProfile {
+        max_privacy: PrivacyGrade::Public,
+        ..profile
+    };
+    std::fs::write(
+        dir.path().join("policy.toml"),
+        toml::to_string_pretty(&lowered).unwrap(),
+    )
+    .unwrap();
+    assert!(rt.block_on(service.recall(binding, receipt)).is_err());
+    drop(service);
+    drop(rt);
+}
+
 #[cfg(unix)]
 struct VaultLockHolder {
     child: std::process::Child,

@@ -540,6 +540,17 @@ impl JsonProcess {
                     return Err(CodexError::Incomplete);
                 }
                 self.active = None;
+                // The account read before the thread only proves who received
+                // the capsule. Observe it again in this same child so a switch
+                // during the turn cannot attribute the answer to the admitted one.
+                let after = observed_account(
+                    &self
+                        .rpc("account/read", json!({"refreshToken":false}))
+                        .await?,
+                )?;
+                if after.account_id.as_deref() != Some(account_id.as_str()) {
+                    return Err(CodexError::SessionMismatch);
+                }
                 return Ok(CodexCompletion {
                     text,
                     session: CodexSession {
@@ -602,7 +613,9 @@ impl JsonProcess {
     }
     async fn close(&mut self) {
         let _ = self.child.start_kill();
-        let _ = tokio::time::timeout(Duration::from_secs(2), self.child.wait()).await;
+        // Kill is immediate; bound the reap below the 2 s Harness² drain so a
+        // cancelled stage still commits its Cancelled receipt in time.
+        let _ = tokio::time::timeout(Duration::from_millis(900), self.child.wait()).await;
     }
 }
 
@@ -622,6 +635,7 @@ mod tests {
 import json, sys, time
 MODE = {mode:?}
 LOG = {log_path:?}
+TURNED = False
 def send(v):
     print(json.dumps(v), flush=True)
 for line in sys.stdin:
@@ -635,6 +649,7 @@ for line in sys.stdin:
             marker = pathlib.Path(LOG+'.account-seen')
             if marker.exists(): account = 'other-account'
             marker.write_text('seen')
+        if MODE == 'switch-after-turn' and TURNED: account = 'other-account'
         send({{'id':i,'result':{{'account':{{'type':'chatgpt','email':'fixture@example.invalid','planType':'unknown'}},'workspaceRouting':{{'chatgptAccountId':account}},'requiresOpenaiAuth':True}}}})
     elif m in ('thread/start','thread/resume'):
         assert r['params']['approvalPolicy'] == 'never'
@@ -642,6 +657,7 @@ for line in sys.stdin:
         assert r['params']['config']['features.shell_tool'] is False
         send({{'id':i,'result':{{'thread':{{'id':'thread-1','sessionId':'different-session-root'}}}}}})
     elif m == 'turn/start':
+        TURNED = True
         send({{'id':i,'result':{{'turn':{{'id':'turn-1','status':'inProgress'}}}}}})
         if MODE == 'hang': time.sleep(30)
         elif MODE == 'oversize': print('x'*300000,flush=True)
@@ -682,6 +698,28 @@ for line in sys.stdin:
         let log = std::fs::read_to_string(dir.path().join("rpc.log")).unwrap();
         assert!(!log.contains("thread/start"));
         assert!(!log.contains("turn/start"));
+    }
+
+    #[tokio::test]
+    async fn account_switch_during_the_turn_is_never_attributed_to_the_admitted_account() {
+        let (dir, client) = fixture("switch-after-turn");
+        let expected = client.account().await.unwrap().account_id.unwrap();
+        let result = client
+            .complete_for_account(
+                &ContextDomain::personal("owner").unwrap(),
+                PrivacyGrade::Public,
+                "fixture-model",
+                "account A admitted capsule",
+                None,
+                Some(&expected),
+                None,
+            )
+            .await;
+        assert!(matches!(result, Err(CodexError::SessionMismatch)));
+        let log = std::fs::read_to_string(dir.path().join("rpc.log")).unwrap();
+        // One read for admission, one before the thread, one after the turn.
+        assert_eq!(log.matches("account/read").count(), 3);
+        assert!(log.contains("turn/start"));
     }
 
     #[tokio::test]

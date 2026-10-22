@@ -160,6 +160,16 @@ impl RuntimeAuthority {
         let _ = uid;
         Err("inference requires the kernel-identified profile owner".into())
     }
+    /// Re-read the operator profile and the live engine immediately before an
+    /// external operation: an emergency pause or profile edit made after
+    /// admission must stop dispatch, not only the later commit.
+    pub fn dispatch(&self, grant: &mut RuntimeGrant) -> Result<Duration, String> {
+        let (_, revision) = self.profile()?;
+        if revision != grant.pinned.policy_revision_ref {
+            return Err("policy changed after admission".into());
+        }
+        grant.dispatch()
+    }
     pub fn new(path: PathBuf, engine: Arc<RwLock<PolicyEngine>>) -> Self {
         Self { path, engine }
     }
@@ -372,5 +382,38 @@ mod tests {
                 Timestamp::now().as_millis()
             )
             .is_err());
+    }
+
+    #[test]
+    fn a_pause_after_admission_refuses_dispatch_of_the_held_grant() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("inference.toml");
+        RuntimeProfile::for_domain(ContextDomain::personal("owner").unwrap())
+            .create(&path)
+            .unwrap();
+        let engine = Arc::new(RwLock::new(PolicyEngine::default()));
+        let policy = RuntimeAuthority::new(path, engine.clone());
+        let binding = InferenceBinding {
+            schema_version: 1,
+            domain: ContextDomain::personal("owner").unwrap(),
+            focus_id: "focus:test".into(),
+            task_id: TaskId::new().to_string(),
+            objective_ref: "objective:test".into(),
+            runner_id: "api".into(),
+            provider_id: "fixture".into(),
+            account_id: "account:test".into(),
+        };
+        let mut grant = policy
+            .admit_grant(
+                &binding,
+                PrivacyGrade::Public,
+                "model",
+                Timestamp::now().as_millis(),
+            )
+            .unwrap();
+        engine.write().unwrap().set_emergency_pause(true);
+        assert!(policy.dispatch(&mut grant).is_err());
+        engine.write().unwrap().set_emergency_pause(false);
+        assert!(policy.dispatch(&mut grant).is_ok());
     }
 }

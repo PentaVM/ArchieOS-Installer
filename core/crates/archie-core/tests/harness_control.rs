@@ -244,8 +244,16 @@ async fn harness_total_deadline_cancels_the_active_model_and_records_no_success(
         credential_env: None,
         models: vec!["harness-deadline-model".into()],
     };
-    let model = provider.descriptors(&[]).unwrap()[0].id.to_string();
-    save_provider(&paths.inference_providers(), provider).unwrap();
+    let mut descriptor = provider.descriptors(&[]).unwrap().remove(0);
+    // Large enough to pass the stage pre-flight, so the stall is reached.
+    descriptor.context_window = 32768;
+    let model = descriptor.id.to_string();
+    std::fs::create_dir_all(paths.models()).unwrap();
+    std::fs::write(
+        paths.models().join("fixture.toml"),
+        toml::to_string(&descriptor).unwrap(),
+    )
+    .unwrap();
     let (sent, started) = tokio::sync::oneshot::channel();
     let slow_model = tokio::spawn(async move {
         let (mut stream, _) = http.accept().await.unwrap();
@@ -280,4 +288,59 @@ async fn harness_total_deadline_cancels_the_active_model_and_records_no_success(
     drop(client);
     connection.await.unwrap();
     slow_model.abort();
+}
+
+#[tokio::test]
+#[ignore = "requires isolated PG18 and ARCHIE_HARNESS2_PYTHON naming POSIX Python3.12/3.13"]
+async fn default_catalog_model_is_refused_before_any_paid_stage() {
+    let root =
+        std::env::temp_dir().join(format!("archie-core-harness-preflight-{}", TraceId::new()));
+    let paths = StatePaths::rooted(&root);
+    paths.ensure_directories().unwrap();
+    configure_worker(&paths);
+    let domain = ContextDomain::personal("harness-preflight").unwrap();
+    RuntimeProfile::for_domain(domain.clone())
+        .create(&paths.config_dir.join("inference.toml"))
+        .unwrap();
+    let runtime = Arc::new(
+        Runtime::boot(paths.clone(), ArchieConfig::default())
+            .await
+            .unwrap(),
+    );
+    let http = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let provider = ProviderSpec {
+        id: "harness-preflight".into(),
+        protocol: ProviderProtocol::OpenAiCompatible,
+        base_url: format!("http://{}/v1/", http.local_addr().unwrap()),
+        locality: Locality::Local,
+        credential_env: None,
+        models: vec!["harness-preflight-model".into()],
+    };
+    // A discovered model keeps the conservative 4096-token default, which the
+    // upstream proposer prompt cannot fit.
+    let model = provider.descriptors(&[]).unwrap()[0].id.to_string();
+    save_provider(&paths.inference_providers(), provider).unwrap();
+    let accepted = tokio::spawn(async move { http.accept().await.is_ok() });
+    let (server, mut client) = tokio::net::UnixStream::pair().unwrap();
+    let host = runtime.clone();
+    let connection = tokio::spawn(async move {
+        serve_operator_connection(server, host).await.unwrap();
+    });
+    let request = archie_core::control::decode::<ControlRequest>(&json!({
+        "request":"ai_harness", "request_body":{
+            "domain":domain.path(), "focus":"preflight", "task_family":"summaries", "run_id":"core-harness-preflight",
+            "prompt":"A public fixture task.", "runner":{"runner":"api_pinned","model":model}, "duration_ms":5000,
+        }
+    }).to_string()).unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(5), request_over(&mut client, &request))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(result.is_error());
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(!accepted.is_finished(), "no stage may reach the provider");
+    accepted.abort();
+    runtime.state.test_sql("DO $$ BEGIN IF EXISTS (SELECT 1 FROM inference_receipts) THEN RAISE EXCEPTION 'a stage ran before the pre-flight refusal'; END IF; END $$;").unwrap();
+    drop(client);
+    connection.await.unwrap();
 }

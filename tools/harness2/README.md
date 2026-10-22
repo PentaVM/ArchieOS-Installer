@@ -102,6 +102,9 @@ rules. The promotion callback must not accept an authority claim made by a model
 Each call reserves input tokens using prompt UTF-8 bytes plus 256 overhead tokens,
 the per-call output ceiling and the parent-provided worst-case cost ceiling. It
 must fit every remaining global ceiling before the request is emitted. The parent
+derives a numeric money ceiling only from trusted known prices; for unknown-price
+APIs and managed subscriptions both cost limits are `null` and the run is bounded
+by calls, tokens, bytes and time instead. A `null` ceiling is never a zero budget. The parent
 must ensure this reserve covers its final transport rendering; otherwise refuse.
 Known usage settles the reservation; unknown fields consume their full reserves.
 The exposed upstream ledger retains method counts and labels. Its default USD

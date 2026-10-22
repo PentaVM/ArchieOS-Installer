@@ -304,6 +304,16 @@ async fn identity(
     }
 }
 
+const MAX_CALLS: u64 = 12;
+const PER_CALL_INPUT_TOKENS: u64 = 100_000;
+
+/// Upstream renders the task twice (as the task and as admitted evidence) plus
+/// a harness tree and instructions of about 16 KiB in its largest proposer
+/// stage. Refusing here costs nothing; failing at stage 2 costs a paid call.
+fn worst_stage_prompt_bytes(task: &str) -> usize {
+    2 * task.len() + 16 * 1024
+}
+
 fn monetary_limits(
     runtime: &UnifiedRuntime,
     runner: &RunnerChoice,
@@ -328,13 +338,16 @@ fn monetary_limits(
     {
         return Ok((None, None));
     }
-    let numerator = u128::from(cost.input_micros_per_mtok) * 100_000
+    // Billed input is bounded by the whole rendered prompt, which can reach the
+    // model's context window, not by the worker's nominal per-call reservation.
+    let input = PER_CALL_INPUT_TOKENS.max(u64::from(descriptor.context_window));
+    let numerator = u128::from(cost.input_micros_per_mtok) * u128::from(input)
         + u128::from(cost.output_micros_per_mtok) * u128::from(output);
     let reserve = numerator.div_ceil(1_000_000);
     if reserve == 0 {
         return Ok((None, None));
     }
-    let aggregate = reserve * 12;
+    let aggregate = reserve * u128::from(MAX_CALLS);
     if aggregate > (1u128 << 53) - 1 {
         return Err("configured Harness² monetary reservation exceeds protocol bounds".into());
     }
@@ -457,6 +470,22 @@ pub async fn run_harness(
     if output_tokens == 0 {
         return Err("pinned Harness² model has no output budget".into());
     }
+    let worst = worst_stage_prompt_bytes(&request.prompt);
+    if worst > profile.max_prompt_bytes {
+        return Err("Harness² task is too large for the operator prompt budget".into());
+    }
+    if let RunnerChoice::ApiPinned { model } = &request.runner {
+        let id = model.parse().map_err(|_| "invalid pinned Harness² model")?;
+        let descriptor = runtime
+            .catalog
+            .registry()
+            .get(&id)
+            .ok_or("pinned Harness² model is unavailable")?;
+        // Same bytes/3 estimate the unified runtime applies per stage.
+        if !descriptor.fits_context((worst / 3 + 1) as u32, output_tokens as u32) {
+            return Err("Harness² stages do not fit the pinned model context".into());
+        }
+    }
     let (per_call_cost, total_cost) = monetary_limits(runtime, &request.runner, output_tokens)?;
     let task = Harness2Task {
         run_id: request.run_id.clone(), task_id: request.run_id.clone(), task_family: request.task_family.clone(),
@@ -471,9 +500,9 @@ pub async fn run_harness(
             ("LongTermMEMORY.md".into(), "No independently verified prior lessons.".into()),
             ("tool_descriptions/tool_guidance.md".into(), "Tools are unavailable. Use only the supplied public evidence.".into()),
         ]),
-        limits: Harness2Limits { max_calls: 12, max_input_tokens: 12 * 100_000,
-            max_output_tokens: 12 * output_tokens, max_cost_micros: total_cost,
-            per_call_input_tokens: 100_000, per_call_output_tokens: output_tokens,
+        limits: Harness2Limits { max_calls: MAX_CALLS, max_input_tokens: MAX_CALLS * PER_CALL_INPUT_TOKENS,
+            max_output_tokens: MAX_CALLS * output_tokens, max_cost_micros: total_cost,
+            per_call_input_tokens: PER_CALL_INPUT_TOKENS, per_call_output_tokens: output_tokens,
             // The parent enforces the real deadline and refuses further stages.
             // The extra interval lets an active stage persist cancellation.
             per_call_cost_micros: per_call_cost, max_frame_bytes: 1_048_576, deadline_unix_ms: deadline + 2500 },
