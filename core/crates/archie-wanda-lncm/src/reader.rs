@@ -213,7 +213,7 @@ pub fn read_recording(
             match &t.kind {
                 TurnKind::Join { person } => state.join(person, &t.chat, t.turn),
                 TurnKind::Leave { person } => state.leave(person, &t.chat, t.turn),
-                TurnKind::Message { speaker, .. } => {
+                TurnKind::Message { speaker, text } => {
                     let previous = last_writer
                         .get(&t.chat)
                         .filter(|(who, _)| who != speaker)
@@ -222,6 +222,8 @@ pub fn read_recording(
                     last_writer.insert(t.chat.clone(), (speaker.clone(), t.at_ms));
                     context.speakers.insert(t.turn, speaker.clone());
                     context.presence.insert(t.turn, state.present_in(&t.chat));
+                    // What a line may claim is limited to what was read.
+                    context.texts.insert(t.turn, text.clone());
                 }
             }
             context.evidence.insert(t.turn, t.evidence.clone());

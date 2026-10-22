@@ -409,9 +409,28 @@ pub struct ChunkContext {
     /// Turn → speaker, for message turns.
     pub speakers: BTreeMap<u64, String>,
     pub at_ms: BTreeMap<u64, i64>,
+    /// Turn → what the message says, so a line can only claim what was read. Empty when the
+    /// caller has no text, and then nothing is checked against it.
+    pub texts: BTreeMap<u64, String>,
 }
 
 impl ChunkContext {
+    /// Whether the message at `turn` says `phrase` (whole words, any case).
+    fn said(&self, turn: u64, phrase: &str) -> bool {
+        if self.texts.is_empty() {
+            return true;
+        }
+        self.texts.get(&turn).is_some_and(|text| {
+            crate::exact::find_phrase(&text.to_lowercase(), &phrase.trim().to_lowercase()).is_some()
+        })
+    }
+    /// Whether any message of the chunk names `label`.
+    fn names(&self, label: &str) -> bool {
+        self.texts.is_empty()
+            || self.texts.values().any(|text| {
+                crate::exact::find_phrase(&text.to_lowercase(), &label.to_lowercase()).is_some()
+            })
+    }
     fn last_message_of(&self, person: &str) -> Option<u64> {
         self.speakers
             .iter()
@@ -591,6 +610,9 @@ impl SocialState {
                 if !chunk.speakers.contains_key(turn) {
                     return false; // a fact is stated in a message
                 }
+                if !chunk.said(*turn, value) {
+                    return false; // and its value is in what the message says
+                }
                 if !self.facts.contains_key(topic) && self.facts.len() >= MAX_TOPICS {
                     return false;
                 }
@@ -640,7 +662,7 @@ impl SocialState {
                 let Some(id) = self.find(person).map(str::to_string) else {
                     return false;
                 };
-                if !chunk.evidence.contains_key(turn) {
+                if !chunk.evidence.contains_key(turn) || !chunk.said(*turn, value) {
                     return false;
                 }
                 let at_ms = chunk.at_ms.get(turn).copied().unwrap_or(self.last_at_ms);
@@ -666,6 +688,14 @@ impl SocialState {
                 let Some(id) = self.find(person).map(str::to_string) else {
                     return false;
                 };
+                // Behaviour is read from what someone wrote, or from what is said about them.
+                let label = self
+                    .people
+                    .get(&id)
+                    .map_or(id.as_str(), |p| p.label.as_str());
+                if chunk.last_message_of(&id).is_none() && !chunk.names(label) {
+                    return false;
+                }
                 let Some(turn) = chunk.last_message_of(&id).or_else(|| chunk.last_turn()) else {
                     return false;
                 };
@@ -1066,6 +1096,21 @@ mod tests {
             s.ensure_person(id, label, 1);
         }
         s
+    }
+
+    #[test]
+    fn a_line_can_only_claim_what_was_read() {
+        let mut s = state();
+        let mut c = chunk(&[(5, "pedro", &["pedro", "ana", "owner"])]);
+        c.texts.insert(5, "El viaje es en julio, os aviso".into());
+        let (lines, _) = parse_delta(
+            "fact el viaje = mayo @5\nfact el viaje = julio @5\nexpect Luis + late: suele llegar tarde\nexpect Pedro + late: suele llegar tarde",
+        );
+        let report = s.apply(&lines, &c);
+        // A value the message never says, and a trait of someone it neither is from nor names.
+        assert_eq!((report.applied, report.rejected), (2, 2));
+        assert_eq!(s.facts["el viaje"].current().unwrap().value, "julio");
+        assert!(s.people["luis"].expectations.is_empty());
     }
 
     #[test]
