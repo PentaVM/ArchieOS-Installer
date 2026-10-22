@@ -244,3 +244,5 @@ license/card or causal-family targets. Podcast163speaker/text segments from one
 episode, no declared license in card. No raw corpus admission or GPU queue edits;
 preserve episode/family groups and resolve provenance before adaptation. PR41
 design was merged before this source assessment; Sentry/Wanda stack not merged.
+
+Tick2026-10-21 07:43UTC: PR38 advanced to13f1187 and adopted strict gate9d56807. See ../round7/adoption-check-20261021.md. Configured venv CPU contract suite14/14 passes; system Python lacked NumPy, no installs. Gate is q/v-only, not proof for historicalq/k/v/o or fresh GPU/export/semantic results. Worker persisted paused PID154 is absent, boot differs, age~2900s, job null; bounded proc scan found no Wanda worker/guard candidate. No restart, ownership claim, hold, queue change or GPU attempt. LNCM implementation is a separate new code path, not reviewed in full this tick. Existing data/bench receipts unchanged, candidates pending-human. Next: check new owner/Claude evidence and current admission/export scope; do not repeat numerical GPU proof or add volume without cause.
