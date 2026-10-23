@@ -1081,8 +1081,10 @@ fn harness2_completes_on_a_real_llama_cpp_server_under_reply_schemas() {
     let database = Database::new();
     let dir = tempfile::tempdir().unwrap();
     let domain = ContextDomain::personal("fixture").unwrap();
-    // A model on a CPU may need more than the default minute per stage.
+    // A model on a CPU may need more than the default minute per stage. The profile's
+    // default 2048-token output ceiling would otherwise cap MAX_OUTPUT below what it says.
     let mut profile = RuntimeProfile::for_domain(domain.clone());
+    profile.max_output_tokens = max_output;
     if let Ok(stage_ms) = std::env::var("ARCHIE_TEST_LLAMA_STAGE_MS") {
         profile.max_duration_ms = stage_ms.parse().unwrap();
     }
@@ -1151,6 +1153,18 @@ thinking = "{thinking}"
         outcome.result.ledger,
         outcome.result.promotion
     );
+    // Each stage's receipt, for the operator's record; duration is from that stage's start.
+    for (stage, receipt) in outcome.receipts.iter().enumerate() {
+        eprintln!(
+            "  stage {}: {:?}, input {:?}, output {:?}, {:?} ms, error {:?}",
+            stage + 1,
+            receipt.status,
+            receipt.usage.input_tokens,
+            receipt.usage.output_tokens,
+            receipt.usage.duration_ms,
+            receipt.error_code
+        );
+    }
     assert_eq!(outcome.result.ledger["R"], 4);
     assert_eq!(outcome.result.ledger["P"], 3);
     assert_eq!(outcome.receipts.len(), 8);

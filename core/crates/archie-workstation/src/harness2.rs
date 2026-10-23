@@ -999,6 +999,9 @@ mod tests {
             keys(&schema),
             BTreeSet::from(["artifact".into(), "trajectory".into()])
         );
+        // These are the keys the worker's own shape check reads from a solver.
+        assert!(include_str!("../../../../tools/harness2/worker.py")
+            .contains(r#"shape(result, ("artifact", "trajectory"), "invalid_model_output")"#));
         // The worker aborts the run on an empty artifact or trajectory.
         assert!(schema["properties"]
             .as_object()
@@ -1015,6 +1018,9 @@ mod tests {
             keys(&schema),
             BTreeSet::from(["harness".into(), "notes".into()])
         );
+        // These are the keys the worker's own shape check reads from a proposal.
+        assert!(include_str!("../../../../tools/harness2/worker.py")
+            .contains(r#"shape(response, ("harness", "notes"), "invalid_model_output")"#));
         let files = &schema["properties"]["harness"];
         strict(files);
         assert_eq!(keys(files), worker_files());
