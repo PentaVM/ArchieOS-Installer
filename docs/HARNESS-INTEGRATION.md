@@ -104,9 +104,48 @@ not answered.
 Twelve earlier runs that night stopped on reply shapes the worker refused. They exposed
 the defects fixed in the branch: the plain-text seed, unbounded reasoning, the pinned role,
 the key prefix, list and object fields, a fenced reply, a guardrails newline, an unreadable
-proposal and `NO_ENTRY`. Bonsai's output still varies between runs. The robust next step
-is schema-constrained decoding for JSON stages: llama.cpp honoured a `json_schema`
-`response_format` with reasoning on in a direct probe.
+proposal and `NO_ENTRY`. Bonsai's output still varies between runs.
+
+### Schema-constrained JSON stages
+
+The solver's `artifact` reply and the proposer's `harness` reply are JSON, so an API
+runner now decodes them under a JSON Schema. `harness2::reply_schema` gives each stage
+exactly the keys the worker reads, every one a string; the proposal's map names the four
+files of the worker's own `ALLOWED` set, and its `guardrails.md` may only be the base
+harness's exact text, because the worker aborts the run on any edit to it. The artifact,
+the trajectory and every editable file are at least one character long, because the
+worker aborts the run on an empty one; a proposal's notes may be empty. The reflection is
+upstream's tagged text and gets no schema.
+
+- The substrate attaches the schema only for API runners, after the bridge has matched
+  the stage's format to the pinned schedule. Codex receives none.
+- `archie-model-runtime` sends it only on the OpenAI wire, as
+  `response_format: {type: "json_schema", json_schema: {name, strict: true, schema}}`,
+  next to the manifest's reasoning switch. llama.cpp turns it into a grammar; vLLM and
+  the hosted OpenAI-compatible APIs accept the same form, without the string
+  `minLength`, which only llama.cpp's converter is known to enforce and a strict
+  validator elsewhere may refuse. Anthropic never receives it.
+- An operator's request cannot carry a schema: `InferenceRequest.reply_schema` is never
+  serialized, and a schema that does not describe an object or is over 16 KiB is
+  refused before any connection.
+- The worker still checks every reply. The schema keeps a small local model from
+  writing a shape the worker would refuse; it proves nothing about the content.
+
+To run the same 8 stages against a real llama.cpp server, use the ignored test. It needs a
+disposable PostgreSQL in `ARCHIE_TEST_DATABASE_URL` and the worker's Python:
+
+```bash
+ARCHIE_HARNESS2_PYTHON=/path/to/python3.13 ARCHIE_TEST_LLAMA_URL=http://127.0.0.1:8081/v1/ ARCHIE_TEST_LLAMA_MODEL=bonsai ARCHIE_TEST_LLAMA_THINKING=on ARCHIE_TEST_LLAMA_STAGE_MS=120000 cargo test -p archie-workstation --test unified_runtime -- --ignored --exact harness2_completes_on_a_real_llama_cpp_server_under_reply_schemas --nocapture
+```
+
+- It prints each stage's receipt.
+- `ARCHIE_TEST_LLAMA_MAX_OUTPUT` (default 4096) sets the output budget and the profile's
+  ceiling with it.
+- The whole run is bounded at 300 s.
+
+In the first attempt on Bonsai (2026-10-23), stages 1 and 2 completed under their schemas.
+Then the RTX 3070 was lost to the system ("GPU is lost", a reboot is required), so the run
+says nothing yet about all eight stages.
 
 ## HarnessRouter (UHP)
 

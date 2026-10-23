@@ -568,6 +568,7 @@ impl Routed {
                     max_tokens: Some(question.max_tokens),
                     temperature: Some(0.2),
                     stream: false,
+                    reply_schema: None,
                 };
                 client.chat(descriptor, question.privacy, &request).await?
             }
@@ -674,6 +675,7 @@ mod refusal_tests {
             max_tokens: Some(128),
             temperature: Some(0.2),
             stream: false,
+            reply_schema: None,
         };
         let answered = Routed::ask_among_with(ids, Duration::from_secs(1), |id, _| {
             let client = &client;

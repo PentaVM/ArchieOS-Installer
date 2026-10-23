@@ -461,6 +461,7 @@ pub(crate) mod tests {
             max_tokens: Some(128),
             temperature: Some(0.2),
             stream: false,
+            reply_schema: None,
         };
         let response = client
             .chat(&model, archie_types::PrivacyGrade::Public, &request)
@@ -661,6 +662,7 @@ pub(crate) mod tests {
             max_tokens: Some(12),
             temperature: None,
             stream: false,
+            reply_schema: None,
         };
         let body = chat_body(&request).unwrap();
         assert_eq!(body["system"], "instructions");

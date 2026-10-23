@@ -304,6 +304,20 @@ async fn identity(
     }
 }
 
+/// Only an API runner can decode under a schema; Codex gets none.
+fn stage_reply_schema(
+    runner: &RunnerChoice,
+    response_format: &str,
+    base: &BTreeMap<String, String>,
+) -> Option<serde_json::Value> {
+    match runner {
+        RunnerChoice::Codex { .. } => None,
+        RunnerChoice::Api | RunnerChoice::ApiPinned { .. } => {
+            crate::harness2::reply_schema(response_format, base)
+        }
+    }
+}
+
 /// Archie's starting harness. The worker asks every solver for a JSON reply whose
 /// `artifact` field holds the answer, so the seed says where the task's own output
 /// format goes. Telling it "plain text" instead left Bonsai deliberating between the
@@ -378,6 +392,8 @@ struct Substrate<'a> {
     deadline: tokio::time::Instant,
     cancel: watch::Receiver<bool>,
     receipts: Vec<InferenceReceipt>,
+    /// The base harness the worker was started with; its guardrails pin the proposal schema.
+    base_harness: BTreeMap<String, String>,
 }
 
 impl Harness2Handler for Substrate<'_> {
@@ -415,6 +431,12 @@ impl Harness2Handler for Substrate<'_> {
                 max_output_tokens: stage.max_output_tokens as u32,
                 recall_memory: false,
                 budget,
+                // The bridge already matched this stage's format to the pinned schedule.
+                reply_schema: stage_reply_schema(
+                    &self.request.runner,
+                    &stage.response_format,
+                    &self.base_harness,
+                ),
             };
             let outcome = self
                 .runtime
@@ -532,6 +554,7 @@ pub async fn run_harness(
         },
     };
     let (stop, stopped) = watch::channel(false);
+    let base_harness = task.base_harness.clone();
     let mut handler = Substrate {
         runtime,
         request,
@@ -543,6 +566,7 @@ pub async fn run_harness(
         deadline: expires,
         cancel: stopped,
         receipts: vec![],
+        base_harness,
     };
     let result = {
         let worker = run_worker(program, task, &mut handler);
@@ -610,6 +634,29 @@ mod tests {
             system.contains("artifact field of the JSON reply"),
             "{system}"
         );
+    }
+
+    /// Codex has no structured-output switch, so no stage it runs carries a schema;
+    /// a pinned API model gets one for each JSON stage.
+    #[test]
+    fn only_api_runners_get_a_reply_schema() {
+        let base = seed_harness();
+        let codex = RunnerChoice::Codex {
+            model: "fixture-model".into(),
+        };
+        let pinned = RunnerChoice::ApiPinned {
+            model: "local.fixture".into(),
+        };
+        for format in ["artifact", "harness", "experience"] {
+            assert_eq!(stage_reply_schema(&codex, format, &base), None, "{format}");
+            assert_eq!(
+                stage_reply_schema(&pinned, format, &base),
+                crate::harness2::reply_schema(format, &base),
+                "{format}"
+            );
+        }
+        assert!(stage_reply_schema(&pinned, "artifact", &base).is_some());
+        assert!(stage_reply_schema(&pinned, "harness", &base).is_some());
     }
 
     #[test]

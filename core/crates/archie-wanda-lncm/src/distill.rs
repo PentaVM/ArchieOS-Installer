@@ -576,6 +576,7 @@ async fn ask(
         max_tokens: Some(max_tokens),
         temperature: Some(temperature),
         stream: false,
+        reply_schema: None,
     };
     let response = client
         .chat(&model.descriptor, PrivacyGrade::Public, &request)

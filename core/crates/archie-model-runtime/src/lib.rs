@@ -302,6 +302,54 @@ pub struct ChatRequest {
     pub temperature: Option<f32>,
     #[serde(default)]
     pub stream: bool,
+    /// The JSON Schema the reply must match, for servers that decode under it. Only the
+    /// OpenAI wire carries it, as `response_format`; Anthropic never receives it. It
+    /// shapes decoding and proves nothing: the caller still validates the reply.
+    #[serde(skip)]
+    pub reply_schema: Option<serde_json::Value>,
+}
+
+/// A reply schema stays small: it names a reply's shape, not its content.
+const MAX_REPLY_SCHEMA_BYTES: usize = 16 * 1024;
+
+/// The schema has to be a JSON object that describes an object, so a server cannot read
+/// it as an invitation to free text.
+fn valid_reply_schema(schema: &serde_json::Value) -> bool {
+    schema.get("type").and_then(serde_json::Value::as_str) == Some("object")
+        && serde_json::to_vec(schema).is_ok_and(|bytes| bytes.len() <= MAX_REPLY_SCHEMA_BYTES)
+}
+
+/// OpenAI's structured-output form, which llama.cpp, vLLM and the hosted APIs accept.
+/// llama.cpp's grammar converter enforces a string's `minLength` and `maxLength`; strict
+/// validators elsewhere differ in whether they accept them, so other servers receive the
+/// schema without them and the caller's own check still refuses a reply that breaks them.
+fn attach_reply_schema(
+    descriptor: &ModelDescriptor,
+    body: &mut serde_json::Value,
+    schema: &serde_json::Value,
+) {
+    let mut schema = schema.clone();
+    if descriptor.provider != ProviderKind::LlamaCpp {
+        drop_string_lengths(&mut schema);
+    }
+    body["response_format"] = serde_json::json!({
+        "type": "json_schema",
+        "json_schema": { "name": "reply", "strict": true, "schema": schema },
+    });
+}
+
+fn drop_string_lengths(schema: &mut serde_json::Value) {
+    match schema {
+        serde_json::Value::Object(map) => {
+            if map.get("type").and_then(serde_json::Value::as_str) == Some("string") {
+                map.remove("minLength");
+                map.remove("maxLength");
+            }
+            map.values_mut().for_each(drop_string_lengths);
+        }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(drop_string_lengths),
+        _ => {}
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -388,6 +436,10 @@ impl ChatRequest {
             || self
                 .temperature
                 .is_some_and(|value| !value.is_finite() || !(0.0..=2.0).contains(&value))
+            || self
+                .reply_schema
+                .as_ref()
+                .is_some_and(|schema| !valid_reply_schema(schema))
         {
             return Err(RuntimeError::InvalidRequest);
         }
@@ -560,9 +612,12 @@ impl InferenceClient {
             return anthropic::decode(&bytes);
         }
         let url = self.endpoint.url("chat/completions")?;
-        let response = if llama_thinking(descriptor)?.is_some() {
+        let response = if llama_thinking(descriptor)?.is_some() || request.reply_schema.is_some() {
             let mut body = serde_json::to_value(request)?;
             pin_llama_reasoning(descriptor, &mut body, request.max_tokens)?;
+            if let Some(schema) = &request.reply_schema {
+                attach_reply_schema(descriptor, &mut body, schema);
+            }
             self.send(url, Some(&body)).await?
         } else {
             self.send(url, Some(request)).await?
@@ -1049,6 +1104,7 @@ mod tests {
             max_tokens: Some(100),
             temperature: Some(0.2),
             stream: false,
+            reply_schema: None,
         };
         assert!(valid.validate().is_ok());
         let mut invalid = valid.clone();
@@ -1074,6 +1130,7 @@ mod tests {
             max_tokens: Some(32),
             temperature: Some(0.0),
             stream: false,
+            reply_schema: None,
         };
 
         let response = client
@@ -1116,6 +1173,7 @@ mod tests {
                 max_tokens: Some(32),
                 temperature: None,
                 stream: false,
+                reply_schema: None,
             };
             client
                 .chat(&model, PrivacyGrade::Restricted, &request)
@@ -1155,6 +1213,7 @@ mod tests {
             max_tokens: Some(32),
             temperature: None,
             stream: false,
+            reply_schema: None,
         };
         InferenceClient::new(endpoint)
             .unwrap()
@@ -1162,6 +1221,206 @@ mod tests {
             .await
             .unwrap();
         assert!(!observed.await.unwrap().contains("chat_template_kwargs"));
+    }
+
+    fn reply_shape() -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "artifact": { "type": "string", "minLength": 1 },
+                "trajectory": { "type": "string" },
+            },
+            "required": ["artifact", "trajectory"],
+            "additionalProperties": false,
+        })
+    }
+
+    /// The same shape without the string lengths only llama.cpp is known to enforce.
+    fn portable_reply_shape() -> serde_json::Value {
+        let mut shape = reply_shape();
+        shape["properties"]["artifact"] = serde_json::json!({ "type": "string" });
+        shape
+    }
+
+    fn schema_request(model: &str, reply_schema: Option<serde_json::Value>) -> ChatRequest {
+        ChatRequest {
+            model: model.into(),
+            messages: vec![ChatMessage {
+                role: MessageRole::User,
+                content: "status".into(),
+            }],
+            max_tokens: Some(32),
+            temperature: None,
+            stream: false,
+            reply_schema,
+        }
+    }
+
+    fn wire_body(captured: &str) -> serde_json::Value {
+        let (_, body) = captured.split_once("\r\n\r\n").expect("an HTTP request");
+        serde_json::from_str(body).expect("a JSON body")
+    }
+
+    /// A pinned llama.cpp model decodes under the stage's schema: the schema rides the
+    /// OpenAI wire as `response_format`, next to the reasoning switch, not instead of it.
+    #[tokio::test]
+    async fn a_reply_schema_rides_the_openai_wire_as_response_format() {
+        let body = r#"{"model":"bonsai","choices":[{"message":{"role":"assistant","content":"{}"},"finish_reason":"stop"}]}"#;
+        for thinking in ["on", "off"] {
+            let (base_url, observed) = one_response(body).await;
+            let mut model = descriptor(ProviderKind::LlamaCpp, Locality::Local);
+            model.labels.insert("base-url".into(), base_url);
+            model
+                .labels
+                .insert("provider-model".into(), "bonsai".into());
+            model.labels.insert("thinking".into(), thinking.into());
+            InferenceClient::new(ProviderEndpoint::for_model(&model).unwrap())
+                .unwrap()
+                .chat(
+                    &model,
+                    PrivacyGrade::Restricted,
+                    &schema_request("bonsai", Some(reply_shape())),
+                )
+                .await
+                .unwrap();
+            let sent = wire_body(&observed.await.unwrap());
+            assert_eq!(
+                sent["response_format"],
+                serde_json::json!({
+                    "type": "json_schema",
+                    "json_schema": { "name": "reply", "strict": true, "schema": reply_shape() },
+                }),
+                "{thinking}"
+            );
+            assert_eq!(
+                sent["chat_template_kwargs"]["enable_thinking"],
+                thinking == "on",
+                "{thinking}"
+            );
+            // The schema is never a message the model reads.
+            assert_eq!(sent["messages"].as_array().unwrap().len(), 1);
+            assert!(sent.get("reply_schema").is_none());
+        }
+
+        // Without a schema nothing changes on the wire.
+        let (base_url, observed) = one_response(body).await;
+        let mut model = descriptor(ProviderKind::LlamaCpp, Locality::Local);
+        model.labels.insert("base-url".into(), base_url);
+        model
+            .labels
+            .insert("provider-model".into(), "bonsai".into());
+        model.labels.insert("thinking".into(), "on".into());
+        InferenceClient::new(ProviderEndpoint::for_model(&model).unwrap())
+            .unwrap()
+            .chat(
+                &model,
+                PrivacyGrade::Restricted,
+                &schema_request("bonsai", None),
+            )
+            .await
+            .unwrap();
+        let sent = wire_body(&observed.await.unwrap());
+        assert!(sent.get("response_format").is_none());
+        assert!(sent.get("reply_schema").is_none());
+
+        // Another OpenAI-compatible server without a reasoning switch gets the schema too,
+        // without the string lengths its strict validator might refuse.
+        let (base_url, observed) = one_response(body).await;
+        let endpoint = ProviderEndpoint::nvidia_nim(&base_url, Locality::Local).unwrap();
+        let model = descriptor(ProviderKind::NvidiaNim, Locality::Local);
+        InferenceClient::new(endpoint)
+            .unwrap()
+            .chat(
+                &model,
+                PrivacyGrade::Restricted,
+                &schema_request(&model.id.to_string(), Some(reply_shape())),
+            )
+            .await
+            .unwrap();
+        let sent = wire_body(&observed.await.unwrap());
+        assert_eq!(
+            sent["response_format"]["json_schema"]["schema"],
+            portable_reply_shape()
+        );
+        assert!(sent.get("chat_template_kwargs").is_none());
+    }
+
+    /// Only a string schema loses its lengths: a property that happens to be named
+    /// `minLength` stays, at any depth.
+    #[test]
+    fn only_string_lengths_are_dropped() {
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "minLength": { "type": "string", "minLength": 1, "maxLength": 9 },
+                "list": { "type": "array", "items": { "type": "string", "minLength": 2 } },
+                "count": { "type": "integer", "minimum": 1 },
+            },
+            "required": ["minLength", "list", "count"],
+            "additionalProperties": false,
+        });
+        drop_string_lengths(&mut schema);
+        assert_eq!(
+            schema,
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "minLength": { "type": "string" },
+                    "list": { "type": "array", "items": { "type": "string" } },
+                    "count": { "type": "integer", "minimum": 1 },
+                },
+                "required": ["minLength", "list", "count"],
+                "additionalProperties": false,
+            })
+        );
+    }
+
+    /// Anthropic's Messages API has no such field; its body never carries the schema.
+    #[test]
+    fn anthropic_never_receives_a_reply_schema() {
+        let body = anthropic::chat_body(&schema_request("claude", Some(reply_shape()))).unwrap();
+        let text = body.to_string();
+        assert!(!text.contains("response_format"), "{text}");
+        assert!(!text.contains("trajectory"), "{text}");
+    }
+
+    /// A schema that does not describe an object, or that is not small, is refused before
+    /// any connection is opened.
+    #[tokio::test]
+    async fn an_unusable_reply_schema_is_refused_before_any_call() {
+        let oversized = serde_json::json!({
+            "type": "object",
+            "description": "x".repeat(MAX_REPLY_SCHEMA_BYTES),
+        });
+        for schema in [
+            serde_json::json!({ "type": "string" }),
+            serde_json::json!("object"),
+            serde_json::json!({ "properties": {} }),
+            oversized,
+        ] {
+            let request = schema_request("bonsai", Some(schema.clone()));
+            assert!(
+                matches!(request.validate(), Err(RuntimeError::InvalidRequest)),
+                "{schema}"
+            );
+            // Port 9 on loopback: the call fails on the request, not on a connection.
+            let mut model = descriptor(ProviderKind::LlamaCpp, Locality::Local);
+            model
+                .labels
+                .insert("base-url".into(), "http://127.0.0.1:9/v1/".into());
+            model
+                .labels
+                .insert("provider-model".into(), "bonsai".into());
+            let error = InferenceClient::new(ProviderEndpoint::for_model(&model).unwrap())
+                .unwrap()
+                .chat(&model, PrivacyGrade::Restricted, &request)
+                .await
+                .unwrap_err();
+            assert!(matches!(error, RuntimeError::InvalidRequest), "{error:?}");
+        }
+        assert!(schema_request("bonsai", Some(reply_shape()))
+            .validate()
+            .is_ok());
     }
 
     /// Voice streams its answers, so a streamed request to the direct manifest must not
@@ -1321,6 +1580,7 @@ mod tests {
             max_tokens: Some(32),
             temperature: Some(0.0),
             stream: false,
+            reply_schema: None,
         };
         assert!(matches!(
             client

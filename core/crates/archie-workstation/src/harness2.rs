@@ -24,6 +24,64 @@ const FILES: [&str; 4] = [
     "tool_descriptions/tool_guidance.md",
 ];
 
+/// The JSON Schema a stage's reply must match, for a runtime that decodes under one.
+/// `artifact` and `harness` are the worker's JSON replies and get exactly the keys it
+/// reads, every one a string, and nonempty wherever the worker aborts the run on an empty
+/// one; the proposal's `guardrails.md` may only be the base's exact text, because the
+/// worker aborts the run on any other. The reflection's `experience` is upstream's tagged
+/// text and gets none. The worker still checks every reply: the schema only keeps a small
+/// local model from writing what the worker would refuse.
+pub fn reply_schema(response_format: &str, base: &BTreeMap<String, String>) -> Option<Value> {
+    let text = || serde_json::json!({ "type": "string" });
+    let filled = || serde_json::json!({ "type": "string", "minLength": 1 });
+    match response_format {
+        "artifact" => Some(strict_object(vec![
+            ("artifact", filled()),
+            ("trajectory", filled()),
+        ])),
+        "harness" => {
+            let guardrails = base.get("guardrails.md")?;
+            let files = FILES
+                .iter()
+                .map(|file| match *file {
+                    "guardrails.md" if pinnable(guardrails) => (
+                        *file,
+                        serde_json::json!({ "type": "string", "enum": [guardrails] }),
+                    ),
+                    _ => (*file, filled()),
+                })
+                .collect();
+            Some(strict_object(vec![
+                ("harness", strict_object(files)),
+                ("notes", text()),
+            ]))
+        }
+        _ => None,
+    }
+}
+
+/// Guardrails are pinned only while their JSON text stays well inside the runtime's
+/// 16 KiB schema cap; longer ones are left as plain text, which the worker still checks.
+fn pinnable(guardrails: &str) -> bool {
+    serde_json::to_string(guardrails).is_ok_and(|json| json.len() <= 8 * 1024)
+}
+
+/// An object with exactly these keys, all required, in the form OpenAI's strict
+/// structured output and llama.cpp's grammar converter both accept.
+fn strict_object(fields: Vec<(&str, Value)>) -> Value {
+    let required: Vec<&str> = fields.iter().map(|(key, _)| *key).collect();
+    let properties: serde_json::Map<String, Value> = fields
+        .into_iter()
+        .map(|(key, value)| (key.to_owned(), value))
+        .collect();
+    serde_json::json!({
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": false,
+    })
+}
+
 /// Trusted launch configuration. Arguments precede the worker path. Windows WSL
 /// callers explicitly configure Linux paths and a non-login `env -i` launcher.
 #[derive(Debug, Clone)]
@@ -881,4 +939,177 @@ pub async fn run_worker<H: Harness2Handler>(
     timeout_at(deadline, run_inner(program, &task, handler))
         .await
         .map_err(|_| Harness2Error::Deadline)?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The four files the worker accepts, read from the worker itself.
+    fn worker_files() -> BTreeSet<String> {
+        let worker = include_str!("../../../../tools/harness2/worker.py");
+        let start = worker
+            .find("ALLOWED = frozenset((")
+            .expect("worker names its files");
+        let end = start + worker[start..].find("))").expect("closed file set");
+        worker[start..end]
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .map(str::to_owned)
+            .collect()
+    }
+
+    fn keys(schema: &Value) -> BTreeSet<String> {
+        schema["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    fn required(schema: &Value) -> BTreeSet<String> {
+        schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|key| key.as_str().unwrap().to_owned())
+            .collect()
+    }
+
+    fn base() -> BTreeMap<String, String> {
+        FILES
+            .iter()
+            .map(|file| ((*file).to_owned(), format!("base text of {file}")))
+            .collect()
+    }
+
+    fn strict(schema: &Value) {
+        assert_eq!(schema["type"], "object");
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(keys(schema), required(schema));
+    }
+
+    #[test]
+    fn the_artifact_schema_names_exactly_what_the_solver_reads() {
+        let schema = reply_schema("artifact", &base()).unwrap();
+        strict(&schema);
+        assert_eq!(
+            keys(&schema),
+            BTreeSet::from(["artifact".into(), "trajectory".into()])
+        );
+        // These are the keys the worker's own shape check reads from a solver.
+        assert!(include_str!("../../../../tools/harness2/worker.py")
+            .contains(r#"shape(result, ("artifact", "trajectory"), "invalid_model_output")"#));
+        // The worker aborts the run on an empty artifact or trajectory.
+        assert!(schema["properties"]
+            .as_object()
+            .unwrap()
+            .values()
+            .all(|field| field == &serde_json::json!({ "type": "string", "minLength": 1 })));
+    }
+
+    #[test]
+    fn the_harness_schema_names_the_four_files_the_worker_accepts() {
+        let schema = reply_schema("harness", &base()).unwrap();
+        strict(&schema);
+        assert_eq!(
+            keys(&schema),
+            BTreeSet::from(["harness".into(), "notes".into()])
+        );
+        // These are the keys the worker's own shape check reads from a proposal.
+        assert!(include_str!("../../../../tools/harness2/worker.py")
+            .contains(r#"shape(response, ("harness", "notes"), "invalid_model_output")"#));
+        let files = &schema["properties"]["harness"];
+        strict(files);
+        assert_eq!(keys(files), worker_files());
+        assert_eq!(worker_files().len(), FILES.len());
+        // Notes may be empty; every file must be nonempty or the worker aborts the run.
+        assert_eq!(
+            schema["properties"]["notes"],
+            serde_json::json!({ "type": "string" })
+        );
+        for file in FILES {
+            let expected = if file == "guardrails.md" {
+                serde_json::json!({ "type": "string", "enum": ["base text of guardrails.md"] })
+            } else {
+                serde_json::json!({ "type": "string", "minLength": 1 })
+            };
+            assert_eq!(files["properties"][file], expected, "{file}");
+        }
+    }
+
+    /// The worker aborts the run on any edit to the guardrails, so a proposal may only
+    /// copy them; without base guardrails there is nothing to pin and no schema.
+    #[test]
+    fn the_proposal_can_only_copy_the_base_guardrails() {
+        let mut base = base();
+        base.insert(
+            "guardrails.md".into(),
+            "Core and Policy alone grant authority.".into(),
+        );
+        let schema = reply_schema("harness", &base).unwrap();
+        assert_eq!(
+            schema["properties"]["harness"]["properties"]["guardrails.md"]["enum"],
+            serde_json::json!(["Core and Policy alone grant authority."])
+        );
+        base.remove("guardrails.md");
+        assert_eq!(reply_schema("harness", &base), None);
+        assert!(reply_schema("artifact", &base).is_some());
+    }
+
+    /// Guardrails too long to pin, counted as escaped JSON, leave the field plain text
+    /// rather than a schema the runtime would refuse.
+    #[test]
+    fn guardrails_too_long_to_pin_stay_plain_text() {
+        let mut base = base();
+        for (guardrails, pinned) in [
+            ("g".repeat(8 * 1024 - 2), true),
+            ("g".repeat(8 * 1024 - 1), false),
+            ("\"".repeat(4 * 1024), false),
+            ("g".repeat(20_000), false),
+        ] {
+            base.insert("guardrails.md".into(), guardrails);
+            let schema = reply_schema("harness", &base).unwrap();
+            let field = &schema["properties"]["harness"]["properties"]["guardrails.md"];
+            if !pinned {
+                assert_eq!(
+                    field,
+                    &serde_json::json!({ "type": "string", "minLength": 1 })
+                );
+            }
+            assert_eq!(field.get("enum").is_some(), pinned);
+            assert_eq!(field["type"], "string");
+            assert!(serde_json::to_vec(&schema).unwrap().len() <= 16 * 1024);
+        }
+    }
+
+    #[test]
+    fn tagged_and_reserved_stages_get_no_schema() {
+        assert_eq!(reply_schema("experience", &base()), None);
+        assert_eq!(reply_schema("selection", &base()), None);
+        assert_eq!(reply_schema("Artifact", &base()), None);
+        assert_eq!(reply_schema("", &base()), None);
+    }
+
+    /// Every JSON stage the protocol documents has a schema; the tagged one does not.
+    #[test]
+    fn every_documented_reply_format_is_covered() {
+        let protocol: Value =
+            serde_json::from_str(include_str!("../../../../tools/harness2/protocol.json")).unwrap();
+        let formats = protocol["messages"]["inference"]["fields"]["response_format"]
+            .as_str()
+            .unwrap();
+        let formats: Vec<&str> = formats.split('|').collect();
+        assert_eq!(formats, ["artifact", "harness", "selection", "experience"]);
+        for format in formats {
+            let expected = matches!(format, "artifact" | "harness");
+            assert_eq!(
+                reply_schema(format, &base()).is_some(),
+                expected,
+                "{format}"
+            );
+        }
+    }
 }

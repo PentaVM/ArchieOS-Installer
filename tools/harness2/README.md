@@ -107,6 +107,12 @@ timeout, malformed output or refusal; the deadline bounds any pending stdin read
 | `experience` | Upstream `<edits>...</edits>` and `<experience>` tags; `cue:`, `lesson:`, `evidence:` required, `confidence:` optional. |
 | `selection` | Reserved for larger future budgets; current `k=1` uses upstream trivial selection. |
 
+The parent may decode `artifact` and `harness` replies under a JSON Schema with exactly
+these keys, with the proposal's `guardrails.md` pinned to the base's exact text and the
+fields this worker refuses empty at least one character long (Archie's API runners do,
+through `harness2::reply_schema`). That shapes the reply; the worker
+still checks it as written above.
+
 All model output is untrusted data. Its evidence/lesson text is an attributed
 hypothesis; nonempty upstream fields do not verify truth. No instruction learned
 in a tree can authorize tools, access credentials or change Policy/domain/lease
