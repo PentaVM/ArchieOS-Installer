@@ -131,6 +131,22 @@ upstream's tagged text and gets no schema.
 - The worker still checks every reply. The schema keeps a small local model from
   writing a shape the worker would refuse; it proves nothing about the content.
 
+To run the same 8 stages against a real llama.cpp server, use the ignored test. It needs a
+disposable PostgreSQL in `ARCHIE_TEST_DATABASE_URL` and the worker's Python:
+
+```bash
+ARCHIE_HARNESS2_PYTHON=/path/to/python3.13 ARCHIE_TEST_LLAMA_URL=http://127.0.0.1:8081/v1/ ARCHIE_TEST_LLAMA_MODEL=bonsai ARCHIE_TEST_LLAMA_THINKING=on ARCHIE_TEST_LLAMA_STAGE_MS=120000 cargo test -p archie-workstation --test unified_runtime -- --ignored --exact harness2_completes_on_a_real_llama_cpp_server_under_reply_schemas --nocapture
+```
+
+- It prints each stage's receipt.
+- `ARCHIE_TEST_LLAMA_MAX_OUTPUT` (default 4096) sets the output budget and the profile's
+  ceiling with it.
+- The whole run is bounded at 300 s.
+
+In the first attempt on Bonsai (2026-10-23), stages 1 and 2 completed under their schemas.
+Then the RTX 3070 was lost to the system ("GPU is lost", a reboot is required), so the run
+says nothing yet about all eight stages.
+
 ## HarnessRouter (UHP)
 
 Archie owns a small adapter boundary and can use HarnessRouter Community Edition's
