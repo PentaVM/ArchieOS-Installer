@@ -78,6 +78,15 @@ function Get-VBoxVms {
 }
 
 $script:cfg = Read-Settings
+# For a VirtualBox machine the model runs on Windows; those functions live beside this file.
+foreach ($module in 'ArchieOS-Machine.ps1', 'ArchieOS-HostModel.ps1') {
+    $path = Join-Path $PSScriptRoot $module
+    if (Test-Path $path) { . $path }
+}
+if (-not (Get-Command Start-HostModel -ErrorAction SilentlyContinue)) {
+    function Start-HostModel($hostModel) { throw 'falta ArchieOS-HostModel.ps1 junto al lanzador' }
+    function Stop-HostModel { }
+}
 
 # ---- the window -------------------------------------------------------------------------
 [xml]$xaml = @'
@@ -624,8 +633,15 @@ function Start-Node([string]$verb) {
     $script:busy = if ($verb -eq 'restart') { 'restart' } else { 'start' }
     Update-View
     if ($script:cfg.backend -eq 'virtualbox') {
+        # The model first, on Windows' GPU: the machine asks it as soon as it is up.
+        if ($script:cfg.host_model) {
+            try { Start-HostModel $script:cfg.host_model; Add-Log "Modelo local en Windows: $($script:cfg.host_model.name) en :$($script:cfg.host_model.port)" }
+            catch { Add-Log "El modelo local no arrancó: $($_.Exception.Message)" }
+        }
+        # The machine's own window is ArchieOS, full screen; without the GUI, it runs unseen.
+        $type = if ($script:cfg.open_gui_on_start) { 'gui' } else { 'headless' }
         if ($verb -eq 'restart') { Start-Command $vbox "controlvm `"$($script:cfg.vm)`" reset" { param($o, $c) Add-Log $o; $script:busy = ''; Update-View } 'vbox' }
-        else { Start-Command $vbox "startvm `"$($script:cfg.vm)`" --type headless" { param($o, $c) Add-Log $o; $script:busy = ''; Update-View } 'vbox' }
+        else { Start-Command $vbox "startvm `"$($script:cfg.vm)`" --type $type" { param($o, $c) Add-Log $o; $script:busy = ''; Update-View } 'vbox' }
         return
     }
     Add-Log "archie-node $verb en $($script:cfg.distro)"
@@ -667,7 +683,7 @@ function Invoke-Compact {
 function Stop-Node {
     $script:busy = 'stop'; Update-View
     if ($script:cfg.backend -eq 'virtualbox') {
-        Start-Command $vbox "controlvm `"$($script:cfg.vm)`" acpipowerbutton" { param($o, $c) Add-Log $o; $script:busy = ''; Update-View } 'vbox'
+        Start-Command $vbox "controlvm `"$($script:cfg.vm)`" acpipowerbutton" { param($o, $c) Add-Log $o; Stop-HostModel; $script:busy = ''; Update-View } 'vbox'
         return
     }
     Wsl 'archie-node down' { param($out, $code) $script:busy = ''; Refresh-All } -label 'node'

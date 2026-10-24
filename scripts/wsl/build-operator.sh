@@ -189,6 +189,9 @@ if (( $(stat -c %s "$out_dir/ArchieOS-Operator.wsl") > 1900 * 1024 * 1024 )); th
   rm "$out_dir/ArchieOS-Operator.wsl"
 fi
 cp "$repo_root/scripts/wsl/install-operator.ps1" "$out_dir/install-archie-operator.ps1"
-# The Windows launcher travels beside the installer, which installs it after the image.
+# The Windows installer (Install-ArchieOS.cmd, with a window) and the launcher travel beside
+# the image, with the model catalog the installer reads before ArchieOS exists.
+cp "$repo_root/distro/windows"/{Install-ArchieOS.cmd,Install-ArchieOS.vbs,Install-ArchieOS.ps1,ArchieOS-Machine.ps1,ArchieOS-HostModel.ps1} "$out_dir/"
 cp "$repo_root/distro/windows"/{ArchieOS-Launcher.ps1,ArchieOS.vbs,Install-ArchieOS-Launcher.ps1,Uninstall-ArchieOS-Launcher.ps1,Compact-ArchieOS-Disk.ps1} "$out_dir/"
+cp "$repo_root/distro/wsl-operator/rootfs/usr/share/archie/local-models.tsv" "$out_dir/"
 du -sh "$out_dir"/ArchieOS-Operator.wsl*
