@@ -100,6 +100,9 @@ impl TurnSource for RoutedSource {
         let timeout = self.timeout;
 
         let task = self.runtime.spawn(async move {
+            // A local server that has stopped is offline here, so the turn goes veiled to
+            // the cloud when its grade allows, and is refused aloud when it does not.
+            routed.refresh_liveness().await;
             match routed.disclose_chat(&request, privacy, role, &veil) {
                 Err(RoutedError::Withheld(reason)) => {
                     let refusal = match privacy {

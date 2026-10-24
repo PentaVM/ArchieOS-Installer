@@ -429,6 +429,39 @@ async fn reply_http(stream: &mut tokio::net::TcpStream, text: &str) {
     let body=serde_json::json!({"model":"fixture-model","choices":[{"message":{"role":"assistant","content":text},"finish_reason":"stop"}]}).to_string();
     stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
 }
+/// The next model call on `listener`. A llama.cpp model's server is asked `/health`
+/// before routing chooses it (`archie_model_runtime::liveness`); those probes are
+/// answered as llama-server answers them and are not model calls.
+async fn accept_call(listener: &tokio::net::TcpListener) -> tokio::net::TcpStream {
+    loop {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut head = [0; 4];
+        loop {
+            let seen = stream.peek(&mut head).await.unwrap();
+            if seen == 0 || seen == head.len() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        if &head != b"GET " {
+            return stream;
+        }
+        let mut request = [0; 4096];
+        let read = stream.read(&mut request).await.unwrap();
+        assert!(String::from_utf8_lossy(&request[..read]).starts_with("GET /health "));
+        let body = r#"{"status":"ok"}"#;
+        stream
+            .write_all(
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+    }
+}
 fn configure_api(dir: &std::path::Path, address: std::net::SocketAddr) {
     std::fs::create_dir_all(dir.join("models")).unwrap();
     save_provider(
@@ -552,7 +585,7 @@ thinking = "on"
     .unwrap();
     let (send, recv) = std::sync::mpsc::channel();
     rt.spawn(async move {
-        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut stream = accept_call(&listener).await;
         send.send(read_http(&mut stream).await).unwrap();
         reply_http(&mut stream, "reasoned proposal SIGMA-3").await;
     });
@@ -779,6 +812,140 @@ fn shared_vault_lock_covers_key_creation_and_two_distinct_focus_commits() {
     drop(rt);
 }
 
+fn llama_manifest(dir: &std::path::Path, id: &str, address: &str, tier: u8) {
+    std::fs::create_dir_all(dir.join("models/local")).unwrap();
+    std::fs::write(
+        dir.join(format!("models/local/{id}.toml")),
+        format!(
+            r#"id = "{id}"
+display_name = "{id}"
+provider = "llama-cpp"
+locality = "local"
+context_window = 16384
+max_output_tokens = 4096
+capabilities = ["cognition.response"]
+max_privacy_grade = "restricted"
+availability = "ready"
+quality_tier = {tier}
+
+[cost]
+input_micros_per_mtok = 0
+output_micros_per_mtok = 0
+
+[labels]
+base-url = "http://{address}/v1/"
+provider-model = "fixture-model"
+thinking = "off"
+"#
+        ),
+    )
+    .unwrap();
+}
+
+/// Two local llama.cpp models marked ready rank above the live one: one's server is gone
+/// (a closed port), the other's still loads (503). Neither is asked the question; the
+/// next admissible candidate answers it, and a run pinned to a dead one is refused.
+#[test]
+#[ignore = "requires isolated PG18 extensions and captured HTTP runner"]
+fn a_ready_local_model_whose_server_is_down_is_passed_over_not_asked() {
+    use archie_model_runtime::routed::Question;
+    use archie_types::ModelRole;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let database = Database::new();
+    let dir = tempfile::tempdir().unwrap();
+    let domain = ContextDomain::personal("fixture").unwrap();
+    RuntimeProfile::for_domain(domain.clone())
+        .create(&dir.path().join("policy.toml"))
+        .unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let dead = rt
+        .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
+        .unwrap()
+        .local_addr()
+        .unwrap();
+    let loading = rt
+        .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
+        .unwrap();
+    let live = rt
+        .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
+        .unwrap();
+    llama_manifest(dir.path(), "local.fixture-gone", &dead.to_string(), 90);
+    llama_manifest(
+        dir.path(),
+        "local.fixture-loading",
+        &loading.local_addr().unwrap().to_string(),
+        80,
+    );
+    configure_api(dir.path(), live.local_addr().unwrap());
+    let asked = Arc::new(AtomicUsize::new(0));
+    let counted = asked.clone();
+    rt.spawn(async move {
+        loop {
+            let (mut stream, _) = loading.accept().await.unwrap();
+            let mut request = [0; 4096];
+            let read = stream.read(&mut request).await.unwrap();
+            if !String::from_utf8_lossy(&request[..read]).starts_with("GET /health ") {
+                counted.fetch_add(1, Ordering::SeqCst);
+            }
+            let body = r#"{"error":{"message":"Loading model","code":503}}"#;
+            let _ = stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 503 Service Unavailable\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
+                )
+                .await;
+        }
+    });
+    rt.spawn(async move {
+        let mut stream = accept_call(&live).await;
+        read_http(&mut stream).await;
+        reply_http(&mut stream, "answered by the live model").await;
+    });
+    let mut service = runtime(&database, dir.path());
+    let question = Question {
+        role: ModelRole::CognitiveResponse,
+        privacy: PrivacyGrade::Public,
+        system: "",
+        user: "which errand first",
+        image: None,
+        max_tokens: 128,
+        timeout: Duration::from_secs(5),
+    };
+    // Taken at their manifests' word, both dead servers would be asked first.
+    let ranked = service.catalog.candidates(&question).unwrap();
+    assert_eq!(ranked[0].as_str(), "local.fixture-gone");
+    assert_eq!(ranked[1].as_str(), "local.fixture-loading");
+    let result = rt
+        .block_on(service.execute(&request(domain.clone(), "which errand first"), None))
+        .unwrap();
+    assert_eq!(result.receipt.status, InferenceStatus::Completed);
+    assert!(result.receipt.model_id.starts_with("catalog."));
+    assert_eq!(result.text.as_deref(), Some("answered by the live model"));
+    assert_eq!(
+        asked.load(Ordering::SeqCst),
+        0,
+        "a loading server is never asked"
+    );
+    let ranked = service.catalog.candidates(&question).unwrap();
+    assert!(ranked.iter().all(|id| id.as_str().starts_with("catalog.")));
+    let mut pinned = request(domain, "pinned to a server that is gone");
+    pinned.runner = RunnerChoice::ApiPinned {
+        model: "local.fixture-gone".into(),
+    };
+    assert_eq!(
+        rt.block_on(service.execute(&pinned, None)).unwrap_err(),
+        "pinned model is offline or outside this request's scope"
+    );
+    drop(service);
+    drop(rt);
+}
+
 #[test]
 #[cfg(unix)]
 #[ignore = "requires isolated PG18 extensions, cross-process Vault lock and captured HTTP runner"]
@@ -984,7 +1151,7 @@ thinking = "on"
         let mut base = serde_json::Map::new();
         let mut seen = Vec::new();
         for _ in 0..8 {
-            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut stream = accept_call(&listener).await;
             let body: serde_json::Value =
                 serde_json::from_str(&read_http(&mut stream).await).unwrap();
             assert_eq!(body["chat_template_kwargs"]["enable_thinking"], true);

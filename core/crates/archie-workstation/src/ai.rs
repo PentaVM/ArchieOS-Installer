@@ -397,6 +397,9 @@ impl UnifiedRuntime {
                     max_tokens: request.max_output_tokens,
                     timeout,
                 };
+                // A local model whose server stopped is offline to routing now: the next
+                // admissible candidate is asked, or none is when the grade admits no other.
+                self.catalog.refresh_liveness().await;
                 let candidates = self
                     .catalog
                     .candidates(&question)
@@ -410,6 +413,10 @@ impl UnifiedRuntime {
                         _ => true,
                     })
                     .collect();
+                if candidates.is_empty() {
+                    // A pinned run never falls back to a model it did not name.
+                    return Err("pinned model is offline or outside this request's scope".into());
+                }
                 for id in candidates.into_iter().take(4) {
                     if start.elapsed() >= timeout || cancel.as_ref().is_some_and(|c| *c.borrow()) {
                         break;
