@@ -501,6 +501,13 @@ impl<S: TurnSource> NemotronCognitive<S> {
             }
         };
         let mut system = format!("{}\n\n{length}", self.persona);
+        // Everything above is in Spanish, and a small local model answers in Spanish even to
+        // English, even told so there: the turn says it in English, beside what was said too.
+        let english = matches!(self.chain.first(),
+            Some(ToolChatMessage::User(said)) if crate::language::spoken_language(said) == "en");
+        if english {
+            system.push_str("\n\nThe person spoke to you in English: answer in English.");
+        }
         let beside = self.context_with_utterance;
         if let (Some(context), false) = (&self.context, beside) {
             system.push_str("\n\nContexto de este momento, que puedes usar como cierto:\n");
@@ -520,6 +527,12 @@ impl<S: TurnSource> NemotronCognitive<S> {
             }
         }
         messages.extend(chain);
+        // What was said is the first message after the history; the history keeps it as said.
+        if english {
+            if let Some(ToolChatMessage::User(said)) = messages.get_mut(1 + self.history.len()) {
+                said.push_str("\n\n(Answer in English.)");
+            }
+        }
         ToolChatRequest {
             model: self.provider_model.clone(),
             messages,
@@ -988,6 +1001,47 @@ mod tests {
         assert!(
             cognitive.last_request().is_none(),
             "none of that left the machine"
+        );
+    }
+
+    #[test]
+    fn an_english_question_is_answered_in_english() {
+        let mut cognitive = adapter(TEXT);
+        let mut english = ask(
+            "t10",
+            "what time is it in Tokyo when it is nine in the evening here?",
+            SpeechBudget::Full,
+        );
+        english.language = "en-US".into();
+        cognitive.begin(english).unwrap();
+        let told = |cognitive: &NemotronCognitive<Replay>| {
+            let sent = &cognitive.last_request().unwrap().messages;
+            let system = matches!(&sent[0],
+                ToolChatMessage::System(text) if text.contains("answer in English"));
+            let beside = matches!(sent.last(),
+                Some(ToolChatMessage::User(text)) if text.ends_with("(Answer in English.)"));
+            assert_eq!(system, beside, "both places, or neither");
+            system
+        };
+        assert!(
+            told(&cognitive),
+            "the turn says it was spoken to in English"
+        );
+        cognitive.cancel("t10", CancelReason::Interrupted);
+        cognitive.remember(
+            "what time is it in Tokyo when it is nine in the evening here?",
+            "It is nine in the morning there.",
+        );
+        assert!(
+            matches!(&cognitive.history[0], ToolChatMessage::User(text) if !text.contains("Answer in")),
+            "the history keeps what was said, as it was said"
+        );
+        cognitive
+            .begin(ask("t11", "¿qué hora es en Tokio?", SpeechBudget::Full))
+            .unwrap();
+        assert!(
+            !told(&cognitive),
+            "and a Spanish one says nothing of the kind"
         );
     }
 

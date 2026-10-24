@@ -53,12 +53,18 @@ download_verified "$es_revision" es/es_MX/ald/medium/MODEL_CARD \
 # were heard without a word wrong (ald: 2.8 %, john: 6.7 %) and speak in a third of real
 # time. Claude's dataset is Apache-2.0; Kristin's recordings are LibriVox, public domain.
 voices_revision=5041a7a49ae5b3a0f30e6837769eb03fdbb231bd
-download_verified "$voices_revision" es/es_MX/claude/high/es_MX-claude-high.onnx   es_MX-claude-high.onnx cb1966e0ff20ca3aa010f6c9a0ce296a
-download_verified "$voices_revision" es/es_MX/claude/high/es_MX-claude-high.onnx.json   es_MX-claude-high.onnx.json 36882201922fabb409f18d284af3eddd
-download_verified "$voices_revision" es/es_MX/claude/high/MODEL_CARD   es_MX-claude-high.MODEL_CARD bca99dc9b9a6c8f2f8563d73d52c4a3b
-download_verified "$voices_revision" en/en_US/kristin/medium/en_US-kristin-medium.onnx   en_US-kristin-medium.onnx 5fed42d2296baca042e2bf74785db725
-download_verified "$voices_revision" en/en_US/kristin/medium/en_US-kristin-medium.onnx.json   en_US-kristin-medium.onnx.json 70bc97d350c796c64ea5e4d08241afac
-download_verified "$voices_revision" en/en_US/kristin/medium/MODEL_CARD   en_US-kristin-medium.MODEL_CARD 9bfb8192299b34cddf76455f04cb8cd2
+download_verified "$voices_revision" es/es_MX/claude/high/es_MX-claude-high.onnx \
+  es_MX-claude-high.onnx cb1966e0ff20ca3aa010f6c9a0ce296a
+download_verified "$voices_revision" es/es_MX/claude/high/es_MX-claude-high.onnx.json \
+  es_MX-claude-high.onnx.json 36882201922fabb409f18d284af3eddd
+download_verified "$voices_revision" es/es_MX/claude/high/MODEL_CARD \
+  es_MX-claude-high.MODEL_CARD bca99dc9b9a6c8f2f8563d73d52c4a3b
+download_verified "$voices_revision" en/en_US/kristin/medium/en_US-kristin-medium.onnx \
+  en_US-kristin-medium.onnx 5fed42d2296baca042e2bf74785db725
+download_verified "$voices_revision" en/en_US/kristin/medium/en_US-kristin-medium.onnx.json \
+  en_US-kristin-medium.onnx.json 70bc97d350c796c64ea5e4d08241afac
+download_verified "$voices_revision" en/en_US/kristin/medium/MODEL_CARD \
+  en_US-kristin-medium.MODEL_CARD 9bfb8192299b34cddf76455f04cb8cd2
 
 cat > "$voice_dir/archie-voice-attribution.txt" <<EOF
 Archie voice pack, separate local Piper TTS models.
@@ -87,4 +93,4 @@ All are openly licensed voices. They are not Baymax recordings, a Baymax voice c
 or endorsed by Disney. Piper and each voice model have separate licenses.
 EOF
 
-printf 'Both voices are installed in %s\n' "$voice_dir"
+printf 'The voices are installed in %s\n' "$voice_dir"
