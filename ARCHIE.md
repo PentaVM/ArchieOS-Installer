@@ -164,10 +164,13 @@ next when one does not answer.
 They are cloud models of unverified retention. Public text goes to them as it is;
 `internal` and `sensitive` text goes veiled, with stand-ins; `restricted` text does not
 go. A reasoning model of the node's own answers everything unveiled, and is the only
-thing that answers `restricted`. The node ships Bonsai for that: Ternary Bonsai 2 9B on
-llama.cpp at `127.0.0.1:8081`, as `local.bonsai-2-9b` (reasoning on, for decisions) and
-`local.bonsai-2-9b-fast` (reasoning off, for short answers). They ship offline; a node
-whose llama-server serves Bonsai marks them ready. Any other OpenAI-compatible
+thing that answers `restricted`. The node ships Bonsai for that, in two sizes on llama.cpp,
+one answering at a time (`archie-local use 27b|9b`): Ternary Bonsai 2 27B at
+`127.0.0.1:8082`, as `local.bonsai-2-27b` (reasoning at medium effort, for decisions) and
+`local.bonsai-2-27b-fast` (no reasoning, for short answers), and Ternary Bonsai 2 9B at
+`127.0.0.1:8081`, as `local.bonsai-2-9b` and `local.bonsai-2-9b-fast`. The router asks
+whichever one's server answers. They ship offline; a node whose llama-server serves Bonsai
+marks them ready. Any other OpenAI-compatible
 server on the machine (Ollama, vLLM) can be added with a manifest that has
 `provider = "openai-compatible"`, `locality = "local"` and its `base-url`.
 [`docs/ROUTER.md`](docs/ROUTER.md) shows one.

@@ -1,4 +1,5 @@
 #include "ShellRuntime.h"
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QStandardPaths>
@@ -93,6 +94,73 @@ void ShellRuntime::aiPolicyRequest(const QString &verb)
     emit aiPolicyChanged();
 }
 
+void ShellRuntime::localModelsRefresh() { localModelRequest({QStringLiteral("list"), QStringLiteral("--json")}, 15000); }
+
+void ShellRuntime::useLocalModel(const QString &name)
+{
+    for (const QVariant &model : std::as_const(m_localModels)) {
+        if (model.toMap().value(QStringLiteral("name")).toString() == name) {
+            // The 27B reads 5.9 GB before it answers; from a slow disk that takes minutes.
+            localModelRequest({QStringLiteral("use"), name}, 15 * 60 * 1000);
+            return;
+        }
+    }
+    m_localModelNote = QStringLiteral("archie-local no ofrece ese modelo.");
+    emit localModelsChanged();
+}
+
+void ShellRuntime::localModelRequest(const QStringList &arguments, int timeoutMs)
+{
+    if (m_localProcess) return; // one at a time; a switch in progress finishes first
+    const QString program = QStandardPaths::findExecutable(QStringLiteral("archie-local"));
+    if (program.isEmpty()) {
+        m_localModels.clear();
+        m_localModelNote = QStringLiteral("archie-local no está instalado en este equipo.");
+        emit localModelsChanged();
+        return;
+    }
+    m_localProcess = new QProcess(this);
+    m_localProcess->setProgram(program);
+    m_localProcess->setArguments(arguments);
+    m_localProcess->setProcessChannelMode(QProcess::SeparateChannels);
+    auto *process = m_localProcess;
+    QTimer::singleShot(timeoutMs, process, [process] { process->kill(); });
+    const bool listing = arguments.first() == QLatin1String("list");
+    connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+            [this, process, listing](int code, QProcess::ExitStatus status) {
+        const QByteArray out = process->readAllStandardOutput().left(16384);
+        const QString err = QString::fromUtf8(process->readAllStandardError().right(400)).trimmed();
+        const bool ok = status == QProcess::NormalExit && code == 0;
+        if (listing && ok) {
+            QVariantList models;
+            for (const QJsonValue &value : QJsonDocument::fromJson(out.trimmed()).array()) {
+                const QJsonObject model = value.toObject();
+                if (model.value(QStringLiteral("name")).isString()) models.append(model.toVariantMap());
+            }
+            m_localModels = models;
+            m_localModelNote = models.isEmpty() ? QStringLiteral("archie-local no listó modelos.") : QString();
+        } else if (!ok) {
+            m_localModelNote = (listing ? QStringLiteral("archie-local no respondió: ")
+                                        : QStringLiteral("No se pudo cambiar de modelo: "))
+                + (err.isEmpty() ? QStringLiteral("sin respuesta") : err.split(QLatin1Char('\n')).last());
+        }
+        m_localProcess = nullptr;
+        process->deleteLater();
+        emit localModelsChanged();
+        // After a switch, read back which one answers now.
+        if (!listing && ok) localModelsRefresh();
+    });
+    connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError error) {
+        if (error != QProcess::FailedToStart) return;
+        m_localModelNote = QStringLiteral("No se pudo ejecutar archie-local: ") + process->errorString();
+        m_localProcess = nullptr;
+        process->deleteLater();
+        emit localModelsChanged();
+    });
+    process->start();
+    emit localModelsChanged();
+}
+
 ShellRuntime::~ShellRuntime()
 {
     m_wanted = false;
@@ -100,6 +168,10 @@ ShellRuntime::~ShellRuntime()
     if (m_aiProcess) {
         m_aiProcess->kill();
         m_aiProcess->waitForFinished(500);
+    }
+    if (m_localProcess) {
+        m_localProcess->kill();
+        m_localProcess->waitForFinished(500);
     }
     if (m_process.state() != QProcess::NotRunning) {
         m_process.kill();

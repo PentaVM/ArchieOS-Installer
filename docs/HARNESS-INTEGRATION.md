@@ -18,22 +18,49 @@ harness or lesson is denied by default, and every result says
 
 ### Local models
 
-Bonsai is Archie's only LLM. Ternary Bonsai 2 9B runs on llama.cpp (`llama-server` on
-`127.0.0.1:8081`, alias `bonsai`), and two manifests describe it:
+Bonsai is Archie's only LLM, in two sizes on llama.cpp. One answers at a time, and
+`archie-local use 27b|9b` changes which: Ternary Bonsai 2 27B (`llama-server` on
+`127.0.0.1:8082`, alias `bonsai-27b`) or Ternary Bonsai 2 9B (`127.0.0.1:8081`, alias
+`bonsai`). Four manifests describe them:
 
-| Manifest | Reasoning | Capability | Use |
-|---|---|---|---|
-| `models/local/bonsai-2-9b.toml` | on | `cognition.reasoning` | decisions, Harness² |
-| `models/local/bonsai-2-9b-fast.toml` | off | `cognition.response` | short answers, voice |
+| Manifest | Reasoning | Capability | Tier | Use |
+|---|---|---|---|---|
+| `models/local/bonsai-2-27b.toml` | `reasoning-effort = "medium"` | `cognition.reasoning` | 63 | decisions, Harness² |
+| `models/local/bonsai-2-27b-fast.toml` | `reasoning-effort = "none"` | `cognition.response` | 63 | short answers, voice |
+| `models/local/bonsai-2-9b.toml` | `thinking = "on"` | `cognition.reasoning` | 55 | decisions, Harness² |
+| `models/local/bonsai-2-9b-fast.toml` | `thinking = "off"` | `cognition.response` | 55 | short answers, voice |
 
-Both are `Local`, take no credential and accept up to `Restricted` context. `Secret` reaches
-no model. Both ship with `availability = "offline"`, because the image does not include
+The router asks a llama.cpp model only while its server answers `/health`. With all four
+installed as ready, the 27B answers while its server runs and the 9B while its server runs:
+switching models needs no restart of archied or Wanda.
+
+Measured on the RTX 3070 (8 GB) on 2026-10-24 with PrismML's llama.cpp b10787, the node's
+runtime since then:
+
+| | 9B, whole on the GPU | 27B, 63 layers on the GPU (`--fit`) |
+|---|---|---|
+| Generation | 113–125 tokens/s (b10777: the same) | 41–43 tokens/s |
+| Reading a 3,650-token prompt | ~2,300 tokens/s | ~690 tokens/s |
+| Short question, answered directly | 0.5 s | 1.4 s |
+| Same, reasoning | 9B on: the thought used all 1,024 tokens, no answer | medium: 15–16 s |
+| Loading | seconds | ~2½ min from a hard disk |
+
+A time-zone question (Santiago 21:00, Tokyo?) was answered right only by the 27B at medium
+in that run, and wrong by it in another, through Core: single samples, not a benchmark of
+quality. Through Core, `archie-local use 9b` took 5 s, and the next unpinned restricted
+question went to `local.bonsai-2-9b-fast` instead of `local.bonsai-2-27b-fast`.
+
+All four are `Local`, take no credential and accept up to `Restricted` context. `Secret` reaches
+no model. They ship with `availability = "offline"`, because the image does not include
 llama-server and the node's own models are preferred for every private and voice request.
 On a node whose llama-server serves these weights, set `availability = "ready"` in the
 installed copies under `/etc/archie/models/local/` (or `<root>/etc/models/local/`). Until
 then the router never chooses Bonsai. The manifest's `thinking = "on" | "off"` label is sent to llama.cpp as
-`chat_template_kwargs.enable_thinking`, on both the plain and the streamed path. A
-misspelt value is refused when the endpoint is built. With reasoning on, llama.cpp may
+`chat_template_kwargs.enable_thinking`, on both the plain and the streamed path. The 27B's
+template reads `reasoning_effort` instead: `reasoning-effort = "none" | "medium" | "xhigh"`
+is sent as that field. Its template answers `"high"` with HTTP 500, so that value is refused
+before it is sent, and its server maps any other unknown value to medium
+(`--reasoning-effort-allow`). A misspelt value is refused when the endpoint is built. With reasoning on, llama.cpp may
 spend half of each request's output budget thinking. The thought is then closed with
 Archie's message, and the other half stays for the answer. A pinned model is asked in the
 role its manifest offers, so `--model local.bonsai-2-9b` reaches the reasoning manifest.

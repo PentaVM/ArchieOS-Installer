@@ -1,0 +1,51 @@
+# Ternary Bonsai 2 27B: Archie's best local reasoning model.
+#
+# PrismML's ternary quantization of Qwen3.5-27B, Apache-2.0
+# (https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf). llama.cpp serves it on
+# loopback with the OpenAI wire format (archie-local use 27b). It never leaves the
+# machine, so it may reason over restricted context; secret context goes to no model.
+#
+# On an 8 GB card its 5.9 GB of weights share the work with the CPU: PrismML's runtime
+# (b10787, --fit) puts on the GPU as many layers as there is room for when it starts.
+# One model answers at a time (archie-local use 27b|9b); the router asks this one only
+# while its server answers /health, and Bonsai 2 9B otherwise.
+id = "local.bonsai-2-27b"
+display_name = "Ternary Bonsai 2 27B"
+provider = "llama-cpp"
+locality = "local"
+
+# One slot with a 16,384-token cache: the card has no room for more beside the weights.
+context_window = 16384
+max_output_tokens = 4096
+
+capabilities = ["cognition.reasoning"]
+max_privacy_grade = "restricted"
+
+# Shipped offline: the router chooses it only on a node whose llama-server serves these
+# weights, which sets availability = "ready" in its installed copy.
+availability = "offline"
+
+# Assigned by hand: above Bonsai 2 9B (55), which it stands in for when it is up, and below
+# the cloud reasoning models. latency_ema_ms is measured on the RTX 3070 (2026-10-24, 63 of
+# its layers on the GPU, 43 tokens/s): a short question with medium reasoning took 15 to 16 s,
+# and answered right where the 9B and this model without reasoning did not.
+quality_tier = 63
+latency_ema_ms = 15000
+
+[cost]
+input_micros_per_mtok = 0
+output_micros_per_mtok = 0
+
+[labels]
+base-url = "http://127.0.0.1:8082/v1/"
+provider-model = "bonsai-27b"
+# Its chat template reads reasoning_effort: none, medium or xhigh ("high" is an HTTP 500,
+# and the runtime refuses it before it is sent). Medium is its shorter reasoning; the
+# thought gets half of each request's output budget and the answer the other half.
+reasoning-effort = "medium"
+thinking = "on"
+weights = "Ternary-Bonsai-2-27B-PTQ1_0.gguf"
+weights_sha256 = "53107f530aa52eb00912263ab1ee29bd199261c87cd7b4ad4ca1318c1fe33ee3"
+weights_bytes = "5946648928"
+source = "https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf"
+license = "apache-2.0"

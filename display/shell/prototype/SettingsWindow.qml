@@ -29,7 +29,26 @@ AppWindow {
             }
         }
     }
-    Column { visible:sw.section===1; width:parent.width; spacing:8
+    Column { id:localModels; visible:sw.section===1; width:parent.width; spacing:8
+        readonly property bool host: typeof shellRuntime !== "undefined" && shellRuntime !== null
+        readonly property var list: host ? shellRuntime.localModels : []
+        onVisibleChanged: if (visible && host) shellRuntime.localModelsRefresh()
+        Eyebrow { text:"Modelo local que responde" }
+        VoidBox { visible:localModels.list.length===0; icon:"cpu"; title:"Sin modelos locales en la lista"
+            text:!localModels.host ? "Este host no puede hablar con archie-local." : (shellRuntime.localModelNote || "archie-local todavía no respondió.") }
+        Repeater { model:localModels.list
+            delegate:ListRow { objectName:"settings.localModel." + modelData.name; glyph:"cpu"; title:modelData.label
+                sub:modelData.answering ? "Responde ahora en 127.0.0.1:" + modelData.port
+                    : modelData.here ? (modelData.chosen ? "Elegido; su servidor no está en marcha" : "En este equipo")
+                    : "No está en este equipo: archie-local setup " + modelData.name
+                Btn { objectName:"settings.useModel." + modelData.name
+                    text:modelData.answering ? "En uso" : shellRuntime.localModelBusy ? "Cargando…" : "Usar"
+                    dis:!modelData.here || modelData.answering || shellRuntime.localModelBusy
+                    onClicked:shellRuntime.useLocalModel(modelData.name) } }
+        }
+        NoteBox { visible:localModels.list.length>0; icon:"cpu"
+            text:(localModels.host && shellRuntime.localModelNote ? shellRuntime.localModelNote + " " : "")
+                + "Uno responde a la vez: la GPU tiene lugar para uno. El 27B responde mejor y tarda unos minutos en cargar; el router de Core pregunta al que esté en marcha, sin reiniciar nada." }
         Eyebrow { text:"Modelos registrados" }
         VoidBox { visible:sw.models.length===0; icon:"cpu"; title:"Sin modelos en la proyección"; text:"No se deduce si hay un modelo cargado a partir de un catálogo vacío." }
         Repeater { model:sw.models
