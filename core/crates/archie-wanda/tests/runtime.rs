@@ -4,7 +4,7 @@ use archie_types::{
 };
 use archie_vault::ContextDomain;
 use archie_wanda::{
-    config::{DomainBinding, SourceBinding, WandaConfig},
+    config::{CoreBinding, DomainBinding, SourceBinding, WandaConfig},
     runtime::query,
     store::WandaStore,
     types::*,
@@ -18,9 +18,22 @@ use std::{
     },
 };
 fn fixture(path: &std::path::Path, url: &str, locality: Locality) -> WandaStore {
+    fixture_with(path, url, locality, None)
+}
+/// With a Core root, the manifest goes where Core reads its catalog, so both see one model.
+fn fixture_with(
+    path: &std::path::Path,
+    url: &str,
+    locality: Locality,
+    core: Option<CoreBinding>,
+) -> WandaStore {
     let domain = ContextDomain::personal("owner").unwrap();
     std::fs::write(path.join("source.token"), "source-fixture-secret").unwrap();
-    std::fs::create_dir(path.join("models")).unwrap();
+    let models = match core.as_ref().and_then(|core| core.root.as_ref()) {
+        Some(root) => archie_state::StatePaths::rooted(root).models(),
+        None => path.join("models"),
+    };
+    std::fs::create_dir_all(&models).unwrap();
     let descriptor = ModelDescriptor {
         id: ModelId::parse("fixture.reasoner").unwrap(),
         display_name: "Fixture".into(),
@@ -40,14 +53,14 @@ fn fixture(path: &std::path::Path, url: &str, locality: Locality) -> WandaStore 
         labels: BTreeMap::from([("base-url".into(), url.into())]),
     };
     std::fs::write(
-        path.join("models/model.toml"),
+        models.join("model.toml"),
         toml::to_string(&descriptor).unwrap(),
     )
     .unwrap();
     let store = WandaStore::new(WandaConfig {
         state_dir: path.join("state"),
         graph_binary: path.join("absent-cli"),
-        models_dir: path.join("models"),
+        models_dir: models,
         operator_token_file: path.join("owner.token"),
         domains: vec![DomainBinding {
             domain: domain.clone(),
@@ -67,6 +80,7 @@ fn fixture(path: &std::path::Path, url: &str, locality: Locality) -> WandaStore 
         deep_quality_tier: 80,
         retention_hours: 168,
         parallel_queries: 1,
+        core,
         lncm: None,
     })
     .unwrap();
@@ -312,4 +326,146 @@ async fn a_failing_model_is_retried_with_backoff_not_every_tick() {
         "the same evidence waits out its backoff after a failure"
     );
     model_task.abort();
+}
+
+fn core_at(root: &std::path::Path) -> CoreBinding {
+    CoreBinding {
+        root: Some(root.to_path_buf()),
+        focus: "wanda".into(),
+        timeout_seconds: 30,
+    }
+}
+
+async fn model_server(calls: Arc<AtomicUsize>) -> (String, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let task = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new()
+                .route("/v1/chat/completions", post(answer))
+                .with_state(calls),
+        )
+        .await
+        .unwrap();
+    });
+    (format!("http://{address}/v1/"), task)
+}
+
+#[tokio::test]
+async fn with_core_configured_and_no_core_running_nothing_reaches_the_model() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let (url, task) = model_server(calls.clone()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("archie");
+    let store = fixture_with(dir.path(), &url, Locality::Local, Some(core_at(&root)));
+    let result = query(
+        &store,
+        &ContextDomain::personal("owner").unwrap(),
+        "¿Qué detalle podría tener?",
+        true,
+        1000,
+    )
+    .await
+    .unwrap();
+    // Wanda does not go around Core when Core is configured and absent.
+    assert_eq!(result.state, "core_unavailable", "{:?}", result.reason);
+    assert!(result.recommendations.is_empty());
+    assert!(result.receipt.is_none());
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    task.abort();
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore = "requires isolated PostgreSQL fixture; captured HTTP is not model-quality proof"]
+async fn core_answers_wanda_with_a_receipt_and_its_pause_stops_her() {
+    use archie_core::{
+        control::{request_over, ControlRequest},
+        operator::serve_operator_connection,
+        ControlResponse,
+    };
+    use archie_workstation::ai_policy::RuntimeProfile;
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let (url, model) = model_server(calls.clone()).await;
+    // Core's state must live under the temporary directory for the PostgreSQL fixture.
+    let root = std::env::temp_dir().join(format!(
+        "archie-wanda-core-{}",
+        archie_types::TraceId::new()
+    ));
+    let paths = archie_state::StatePaths::rooted(&root);
+    paths.ensure_directories().unwrap();
+    let domain = ContextDomain::personal("owner").unwrap();
+    let mut profile = RuntimeProfile::for_domain(domain.clone());
+    profile.max_prompt_bytes = 65536;
+    profile
+        .create(&paths.config_dir.join("inference.toml"))
+        .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let store = fixture_with(dir.path(), &url, Locality::Local, Some(core_at(&root)));
+    let runtime = Arc::new(
+        archie_core::Runtime::boot(paths.clone(), archie_core::ArchieConfig::default())
+            .await
+            .unwrap(),
+    );
+    // The operator socket archied serves, here for this runtime alone.
+    let listener = tokio::net::UnixListener::bind(paths.control_socket()).unwrap();
+    let host = runtime.clone();
+    let socket = tokio::spawn(async move {
+        loop {
+            let (stream, _) = listener.accept().await.unwrap();
+            let host = host.clone();
+            tokio::spawn(async move {
+                let _ = serve_operator_connection(stream, host).await;
+            });
+        }
+    });
+
+    let result = query(&store, &domain, "¿Qué detalle podría tener?", true, 1000)
+        .await
+        .unwrap();
+    assert_eq!(
+        result.recommendations.len(),
+        1,
+        "state={}, reason={:?}",
+        result.state,
+        result.reason
+    );
+    assert_eq!(result.model.as_deref(), Some("fixture.reasoner"));
+    let receipt = result.receipt.clone().expect("Core's receipt");
+    assert!(uuid_like(&receipt), "{receipt}");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    // Core's emergency pause stops Wanda too: nothing reaches the model while it holds.
+    let mut operator = tokio::net::UnixStream::connect(paths.control_socket())
+        .await
+        .unwrap();
+    assert!(matches!(
+        request_over(&mut operator, &ControlRequest::AiPause)
+            .await
+            .unwrap(),
+        ControlResponse::AiPolicy { paused: true, .. }
+    ));
+    let paused = query(&store, &domain, "¿Y otro detalle?", true, 1000)
+        .await
+        .unwrap();
+    assert_eq!(paused.state, "core_refused", "{:?}", paused.reason);
+    assert!(paused.recommendations.is_empty());
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert!(matches!(
+        request_over(&mut operator, &ControlRequest::AiResume)
+            .await
+            .unwrap(),
+        ControlResponse::AiPolicy { paused: false, .. }
+    ));
+    socket.abort();
+    model.abort();
+    drop(runtime);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[cfg(target_os = "linux")]
+fn uuid_like(value: &str) -> bool {
+    value.len() == 36 && value.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
 }

@@ -972,13 +972,17 @@ name = "archie-wanda"
 version = "0.1.0"
 dependencies = [
  "archie-cerebra",
+ "archie-core",
+ "archie-memory",
  "archie-model-runtime",
  "archie-registry",
  "archie-router",
  "archie-slink",
+ "archie-state",
  "archie-types",
  "archie-vault",
  "archie-wanda-lncm",
+ "archie-workstation",
  "axum",
  "clap",
  "fs2",

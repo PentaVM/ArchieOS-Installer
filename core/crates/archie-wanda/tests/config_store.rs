@@ -44,6 +44,7 @@ fn config(dir: &Path) -> WandaConfig {
         deep_quality_tier: 80,
         retention_hours: 168,
         parallel_queries: 1,
+        core: None,
         lncm: None,
     }
 }

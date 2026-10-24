@@ -14,6 +14,7 @@ pub mod server;
 pub mod social;
 pub mod store;
 pub mod types;
+mod via_core;
 
 #[derive(Debug, thiserror::Error)]
 pub enum WandaError {

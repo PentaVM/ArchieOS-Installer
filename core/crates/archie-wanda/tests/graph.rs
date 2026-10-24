@@ -27,6 +27,7 @@ async fn real_graph_authority_projects_tags_without_promoting_hypotheses() {
         deep_quality_tier: 80,
         retention_hours: 168,
         parallel_queries: 1,
+        core: None,
         lncm: None,
     };
     let projection = project(&config, &domain).await.unwrap();

@@ -80,6 +80,35 @@ pub struct LncmBinding {
 fn one() -> usize {
     1
 }
+
+/// Archie Core, through which Wanda asks its reasoning model. With it, each question is
+/// one `AiInfer` on Core's operator socket: Core's profile admits it, Policy leases it,
+/// the router decides under the same grade and the answer is sealed with a receipt.
+/// Without it Wanda asks the local model itself and nothing records the call.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CoreBinding {
+    /// Archie's root, laid out as `ARCHIE_ROOT` is; absent, the system layout.
+    #[serde(default)]
+    pub root: Option<PathBuf>,
+    /// The Focus label Core files Wanda's receipts under.
+    #[serde(default = "core_focus")]
+    pub focus: String,
+    /// How long one question may take, Core's own deadline included.
+    #[serde(default = "core_timeout")]
+    pub timeout_seconds: u16,
+}
+fn core_focus() -> String {
+    "wanda".into()
+}
+fn core_timeout() -> u16 {
+    60
+}
+impl std::fmt::Debug for CoreBinding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CoreBinding(redacted)")
+    }
+}
 impl std::fmt::Debug for LncmBinding {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("LncmBinding(redacted)")
@@ -107,6 +136,8 @@ pub struct WandaConfig {
     /// (llama-server `--parallel`); further queries wait their turn for a few seconds.
     #[serde(default = "parallel_queries")]
     pub parallel_queries: u8,
+    #[serde(default)]
+    pub core: Option<CoreBinding>,
 }
 fn parallel_queries() -> u8 {
     1
@@ -167,6 +198,9 @@ impl WandaConfig {
         }
         if let Some(lncm) = &mut config.lncm {
             resolve(base, &mut lncm.dir);
+        }
+        if let Some(root) = config.core.as_mut().and_then(|core| core.root.as_mut()) {
+            resolve(base, root);
         }
         config.validate()?;
         Ok(config)
@@ -253,6 +287,21 @@ impl WandaConfig {
                 || source.chat_domains.iter().any(|(chat, domain)| {
                     crate::chat::routing_key(chat).is_none() || !domains.contains(domain)
                 })
+            {
+                return Err(invalid());
+            }
+        }
+        if let Some(core) = &self.core {
+            // The Focus label Core accepts, so a bad one fails here and not per question.
+            let focus_ok = !core.focus.is_empty()
+                && core.focus.len() <= 64
+                && core
+                    .focus
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+            if !focus_ok
+                || !(1..=600).contains(&core.timeout_seconds)
+                || core.root.as_ref().is_some_and(|p| !usable(p))
             {
                 return Err(invalid());
             }

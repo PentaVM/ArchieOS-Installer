@@ -8,13 +8,17 @@ license.workspace = true
 
 [dependencies]
 archie-cerebra.workspace = true
+archie-core.workspace = true
+archie-memory.workspace = true
 archie-model-runtime.workspace = true
 archie-registry.workspace = true
 archie-router.workspace = true
 archie-slink.workspace = true
+archie-state.workspace = true
 archie-types.workspace = true
 archie-vault.workspace = true
 archie-wanda-lncm.workspace = true
+archie-workstation.workspace = true
 axum = { workspace = true, features = ["json", "query"] }
 clap.workspace = true
 fs2.workspace = true
@@ -28,4 +32,5 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", 
 toml.workspace = true
 
 [dev-dependencies]
+archie-state = { workspace = true, features = ["test-support"] }
 tempfile = "3"

@@ -66,6 +66,7 @@ fn config(dir: &Path, checkpoint: &Path) -> WandaConfig {
         deep_quality_tier: 80,
         retention_hours: 168,
         parallel_queries: 1,
+        core: None,
         lncm: Some(LncmBinding {
             dir: checkpoint.to_path_buf(),
             device: "cpu".into(),

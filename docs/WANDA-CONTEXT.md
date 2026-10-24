@@ -50,7 +50,33 @@ token_file = "/var/lib/archie/secrets/wanda-browser.token"
 allow_presumed_owner = true
 [sources.chat_domains]
 "120363042000000001@g.us" = "work/studio/house"
+
+[core]
+# Raíz de Archie con el diseño de ARCHIE_ROOT; sin ella, /etc/archie y /run/archie.
+# root = "/var/tmp/archie"
+focus = "wanda"
+timeout_seconds = 60
 ```
+
+### Razonamiento por Core
+
+Con el bloque `[core]`, Wanda no llama al modelo: cada consulta es un `AiInfer` en el
+socket del operador de `archied`, fijado al modelo que Cerebra admitió, con grado
+`Restricted` y sin la memoria propia de Core (Wanda ya eligió el contexto). Core admite la
+consulta con su perfil (`etc/inference.toml`), la despacha con un permiso de Policy,
+el router vuelve a comprobar grado y localidad, y la respuesta queda sellada en el Vault
+de Core con un recibo. La respuesta de `/v1/query` trae ese `receipt`.
+
+- El proceso de Wanda corre como el dueño del perfil de Core, y los dominios de Wanda
+  deben estar en `allowed_domains`. El prompt de Wanda llega a ~34 KiB con el contexto
+  completo: subir `max_prompt_bytes` a 65536.
+- El modelo debe existir con el mismo id en `models_dir` de Wanda y en el catálogo de Core:
+  usar el mismo directorio (`/etc/archie/models`).
+- La pausa de emergencia (`archie ai pause`) también detiene a Wanda.
+- Sin Core en marcha, Wanda responde `core_unavailable` y no consulta al modelo por fuera.
+- Sin el bloque `[core]`, Wanda llama al modelo local directamente y no queda recibo. Es
+  el modo de diagnóstico y de las pruebas sin base de datos.
+- El experto LNCM (estado 1) corre dentro del proceso de Wanda y no pasa por Core.
 
 Usar rutas sin `..` después de resolver la ubicación del archivo; la validación
 rechaza componentes que puedan escapar del directorio configurado. En producción

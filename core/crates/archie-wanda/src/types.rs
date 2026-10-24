@@ -171,6 +171,9 @@ pub struct QueryResponse {
     pub quick: Option<archie_wanda_lncm::QuickAnswer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refined: Option<Refined>,
+    /// Core's receipt for the model call behind `recommendations`, when Core made it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt: Option<String>,
 }
 /// Below this, state 1 is not said aloud: an unsure "yes" is worse than none.
 pub const QUICK_CONFIDENCE: f32 = 0.6;
@@ -247,6 +250,7 @@ mod tests {
         QueryResponse {
             recommendations: Vec::new(),
             model: None,
+            receipt: None,
             state: "answered".into(),
             reason: None,
             quick: Some(QuickAnswer {

@@ -32,6 +32,7 @@ pub fn unavailable(state: &str, reason: &str) -> QueryResponse {
         reason: Some(reason.into()),
         quick: None,
         refined: None,
+        receipt: None,
     }
 }
 
@@ -350,45 +351,101 @@ async fn query_model(
             "El núcleo no admitió un modelo para esta consulta y presupuesto.",
         ));
     };
-    let mut selected = ModelRegistry::new();
-    selected
-        .register(models.get(&model).ok_or(WandaError::NoModel)?.clone())
-        .map_err(|_| WandaError::NoModel)?;
+    let descriptor = models.get(&model).ok_or(WandaError::NoModel)?.clone();
     let text = capsule
         .render(&task, now_ms)
         .map_err(|_| WandaError::Storage)?;
-    let routed = Routed::new(selected).requiring_quality(quality);
-    let result = routed
-        .ask_private(
-            &Question {
-                role: ModelRole::ReasoningWorker,
-                privacy: PrivacyGrade::Restricted,
-                system: INSTRUCTION,
-                user: &text,
-                image: None,
-                max_tokens: 2048,
-                timeout: Duration::from_secs(20),
-            },
-            &Veil::new(),
-        )
-        .await;
-    capsule.dispose();
-    let answer = match result {
-        Ok(answer) if !answer.left_the_machine => answer.answered,
-        _ => {
-            return Ok(unavailable(
-                "model_unavailable",
-                "El modelo local no respondió; no se generó una recomendación.",
-            ))
+    let reply = match &store.config().core {
+        // Core asks the model Cerebra admitted, under Core's lease, and seals the answer.
+        Some(core) => {
+            let request = crate::via_core::request(
+                core,
+                domain,
+                &model,
+                format!("{INSTRUCTION}\n\n{text}"),
+                2048,
+            );
+            crate::via_core::ask(core, request)
+                .await
+                .map(|answer| (answer.text, answer.model, Some(answer.receipt_id)))
+                .map_err(|refusal| refused_by_core(&refusal))
+        }
+        // Without Core, Wanda asks the local model itself and nothing records the call.
+        None => {
+            let mut selected = ModelRegistry::new();
+            selected
+                .register(descriptor)
+                .map_err(|_| WandaError::NoModel)?;
+            let routed = Routed::new(selected).requiring_quality(quality);
+            match routed
+                .ask_private(
+                    &Question {
+                        role: ModelRole::ReasoningWorker,
+                        privacy: PrivacyGrade::Restricted,
+                        system: INSTRUCTION,
+                        user: &text,
+                        image: None,
+                        max_tokens: 2048,
+                        timeout: Duration::from_secs(20),
+                    },
+                    &Veil::new(),
+                )
+                .await
+            {
+                Ok(answer) if !answer.left_the_machine => Ok((
+                    answer.answered.text,
+                    answer.answered.model.to_string(),
+                    None,
+                )),
+                _ => Err(unavailable(
+                    "model_unavailable",
+                    "El modelo local no respondió; no se generó una recomendación.",
+                )),
+            }
         }
     };
-    let recommendations = crate::advice::validate(&answer.text, &references, &people, now_ms)?;
+    capsule.dispose();
+    let (answer, model, receipt) = match reply {
+        Ok(reply) => reply,
+        Err(response) => return Ok(response),
+    };
+    let recommendations = crate::advice::validate(&answer, &references, &people, now_ms)?;
     Ok(QueryResponse {
         recommendations,
-        model: Some(answer.model.to_string()),
+        model: Some(model),
         state: "ready".into(),
         reason: None,
         quick: None,
         refined: None,
+        receipt,
     })
+}
+
+/// What Wanda says when Core gave no answer. Wanda never goes around Core to ask anyway.
+fn refused_by_core(refusal: &crate::via_core::CoreRefusal) -> QueryResponse {
+    use crate::via_core::CoreRefusal;
+    match refusal {
+        CoreRefusal::Unreachable => unavailable(
+            "core_unavailable",
+            "Core no está disponible; Wanda no consulta al modelo por fuera de Core.",
+        ),
+        CoreRefusal::Refused(message) => unavailable(
+            "core_refused",
+            &format!(
+                "Core rechazó la consulta: {}",
+                message.chars().take(200).collect::<String>()
+            ),
+        ),
+        CoreRefusal::Failed(code) => unavailable(
+            "model_unavailable",
+            &format!(
+                "El modelo local no completó la respuesta ({}); no se generó una recomendación.",
+                code.chars().take(64).collect::<String>()
+            ),
+        ),
+        CoreRefusal::Deadline => unavailable(
+            "model_unavailable",
+            "Core no respondió a tiempo; la consulta no se repite.",
+        ),
+    }
 }
