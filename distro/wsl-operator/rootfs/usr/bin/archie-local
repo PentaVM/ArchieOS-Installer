@@ -1,24 +1,67 @@
 #!/usr/bin/env bash
-# Reasoning models on this machine: Bonsai (PrismML, Apache 2.0), run by PrismML's llama.cpp.
-# With them, what is said to Archie does not leave the machine. Several can be kept here; one
-# answers at a time, and changing which one is a single command.
+# Reasoning models on this machine, run by PrismML's llama.cpp: Bonsai (PrismML), Qwen
+# (Alibaba), Gemma (Google), gpt-oss (OpenAI), Nemotron (NVIDIA), DeepSeek, Kimi (Moonshot)
+# and Flint, in the publishers' or unsloth's GGUF quantizations. With them, what is said to
+# Archie does not leave the machine. Several can be kept here; one answers at a time, and
+# changing which one is a single command.
 #
 #   archie-local list [--json]            the models: which are here, which one answers
-#   archie-local use 27b|9b|4b|1.7b       that one answers from now on (the other stops)
+#   archie-local use <name>               that one answers from now on (the other stops)
 #   archie-local current                  the chosen one as "name endpoint alias", for scripts
-#   archie-local setup [27b|9b|4b|1.7b]   fetch a model, checked against its digest (default 9b)
+#   archie-local setup [<name>]           fetch a model, checked against its digest (default 9b)
+#   archie-local remove <name>            delete a fetched model (not the one answering)
+#   archie-local manifest <name>          Core's manifest for it (archie-node installs it)
+#   archie-local config [--json | models-dir DIR]  where models are kept (setting it needs root)
 #   archie-local gpu                      build the runtime for the NVIDIA GPU (as root, once:
 #                                         about 8 GB of CUDA toolkit and a quarter of an hour)
 #   archie-local up | down | status | ready
 #
-# Bonsai 2 27B answers best. On an 8 GB card its 5.9 GB of weights share the work with the
-# CPU: the runtime puts on the GPU as many layers as there is room for when it starts. Bonsai
-# 2 9B fits whole and answers sooner. Bonsai 4B and 1.7B are for a machine without a GPU; on
-# a six-core laptop the 4B took 40 to 60 s to answer. Core's router reaches each model by its
-# own port, and only while its server answers /health, so stopping one and starting another
-# changes which model it asks without restarting anything.
+# Bonsai 2 27B answered best on an RTX 3070: 63 of its 64 layers fit on the 8 GB card and it
+# speaks at 43 tokens/s. Bonsai 2 9B fits whole and answers sooner. The rest are for other
+# machines, by memory: the small ones for no GPU; Qwen 3.8 27B, Gemma 4 and gpt-oss 20B for
+# 12 to 32 GB of GPU; gpt-oss 120B, Nemotron 3.5 Bolt, Qwen 3.5 122B, Qwen 3.8 Flash-Next
+# and DeepSeek V4 Flash for 128 GB of unified memory (DGX Spark, RTX Spark); DeepSeek V4.1
+# Flash for 256 GB and Kimi K3 for 512 GB. Licences differ: most are Apache 2.0 or MIT,
+# Nemotron's is NVIDIA's open model licence, and Kimi K3's and Qwen 3.8 Flash-Next's have
+# their own terms for large commercial use; `list --json` gives each one's, and its size, so
+# whoever shows the list can say what fits. Core's router reaches each model by its own port,
+# and only while its server answers /health, so stopping one and starting another changes
+# which model it asks without restarting anything.
 set -euo pipefail
-dir=/var/lib/archie/models/local
+conf=/etc/archie/local.conf
+models_dir() {
+  local value=${ARCHIE_LOCAL_MODELS:-}
+  [ -z "$value" ] && [ -r "$conf" ] && value=$(sed -n 's/^MODELS_DIR=//p' "$conf" | tail -1)
+  echo "${value:-/var/lib/archie/models/local}"
+}
+# The Windows drive that holds this distro's virtual disk (C: unless the distro was imported
+# elsewhere): inside WSL its ext4 claims hundreds of GB free that the drive does not have.
+host_drive() {
+  local value=
+  [ -r "$conf" ] && value=$(sed -n 's/^HOST_DRIVE=//p' "$conf" | tail -1)
+  echo "${value:-/mnt/c}"
+}
+# MB of GPU memory the runtime leaves free when it fits a model (Windows, WSLg, the GUI).
+# Not more by default: on the 8 GB RTX 3070 a 1536 MB margin put Bonsai 2 27B's layer 0 on
+# the CPU, which turns off the fused Gated DeltaNet kernels for every layer, and it spoke at
+# 5 tokens/s instead of 43 (2026-10-24).
+fit_target() {
+  local value=
+  [ -r "$conf" ] && value=$(sed -n 's/^FIT_TARGET_MB=//p' "$conf" | tail -1)
+  echo "${value:-512}"
+}
+# Bytes really free for a model in the models folder.
+free_bytes() {
+  local d=$1 own host
+  mkdir -p "$d" 2>/dev/null || true
+  own=$(df --output=avail -B1 "$d" | tail -1 | tr -dc 0-9)
+  case $(readlink -f "$d") in
+    /mnt/?/*) echo "$own" ;;
+    *) host=$(df --output=avail -B1 "$(host_drive)" 2>/dev/null | tail -1 | tr -dc 0-9)
+       echo $(( ${host:-$own} < own ? ${host:-$own} : own )) ;;
+  esac
+}
+dir=$(models_dir)
 run=$HOME/.archie/local
 cpu=/opt/archie/llama
 gpu=/opt/archie/llama-cuda
@@ -26,22 +69,94 @@ gpu=/opt/archie/llama-cuda
 # the first with --fit (layers placed by the room the GPU has) and --reasoning-effort-allow.
 revision=73bfe6cc485554822f80c473a3c0c4f25e80f41b
 
-# name, file, Hugging Face repository (prism-ml/…), sha256, port, alias, what it is
+# name, file, Hugging Face repository and revision, sha256, bytes, port, alias, how it is
+# asked to reason, the architecture the runtime must know, the licence, the quality tier
+# Core's router is given, what it is. Reasoning: effort is Bonsai 2 27B's reasoning_effort
+# (none, medium, xhigh); harmony is gpt-oss's (low, medium, high); thinking is
+# enable_thinking; none leaves the chat template's default. A model split in parts
+# (-00001-of-0000N.gguf) names its first part, lists every part's digest in order, and its
+# bytes are their sum. Digests and sizes as Hugging Face listed them on 2026-10-24.
 catalog() {
   cat <<'MODELS'
-27b Ternary-Bonsai-2-27B-PTQ1_0.gguf Ternary-Bonsai-2-27B-gguf 53107f530aa52eb00912263ab1ee29bd199261c87cd7b4ad4ca1318c1fe33ee3 8082 bonsai-27b Bonsai 2 27B, ternary (5.9 GB)
-9b Ternary-Bonsai-2-9B-PTQ1_0.gguf Ternary-Bonsai-2-9B-gguf 3561df7ac7d26a71ffa991ac2db740b10841c3a350aa2676ccd3ff5d428b4e8b 8081 bonsai Bonsai 2 9B, ternary (2.0 GB)
-4b Bonsai-4B-Q1_0.gguf Bonsai-4B-gguf 4524b3f997f0f06444e568d1f26e2efd69effa3218c7ad3047432fb171e42168 8083 bonsai-4b Bonsai 4B, 1-bit (572 MB)
-1.7b Bonsai-1.7B-Q1_0.gguf Bonsai-1.7B-gguf 3d7c6c90dd98717a203adb22d5eacd2581850e40aa5327e144b97766cae5f7e3 8084 bonsai-1.7b Bonsai 1.7B, 1-bit (248 MB)
+27b Ternary-Bonsai-2-27B-PTQ1_0.gguf prism-ml/Ternary-Bonsai-2-27B-gguf b072e1d3b35a0a630cece372c2127528e0994386 53107f530aa52eb00912263ab1ee29bd199261c87cd7b4ad4ca1318c1fe33ee3 5946648928 8082 bonsai-27b effort qwen35 apache-2.0 63 Bonsai 2 27B, ternary
+9b Ternary-Bonsai-2-9B-PTQ1_0.gguf prism-ml/Ternary-Bonsai-2-9B-gguf 5b2abb02362efbed46bbe204014b02837778b2c2 3561df7ac7d26a71ffa991ac2db740b10841c3a350aa2676ccd3ff5d428b4e8b 1997486976 8081 bonsai thinking qwen35 apache-2.0 55 Bonsai 2 9B, ternary
+4b Bonsai-4B-Q1_0.gguf prism-ml/Bonsai-4B-gguf 78f2c2bacd0904ffaba24b4873ed975e5818354a 4524b3f997f0f06444e568d1f26e2efd69effa3218c7ad3047432fb171e42168 572270624 8083 bonsai-4b thinking qwen3 apache-2.0 40 Bonsai 4B, 1-bit
+1.7b Bonsai-1.7B-Q1_0.gguf prism-ml/Bonsai-1.7B-gguf 210a9e99f79cb184909d49595906526eb2b3dd9a 3d7c6c90dd98717a203adb22d5eacd2581850e40aa5327e144b97766cae5f7e3 248302272 8084 bonsai-1.7b thinking qwen3 apache-2.0 30 Bonsai 1.7B, 1-bit
+qwen-2b Qwen3.5-2B-Q4_K_M.gguf unsloth/Qwen3.5-2B-GGUF f6d5376be1edb4d416d56da11e5397a961aca8ae aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223 1280835840 8085 qwen-2b thinking qwen35 apache-2.0 40 Qwen 3.5 2B, Q4_K_M
+qwen-4b Qwen3.5-4B-Q4_K_M.gguf unsloth/Qwen3.5-4B-GGUF e87f176479d0855a907a41277aca2f8ee7a09523 00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4 2740937888 8086 qwen-4b thinking qwen35 apache-2.0 48 Qwen 3.5 4B, Q4_K_M
+qwen-9b Qwen3.5-9B-Q4_K_M.gguf unsloth/Qwen3.5-9B-GGUF 3885219b6810b007914f3a7950a8d1b469d598a5 03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8 5680522464 8087 qwen-9b thinking qwen35 apache-2.0 56 Qwen 3.5 9B, Q4_K_M
+qwen-27b Qwen3.5-27B-UD-IQ2_M.gguf unsloth/Qwen3.5-27B-GGUF 3221f178a6b842d04f1fb42f1c413534adcc0a6a 3c05eb29a4eacbe0caf80990c14f5857d0581af0b162934a42357960a99fb4ba 10188072864 8088 qwen-27b thinking qwen35 apache-2.0 60 Qwen 3.5 27B, 2-bit (UD-IQ2_M)
+qwen-35b-a3b Qwen3.5-35B-A3B-UD-IQ2_M.gguf unsloth/Qwen3.5-35B-A3B-GGUF bc014a17be43adabd7066b7a86075ff935c6a4e2 187b5bbb81d7ec1dc228cb04120302cc0d486cb3c988501af87e5f02e15ace0e 11391613568 8089 qwen-35b-a3b thinking qwen35moe apache-2.0 60 Qwen 3.5 35B-A3B (MoE, 3B active), 2-bit (UD-IQ2_M)
+flint Flint-Q4_K_M.gguf ggml-org/Flint-GGUF 468307a1b38259e9e4c9d4fe53d4e3b76386572c c3c4d93f9db92627a2fc47ea8fe8c64a094cabd3549db544bcdd2c00e9a9a347 23387911136 8090 flint none flint apache-2.0 58 Flint 40B-A2.5B (MoE), Q4_K_M
+qwen3.8-27b-iq3 Qwen3.8-27B-UD-IQ3_XXS.gguf unsloth/Qwen3.8-27B-GGUF 4ca720788d1e01f1bff70c033e0d0028fd02e502 c0b7c3038681ed2e3040456c1dd45f9858b6c2290bed172c70388a94874f3eee 10934860704 8091 qwen3.8-27b-iq3 thinking qwen35 apache-2.0 64 Qwen 3.8 27B, 3-bit (UD-IQ3_XXS)
+qwen3.8-27b Qwen3.8-27B-UD-Q4_K_XL.gguf unsloth/Qwen3.8-27B-GGUF 4ca720788d1e01f1bff70c033e0d0028fd02e502 3f227079003add2511437e5b1e94812e363385225bf6a9b47b0054a72bc8b01e 17559178144 8092 qwen3.8-27b thinking qwen35 apache-2.0 68 Qwen 3.8 27B, 4-bit (UD-Q4_K_XL)
+qwen3.8-27b-q8 Qwen3.8-27B-Q8_0.gguf unsloth/Qwen3.8-27B-GGUF 4ca720788d1e01f1bff70c033e0d0028fd02e502 a680f44a06920e5d689774823782006aa3acc8db95750323373b24139b67e348 29047086048 8093 qwen3.8-27b-q8 thinking qwen35 apache-2.0 70 Qwen 3.8 27B, 8-bit (Q8_0)
+qwen3.6-35b-a3b Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf unsloth/Qwen3.6-35B-A3B-GGUF a483e9e6cbd595906af30beda3187c2663a1118c 707a55a8a4397ecde44de0c499d3e68c1ad1d240d1da65826b4949d1043f4450 22360456160 8094 qwen3.6-35b-a3b thinking qwen35moe apache-2.0 64 Qwen 3.6 35B-A3B (MoE, 3B active), 4-bit
+gemma4-12b gemma-4-12b-it-UD-Q4_K_XL.gguf unsloth/gemma-4-12b-it-GGUF fc034cfff751157913579611efad8462ac1be606 90fd944d227e9d9b68e7e2c7d5b57b79d4c66ed521b0919fbbd932cf834f6f8e 7366423360 8095 gemma4-12b none gemma4 apache-2.0 55 Gemma 4 12B (Google), 4-bit
+gemma4-26b-a4b gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf unsloth/gemma-4-26B-A4B-it-GGUF c099eb48e663fd284577b04978a94ffccb261841 ef728c8e0c337fd1067b947af006e38a9ef2419e56feced4fd29b4bf0636e30c 17010980576 8096 gemma4-26b-a4b none gemma4 apache-2.0 60 Gemma 4 26B-A4B (Google, MoE), 4-bit
+gpt-oss-20b gpt-oss-20b-UD-Q4_K_XL.gguf unsloth/gpt-oss-20b-GGUF d449b42d93e1c2c7bda5312f5c25c8fb91dfa9b4 10fe673de12c20b74b8d670a9fdf0fd36b43b0a86ffc04daeb175c0a2b98c4f9 11872347328 8097 gpt-oss-20b harmony gpt-oss apache-2.0 58 gpt-oss 20B (OpenAI, MoE), MXFP4
+nemotron3.5-30b-a3b NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-Q4_K_XL.gguf unsloth/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-GGUF f2d3fe3694501008786e81e5f20360cbf715496a 112bf957489a497c18f60bf8bd44ee1dfa05e87368b8ed7f68998a4e38f275c9 25505724480 8098 nemotron3.5-30b-a3b thinking nemotron_h_moe nvidia-open-model 62 Nemotron 3.5 Lightning 30B-A3B (NVIDIA, MoE), 4-bit
+gpt-oss-120b UD-Q4_K_XL/gpt-oss-120b-UD-Q4_K_XL-00001-of-00002.gguf unsloth/gpt-oss-120b-GGUF ff1a82da6ad466e32284fa3d2b86694db3204789 c7b59d68c889ada280736d9b82685baeb6152f4d7423a169a369bb3492b3056e,7c77ca781792a28565c311ace40620ef7fb1cf67d123db347aa34f30ff48ad16 63016311392 8099 gpt-oss-120b harmony gpt-oss apache-2.0 70 gpt-oss 120B (OpenAI, MoE), MXFP4
+nemotron3.5-74b-a9b UD-Q4_K_XL/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-UD-Q4_K_XL-00001-of-00003.gguf unsloth/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-GGUF 34841e360524d421c564cc3ed247aa04a865473b d6f33b5e8a49ea57a0a3ae922dfd0b3033a19429993d3215fc4992f4270aa2df,93c8485db6f9e9d26085acc368ca3b0993a36aa870e8f8b7748c1fbd174c6276,f97b7a5443b3f77150a1bf7bac6c00862411ee2f26b7bf57a599fb61dbe867df 50219478368 8100 nemotron3.5-74b-a9b thinking nemotron_h_moe nvidia-open-model 68 Nemotron 3.5 Bolt 74B-A9B (NVIDIA, MoE), 4-bit
+qwen3.5-122b-a10b UD-Q4_K_XL/Qwen3.5-122B-A10B-UD-Q4_K_XL-00001-of-00003.gguf unsloth/Qwen3.5-122B-A10B-GGUF 51eab4d59d53f573fb9206cb3ce613f1d0aa392b 467c9bd92ea518539cf75bf5a5fbfbd35e9a0b40d766ccaa67bf120e12041df3,ecdbd42d43b0df9fa0ef9a584e09e95a43966ef03a122aba0b87a99d44d9ad98,13300e0f059e6fa21aa0fabde2a554f9deea366c0e54f268045769b214b28c97 77029996032 8101 qwen3.5-122b-a10b thinking qwen35moe apache-2.0 70 Qwen 3.5 122B-A10B (MoE), 4-bit
+qwen3.8-flash-next UD-IQ4_XS/Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf unsloth/Qwen3.8-Flash-Next-GGUF 766911a6b7369840a91dbcd95f9f997acaab6cd6 5ce89370720f8bf90890f439361282104c1aa1482d4013bb9a50923e758e71a4,577a38a2392b40ca2193cea502e1d92f60b8cd370675d308e0ec21885d9daaa7,d4634e6d84f0ebb0940be15c90d3790bf6464e3dea3a1cddc567dc0e83ad8833 93682584224 8102 qwen3.8-flash-next thinking qwen4exp qwen 76 Qwen 3.8 Flash-Next 177B (MoE), 4-bit (UD-IQ4_XS)
+deepseek-v4-flash UD-Q2_K_XL/DeepSeek-V4-Flash-0731-UD-Q2_K_XL-00001-of-00003.gguf unsloth/DeepSeek-V4-Flash-0731-GGUF fbbb5b93fb787c21338159b0af3318bb3f4d9768 de65c5bb660817b95cc281bf54935f9d1bcc3b22535f2eae63b35a14c7c5724b,c8728a298862cd8736782e2e4056e5e3e03c415ba552a38173264494e41ef327,a4bae0788c025c1b2388754592c98fefa1372981748ac9875039bf6a30e6eeb4 96832508352 8103 deepseek-v4-flash none deepseek4 mit 74 DeepSeek V4 Flash 284B (MoE), 2-bit (UD-Q2_K_XL)
+deepseek-v4.1-flash UD-IQ1_S/DeepSeek-V4.1-Flash-1017-UD-IQ1_S-00001-of-00005.gguf unsloth/DeepSeek-V4.1-Flash-1017-GGUF 60ad3651641b5c97679c807e064ab1d7a3ca1455 b843148a82de2b24df0c5a656669edbb9212eb69a41953249fe6c50d04186177,4cb1b13e50db73650d6d9fcaf22cd938b4b2e993740c2abe6815f82107048461,def479df0dca997b9cad4716f6375296c1f805887b5cde669105db99f0d9dd75,863e1ba47e2479aedc9ce2cc3fe2f57e091548c943bd56d7dd149a771637a17d,771805301e695d72d268151dfc43043581ba904298574aa879d4349cbe67b020 232979608475 8104 deepseek-v4.1-flash none deepseek41 mit 80 DeepSeek V4.1 Flash 748B (MoE), 1-bit (UD-IQ1_S)
+kimi-k3 UD-Q1_0/Kimi-K3-UD-Q1_0-00001-of-00011.gguf unsloth/Kimi-K3-GGUF a0836360ce58dfec088d966a97f2ddc8a606279b 6a4bef3afb5edb2223c210dd591d8f6f4b8d4ade105d26d5505d1acaeb25131c,acfa63854d29c5903f7911d458ea62811c28bce183c163af3c720d31d8ea3e16,d87c6e05e0c26e56d756a82e77a20843e2013c7122f1e7d9aa13aea80aea82f8,bebce65d763eaa4d617bc9f10568e4d68cb14a1da5c16b656a714ab78ba0bd40,4326257c8e4aab36725a0f330b7d2e7bf4b5e74b04fa1efa8650666faf11bfd4,f73541f61bdcbb1d256fe691a2d1ae78e399b54205b1c914de969958de0de360,28ebbc7ce2b2593687d17da08c4adb6820933939479edfb8e6f2dd2ab8aab060,754ab1f3ded34ea92277a9f97ab5586420fd7ce56828a988a618f12fc41c9fd2,a2da78211d9821974657ed6e053bb267cae021ae03d738f79a8f9a3aef8b3931,1ddbe59fc65d1419f04b6dedba47353ceac5c5134db7b72d81edbb4d2ca18a63,2609b7b714f570bd40243e73b59244df412cf599047ea2df17357f3d7fda933e 466369456320 8105 kimi-k3 none kimi-k3 kimi-k3 82 Kimi K3 2.8T (Moonshot, MoE), 1-bit (UD-Q1_0)
 MODELS
 }
 names() { catalog | awk '{ print $1 }'; }
-lookup() { # name → name file repo sha port alias label
+lookup() { # name → its catalog line
   catalog | awk -v n="$1" '$1 == n' | grep . || { echo "archie-local: no model called '$1' (one of: $(names | tr '\n' ' '))" >&2; exit 64; }
 }
-here() { [ -e "$dir/$1" ]; }
+field() { lookup "$1" | awk -v i="$2" '{ print $i }'; }
+# A model's parts, one per line: its path in the repository, the file here, its digest. A
+# model in one file is one part.
+parts() { # name
+  local file sha path i
+  read -r _ file _ _ sha _ < <(lookup "$1")
+  local -a digests
+  IFS=, read -r -a digests <<< "$sha"
+  for ((i = 1; i <= ${#digests[@]}; i++)); do
+    path=$file
+    [ "${#digests[@]}" -gt 1 ] && path=${file/-00001-of-/$(printf -- '-%05d-of-' "$i")}
+    echo "$path ${path##*/} ${digests[i - 1]}"
+  done
+}
+# Whether every part of a model is here. A part is moved into place only once its digest
+# matched, so being here is being whole.
+present() { # name
+  local _path file _sha
+  while read -r _path file _sha; do [ -e "$dir/$file" ] || return 1; done < <(parts "$1")
+}
+# The file llama-server is given: the first part, which names the others.
+first_file() { parts "$1" | awk 'NR == 1 { print $2 }'; }
+# Bytes of a model here so far: whole parts and the one under way.
+fetched_bytes() { # name
+  local _path file _sha total=0 size
+  while read -r _path file _sha; do
+    for size in "$dir/$file" "$dir/$file.part"; do
+      [ -f "$size" ] && total=$((total + $(stat -c %s "$size")))
+    done
+  done < <(parts "$1")
+  echo "$total"
+}
 healthy() { curl -fsS -m 2 "http://127.0.0.1:$1/health" >/dev/null 2>&1; }
 has_gpu() { [ -x "$gpu/bin/llama-server" ] && command -v nvidia-smi >/dev/null && nvidia-smi >/dev/null 2>&1; }
+runtime_dir() { if has_gpu; then echo "$gpu"; else echo "$cpu"; fi; }
+# Whether the runtime knows an architecture: its name is among libllama's strings. Read once;
+# `strings | grep -q` would end in SIGPIPE, which pipefail counts as a failure.
+arches=
+knows() {
+  if [ -z "$arches" ]; then
+    local lib
+    lib=$(readlink -f "$(runtime_dir)/lib/libllama.so.0" 2>/dev/null || true)
+    # Hyphens and dots too: gpt-oss, kimi-k3, glm5-next.
+    arches=$( { [ -n "$lib" ] && [ -f "$lib" ] && strings "$lib" | grep -E '^[a-z0-9_.-]{2,24}$'; } | sort -u || true)
+    arches=${arches:-none}
+  fi
+  grep -qx -- "$1" <<< "$arches"
+}
 
 # The one chosen with `use`; until then, the best one here this machine can run.
 chosen() {
@@ -55,10 +170,10 @@ chosen() {
     name=$(catalog | awk -v f="$(basename "$(readlink "$dir/current.gguf")")" '$2 == f { print $1 }')
     [ -n "$name" ] && { echo "$name"; return; }
   fi
-  local order="4b 1.7b 9b"
-  has_gpu && order="27b 9b 4b 1.7b"
+  local order="4b 1.7b qwen-2b 9b"
+  has_gpu && order="27b 9b qwen-9b qwen-4b 4b qwen-2b 1.7b"
   for name in $order; do
-    here "$(lookup "$name" | awk '{ print $2 }')" && { echo "$name"; return; }
+    present "$name" && { echo "$name"; return; }
   done
   echo 9b
 }
@@ -70,15 +185,26 @@ stop_port() {
 }
 
 fetch() { # name
-  local name file repo sha
+  local name repo rev bytes
   lookup "$1" >/dev/null
-  read -r name file repo sha _ < <(lookup "$1")
-  local out=$dir/$file
-  if [ -f "$out" ] && printf '%s  %s\n' "$sha" "$out" | sha256sum --check --status; then return 0; fi
+  read -r name _ repo rev _ bytes _ < <(lookup "$1")
+  present "$name" && return 0
   mkdir -p "$dir"
-  curl --fail --location --proto '=https' --tlsv1.2 "https://huggingface.co/prism-ml/$repo/resolve/main/$file" -o "$out.part"
-  printf '%s  %s\n' "$sha" "$out.part" | sha256sum --check --status || { rm -f "$out.part"; echo 'archie-local: the model did not arrive whole' >&2; exit 1; }
-  mv "$out.part" "$out"
+  # Room for the rest of it before it starts, not a disk filled halfway.
+  # A gigabyte stays free on top of it, for Windows and its page file.
+  local free left
+  free=$(free_bytes "$dir")
+  left=$((bytes - $(fetched_bytes "$name")))
+  [ "$free" -gt $((left + 1000000000)) ] || { echo "archie-local: $name needs $((left / 1000000)) MB more and $dir has $((free / 1000000)) MB really free (archie-local config models-dir another disk)" >&2; exit 1; }
+  local path file sha out
+  while read -r path file sha; do
+    out=$dir/$file
+    [ -e "$out" ] && continue
+    curl --fail --location --proto '=https' --tlsv1.2 --continue-at - \
+      "https://huggingface.co/$repo/resolve/$rev/$path" -o "$out.part"
+    printf '%s  %s\n' "$sha" "$out.part" | sha256sum --check --status || { rm -f "$out.part"; echo "archie-local: $file did not arrive whole" >&2; exit 1; }
+    mv "$out.part" "$out"
+  done < <(parts "$name")
 }
 
 build_gpu() {
@@ -102,32 +228,34 @@ build_gpu() {
 }
 
 up() {
-  local name file port alias
-  read -r name file _ _ port alias _ < <(lookup "$(chosen)")
-  here "$file" || { echo "archie-local: $name is not here yet; run archie-local setup $name" >&2; exit 1; }
+  local name port alias reasoning arch
+  read -r name _ _ _ _ _ port alias reasoning arch _ < <(lookup "$(chosen)")
+  present "$name" || { echo "archie-local: $name is not here yet; run archie-local setup $name" >&2; exit 1; }
+  knows "$arch" || { echo "archie-local: this runtime does not know $name's architecture ($arch); a newer llama.cpp is needed" >&2; exit 1; }
   healthy "$port" && return 0
   # One model at a time: the GPU has room for one, and the others would only hold memory.
   local other
-  for other in $(catalog | awk -v n="$name" '$1 != n { print $5 }'); do stop_port "$other"; done
+  for other in $(catalog | awk -v n="$name" '$1 != n { print $7 }'); do stop_port "$other"; done
   stop_port "$port"
   mkdir -p "$run"
   local runtime=$cpu
-  local args=(-m "$dir/$file" --host 127.0.0.1 --port "$port" --alias "$alias" --jinja)
+  local args=(-m "$dir/$(first_file "$name")" --host 127.0.0.1 --port "$port" --alias "$alias" --jinja)
   if has_gpu; then
     runtime=$gpu
     # The KV cache quantised to q8_0 with flash attention, requests batched continuously and a
     # cached prompt prefix reused, so a follow-up question does not re-read it.
     args+=(--flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --cont-batching --cache-reuse 256)
     case $name in
-      # The 27B leaves the GPU half a gigabyte for Windows' own use and fits the rest. Its chat
-      # template knows reasoning_effort none, medium and xhigh; anything else (a "high" would
-      # be an HTTP 500) is answered at medium.
-      27b) args+=(-ngl auto --fit on --fit-target 512 --ctx-size 16384 --parallel 1
-                  --reasoning-effort-allow none,medium,xhigh --reasoning-effort-fallback medium) ;;
       # The 9B whole on the GPU (~4 GB with its cache), four requests at once: Wanda and the
       # voice ask it at the same time.
-      *) args+=(-ngl 99 --ctx-size 65536 --parallel 4 --kv-unified) ;;
+      9b) args+=(-ngl 99 --ctx-size 65536 --parallel 4 --kv-unified) ;;
+      # The rest: as many layers on the GPU as there is room for (experts of a MoE too), with
+      # FIT_TARGET_MB (local.conf) left for Windows and the GUI.
+      *) args+=(-ngl auto --fit on --fit-target "$(fit_target)" --ctx-size 16384 --parallel 1) ;;
     esac
+    # The 27B's chat template knows reasoning_effort none, medium and xhigh; anything else
+    # (a "high" would be an HTTP 500) is answered at medium.
+    [ "$reasoning" = effort ] && args+=(--reasoning-effort-allow none,medium,xhigh --reasoning-effort-fallback medium)
   else
     args+=(-ngl 0 --threads "$(nproc)" --ctx-size 8192)
   fi
@@ -135,8 +263,9 @@ up() {
     > "$run/$name.log" 2>&1 < /dev/null &
   local pid=$!
   printf 'archie-local: loading %s' "$name" >&2
-  # The 27B reads 5.9 GB before it answers; from a slow disk that can take minutes.
-  for _ in $(seq 1 600); do
+  # The 27B reads 5.9 GB before it answers; from a slow disk that can take minutes, and a
+  # model of a hundred gigabytes takes longer still.
+  for _ in $(seq 1 3600); do
     if healthy "$port"; then echo ' ready' >&2; return 0; fi
     kill -0 "$pid" 2>/dev/null || { echo >&2; echo "archie-local: it stopped; see $run/$name.log" >&2; exit 1; }
     printf '.' >&2
@@ -146,28 +275,81 @@ up() {
 }
 
 list() {
-  local current name file repo sha port alias label state
+  local current name file repo rev sha bytes port alias reasoning arch license tier label state
   current=$(chosen)
-  while read -r name file repo sha port alias label; do
+  while read -r name file repo rev sha bytes port alias reasoning arch license tier label; do
     if healthy "$port"; then state="answering on 127.0.0.1:$port"
-    elif here "$file"; then state=here
+    elif present "$name"; then state=here
     else state="not here (archie-local setup $name)"; fi
-    printf '%s %-5s %-46s %s\n' "$([ "$name" = "$current" ] && echo '*' || echo ' ')" "$name" "$label" "$state"
+    knows "$arch" || state="$state; this runtime cannot run it"
+    printf '%s %-20s %-52s %6.1f GB  %s\n' "$([ "$name" = "$current" ] && echo '*' || echo ' ')" "$name" "$label" \
+      "$(awk -v b="$bytes" 'BEGIN { print b / 1e9 }')" "$state"
   done < <(catalog)
 }
 
-# The same, for the shell's Settings: [{"name", "label", "port", "here", "answering", "chosen"}].
+# The same, for the shell's Settings and the Windows launcher: each model's name, label,
+# repository, bytes, port, licence, architecture and parts, whether it is here, answering or
+# chosen, whether this runtime can run it, and the bytes fetched so far while a `setup` is
+# under way.
 list_json() {
-  local current name file repo sha port alias label sep=''
+  local current name file repo rev sha bytes port alias reasoning arch license tier label sep='' here fetched
   current=$(chosen)
   printf '['
-  while read -r name file repo sha port alias label; do
-    printf '%s{"name":"%s","label":"%s","port":%s,"here":%s,"answering":%s,"chosen":%s}' "$sep" "$name" "$label" "$port" \
-      "$(here "$file" && echo true || echo false)" "$(healthy "$port" && echo true || echo false)" \
-      "$([ "$name" = "$current" ] && echo true || echo false)"
+  while read -r name file repo rev sha bytes port alias reasoning arch license tier label; do
+    here=false fetched=0
+    if present "$name"; then here=true; else fetched=$(fetched_bytes "$name"); fi
+    printf '%s{"name":"%s","label":"%s","repo":"%s","bytes":%s,"port":%s,"reasoning":"%s","arch":"%s","license":"%s","tier":%s,"parts":%s,"here":%s,"answering":%s,"chosen":%s,"runnable":%s,"fetched":%s}' \
+      "$sep" "$name" "$label" "$repo" "$bytes" "$port" "$reasoning" "$arch" "$license" "$tier" \
+      "$(tr ',' '\n' <<< "$sha" | wc -l)" "$here" "$(healthy "$port" && echo true || echo false)" \
+      "$([ "$name" = "$current" ] && echo true || echo false)" "$(knows "$arch" && echo true || echo false)" "$fetched"
     sep=,
   done < <(catalog)
   printf ']\n'
+}
+
+# Core's manifest for a model, from its catalog line: how the router reaches it, what it may
+# see and how it is asked to reason. `archie-node models` installs one for each model here
+# that has none, ready, since a model here answers whenever `use` starts it.
+manifest() { # name
+  local name file repo rev sha bytes port alias reasoning arch license tier label
+  read -r name file repo rev sha bytes port alias reasoning arch license tier label < <(lookup "$1")
+  local capability=cognition.reasoning context=16384
+  [ "$reasoning" = none ] && capability=cognition.response
+  [ "$name" = 9b ] && context=65536
+  cat <<EOF
+# $label: written by archie-local from its catalog, for archie-local use $name.
+# https://huggingface.co/$repo at $rev, licence $license. llama.cpp serves it on loopback with
+# the OpenAI wire format; it never leaves the machine, so it may reason over restricted
+# context. One local model answers at a time: the router asks this one only while its
+# server answers /health.
+id = "local.$name"
+display_name = "$label"
+provider = "llama-cpp"
+locality = "local"
+
+context_window = $context
+max_output_tokens = 4096
+
+capabilities = ["$capability"]
+max_privacy_grade = "restricted"
+availability = "ready"
+quality_tier = $tier
+
+[cost]
+input_micros_per_mtok = 0
+output_micros_per_mtok = 0
+
+[labels]
+base-url = "http://127.0.0.1:$port/v1/"
+provider-model = "$alias"
+EOF
+  case $reasoning in
+    effort) printf 'reasoning-effort = "medium"\nthinking = "on"\n' ;;
+    harmony) printf 'reasoning-effort = "medium"\n' ;;
+    thinking) printf 'thinking = "on"\n' ;;
+  esac
+  printf 'weights = "%s"\nweights_sha256 = "%s"\nweights_bytes = "%s"\nsource = "https://huggingface.co/%s"\nlicense = "%s"\n' \
+    "$(first_file "$name")" "$sha" "$bytes" "$repo" "$license"
 }
 
 case "${1:-status}" in
@@ -175,31 +357,79 @@ case "${1:-status}" in
   use)
     [ -n "${2:-}" ] || { echo "archie-local use $(names | paste -sd '|')" >&2; exit 64; }
     lookup "$2" >/dev/null
-    read -r name file _ < <(lookup "$2")
-    here "$file" || { echo "archie-local: $name is not here yet; run archie-local setup $name" >&2; exit 1; }
+    name=$2
+    present "$name" || { echo "archie-local: $name is not here yet; run archie-local setup $name" >&2; exit 1; }
     mkdir -p "$run"
+    previous=$(cat "$run/choice" 2>/dev/null || true)
     echo "$name" > "$run/choice"
-    up
+    # A model that cannot start leaves the previous choice in place.
+    if ! (up); then
+      if [ -n "$previous" ]; then echo "$previous" > "$run/choice"; else rm -f "$run/choice"; fi
+      exit 1
+    fi
     echo "archie-local: $name answers now"
     ;;
   current)
-    read -r name _ _ _ port alias _ < <(lookup "$(chosen)")
+    read -r name _ _ _ _ _ port alias _ < <(lookup "$(chosen)")
     echo "$name http://127.0.0.1:$port/v1 $alias"
     ;;
   setup)
     lookup "${2:-9b}" >/dev/null
     fetch "${2:-9b}"
-    echo "archie-local: $(lookup "${2:-9b}" | awk '{ print $2 }') is ready"
+    echo "archie-local: ${2:-9b} is ready"
+    ;;
+  remove)
+    [ -n "${2:-}" ] || { echo 'archie-local remove <name>' >&2; exit 64; }
+    lookup "$2" >/dev/null
+    healthy "$(field "$2" 7)" && { echo "archie-local: $2 is answering; use another one first" >&2; exit 1; }
+    # A link (a model kept on another disk) goes; the file it points to stays.
+    while read -r _ file _; do rm -f "$dir/$file" "$dir/$file.part"; done < <(parts "$2")
+    echo "archie-local: $2 removed from $dir"
+    ;;
+  manifest)
+    [ -n "${2:-}" ] || { echo 'archie-local manifest <name>' >&2; exit 64; }
+    manifest "$2"
+    ;;
+  config)
+    if [ "${2:-}" = models-dir ]; then
+      [ -n "${3:-}" ] || { echo 'archie-local config models-dir DIR' >&2; exit 64; }
+      [ "$(id -u)" -eq 0 ] || { echo 'archie-local config: run it as root' >&2; exit 1; }
+      install -d -o "${SUDO_USER:-archie}" "$3"
+      mkdir -p "$(dirname "$conf")"
+      echo "MODELS_DIR=$3" > "$conf"
+    fi
+    if [ "${2:-}" = --json ]; then
+      vram=$(nvidia-smi --query-gpu=name,memory.total,memory.used --format=csv,noheader,nounits 2>/dev/null | head -1 || true)
+      gpu_name=$(echo "$vram" | cut -d, -f1 | xargs)
+      vram_total=$(echo "$vram" | cut -d, -f2 | tr -dc 0-9 | grep . || echo 0)
+      vram_used=$(echo "$vram" | cut -d, -f3 | tr -dc 0-9 | grep . || echo 0)
+      ram_total=$(awk '/MemTotal/ { print int($2 / 1024) }' /proc/meminfo)
+      # A GPU that shares the machine's memory (DGX Spark, RTX Spark: GB10) reports none of
+      # its own: the memory it may use is the machine's.
+      unified=false
+      if [ -n "$gpu_name" ] && [ "$vram_total" = 0 ]; then
+        unified=true
+        vram_total=$ram_total
+        vram_used=$(awk '/MemTotal/ { t = $2 } /MemAvailable/ { a = $2 } END { print int((t - a) / 1024) }' /proc/meminfo)
+      fi
+      printf '{"models_dir":"%s","free_bytes":%s,"runtime":"%s","gpu":"%s","vram_total_mb":%s,"vram_used_mb":%s,"unified_memory":%s,"ram_total_mb":%s,"chosen":"%s"}\n' \
+        "$(models_dir)" "$(free_bytes "$(models_dir)")" "$(runtime_dir)" "$gpu_name" \
+        "$vram_total" "$vram_used" "$unified" "$ram_total" "$(chosen)"
+      exit 0
+    fi
+    echo "models-dir: $(models_dir) ($(( $(free_bytes "$(models_dir)") / 1000000 )) MB really free)"
+    echo "runtime:    $(runtime_dir)"
+    echo "chosen:     $(chosen)"
     ;;
   gpu) build_gpu ;;
-  ready) read -r _ file _ < <(lookup "$(chosen)"); here "$file" && [ -x "$gpu/bin/llama-server" ] ;;
+  ready) present "$(chosen)" && [ -x "$gpu/bin/llama-server" ] ;;
   up) up ;;
-  down) for port in $(catalog | awk '{ print $5 }'); do stop_port "$port"; done ;;
+  down) for port in $(catalog | awk '{ print $7 }'); do stop_port "$port"; done ;;
   status)
     if has_gpu; then echo "runtime: GPU ($(LD_LIBRARY_PATH=$gpu/lib:/opt/cuda/lib64 "$gpu/bin/llama-server" --version 2>&1 | grep -o 'build [0-9]*' || echo 'build unknown'))"
     elif [ -x "$gpu/bin/llama-server" ]; then echo 'runtime: GPU built, but no GPU is visible now'
     else echo 'runtime: CPU only (archie-local gpu builds the GPU one)'; fi
     list
     ;;
-  *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
+  *) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
 esac
