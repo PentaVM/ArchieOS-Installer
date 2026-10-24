@@ -189,4 +189,6 @@ if (( $(stat -c %s "$out_dir/ArchieOS-Operator.wsl") > 1900 * 1024 * 1024 )); th
   rm "$out_dir/ArchieOS-Operator.wsl"
 fi
 cp "$repo_root/scripts/wsl/install-operator.ps1" "$out_dir/install-archie-operator.ps1"
+# The Windows launcher travels beside the installer, which installs it after the image.
+cp "$repo_root/distro/windows"/{ArchieOS-Launcher.ps1,ArchieOS.vbs,Install-ArchieOS-Launcher.ps1,Uninstall-ArchieOS-Launcher.ps1,Compact-ArchieOS-Disk.ps1} "$out_dir/"
 du -sh "$out_dir"/ArchieOS-Operator.wsl*
