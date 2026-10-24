@@ -49,6 +49,12 @@ automatic cross-identity credential sharing is installed by this feature.
 The existing `live` voice mode accepts `--world-domain personal/owner` or a full
 `work/organization/project` scope. This trusted host setting and the existing
 session privacy grade accompany proposals to Core. The model cannot widen them.
+The tools are `world_plan`, `world_explore`, `world_resolve`, `world_status`,
+`world_pause`, `world_resume` and `world_cancel`. Controls require a specific
+32-hex-digit job ID already bound by Core to that exact context. Pause/cancel
+use local write authority; resume reads the owned stored request, derives its
+fixed provider hosts and obtains new network authority. It cannot select a
+different provider or globally pause other jobs.
 Core verifies the kernel peer owner, operator profile, exact context scope,
 privacy ceiling, emergency Policy state and one-operation leases for fixed
 provider hosts. External providers accept explicitly Public data only. Core

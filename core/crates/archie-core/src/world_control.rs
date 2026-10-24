@@ -1,9 +1,11 @@
 //! World proposals admitted by Core's existing operator profile and Policy engine.
 use crate::{
-    control::{ControlRequest, ControlResponse},
+    control::{ControlRequest, ControlResponse, WorldJobAction},
     Runtime,
 };
-use archie_geofabric::exploration::{self, ExplorationDomain, ExplorationLayer};
+use archie_geofabric::exploration::{
+    self, ExplorationDomain, ExplorationLayer, ExplorationRequest,
+};
 use archie_policy::{
     Action, CapabilityRequest, Constraints, Operation, Principal, Resource, Scope,
 };
@@ -88,6 +90,14 @@ fn admit_command(
             hosts.push("photon.komoot.io");
         }
         ExploreCommand::Status { domain: requested } if *requested == geo_domain(domain) => {}
+        ExploreCommand::Pause {
+            id,
+            domain: requested,
+        }
+        | ExploreCommand::Cancel {
+            id,
+            domain: requested,
+        } if *requested == geo_domain(domain) && valid_job_id(id) => {}
         _ => return Err("world operation is outside this gateway".into()),
     }
     // These third parties have no verified retention exemption. Public data only,
@@ -105,6 +115,9 @@ fn capabilities(
     command: &ExploreCommand,
     hosts: &[&str],
 ) -> Result<Vec<CapabilityRequest>, String> {
+    if matches!(command, ExploreCommand::Resume { .. }) && hosts.is_empty() {
+        return Err("resume requires providers derived from the owned job request".into());
+    }
     let canonical = serde_json::to_vec(
         &serde_json::json!({"domain":domain,"privacy":privacy,"command":command}),
     )
@@ -140,7 +153,14 @@ fn capabilities(
             resource,
             scope: Scope::OneOperation { operation: id },
             constraints: Constraints::with_actions([if hosts.is_empty() {
-                Action::Read
+                if matches!(
+                    command,
+                    ExploreCommand::Pause { .. } | ExploreCommand::Cancel { .. }
+                ) {
+                    Action::Write
+                } else {
+                    Action::Read
+                }
             } else {
                 Action::Execute
             }])
@@ -155,11 +175,13 @@ fn operation(request: &CapabilityRequest) -> Operation {
     Operation {
         principal: request.principal.clone(),
         resource: request.resource.clone(),
-        action: if matches!(request.resource, Resource::Network { .. }) {
-            Action::Execute
-        } else {
-            Action::Read
-        },
+        action: request
+            .constraints
+            .actions
+            .iter()
+            .next()
+            .copied()
+            .unwrap_or(Action::Read),
         task_id: None,
         user_present: false,
     }
@@ -167,6 +189,43 @@ fn operation(request: &CapabilityRequest) -> Operation {
 
 fn operator_peer(peer: Option<&WorldOperator>) -> Result<&WorldOperator, String> {
     peer.ok_or_else(|| "authenticated local operator session required".into())
+}
+
+fn valid_job_id(id: &str) -> bool {
+    id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn require_job_binding(
+    id: &str,
+    domain: &ContextDomain,
+    ledger: &BTreeMap<String, ContextDomain>,
+) -> Result<(), String> {
+    if !valid_job_id(id) || ledger.get(id) != Some(domain) {
+        return Err("job is not bound to this exact context domain".into());
+    }
+    Ok(())
+}
+
+fn owned_job_request(
+    status: &serde_json::Value,
+    id: &str,
+    domain: &ContextDomain,
+    ledger: &BTreeMap<String, ContextDomain>,
+) -> Result<ExplorationRequest, String> {
+    require_job_binding(id, domain, ledger)?;
+    let jobs = status["jobs"].as_array().ok_or("invalid world status")?;
+    let mut matching = jobs.iter().filter(|job| job["id"].as_str() == Some(id));
+    let job = matching.next().ok_or("owned world job is unavailable")?;
+    if matching.next().is_some() || job["domain"] != serde_json::json!(geo_domain(domain)) {
+        return Err("world job identity or domain mismatch".into());
+    }
+    let request: ExplorationRequest = serde_json::from_value(job["request"].clone())
+        .map_err(|_| "invalid stored world request")?;
+    if request.domain != geo_domain(domain) {
+        return Err("stored request domain mismatch".into());
+    }
+    exploration::plan(&request).map_err(|error| error.to_string())?;
+    Ok(request)
 }
 
 fn recheck_profile(
@@ -302,6 +361,98 @@ async fn cancel_accepted(value: &serde_json::Value, domain: &ContextDomain) -> b
 }
 
 impl Runtime {
+    /// The model supplies only an owned ID. Resume providers come from worldd's
+    /// normalized stored request, read under an independent local Policy lease.
+    async fn owned_resume_request(
+        &self,
+        peer: &WorldOperator,
+        domain: &ContextDomain,
+        privacy: PrivacyGrade,
+        revision: &str,
+        id: &str,
+    ) -> Result<ExplorationRequest, String> {
+        let directory = self.paths.state_dir.join("world-context-bindings");
+        require_job_binding(id, domain, &bindings(&directory, None)?)?;
+        if privacy != PrivacyGrade::Public {
+            return Err("resume external providers requires explicitly public data".into());
+        }
+        let command = ExploreCommand::Status {
+            domain: geo_domain(domain),
+        };
+        let authority = self.ai_authority();
+        authority.admit_operator_uid(peer.uid)?;
+        let (profile, fresh_revision) = authority.profile()?;
+        recheck_profile(
+            revision,
+            &fresh_revision,
+            &profile,
+            domain,
+            privacy,
+            &command,
+        )?;
+        let request = capabilities(peer.uid, domain, privacy, &command, &[])?.remove(0);
+        let decision = self
+            .live_policy()
+            .read()
+            .map_err(|_| "policy unavailable")?
+            .decide(&request);
+        self.state
+            .append_audit(&decision.to_audit(self.node_id(), &request))
+            .map_err(|_| "world read audit unavailable")?;
+        let mut lease = decision
+            .lease
+            .ok_or("Core Policy refused owned world job read")?;
+        let Scope::OneOperation {
+            operation: operation_id,
+        } = request.scope
+        else {
+            return Err("world read lease not scoped".into());
+        };
+        lease
+            .authorises_one_operation(&operation(&request), operation_id, Timestamp::now())
+            .map_err(|_| "Core lease refused world job read")?;
+        lease.consume();
+        let duration = lease
+            .constraints
+            .expires_at
+            .ok_or("world read lease has no expiry")?
+            .as_millis()
+            .saturating_sub(Timestamp::now().as_millis())
+            .clamp(0, 5_000);
+        if duration == 0 {
+            return Err("world read lease expired".into());
+        }
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_millis(duration as u64);
+        let status = tokio::time::timeout(
+            std::time::Duration::from_millis(duration as u64),
+            archie_worldd::exploration_control::send(command.clone()),
+        )
+        .await
+        .map_err(|_| "world job read timed out")??;
+        let now = Timestamp::now();
+        if std::time::Instant::now() >= deadline
+            || lease.revoked
+            || now < lease.issued_at
+            || lease
+                .constraints
+                .expires_at
+                .is_none_or(|expiry| now >= expiry)
+        {
+            return Err("world read lease expired before use".into());
+        }
+        authority.admit_operator_uid(peer.uid)?;
+        let (profile, fresh_revision) = authority.profile()?;
+        recheck_profile(
+            revision,
+            &fresh_revision,
+            &profile,
+            domain,
+            privacy,
+            &command,
+        )?;
+        owned_job_request(&status, id, domain, &bindings(&directory, None)?)
+    }
     pub(crate) async fn handle_operator_world(
         &self,
         peer: Option<&WorldOperator>,
@@ -326,6 +477,29 @@ impl Runtime {
         request: ControlRequest,
     ) -> Result<serde_json::Value, String> {
         let (domain, privacy, command) = match request {
+            ControlRequest::WorldJob {
+                action,
+                id,
+                domain,
+                privacy,
+            } => {
+                let requested = geo_domain(&domain);
+                let command = match action {
+                    WorldJobAction::Pause => ExploreCommand::Pause {
+                        id,
+                        domain: requested,
+                    },
+                    WorldJobAction::Resume => ExploreCommand::Resume {
+                        id,
+                        domain: requested,
+                    },
+                    WorldJobAction::Cancel => ExploreCommand::Cancel {
+                        id,
+                        domain: requested,
+                    },
+                };
+                (domain, privacy, command)
+            }
             ControlRequest::WorldPlan {
                 request,
                 domain,
@@ -364,7 +538,26 @@ impl Runtime {
         let authority = self.ai_authority();
         authority.admit_operator_uid(peer.uid)?;
         let (profile, revision) = authority.profile()?;
-        let hosts = admit_command(&profile, &domain, privacy, &command)?;
+        let binding_dir = self.paths.state_dir.join("world-context-bindings");
+        let managed_id = match &command {
+            ExploreCommand::Pause { id, .. }
+            | ExploreCommand::Resume { id, .. }
+            | ExploreCommand::Cancel { id, .. } => Some(id),
+            _ => None,
+        };
+        if let Some(id) = managed_id {
+            require_job_binding(id, &domain, &bindings(&binding_dir, None)?)?;
+        }
+        let admission_command = if let ExploreCommand::Resume { id, .. } = &command {
+            ExploreCommand::Explore {
+                request: self
+                    .owned_resume_request(peer, &domain, privacy, &revision, id)
+                    .await?,
+            }
+        } else {
+            command.clone()
+        };
+        let hosts = admit_command(&profile, &domain, privacy, &admission_command)?;
         let requests = capabilities(peer.uid, &domain, privacy, &command, &hosts)?;
         let engine = self.live_policy();
         let mut grants = Vec::new();
@@ -391,8 +584,11 @@ impl Runtime {
             &fresh,
             &domain,
             privacy,
-            &command,
+            &admission_command,
         )?;
+        if let Some(id) = managed_id {
+            require_job_binding(id, &domain, &bindings(&binding_dir, None)?)?;
+        }
         for (request, lease) in &mut grants {
             let Scope::OneOperation { operation: id } = request.scope else {
                 return Err("world lease is not operation scoped".into());
@@ -404,7 +600,7 @@ impl Runtime {
         }
         let status = matches!(command, ExploreCommand::Status { .. });
         let explore = matches!(command, ExploreCommand::Explore { .. });
-        let binding_dir = self.paths.state_dir.join("world-context-bindings");
+        let starts_capture = explore || matches!(command, ExploreCommand::Resume { .. });
         // Verify ledger access before accepting a background job.
         if explore {
             if bindings(&binding_dir, None)?.len() >= 512 {
@@ -454,11 +650,11 @@ impl Runtime {
                 &fresh,
                 &domain,
                 privacy,
-                &command,
+                &admission_command,
             )
         })();
         if let Err(error) = reauthorized {
-            if explore {
+            if starts_capture {
                 let stopped = cancel_accepted(&value, &domain).await;
                 return Err(format!(
                     "{error}; accepted capture cancellation {}",
@@ -532,6 +728,103 @@ mod tests {
 
     fn scope() -> ContextDomain {
         ContextDomain::personal("owner").unwrap()
+    }
+
+    #[test]
+    fn job_controls_require_exact_binding_and_stored_request() {
+        let id = "a".repeat(32);
+        let a = ContextDomain::work("org", "a").unwrap();
+        let b = ContextDomain::work("org", "b").unwrap();
+        let request = ExplorationRequest {
+            domain: ExplorationDomain::Work,
+            layers: vec![ExplorationLayer::Buildings],
+            ..ExplorationRequest::default()
+        };
+        let status = serde_json::json!({"jobs":[{"id":id,"domain":"work","request":request}]});
+        let mut ledger = BTreeMap::new();
+        assert!(owned_job_request(&status, &id, &a, &ledger).is_err());
+        ledger.insert(id.clone(), b);
+        assert!(owned_job_request(&status, &id, &a, &ledger).is_err());
+        ledger.insert(id.clone(), a.clone());
+        let stored = owned_job_request(&status, &id, &a, &ledger).unwrap();
+        assert_eq!(stored.layers, vec![ExplorationLayer::Buildings]);
+        let profile = RuntimeProfile::for_domain(a.clone());
+        assert_eq!(
+            admit_command(
+                &profile,
+                &a,
+                PrivacyGrade::Public,
+                &ExploreCommand::Explore { request: stored }
+            )
+            .unwrap(),
+            vec!["overpass-api.de"]
+        );
+        let mut mismatched = status.clone();
+        mismatched["jobs"][0]["request"]["domain"] = serde_json::json!("personal");
+        assert!(owned_job_request(&mismatched, &id, &a, &ledger).is_err());
+        assert!(owned_job_request(&serde_json::json!({"jobs":[]}), &id, &a, &ledger).is_err());
+        assert!(owned_job_request(&status, "../bad", &a, &ledger).is_err());
+    }
+
+    #[test]
+    fn job_control_rpc_is_typed_and_requires_operator_dispatch() {
+        for action in ["pause", "resume", "cancel"] {
+            let request: ControlRequest = serde_json::from_value(serde_json::json!({
+                "request":"world_job","action":action,"id":"a".repeat(32),
+                "domain":"work/org/a","privacy":"public"
+            }))
+            .unwrap();
+            assert!(request.is_world());
+            assert!(request.is_mutating());
+            let ControlRequest::WorldJob { action: typed, .. } = request else {
+                panic!("job action");
+            };
+            assert_eq!(serde_json::to_value(typed).unwrap(), action);
+        }
+        assert!(serde_json::from_value::<ControlRequest>(serde_json::json!({
+            "request":"world_job","action":"execute","id":"a".repeat(32),
+            "domain":"work/org/a","privacy":"public"
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn pause_and_cancel_are_local_write_operations_not_network_or_global_pause() {
+        let profile = RuntimeProfile::for_domain(scope());
+        for command in [
+            ExploreCommand::Pause {
+                id: "a".repeat(32),
+                domain: ExplorationDomain::Personal,
+            },
+            ExploreCommand::Cancel {
+                id: "a".repeat(32),
+                domain: ExplorationDomain::Personal,
+            },
+        ] {
+            assert!(
+                admit_command(&profile, &scope(), PrivacyGrade::Restricted, &command)
+                    .unwrap()
+                    .is_empty()
+            );
+            let requests =
+                capabilities(1000, &scope(), PrivacyGrade::Restricted, &command, &[]).unwrap();
+            assert!(matches!(requests[0].resource, Resource::Knowledge { .. }));
+            assert_eq!(operation(&requests[0]).action, Action::Write);
+        }
+        let resume = ExploreCommand::Resume {
+            id: "a".repeat(32),
+            domain: ExplorationDomain::Personal,
+        };
+        assert!(capabilities(1000, &scope(), PrivacyGrade::Public, &resume, &[]).is_err());
+        let requests = capabilities(
+            1000,
+            &scope(),
+            PrivacyGrade::Public,
+            &resume,
+            &["overpass-api.de"],
+        )
+        .unwrap();
+        assert_eq!(operation(&requests[0]).action, Action::Execute);
     }
     fn explore(domain: ExplorationDomain) -> ExploreCommand {
         ExploreCommand::Explore {

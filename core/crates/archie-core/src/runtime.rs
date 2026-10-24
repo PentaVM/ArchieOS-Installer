@@ -716,6 +716,7 @@ impl Runtime {
 
         match request {
             ControlRequest::WorldPlan { .. }
+            | ControlRequest::WorldJob { .. }
             | ControlRequest::WorldExplore { .. }
             | ControlRequest::WorldResolve { .. }
             | ControlRequest::WorldStatus { .. } => {

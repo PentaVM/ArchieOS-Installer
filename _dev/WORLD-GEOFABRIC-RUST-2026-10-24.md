@@ -1,8 +1,10 @@
 # Native GeoFabric exploration implementation
 
-Approved by PentaVM in chat on 2026-10-24. Base: origin/claude/unified-0.1,
-9091658, in a separate managed worktree; PR targets that integration branch so
-unrelated changes do not enter the feature diff. Repository remote verified.
+Approved by PentaVM in chat on 2026-10-24, in a separate managed worktree.
+Initial integration base: 9091658. The integration branch subsequently merged
+into main in PR #51; final base is origin/main at 51db334. The feature PR targets
+main so unrelated integration changes do not enter its diff. Remote verified:
+PentaVM/ArchieOS-Nvidia.
 
 ## Contract
 
@@ -91,9 +93,31 @@ unless actually exercised later. No recording is authorized in this task.
   nodata stays missing, negative elevations remain source values, and a first
   measured elevation reframes only an untouched automatic camera.
 - Fixed both admission and completion persistence-error concurrency leaks.
+- Final voice controls cover plan/explore/resolve/status/pause/resume/cancel.
+  Job controls require an exact persisted ContextDomain binding. Resume reads
+  the owned stored request under a separate local lease, derives only its fixed
+  provider hosts and obtains new Network leases. Pause/cancel use local Write
+  leases. Focused independent review found no actionable blockers.
 - Review's cache-eviction race was treated as a correctness fix: an eviction
   after metadata becomes a cache miss, rather than failing a valid capture.
   No unrelated cleanup or changes to Stage's human authority were made.
+
+## Final validation after job controls
+
+- Linux/WSL focused Cargo suite: **362 passed, 33 ignored, 0 failed** across
+  archie-core/cli/displayd/geofabric/worldd, including the three new Core job
+  control tests. See linux-final-suite.log. Ignored tests remain explicit;
+  this does not certify hardware or deployment.
+- Native post-rebase checks: all 3 HUD/preview/credential CTests and both
+  camera/observatory CTests passed; see native-final.log.
+- Final cargo fmt and git diff --check passed.
+- Final live-feature voice tool tests with installed Linux NeMo SDK: **5 passed**,
+  including all seven tools, strict job IDs and host scope/privacy preservation.
+  See linux-voice-final.log; no audio hardware or model execution was tested.
+- The final Windows broad-suite retry failed while linking with MSVC PDB
+  error LNK1318. It is not recorded as a passing Windows final run; the prior
+  351-test Windows result above predates the final job controls. See
+  windows-linker-limitation.log. Final Rust behavior was validated on Linux.
 
 ## Limits and deployment
 

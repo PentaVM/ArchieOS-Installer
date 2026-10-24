@@ -1331,10 +1331,25 @@ fn is_lowercase_sha256(value: &str) -> bool {
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
-/// What the CLI can ask for.
+/// A job-local control action. The typed action carries no authority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorldJobAction {
+    Pause,
+    Resume,
+    Cancel,
+}
+
+/// What an operator client can ask Core to admit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "request", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ControlRequest {
+    WorldJob {
+        action: WorldJobAction,
+        id: String,
+        domain: archie_vault::ContextDomain,
+        privacy: archie_types::PrivacyGrade,
+    },
     WorldPlan {
         #[serde(rename = "request_body")]
         request: archie_geofabric::exploration::ExplorationRequest,
@@ -1456,6 +1471,7 @@ impl ControlRequest {
             Self::SentryPrepare { .. }
                 | Self::WorldExplore { .. }
                 | Self::WorldResolve { .. }
+                | Self::WorldJob { .. }
                 | Self::SentryApprove { .. }
                 | Self::SentryCancel
                 | Self::AiInfer { .. }
@@ -1485,6 +1501,7 @@ impl ControlRequest {
         matches!(
             self,
             Self::WorldPlan { .. }
+                | Self::WorldJob { .. }
                 | Self::WorldExplore { .. }
                 | Self::WorldResolve { .. }
                 | Self::WorldStatus { .. }
@@ -1493,6 +1510,7 @@ impl ControlRequest {
 
     pub fn name(&self) -> &'static str {
         match self {
+            Self::WorldJob { .. } => "world-job",
             Self::WorldPlan { .. } => "world-plan",
             Self::WorldExplore { .. } => "world-explore",
             Self::WorldResolve { .. } => "world-resolve",
