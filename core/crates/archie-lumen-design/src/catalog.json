@@ -83,6 +83,81 @@
     "rotate": true,
     "pauseOnInspect": true
   },
+  "profiles": [
+    {
+      "id": "field",
+      "name": "Regiones vivas",
+      "overrides": {}
+    },
+    {
+      "id": "crown",
+      "name": "Corona",
+      "overrides": {
+        "categoryPull": 0.58,
+        "hierarchyPull": 0.42,
+        "radialLayers": 0.77,
+        "scale": 1.12,
+        "shellOpacity": 0.15,
+        "ambientCount": 550,
+        "nodeSize": 1.9,
+        "rotationSpeed": 0.55,
+        "bloomStrength": 0.27
+      }
+    },
+    {
+      "id": "atlas",
+      "name": "Atlas",
+      "overrides": {
+        "categoryPull": 0.29,
+        "hierarchyPull": 0.78,
+        "radialLayers": 0.53,
+        "scale": 1.06,
+        "ambientCount": 180,
+        "shellOpacity": 0.02,
+        "links": true,
+        "linkBudget": 320,
+        "nodeSize": 2,
+        "bloomStrength": 0.18
+      }
+    },
+    {
+      "id": "dense",
+      "name": "Núcleo denso",
+      "overrides": {
+        "categoryPull": 0.52,
+        "hierarchyPull": 0.67,
+        "radialLayers": 0.42,
+        "scale": 0.82,
+        "ambientCount": 680,
+        "shellOpacity": 0.16,
+        "nodeSize": 1.85,
+        "bloomStrength": 0.3
+      }
+    }
+  ],
+  "legacy": {
+    "layoutMode": "legacy",
+    "categoryPull": 0.72,
+    "hierarchyPull": 0.35,
+    "radialLayers": 0.64,
+    "nodeSize": 1.4,
+    "shellOpacity": 0.075,
+    "ambientCount": 1400,
+    "ambientSize": 0.9,
+    "ghostOpacity": 0.42,
+    "metalness": 0.58,
+    "roughness": 0.31,
+    "emissive": 0.8,
+    "linkOpacity": 0.09,
+    "linkBudget": 1200,
+    "bloomStrength": 0.64,
+    "bloomThreshold": 0.68,
+    "ambientLight": 1.5,
+    "warmLight": 26000,
+    "coolLight": 21000,
+    "background": "#070d13",
+    "guides": true
+  },
   "presets": [
     {
       "id": "polar-prisma",

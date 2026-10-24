@@ -698,3 +698,81 @@ mod content_sphere {
         let _ = fs::remove_dir_all(root);
     }
 }
+
+/// The port against Xavi's original itself: fixtures/golden.mjs ran the original
+/// catalog.js and main.js settings with node and kept what they returned.
+mod golden {
+    use serde_json::Value;
+
+    const PRESETS: &str = include_str!("../fixtures/presets.golden.json");
+
+    fn json(text: &str) -> Value {
+        serde_json::from_str(text).unwrap()
+    }
+    /// Differences between two settings maps, numbers compared as numbers (1 is 1.0).
+    fn differences(label: &str, port: &Value, original: &Value) -> Vec<String> {
+        let (Some(port), Some(original)) = (port.as_object(), original.as_object()) else {
+            return vec![format!("{label}: not an object")];
+        };
+        let mut out = Vec::new();
+        for key in port
+            .keys()
+            .chain(original.keys().filter(|k| !port.contains_key(*k)))
+        {
+            let (a, b) = (&port.get(key), &original.get(key));
+            let same = match (a, b) {
+                (Some(Value::Number(x)), Some(Value::Number(y))) => x.as_f64() == y.as_f64(),
+                _ => a == b,
+            };
+            if !same {
+                out.push(format!("{label}.{key}: port {a:?}, original {b:?}"));
+            }
+        }
+        out
+    }
+    fn merged(base: &Value, overrides: &Value) -> Value {
+        let mut out = base.as_object().unwrap().clone();
+        for (k, v) in overrides.as_object().unwrap() {
+            out.insert(k.clone(), v.clone());
+        }
+        Value::Object(out)
+    }
+
+    #[test]
+    fn catalog_holds_every_original_profile_value() {
+        let (original, catalog) = (json(PRESETS), json(crate::CATALOG_JSON));
+        let mut wrong = differences("defaults", &catalog["defaults"], &original["defaults"]);
+        // field, crown, atlas and dense: the composition profiles of main.js, every field.
+        let profiles = catalog["profiles"].as_array().expect("catalog profiles");
+        let expected = original["original"].as_array().unwrap();
+        assert_eq!(profiles.len(), expected.len());
+        for (port, source) in profiles.iter().zip(expected) {
+            assert_eq!(port["id"], source["id"]);
+            assert_eq!(port["name"], source["name"]);
+            let id = source["id"].as_str().unwrap();
+            wrong.extend(differences(id, &port["overrides"], &source["overrides"]));
+            // Applied, a profile is the defaults with its overrides on top.
+            wrong.extend(differences(
+                id,
+                &merged(&catalog["defaults"], &port["overrides"]),
+                &merged(&original["defaults"], &source["overrides"]),
+            ));
+        }
+        wrong.extend(differences(
+            "legacy",
+            &merged(&catalog["defaults"], &catalog["legacy"]),
+            &original["legacy"],
+        ));
+        let presets = catalog["presets"].as_array().unwrap();
+        for source in original["presets"].as_array().unwrap() {
+            let port = presets
+                .iter()
+                .find(|p| p["id"] == source["id"])
+                .unwrap_or_else(|| panic!("preset {} missing", source["id"]));
+            assert_eq!(port["name"], source["name"]);
+            let id = source["id"].as_str().unwrap();
+            wrong.extend(differences(id, &port["settings"], &source["settings"]));
+        }
+        assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    }
+}
