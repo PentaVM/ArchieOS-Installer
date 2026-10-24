@@ -1430,7 +1430,9 @@ fn month(month: time::Month) -> &'static str {
 }
 
 /// The voice's model on this machine: a llama.cpp model, so the router asks its server's
-/// /health before each turn, and each request carries the reasoning switch pinned here.
+/// /health before each turn, and each request carries the reasoning switch pinned here, in
+/// both forms the local models read: `enable_thinking` (Bonsai 2 9B) and `reasoning_effort`
+/// (Bonsai 2 27B, "medium" being its shorter reasoning).
 fn local_voice(model: &str, url: &str, thinking: &str) -> Result<ModelDescriptor, String> {
     let mut desc = descriptor(
         model,
@@ -1440,6 +1442,10 @@ fn local_voice(model: &str, url: &str, thinking: &str) -> Result<ModelDescriptor
         Some(url),
     )?;
     desc.labels.insert("thinking".into(), thinking.into());
+    desc.labels.insert(
+        "reasoning-effort".into(),
+        if thinking == "on" { "medium" } else { "none" }.into(),
+    );
     Ok(desc)
 }
 
@@ -1567,6 +1573,9 @@ mod local_voice_tests {
         assert_eq!(desc.locality, Locality::Local);
         assert!(desc.permits_privacy(PrivacyGrade::Restricted));
         assert_eq!(desc.labels.get("thinking").map(String::as_str), Some("off"));
+        assert_eq!(desc.labels.get("reasoning-effort").map(String::as_str), Some("none"));
+        let on = local_voice("bonsai", "http://127.0.0.1:8082/v1", "on").unwrap();
+        assert_eq!(on.labels.get("reasoning-effort").map(String::as_str), Some("medium"));
         // The endpoint builds, and the router knows where to ask whether it is up.
         let endpoint = ProviderEndpoint::for_model(&desc).unwrap();
         assert_eq!(endpoint.locality(), Locality::Local);

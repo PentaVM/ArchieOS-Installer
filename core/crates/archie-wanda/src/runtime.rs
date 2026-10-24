@@ -11,6 +11,7 @@ use archie_cerebra::{
     Cerebra, CerebraConfig, Intent, Trigger,
 };
 use archie_model_runtime::{
+    liveness::Liveness,
     routed::{Question, Routed},
     ProviderEndpoint,
 };
@@ -59,6 +60,19 @@ pub fn unavailable(state: &str, reason: &str) -> QueryResponse {
         refined: None,
         receipt: None,
     }
+}
+
+/// Of `models`, those whose server answers now. Local models are swapped while the node runs
+/// (`archie-local use`): Cerebra must not admit one whose server is down, or Core refuses the
+/// pinned model and the question fails while another model is there to answer it.
+async fn running(models: ModelRegistry) -> ModelRegistry {
+    let liveness = Liveness::shared();
+    liveness.refresh(models.iter()).await;
+    let mut up = ModelRegistry::new();
+    for descriptor in models.iter().filter(|d| !liveness.is_down(d)) {
+        let _ = up.register(descriptor.clone());
+    }
+    up
 }
 
 /// Local models whose endpoint is really on this machine. A manifest alone does not prove
@@ -333,6 +347,7 @@ async fn query_model(
             "No hay un registro local de modelos disponible para Wanda.",
         ));
     };
+    let models = running(models).await;
     if models.is_empty() {
         return Ok(unavailable(
             "no_model",

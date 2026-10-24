@@ -211,6 +211,7 @@ impl ProviderEndpoint {
             // any base URL that is not on this machine.
             ProviderKind::LlamaCpp => {
                 llama_thinking(descriptor)?;
+                llama_effort(descriptor)?;
                 Self::openai_compatible(
                     label("base-url").unwrap_or("http://127.0.0.1:8081/v1/"),
                     Locality::Local,
@@ -613,7 +614,7 @@ impl InferenceClient {
             return anthropic::decode(&bytes);
         }
         let url = self.endpoint.url("chat/completions")?;
-        let response = if llama_thinking(descriptor)?.is_some() || request.reply_schema.is_some() {
+        let response = if llama_reasoning_pinned(descriptor)? || request.reply_schema.is_some() {
             let mut body = serde_json::to_value(request)?;
             pin_llama_reasoning(descriptor, &mut body, request.max_tokens)?;
             if let Some(schema) = &request.reply_schema {
@@ -931,6 +932,28 @@ fn llama_thinking(descriptor: &ModelDescriptor) -> Result<Option<bool>, RuntimeE
     }
 }
 
+/// The reasoning effort a llama.cpp manifest pins with `reasoning-effort`, for chat templates
+/// that read it instead of `enable_thinking` (PrismML's Ternary Bonsai 2 27B: "none" turns its
+/// reasoning off, "medium" shortens it, "xhigh" is its default). "high" is refused: that
+/// template answers it with HTTP 500 (PrismML KNOWN_ISSUES, 2026-10). Any other value too.
+fn llama_effort(descriptor: &ModelDescriptor) -> Result<Option<&'static str>, RuntimeError> {
+    if descriptor.provider != ProviderKind::LlamaCpp {
+        return Ok(None);
+    }
+    match descriptor.labels.get("reasoning-effort").map(String::as_str) {
+        None => Ok(None),
+        Some("none") => Ok(Some("none")),
+        Some("medium") => Ok(Some("medium")),
+        Some("xhigh") => Ok(Some("xhigh")),
+        Some(_) => Err(RuntimeError::InvalidRequest),
+    }
+}
+
+/// Whether a llama.cpp request carries any reasoning field of the manifest's.
+fn llama_reasoning_pinned(descriptor: &ModelDescriptor) -> Result<bool, RuntimeError> {
+    Ok(llama_thinking(descriptor)?.is_some() || llama_effort(descriptor)?.is_some())
+}
+
 /// What llama.cpp says when a model's reasoning budget runs out, before the answer.
 const REASONING_BUDGET_MESSAGE: &str =
     "\n\nTime is up. I will stop thinking and give the final answer now.\n";
@@ -947,11 +970,16 @@ fn pin_llama_reasoning(
     body: &mut serde_json::Value,
     max_tokens: Option<u32>,
 ) -> Result<(), RuntimeError> {
-    let Some(thinking) = llama_thinking(descriptor)? else {
-        return Ok(());
-    };
-    body["chat_template_kwargs"] = serde_json::json!({ "enable_thinking": thinking });
-    if let (true, Some(max_tokens)) = (thinking, max_tokens) {
+    let thinking = llama_thinking(descriptor)?;
+    let effort = llama_effort(descriptor)?;
+    if let Some(thinking) = thinking {
+        body["chat_template_kwargs"] = serde_json::json!({ "enable_thinking": thinking });
+    }
+    if let Some(effort) = effort {
+        body["reasoning_effort"] = effort.into();
+    }
+    let reasons = thinking.unwrap_or_else(|| effort.is_some_and(|e| e != "none"));
+    if let (true, Some(max_tokens)) = (reasons, max_tokens) {
         body["thinking_budget_tokens"] = (max_tokens / 2).into();
         body["reasoning_budget_message"] = REASONING_BUDGET_MESSAGE.into();
     }
@@ -1150,6 +1178,38 @@ mod tests {
         assert!(request_text.contains("\"model\":\"test.model\""));
         assert!(request_text.contains("\"content\":\"status\""));
         assert!(!request_text.to_ascii_lowercase().contains("authorization:"));
+    }
+
+    #[tokio::test]
+    async fn llama_cpp_manifest_pins_the_reasoning_effort_on_the_wire() {
+        let body = r#"{"model":"bonsai","choices":[{"message":{"role":"assistant","content":"ready"},"finish_reason":"stop"}]}"#;
+        for effort in ["none", "medium", "xhigh"] {
+            let (base_url, observed) = one_response(body).await;
+            let mut model = descriptor(ProviderKind::LlamaCpp, Locality::Local);
+            model.labels.insert("base-url".into(), base_url.clone());
+            model.labels.insert("provider-model".into(), "bonsai".into());
+            model.labels.insert("reasoning-effort".into(), effort.into());
+            let client =
+                InferenceClient::new(ProviderEndpoint::for_model(&model).unwrap()).unwrap();
+            let request = ChatRequest {
+                model: "bonsai".into(),
+                messages: vec![ChatMessage { role: MessageRole::User, content: "status".into() }],
+                max_tokens: Some(32),
+                temperature: None,
+                stream: false,
+                reply_schema: None,
+            };
+            client.chat(&model, PrivacyGrade::Restricted, &request).await.unwrap();
+            let request_text = observed.await.unwrap();
+            assert!(request_text.contains(&format!("\"reasoning_effort\":\"{effort}\"")), "{effort}: {request_text}");
+            // Without a thinking label, only an effort that reasons spends half the budget on it.
+            assert_eq!(request_text.contains("\"thinking_budget_tokens\":16"), effort != "none", "{effort}: {request_text}");
+            assert!(!request_text.contains("enable_thinking"), "{effort}: {request_text}");
+        }
+        // "high" answers HTTP 500 on the 27B's template: refused before any request.
+        let mut model = descriptor(ProviderKind::LlamaCpp, Locality::Local);
+        model.labels.insert("reasoning-effort".into(), "high".into());
+        assert!(ProviderEndpoint::for_model(&model).is_err());
     }
 
     #[tokio::test]
