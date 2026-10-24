@@ -80,7 +80,9 @@ impl Runtime {
         authority.admit_profile_owner(peer.uid)?;
         let live = self.live_policy();
         // A poisoned engine still pauses: the stop must not depend on an earlier panic.
-        let mut engine = live.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut engine = live
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let audit = |action: &str, explanation: &str| {
             self.state
                 .append_audit(&archie_observability::AuditEvent::new(
