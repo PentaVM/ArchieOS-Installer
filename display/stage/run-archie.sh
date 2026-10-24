@@ -21,6 +21,7 @@
 #   SCREEN        which screen the stage takes     default: the last one
 #   RUN_DIR       key, sockets, logs               default: /tmp/archie-run
 #   HEADPHONES=1  keep listening while Archie speaks, so it can be interrupted
+#   ALWAYS=1      answer whatever is heard, named or not (one person alone)
 set -eu
 
 GRADE=${1:-}
@@ -111,6 +112,7 @@ else
     echo "run-archie: English Piper voice is not installed; using Spanish for every reply" >&2
 fi
 [ "${HEADPHONES:-0}" = 1 ] && set -- "$@" --headphones
+[ "${ALWAYS:-0}" = 1 ] && set -- "$@" --always
 
 # Two thread pools share this process's cores; spinning ones starve each other.
 # Applications opened by voice inherit the stage's runtime directory and software rendering.
