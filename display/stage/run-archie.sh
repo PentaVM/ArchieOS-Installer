@@ -20,6 +20,8 @@
 #                 (WSLg: /mnt/wslg/runtime-dir/wayland-0)
 #   SCREEN        which screen the stage takes     default: the last one
 #   RUN_DIR       key, sockets, logs               default: /tmp/archie-run
+#   LISTEN_LANGUAGE  what the recogniser listens for: es-US, en-US or auto  default: es-US
+#                 (auto: either, and Archie answers in the language it was spoken to)
 #   HEADPHONES=1  keep listening while Archie speaks, so it can be interrupted
 #   ALWAYS=1      answer whatever is heard, named or not (one person alone)
 #   SESSION_LOG   also write the session there, each line with its time
@@ -51,8 +53,10 @@ ASR_MODEL=${ASR_MODEL:-$(ls "$HOME"/.cache/nemo-speech/models/nvidia/nemotron-3.
 PIPER_PYTHON=${PIPER_PYTHON:-python3}
 PIPER=${PIPER:-$REPO/scripts/models/piper-json-bridge.py}
 PIPER_VOICES=${PIPER_VOICES:-$REPO/models-cache/piper}
-PIPER_MODEL=${PIPER_MODEL:-$PIPER_VOICES/es_MX-ald-medium.onnx}
-PIPER_MODEL_EN=${PIPER_MODEL_EN:-$PIPER_VOICES/en_US-john-medium.onnx}
+# The voices heard best (scripts/models/install-piper-voices.sh), else the earlier pair.
+default_voice() { if [ -f "$PIPER_VOICES/$1.onnx" ]; then echo "$PIPER_VOICES/$1.onnx"; else echo "$PIPER_VOICES/$2.onnx"; fi; }
+PIPER_MODEL=${PIPER_MODEL:-$(default_voice es_MX-claude-high es_MX-ald-medium)}
+PIPER_MODEL_EN=${PIPER_MODEL_EN:-$(default_voice en_US-kristin-medium en_US-john-medium)}
 HOST_WAYLAND=${HOST_WAYLAND:-${WAYLAND_DISPLAY:-}}
 RUN_DIR=${RUN_DIR:-/tmp/archie-run}
 SOCKET_NAME=archie-stage
@@ -112,6 +116,7 @@ if [ -f "$PIPER_MODEL_EN" ]; then
 else
     echo "run-archie: English Piper voice is not installed; using Spanish for every reply" >&2
 fi
+[ -n "${LISTEN_LANGUAGE:-}" ] && set -- "$@" --listen-language "$LISTEN_LANGUAGE"
 [ "${HEADPHONES:-0}" = 1 ] && set -- "$@" --headphones
 [ "${ALWAYS:-0}" = 1 ] && set -- "$@" --always
 
