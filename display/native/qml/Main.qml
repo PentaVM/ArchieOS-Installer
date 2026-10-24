@@ -25,6 +25,8 @@ ApplicationWindow {
     readonly property color amber: "#f0b429"
     readonly property color red: "#f2626b"
     property string scene: "orb"
+    // Xavi's neural sphere draws the orb when the look preset names it as the field source.
+    readonly property bool neural: lumen.settings.fieldSource === "neural"
     property bool orbHudVisible: true
     property var selection: null
 
@@ -494,7 +496,7 @@ ApplicationWindow {
                     id: view
                     anchors.fill: parent
                     // FORGE is a list, not a scene; the GPU rests while it is shown.
-                    visible: root.scene !== "forge"
+                    visible: root.scene !== "forge" && !(root.scene === "orb" && root.neural)
                     camera: root.scene === "orb" ? lumenScene.camera : camera
                     // The hologram's grade (Xavi's desktop sphere) over the orb's finished frame.
                     layer.enabled: root.scene === "orb" && !!lumen.look.graded
@@ -797,10 +799,19 @@ ApplicationWindow {
                     }
                 }
 
+                NeuralViewport {
+                    anchors.fill: parent
+                    controller: lumen
+                    visible: root.scene === "orb" && root.neural
+                    presented: visible && archieBridge.presented
+                    hudVisible: root.orbHudVisible
+                    reducedMotion: !archieBridge.frame.ambientMotion
+                }
+
                 OrbHud {
                     controller: lumen
                     anchors.fill: parent
-                    visible: root.scene === "orb"
+                    visible: root.scene === "orb" && !root.neural
                     labelsVisible: root.orbHudVisible && lumen.settings.labels
                     view: view
                     orbScene: lumenScene

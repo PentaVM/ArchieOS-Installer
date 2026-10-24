@@ -22,6 +22,8 @@ Item {
     // whenever the view draws; the governor's post-processing switch keeps the bloom.
     readonly property bool graded: !!controller.look.graded
     property bool ownsController: false
+    // Xavi's neural sphere draws the orb when the look preset names it as the field source.
+    readonly property bool neural: !!controller.settings.fieldSource && controller.settings.fieldSource === "neural"
 
     Component.onCompleted: ownsController = controller.acquireView(viewport)
     Component.onDestruction: controller.releaseView(viewport)
@@ -33,7 +35,7 @@ Item {
     View3D {
         id: view
         anchors.fill: parent
-        visible: viewport.ownsController && viewport.presented && viewport.frameIntervalMs > 0
+        visible: viewport.ownsController && viewport.presented && viewport.frameIntervalMs > 0 && !viewport.neural
         renderMode: View3D.Offscreen
         camera: scene.camera
         environment: ExtendedSceneEnvironment {
@@ -80,6 +82,14 @@ Item {
             reducedMotion: viewport.reducedMotion || !viewport.controller.renderBudget.ambientMotion
             presented: viewport.presented
         }
+    }
+    NeuralViewport {
+        anchors.fill: parent
+        controller: viewport.controller
+        visible: viewport.ownsController && viewport.presented && viewport.neural
+        presented: visible
+        hudVisible: viewport.hudVisible
+        reducedMotion: viewport.reducedMotion
     }
     OrbHud {
         anchors.fill: parent

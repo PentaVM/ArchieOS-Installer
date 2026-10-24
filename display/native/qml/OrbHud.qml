@@ -6,6 +6,9 @@ import QtQuick
 // saying what Archie is doing and what it is using.
 Item {
     id: hud
+    // The project's typeface (the shell embeds it); the HUD used the system monospace.
+    readonly property string family: inter.status === FontLoader.Ready ? inter.font.family : "sans-serif"
+    FontLoader { id: inter; source: "qrc:/archie/shell/fonts/inter/Inter-Variable.ttf" }
     required property var controller
     property bool navigationEnabled: true
 
@@ -108,7 +111,7 @@ Item {
                 text: String(place.name).toUpperCase()
                 color: "#d9e1ea"
                 opacity: 0.86
-                font.family: "monospace"
+                font.family: hud.family
                 font.pixelSize: 11
                 font.letterSpacing: 0.4
                 style: Text.Outline
@@ -125,7 +128,7 @@ Item {
             Text {
                 text: String(hud.s.contentName || "").toUpperCase()
                 color: "#46d8ea"
-                font.family: "monospace"
+                font.family: hud.family
                 font.pixelSize: 13
                 font.weight: Font.DemiBold
                 font.letterSpacing: 0.6
@@ -137,7 +140,7 @@ Item {
                 text: Number(hud.s.contentElements || 0).toFixed(0) + " ELEMENTOS  ·  "
                       + contentLabels.sizeText(Number(hud.s.contentBytes || 0))
                 color: "#cfd8e3"
-                font.family: "monospace"
+                font.family: hud.family
                 font.pixelSize: 11
                 style: Text.Outline
                 styleColor: "#c0000000"
