@@ -1,0 +1,13 @@
+[package]
+name = "archie-camera"
+description = "Cameras as ArchieOS sees them: V4L2 straight from the kernel, and the host bridge for a VM that has no camera."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true

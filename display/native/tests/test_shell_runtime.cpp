@@ -5,6 +5,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSignalSpy>
+#include <QTemporaryDir>
 #include <QtTest>
 
 class ShellRuntimeContracts final : public QObject {
@@ -41,6 +42,46 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(!runtime.error().isEmpty(), 2000);
         QVERIFY(!runtime.running());
         runtime.setRunning(false);
+    }
+    // Settings > Modelos lists archie-local's models and switches to one of them, never to a
+    // name the list did not give. The archie-local here is a stand-in that records its arguments.
+    void localModelsAreListedAndOnlyAListedOneIsUsed() {
+        QTemporaryDir bin;
+        QVERIFY(bin.isValid());
+        QFile tool(bin.filePath(QStringLiteral("archie-local")));
+        QVERIFY(tool.open(QIODevice::WriteOnly));
+        tool.write("#!/bin/sh\n"
+                   "echo \"$*\" >> \"$(dirname \"$0\")/calls\"\n"
+                   "case \"$1\" in\n"
+                   "  list) echo '[{\"name\":\"27b\",\"label\":\"Bonsai 2 27B\",\"port\":8082,\"here\":true,\"answering\":false,\"chosen\":false},"
+                   "{\"name\":\"9b\",\"label\":\"Bonsai 2 9B\",\"port\":8081,\"here\":true,\"answering\":true,\"chosen\":true}]' ;;\n"
+                   "  use) [ \"$2\" = 27b ] || { echo 'archie-local: no' >&2; exit 64; } ;;\n"
+                   "esac\n");
+        tool.close();
+        QVERIFY(tool.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        const QByteArray path = qgetenv("PATH");
+        qputenv("PATH", bin.path().toUtf8() + ':' + path);
+
+        ShellRuntime runtime(QStringLiteral("/missing/archie-shell-bridge"), QString(), QString());
+        runtime.localModelsRefresh();
+        QTRY_COMPARE_WITH_TIMEOUT(runtime.localModels().size(), 2, 4000);
+        QTRY_VERIFY(!runtime.localModelBusy());
+        QCOMPARE(runtime.localModels()[1].toMap().value(QStringLiteral("answering")).toBool(), true);
+
+        runtime.useLocalModel(QStringLiteral("70b; rm -rf /"));
+        QVERIFY(!runtime.localModelBusy());
+        QVERIFY(!runtime.localModelNote().isEmpty());
+
+        runtime.useLocalModel(QStringLiteral("27b"));
+        QVERIFY(runtime.localModelBusy());
+        // The switch, then the list read back.
+        QTRY_VERIFY_WITH_TIMEOUT(!runtime.localModelBusy() && runtime.localModelNote().isEmpty(), 4000);
+        qputenv("PATH", path);
+        const auto calls = [&bin] {
+            QFile file(bin.filePath(QStringLiteral("calls")));
+            return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+        };
+        QTRY_COMPARE_WITH_TIMEOUT(calls(), QByteArray("list --json\nuse 27b\nlist --json\n"), 4000);
     }
     void unexpectedExitReconnectsAndStopCancelsReconnect() {
         ShellRuntime runtime(QCoreApplication::applicationFilePath(), QStringLiteral("fixture:exit"), QString());

@@ -1,0 +1,52 @@
+{
+  "format_version": 1,
+  "status": "passed",
+  "scope": "real_zero_adapter_suffix",
+  "base_sha256": "3561df7ac7d26a71ffa991ac2db740b10841c3a350aa2676ccd3ff5d428b4e8b",
+  "extraction_sha256": "06d1a2412420bbbc942e73aaea956273f80a7880493bb3679db0bf700d116562",
+  "cases": [
+    {
+      "id": "saludo",
+      "cache": "/home/archie/wanda/run/cache/84d3c3eeb58147ab990553f3e1482f93/saludo-0",
+      "cache_sha256": "ce10c6b9a4b1d5f4a78c677e833a45d24b6e74a64ff198cc642ad51af9ded732",
+      "tokens": 10,
+      "normalized_relative_rms": 0.0032270964487586657,
+      "maximum_token_kl": 4.479312232128548e-05,
+      "greedy_agreement": 1.0,
+      "criterion": "within_native_layout_noise"
+    },
+    {
+      "id": "plazo",
+      "cache": "/home/archie/wanda/run/cache/84d3c3eeb58147ab990553f3e1482f93/plazo-0",
+      "cache_sha256": "f2a59bf4f83914068eb967621a20cff70f5e1a206403778dab4145217d3cdac0",
+      "tokens": 19,
+      "normalized_relative_rms": 0.003094004841624629,
+      "maximum_token_kl": 0.00010205992376274224,
+      "greedy_agreement": 1.0,
+      "criterion": "within_native_layout_noise"
+    },
+    {
+      "id": "ruido",
+      "cache": "/home/archie/wanda/run/cache/84d3c3eeb58147ab990553f3e1482f93/ruido-0",
+      "cache_sha256": "205764d9326bb2b6519b2be3089bcdcbb0fee2b7a44b2222226ab382d5d91d90",
+      "tokens": 35,
+      "normalized_relative_rms": 0.0032026041073800115,
+      "maximum_token_kl": 0.00011605980183199832,
+      "greedy_agreement": 0.9714285714285714,
+      "criterion": "within_native_layout_noise"
+    }
+  ],
+  "seconds": 3.252106673000526,
+  "peak_cuda_allocated_bytes": 712639488,
+  "resources_before": {
+    "total_gpu_mib": 8192,
+    "used_gpu_mib": 1452,
+    "free_gpu_mib": 6567,
+    "worker_budget_mib": 5716,
+    "available_ram_bytes": 7303827456,
+    "guest_free_disk_bytes": 1005935235072,
+    "host_free_disk_bytes": 221599522816
+  },
+  "nonzero_native_adapter_verified": false,
+  "semantic_training": false
+}

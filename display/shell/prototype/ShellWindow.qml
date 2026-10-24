@@ -10,7 +10,7 @@ Window {
     readonly property string bridgeLink:desktop.bridge.link
     readonly property string orbDiagnostics:desktop.orbDiagnostics
     Component.onCompleted: if (typeof shellColorMode !== "undefined") Theme.colorMode=shellColorMode
-    Main { id:desktop; anchors.fill:parent }
+    Main { id:desktop; objectName:"desktop"; anchors.fill:parent }
     // The profile goes through LiveOrb, which applies the preset and then the look chosen in
     // Settings (grade, brightness, nodes...). Applying it to lumen directly here as well
     // reset those settings to the preset's defaults after the look had been applied.

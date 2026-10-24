@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.os.Bundle
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -34,6 +35,38 @@ class PairingActivity : FragmentActivity() {
             setText(prefs.getString("token", ""))
         }
         val status = TextView(this)
+        val wandaPrefs = getSharedPreferences(WandaConfig.PREFS, Context.MODE_PRIVATE)
+        val wandaUrl = EditText(this).apply {
+            hint = "Wanda: https://your-node/v1/events"
+            setText(wandaPrefs.getString("endpoint", ""))
+        }
+        val wandaToken = EditText(this).apply {
+            hint = "separate Wanda source token"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setText(wandaPrefs.getString("token", ""))
+        }
+        val wandaEnabled = CheckBox(this).apply {
+            text = "Enable WhatsApp notification content for Wanda"
+            isChecked = wandaPrefs.getBoolean("enabled", false)
+        }
+        val wandaPresumed = CheckBox(this).apply {
+            text = "Allow presumed-owner content after biometric confirmation decays"
+            isChecked = wandaPrefs.getBoolean("allow_presumed", false)
+        }
+        val wandaSave = Button(this).apply {
+            text = "Save Wanda pairing"
+            setOnClickListener {
+                val endpoint = wandaUrl.text.toString().trim()
+                val token = wandaToken.text.toString().trim()
+                if (!WandaConfig.validEndpoint(endpoint) || (wandaEnabled.isChecked && token.isEmpty())) {
+                    status.text = "Use an HTTPS /v1/events URL and source token (HTTP only for loopback)."
+                } else {
+                    wandaPrefs.edit().putString("endpoint", endpoint).putString("token", token)
+                        .putBoolean("enabled", wandaEnabled.isChecked).putBoolean("allow_presumed", wandaPresumed.isChecked).apply()
+                    status.text = "Wanda pairing saved. Enroll device ${AgentConfig.load(applicationContext).deviceId} on your node. Notification previews only."
+                }
+            }
+        }
 
         val save = Button(this).apply {
             text = "Pair this phone"
@@ -69,10 +102,18 @@ class PairingActivity : FragmentActivity() {
             addView(urlField)
             addView(tokenField)
             addView(save)
+            addView(TextView(this@PairingActivity).apply {
+                text = "Wanda sends WhatsApp notification message content through a separate pairing. Hidden, disabled or redacted previews are unavailable. Domain is fixed by your node's source token."
+            })
+            addView(wandaUrl)
+            addView(wandaToken)
+            addView(wandaEnabled)
+            addView(wandaPresumed)
+            addView(wandaSave)
             addView(confirm)
             addView(notMe)
             addView(status)
-        })
+        }.let { content -> android.widget.ScrollView(this).apply { addView(content) } })
     }
 
     private fun confirmOwner(status: TextView) {

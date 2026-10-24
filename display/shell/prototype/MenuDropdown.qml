@@ -2,7 +2,8 @@ import QtQuick
 import "ActionRules.js" as ActionRules
 
 // Drop-down of the top-bar menus (Archivo, Editar, Vista, Ir, Ventana). Each entry runs an
-// action by id in Main.run(); entries that cannot apply right now are disabled and dim.
+// action by id in Main.run(). An entry with no contract on this host is not listed at all;
+// one that cannot apply right now (no window in front, nothing selected) is disabled and dim.
 Panel {
     id: md
     kind: "panel"
@@ -23,15 +24,9 @@ Panel {
                 { l: "Subir un nivel", id: "vault.up", k: "⌫" },
                 { sep: true },
                 { l: "Buscar…", id: "overlay.search", k: "/" },
-                { l: "Paleta de comandos", id: "overlay.palette", k: "Ctrl K" },
-                { sep: true },
-                { l: "Bloquear pantalla", id: "overlay.lock", k: "L" } ],
+                { l: "Paleta de comandos", id: "overlay.palette", k: "Ctrl K" } ],
             "Editar": [
-                { l: "Cancelar copia", id: "vault.cancel", dis: !v || v.qState !== "running" },
-                { l: "Deshacer copia", id: "vault.undo", dis: !v || !v.canUndo },
-                { l: "Repetir copia", id: "vault.redo", dis: !v || v.qState === "running" },
-                { sep: true },
-                { l: "Ordenar por nombre", id: "vault.sort" } ],
+                { l: "Orden: " + (!v ? "nombre" : ["nombre A→Z", "nombre Z→A", "más recientes"][v.sortMode]), id: "vault.sort" } ],
             "Vista": [
                 { l: "Lista", id: "vault.list", k: "G", on: !!v && !v.gridView },
                 { l: "Cuadrícula", id: "vault.grid", k: "G", on: !!v && v.gridView },
@@ -42,14 +37,9 @@ Panel {
                 { sep: true },
                 { l: "Navegar la esfera en 3D", id: "orb.nav", k: "Ctrl Espacio", on: Demo.orbNav },
                 { l: "Escritorio vacío", id: "desk.toggle", k: "H", on: Demo.bare } ],
-            "Ir": [
-                { l: "Inicio", id: "go:0" },
-                { l: "Entregas", id: "go:0" },
-                { l: "Workspaces", id: "go:1" },
-                { l: "Documentos", id: "go:2" },
-                { l: "Trabajo", id: "go:3" },
-                { l: "Recientes", id: "go:4" },
-                { l: "Papelera", id: "go:5" } ],
+            // Vault's own places, so the menu and the sidebar never disagree.
+            "Ir": (v ? v.places : []).map(function(p, i) {
+                return { l: p.name, id: "go:" + i, on: !!v && v.place === i } }),
             "Ventana": [
                 { l: "Minimizar", id: "win.min", k: "Ctrl M", dis: Wm.front() === "" },
                 { l: "Zoom", id: "win.zoom", dis: Wm.front() === "" },
@@ -73,15 +63,16 @@ Panel {
                 { l: "Centro de control", id: "overlay.control", k: "C" },
                 { l: "Inspector", id: "overlay.inspector", k: "I" } ]
         }
-        return (m[name] || []).map(function(row) {
-            if (!row.sep && !ActionRules.allowed(row.id, md.actionContext)) row.dis = true
-            return row
+        // Hide what has no contract here, then the separators left at an edge or doubled.
+        var rows = (m[name] || []).filter(function(row) { return row.sep || ActionRules.allowed(row.id, md.actionContext) })
+        return rows.filter(function(row, i) {
+            return !row.sep || (i > 0 && i < rows.length - 1 && !rows[i - 1].sep)
         })
     }
 
     Column { id: col; x: 6; y: 6; width: parent.width - 12
         Repeater { model: md.items
-            delegate: Item { width: col.width; height: modelData.sep ? 9 : 30
+            delegate: Item { objectName: modelData.sep ? "" : "menu." + modelData.id; width: col.width; height: modelData.sep ? 9 : 30
                 Rectangle { visible: modelData.sep === true; x: 8; y: 4; width: parent.width - 16; height: 1; color: Theme.hair }
                 Rectangle { visible: modelData.sep !== true; anchors.fill: parent; radius: 7
                     color: (ima.containsMouse && !modelData.dis) ? Theme.hover : "transparent"

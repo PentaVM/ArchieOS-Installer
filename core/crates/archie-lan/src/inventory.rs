@@ -2,17 +2,18 @@
 
 use crate::classify::{classify, Evidence};
 use crate::http::{get, LanUrl};
-use crate::{mdns, roku, ssdp, upnp};
-use serde::Serialize;
+use crate::{dns_sd, mdns, neighbors, presence, roku, spotify, ssdp, upnp, wsdiscovery};
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// How long the devices that answered are asked about themselves, all together.
 const ASKING: Duration = Duration::from_secs(45);
 
 /// One device, as it described itself.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Device {
     pub address: String,
     /// The device family, when what it said supports one.
@@ -64,7 +65,33 @@ pub fn assemble(
             let heard: Vec<&ssdp::Answer> = answers.iter().filter(|a| a.from == address).collect();
             let description = descriptions.get(&address).cloned().unwrap_or_default();
             let host = hosts.get(&address).cloned().unwrap_or_default();
-            let state = states.get(&address).cloned().unwrap_or_default();
+            let mut state = states.get(&address).cloned().unwrap_or_default();
+            for (kind, endpoint) in host.endpoints(address) {
+                state.insert(format!("{kind}.endpoint"), endpoint);
+            }
+            let tags: Vec<&str> = [
+                ("_matter._tcp", "matter"),
+                ("_matterc._udp", "matter-commissionable"),
+                ("_matterd._udp", "matter-commissioner"),
+                ("_hap._tcp", "homekit"),
+                ("_mqtt._tcp", "mqtt"),
+                ("_secure-mqtt._tcp", "mqtt-tls"),
+                ("_esphomelib._tcp", "esphome"),
+                ("_wled._tcp", "wled"),
+                ("_shelly._tcp", "shelly"),
+                ("_hue._tcp", "hue"),
+                ("_adb-tls-connect._tcp", "android-debug-service"),
+            ]
+            .into_iter()
+            .filter(|(kind, _)| host.services.contains(*kind))
+            .map(|(_, tag)| tag)
+            .collect();
+            if !tags.is_empty() {
+                state.insert("discovery_tags".into(), tags.join(","));
+            }
+            if let Some(control_url) = &description.igd_control_url {
+                state.insert("upnp.igd_control_url".into(), control_url.clone());
+            }
             let fact = |key: &str| host.facts.get(key).map(String::as_str).unwrap_or("");
             let said = |key: &str| state.get(key).map(String::as_str).unwrap_or("");
             let mut evidence = Evidence {
@@ -75,6 +102,9 @@ pub fn assemble(
                 ],
                 services: host.services.iter().cloned().collect(),
             };
+            if description.igd_control_url.is_some() {
+                evidence.upnp.push(upnp::IGD_WANIP_SERVICE_TYPE.to_string());
+            }
             evidence.upnp.extend(
                 heard
                     .iter()
@@ -125,10 +155,174 @@ pub fn assemble(
 /// Listens on both protocols for `listen`, reads the descriptions devices published, asks
 /// each Roku what is on, and returns the inventory.
 pub fn scan(listen: Duration) -> std::io::Result<Inventory> {
-    let local = crate::lan_address()?;
-    let browsing = std::thread::spawn(move || mdns::browse(local, listen));
-    let answers = ssdp::search(local, listen)?;
-    let hosts = browsing.join().unwrap_or_else(|_| Ok(BTreeMap::new()))?;
+    scan_with(ScanOptions::default(), listen).map(|report| report.inventory)
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ScanOptions {
+    pub bind: Option<Ipv4Addr>,
+    pub probe_local: bool,
+    pub subnet: Option<presence::Subnet>,
+    pub probe_seconds: u64,
+    pub mdns_backend: dns_sd::Backend,
+}
+
+impl Default for ScanOptions {
+    fn default() -> Self {
+        Self {
+            bind: None,
+            probe_local: false,
+            subnet: None,
+            probe_seconds: 15,
+            mdns_backend: dns_sd::Backend::Native,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct SourceStatus {
+    pub available: bool,
+    pub matches: usize,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Diagnostics {
+    pub format: &'static str,
+    pub local_address: Ipv4Addr,
+    pub sources: BTreeMap<String, SourceStatus>,
+    pub presence: Option<presence::Report>,
+    pub limitations: Vec<&'static str>,
+}
+
+pub struct ScanReport {
+    pub inventory: Inventory,
+    pub diagnostics: Diagnostics,
+}
+
+fn source<T: Default>(result: std::thread::Result<std::io::Result<T>>) -> (T, Option<String>) {
+    match result {
+        Ok(Ok(value)) => (value, None),
+        Ok(Err(error)) => (T::default(), Some(error.to_string())),
+        Err(_) => (T::default(), Some("discovery worker failed".into())),
+    }
+}
+
+pub fn scan_with(options: ScanOptions, listen: Duration) -> std::io::Result<ScanReport> {
+    let local = match options.bind {
+        Some(address) => address,
+        None => crate::lan_address()?,
+    };
+    if !crate::is_lan_v4(local) {
+        return Err(std::io::Error::other(
+            "selected interface must be private or link-local",
+        ));
+    }
+    if !if_addrs::get_if_addrs()?
+        .iter()
+        .any(|interface| interface.addr.ip() == IpAddr::V4(local))
+    {
+        return Err(std::io::Error::other(
+            "selected IPv4 address is not assigned to a local interface",
+        ));
+    }
+    let subnet = if let Some(subnet) = options.subnet {
+        Some(subnet)
+    } else if options.probe_local {
+        Some(presence::Subnet::for_interface(local).map_err(std::io::Error::other)?)
+    } else {
+        None
+    };
+    if subnet.is_some_and(|s| !s.contains(local)) {
+        return Err(std::io::Error::other(
+            "probe subnet must contain the selected local interface",
+        ));
+    }
+    let browsing = (!matches!(options.mdns_backend, dns_sd::Backend::MdnsSd))
+        .then(|| std::thread::spawn(move || mdns::browse_report(local, listen)));
+    let library = (!matches!(options.mdns_backend, dns_sd::Backend::Native))
+        .then(|| std::thread::spawn(move || dns_sd::browse(local, listen)));
+    let searching = std::thread::spawn(move || ssdp::search(local, listen));
+    let wsd = std::thread::spawn(move || wsdiscovery::search(local, listen));
+    let probing = subnet.map(|s| {
+        std::thread::spawn(move || {
+            presence::scan(
+                s,
+                local,
+                Duration::from_secs(options.probe_seconds.clamp(1, 120)),
+            )
+        })
+    });
+    let (answers, ssdp_error) = source(searching.join());
+    let (browse, mdns_error) = browsing
+        .map(|worker| source(worker.join()))
+        .unwrap_or_else(|| {
+            (
+                mdns::BrowseReport::default(),
+                Some("native mDNS disabled by selected backend".into()),
+            )
+        });
+    let (supplemental, library_error) = library
+        .map(|worker| source(worker.join()))
+        .unwrap_or_default();
+    let (discovered, wsd_error) = source(wsd.join());
+    let probe = probing.and_then(|worker| worker.join().ok());
+    let mut sources = BTreeMap::new();
+    sources.insert(
+        "ssdp".into(),
+        SourceStatus {
+            available: ssdp_error.is_none(),
+            matches: answers.len(),
+            error: ssdp_error,
+        },
+    );
+    sources.insert(
+        "mdns".into(),
+        SourceStatus {
+            available: mdns_error.is_none(),
+            matches: browse.hosts.len(),
+            error: mdns_error,
+        },
+    );
+    sources.insert(
+        "mdns-multicast".into(),
+        SourceStatus {
+            available: browse.multicast,
+            matches: 0,
+            error: browse.warning,
+        },
+    );
+    sources.insert(
+        "ws-discovery".into(),
+        SourceStatus {
+            available: wsd_error.is_none(),
+            matches: discovered.len(),
+            error: wsd_error,
+        },
+    );
+    if subnet.is_some() {
+        sources.insert(
+            "tcp-presence".into(),
+            SourceStatus {
+                available: probe.is_some(),
+                matches: probe.as_ref().map_or(0, |p| p.responders.len()),
+                error: if probe.is_none() {
+                    Some("presence worker failed".into())
+                } else {
+                    None
+                },
+            },
+        );
+    }
+    let hosts = browse.hosts;
+    if !matches!(options.mdns_backend, dns_sd::Backend::Native) {
+        let mut status = supplemental.status();
+        if let Some(error) = library_error {
+            status.error = Some(error);
+            status.available = false;
+        }
+        sources.insert("mdns-sd".into(), status);
+    }
 
     let mut descriptions = BTreeMap::new();
     let mut states = BTreeMap::new();
@@ -146,7 +340,7 @@ pub fn scan(listen: Duration) -> std::io::Result<Inventory> {
         if let Some(url) = published {
             if !descriptions.contains_key(&answer.from) && Instant::now() < until {
                 if let Ok(body) = get(&url) {
-                    descriptions.insert(answer.from, upnp::parse(&body));
+                    descriptions.insert(answer.from, upnp::parse_with_base(&body, &url));
                 }
             }
         }
@@ -158,7 +352,162 @@ pub fn scan(listen: Duration) -> std::io::Result<Inventory> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
-    Ok(assemble(&answers, &descriptions, &hosts, &states, now))
+    let mut inventory = assemble(&answers, &descriptions, &hosts, &states, now);
+    dns_sd::merge(&mut inventory.devices, &supplemental.devices);
+    for device in &mut inventory.devices {
+        if Instant::now() >= until {
+            break;
+        }
+        if let Some(endpoint) = device.state.get("_spotify-connect._tcp.endpoint").cloned() {
+            match spotify::observe(&endpoint) {
+                Ok(snapshot) => {
+                    if device.class.is_none() {
+                        device.class = snapshot.class;
+                    }
+                    device.state.extend(snapshot.state);
+                    device.seen_by.push("spotify-getinfo".into());
+                }
+                Err(error) => {
+                    device.state.insert(
+                        "spotify.probe_error".into(),
+                        error.chars().take(200).collect(),
+                    );
+                }
+            }
+        }
+    }
+    merge_observations(
+        &mut inventory,
+        &discovered,
+        probe.as_ref().map_or(&[], |p| p.responders.as_slice()),
+    );
+    // Observe after active probes so fresh ARP resolutions can contribute, but
+    // keep the cached status: a cached entry does not prove a live device.
+    match neighbors::collect(local) {
+        Ok(records) => {
+            sources.insert(
+                "neighbor-cache".into(),
+                SourceStatus {
+                    available: true,
+                    matches: records.len(),
+                    error: None,
+                },
+            );
+            let mut index = index_of(&inventory.devices);
+            for neighbor in records {
+                let device = device_at(
+                    &mut inventory.devices,
+                    &mut index,
+                    &neighbor.address.to_string(),
+                );
+                device.seen_by.push("neighbor-cache".into());
+                device.state.insert("neighbor.mac".into(), neighbor.mac);
+                // The entry's reachability state (REACHABLE, STALE, DELAY…) changes by
+                // itself every few seconds; as a device fact it would be a change on
+                // almost every pass, so it is not one.
+                device.state.insert(
+                    "neighbor.source".into(),
+                    "system-cache; reachability unconfirmed".into(),
+                );
+            }
+        }
+        Err(error) => {
+            sources.insert(
+                "neighbor-cache".into(),
+                SourceStatus {
+                    available: false,
+                    matches: 0,
+                    error: Some(error),
+                },
+            );
+        }
+    }
+    inventory
+        .devices
+        .sort_by_key(|d| d.address.parse::<IpAddr>().unwrap());
+    inventory.devices.truncate(4096);
+    for device in &mut inventory.devices {
+        if device.address == local.to_string() {
+            device
+                .state
+                .insert("local_address_matches".into(), "true".into());
+        }
+    }
+    Ok(ScanReport { inventory, diagnostics: Diagnostics {
+        format: "archie-lan-diagnostics-v1", local_address: local, sources, presence: probe,
+        limitations: vec![if matches!(options.mdns_backend, dns_sd::Backend::Native) { "native discovery uses IPv4; IPv6-only endpoints require another source" } else { "DNS-SD observes private scoped IPv6; HTTP and TCP discovery still use IPv4" },
+            "one selected network; isolated VLANs are not visible", "Zigbee/Thread devices may require hub or border-router observations",
+            "silent devices without advertised services or sampled open TCP ports may remain unseen",
+            "advertisements are unauthenticated device claims; ownership is unknown"] } })
+}
+
+/// Where each address sits in `devices`, built once per merge.
+fn index_of(devices: &[Device]) -> BTreeMap<String, usize> {
+    devices
+        .iter()
+        .enumerate()
+        .map(|(at, device)| (device.address.clone(), at))
+        .collect()
+}
+
+/// The device at `address`, added empty when no source has listed it yet.
+fn device_at<'a>(
+    devices: &'a mut Vec<Device>,
+    index: &mut BTreeMap<String, usize>,
+    address: &str,
+) -> &'a mut Device {
+    let at = *index.entry(address.to_owned()).or_insert_with(|| {
+        devices.push(Device {
+            address: address.to_owned(),
+            ..Default::default()
+        });
+        devices.len() - 1
+    });
+    &mut devices[at]
+}
+
+pub fn merge_observations(
+    inventory: &mut Inventory,
+    discovered: &[wsdiscovery::Match],
+    presence: &[(Ipv4Addr, Vec<u16>)],
+) {
+    let mut index = index_of(&inventory.devices);
+    for found in discovered {
+        let device = device_at(&mut inventory.devices, &mut index, &found.from.to_string());
+        if device.class.is_none() {
+            device.class.clone_from(&found.class);
+        }
+        if !device.seen_by.iter().any(|s| s == "ws-discovery") {
+            device.seen_by.push("ws-discovery".into());
+        }
+        if let Some(endpoint) = &found.endpoint {
+            device
+                .state
+                .entry("wsd.endpoint".into())
+                .or_insert_with(|| endpoint.clone());
+        }
+        let types = found.types.join(",");
+        if types.len() <= 256 {
+            device.state.entry("wsd.types".into()).or_insert(types);
+        }
+    }
+    for (address, ports) in presence {
+        let device = device_at(&mut inventory.devices, &mut index, &address.to_string());
+        if !device.seen_by.iter().any(|s| s == "tcp-presence") {
+            device.seen_by.push("tcp-presence".into());
+        }
+        device.state.insert(
+            "open_tcp_ports".into(),
+            ports
+                .iter()
+                .map(u16::to_string)
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+    }
+    inventory
+        .devices
+        .sort_by_key(|d| d.address.parse::<IpAddr>().unwrap());
 }
 
 #[cfg(test)]
@@ -199,6 +548,7 @@ mod tests {
                     services: BTreeSet::from(["_airplay._tcp".to_string()]),
                     name: Some("Living".into()),
                     facts: BTreeMap::new(),
+                    ..Default::default()
                 },
             ),
             (
@@ -207,6 +557,7 @@ mod tests {
                     services: BTreeSet::from(["_ipp._tcp".to_string()]),
                     name: Some("Oficina".into()),
                     facts: BTreeMap::from([("ty".to_string(), "Brother HL-L2350DW".to_string())]),
+                    ..Default::default()
                 },
             ),
         ]);
@@ -256,5 +607,54 @@ mod tests {
         );
         assert_eq!(inventory.devices[0].class, None);
         assert_eq!(inventory.devices[0].name, "");
+    }
+
+    #[test]
+    fn independent_source_failure_retains_an_available_ssdp_observation() {
+        let (hosts, error) = source::<BTreeMap<IpAddr, mdns::Host>>(Ok(Err(
+            std::io::Error::other("mDNS source failed"),
+        )));
+        assert_eq!(error.as_deref(), Some("mDNS source failed"));
+        let (answers, error) = source(Ok(Ok(vec![answer(
+            "10.0.0.9",
+            "upnp:rootdevice",
+            "generic",
+        )])));
+        assert!(error.is_none());
+        let inventory = assemble(&answers, &BTreeMap::new(), &hosts, &BTreeMap::new(), 42);
+        assert_eq!(inventory.devices.len(), 1);
+        assert_eq!(inventory.devices[0].address, "10.0.0.9");
+        assert_eq!(inventory.devices[0].seen_by, ["ssdp"]);
+    }
+
+    #[test]
+    fn a_gateway_description_with_wanipconnection_exposes_its_igd_control_url() {
+        let gateway: IpAddr = "192.168.1.1".parse().unwrap();
+        let descriptions = BTreeMap::from([(
+            gateway,
+            upnp::Description {
+                friendly_name: "MitraStar GPT-2741GNAC".into(),
+                manufacturer: "MitraStar".into(),
+                model_name: "GPT-2741GNAC".into(),
+                igd_control_url: Some(
+                    "http://192.168.1.1:5000/upnp/control/WANIPConnection1".into(),
+                ),
+                ..Default::default()
+            },
+        )]);
+        let inventory = assemble(
+            &[answer("192.168.1.1", "upnp:rootdevice", "Linux UPnP/1.0")],
+            &descriptions,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            100,
+        );
+        assert_eq!(inventory.devices.len(), 1);
+        let router = &inventory.devices[0];
+        assert_eq!(router.class.as_deref(), Some("router"));
+        assert_eq!(
+            router.state.get("upnp.igd_control_url").map(String::as_str),
+            Some("http://192.168.1.1:5000/upnp/control/WANIPConnection1")
+        );
     }
 }

@@ -1,5 +1,73 @@
 # Bitácora — ArchieOS-Nvidia
 
+## 2026-10-21 — Claude — IRIS C2–C10, archie-accel, S-LINKs, ResourceAdvice, slots del LLM
+
+Pedido del dueño: implementar todos los C y las arquitecturas del plan
+(`_dev/PLAN-CORTEX-ROUTER-SLINKS-2026-10-20.md`, en `perf/wanda-runtime`). Registro completo,
+con qué se verificó y qué no: `IMPLEMENTACION-IRIS-ACCEL-SLINKS-2026-10-21.md`.
+
+- **IRIS**: C3 (carga perezosa del zip, torre de texto en CPU, caché de frases en disco; arreglado
+  un bug previo de offsets de storage), C5–C10, C2 detrás de `flash-attn`. `tests/weights.rs`
+  sobre un `.pt` con la forma real escrito sin PyTorch; `tests/pipeline.rs` corre todo el
+  runtime sobre un modelo aleatorio con las formas de la release.
+- **F3**: `core/crates/archie-accel` (daño, seguimiento, plan, VRAM y residencia de expertos,
+  `ResourceAdvice` con sobre de Policy). En IRIS: `/live` (cada cuadro respondido sin esperar al
+  modelo; lecturas en un worker), `detect_many` con capacidad del MoE por imagen, residencia de
+  expertos (apagada), histogramas de ruteo.
+- **F4**: `core/crates/archie-slink` (en proceso y entre procesos por memfd+seqlock+eventfd, 8
+  enlaces tipados con grado de privacidad, joiner, puente de texto etapa A). IRIS publica y
+  exporta `scene.state`.
+- **Cortex**: `resources.hpp` (`ResourceAdvice` como `CandidateSchedulerChange`, `focus.plan` con
+  fixture compartido C++/Rust, descriptores de capacidad).
+- **§9**: `archie-model-runtime::llama_slots` (prefijo estable, slots en SSD de `llama-server`
+  local).
+- **Herramientas**: `archie-iris-bench` (F0) y `scripts/iris/verify-rtx3070.sh`; la paridad
+  acepta `IRIS_DEVICE=cuda`.
+- **Verificado aquí**: pruebas de CPU; build y clippy con `--features cuda` y `flash-attn`
+  (nvcc 12.8, `CUDA_COMPUTE_CAP=86`); clippy con Rust 1.88 y 1.97; CMake/ctest de Cortex.
+  Seguimiento: 20 cajas a 640×480 en 3.9 ms por cuadro (4 hilos del contenedor).
+- **Sin verificar**: cualquier tiempo o VRAM en la 3070, la paridad con los pesos reales (en
+  CPU y en GPU), flash-attention en ejecución. La inferencia completa por cuadro no llega a
+  60 fps en la 3070 por las cuentas del plan; la rama responde cada cuadro a la tasa de la cámara
+  y lee con el modelo tan seguido como dé la GPU, y el bench mide las dos cosas.
+- **No hecho**: `read_decoder` (falta el código de Foundry), el lado de Wanda (vive en
+  `perf/wanda-runtime`; un merge de prueba choca con el veil del #35 en `archie-voice`), F5 y
+  F6, y el entrenamiento, que sigue en la WSL del dueño.
+
+## 2026-10-21 — Claude — IRIS F1: C4 y C1 (frases en lote, MoE sin lecturas al host)
+
+Sigue el paso 3 de `HANDOFF-WANDA-IRIS-2026-10-20.md` y §3/§12 de
+`_dev/PLAN-CORTEX-ROUTER-SLINKS-2026-10-20.md` (rama `perf/wanda-runtime`).
+
+- **C4** (`siglip.rs`): `.contiguous()` sobre la última posición de la torre de texto. Es el
+  fallo de CUDA "matmul is only supported for contiguous tensors" con 2 o más frases nuevas.
+  **No reproducido ni verificado en GPU**: en CPU candle acepta la vista con stride.
+- **C1** (`model.rs`, `SparseMoe`): dos rutas con el mismo resultado.
+  - `route_on_device` (GPU): sin `to_vec1`. Top-k por máximos repetidos (empates al experto
+    menor, como el sort estable), posición en la cola por conteos acumulados por bloques de
+    128 (el `cumsum` de candle multiplica por un triángulo N×N, 4.8 GB en modo abierto),
+    productos por lotes de 8 expertos sobre `[E, capacidad, D]`, y cada token suma sus
+    expertos en orden ascendente, como el bucle anterior.
+  - `route_on_host` (CPU): el algoritmo anterior, sin cambios. Medido en este contenedor
+    (CPU de 4 núcleos, forma real 512→2048, 32 expertos): la ruta por lotes tardó 722 ms
+    contra 539 ms con 1 fila y 6.3 s contra 4.0 s con 17 filas, porque multiplica las ranuras
+    vacías de la capacidad 1.5×. Por eso la CPU conserva la ruta del host.
+  - La capacidad sigue siendo una sola para todo el lote, como en el entrenamiento. Calcularla
+    por imagen en lotes con varios focos (handoff §4.2) cambia resultados y es de F3.
+- **Verificado** (CPU, f32): `device_routing_matches_host_routing` compara las dos rutas con
+  8 y 12 expertos, top-2 y top-3, empates y desbordes, y un escaneo de tres niveles. Con
+  umbral 0 dieron idénticas bit a bit; la prueba deja 1e-5 por si otra CPU elige otro kernel
+  de gemm. `tokens_past_capacity_keep_only_the_shared_expert` comprueba los descartes.
+  `cargo clippy -p archie-iris-runtime --all-targets -- -D warnings` y `cargo fmt` limpios.
+- **Arreglo de revisión** (`9fc97b9`, del dueño): en la release los sesgos de los expertos son
+  `[E, 1, H]`; `route_on_device` les agregaba otra dimensión y el matmul por lotes fallaba, así
+  que el camino de GPU no corría con los pesos reales. Ahora se llevan a `[count, 1, H]` con
+  cualquiera de las dos formas, y las pruebas arman los sesgos como la release. Sin el arreglo
+  fallan 2 de las 3 pruebas del MoE; con él pasan.
+- **Sin verificar**: la build `--features cuda` (sin toolkit aquí), la paridad con
+  `tests/parity.rs` sobre los pesos reales y cualquier latencia en la RTX 3070. La meta de F1
+  (open ≤ 300 ms, focused ≤ 90 ms) sigue sin medir.
+
 ## 2026-10-12 — Claude — IRIS en Rust, memoria y Wanda probadas
 
 - **Runtime de IRIS sin Python** (`core/crates/archie-iris-runtime`, binario
@@ -423,3 +491,28 @@ está en `docs/SENTRY-RESPUESTA.md`.
 
 Humo con binarios reales: pcap → netwatch → follower → tablón → displayd
 `/api/notices`; `vault-docs` → `focus trabajo`; `--claim` tres veces y luego `null`.
+
+## 2026-10-15 — Bloqueo de dispositivos como Intent (Claude)
+
+Pedido de Nelson: implementar el bloqueo como `Intent` y revisar los otros PR sin
+mergear los de XaviCottier.
+
+- **Contrato:** `Command::DeviceBlock { mac, blocked }`, `CommandKind::DeviceBlock`,
+  `ResourceState::Router.device_blocked` (`serde(default)`: recibos viejos siguen
+  leyéndose), `validate_mac` (una sola dirección de equipo, minúsculas).
+- **Router (SSH):** `block_rule` arma el argv exacto (`-C`/`-I`/`-D`, herramienta
+  conocida, MAC válida; nada más llega al router). Cortafuegos detectados con `-S
+  FORWARD` en el probe o a la primera, de solo lectura. Inserta solo si falta; borra
+  hasta que `-C` diga que no queda. `protected_macs` en `[sentry.router]`.
+- **CLI:** `archie sentry-node block|unblock <router> <mac>` → `SentryPrepare`, misma
+  revisión y aprobación por digest que el resto.
+- **Pruebas:** cortafuegos simulado con estado (inserción en ambos, idempotencia,
+  duplicados, MAC ajena intacta, protegidas y malformadas sin procesos, sin
+  cortafuegos = `Unsupported`, ssh 255 = `Unavailable`, desacuerdo = no verifica),
+  configuración (`protected_macs`, router solo IGD sin la capacidad), parseo CLI.
+- **No verificado en hardware:** el firmware del MitraStar puede no traer el módulo
+  `mac` de iptables; entonces responde `Unavailable`.
+- **Otros PR (solo revisión, nada mergeado):** #35, #38, #39 limpios contra `main` y
+  contra este cambio, CI verde. #40 (Xavi) CI rojo por `rustfmt` en
+  `archie-cli/src/visual.rs`. #41 (Xavi) en conflicto con `main` (displayd, orb lumen,
+  voice, `build.sh`) y sin CI. #35 y #39 solo chocan entre sí en `Cargo.lock`.

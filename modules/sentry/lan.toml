@@ -3,7 +3,8 @@
 #
 # It asks the way a phone on the same network asks (SSDP and mDNS), reads the description
 # a device publishes, and asks a Roku what is on. It observes only: it never leaves the
-# LAN, never probes ports or tries credentials, and changes nothing on any device.
+# LAN, samples TCP presence within the bounded local subnet, never tries credentials,
+# and changes nothing on any device. Core owns the worker and all action authority.
 id = "sentry.lan"
 version = "0.1.0"
 description = "Local network inventory: devices on the owner's LAN, their kind and reported state"
@@ -16,7 +17,7 @@ permissions = ["network-lan", "device-communicate", "read-telemetry"]
 [worker]
 kind = "process"
 command = "/usr/bin/archie-lan"
-args = ["watch", "--out", "/var/lib/archie/sentry/lan.json", "--every", "300"]
+args = ["watch", "--autonomous", "--out", "/var/lib/archie/sentry/lan.json", "--every", "30", "--deep-every", "600", "--probe-local", "--diagnostics", "/var/lib/archie/sentry/lan.coverage.json"]
 
 [health_check]
 kind = "none"

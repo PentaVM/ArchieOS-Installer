@@ -1,0 +1,29 @@
+{
+  "scope": "one_real_projection_only",
+  "full_model_training": false,
+  "wanda_training": false,
+  "synthetic_activations_and_targets": true,
+  "source_base_sha256": "3561df7ac7d26a71ffa991ac2db740b10841c3a350aa2676ccd3ff5d428b4e8b",
+  "source_model": "Ternary-Bonsai-2-9B",
+  "tensor": {
+    "name": "blk.31.attn_v.weight",
+    "shape": [
+      4096,
+      1024
+    ],
+    "type": 143,
+    "offset": 1952483328
+  },
+  "ptq_decode_matches_runtime": true,
+  "hadamard_algebra_relative_max": 2.9515311439354264e-07,
+  "cuda_device": "NVIDIA GeForce RTX 3070",
+  "rank": 8,
+  "alpha": 16.0,
+  "first_loss": 0.0003442793677095324,
+  "last_loss": 1.8292544154974166e-06,
+  "base_tensor_unchanged": true,
+  "peak_allocated_mib": 72.453125,
+  "zero_adapter": "/mnt/d/ArchieLocal/compatibility-probes/bonsai9b-zero-lora-PROBE.gguf",
+  "nonzero_adapter": "/mnt/d/ArchieLocal/compatibility-probes/bonsai9b-one-layer-lora-PROBE.gguf",
+  "promoted": false
+}

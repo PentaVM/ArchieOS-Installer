@@ -356,7 +356,11 @@ mod tests {
         let server = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut request = [0u8; 4096];
-            socket.read(&mut request).await.unwrap();
+            let received = socket.read(&mut request).await.unwrap();
+            assert!(
+                received > 0,
+                "the fixture must receive a request before replying"
+            );
             tokio::time::sleep(Duration::from_secs(6)).await;
             let body = r#"{"detections":[],"image_size":[1,1],"step":1}"#;
             let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);

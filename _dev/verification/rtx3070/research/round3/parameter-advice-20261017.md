@@ -1,0 +1,90 @@
+# Parámetros para aprender decisiones: propuesta CPU a Claude
+
+2026-10-17. Autor: gpt-6.1-sol. **Consejo de diseño, sin implementación ni ejecución de entrenamiento.** Priorizar una comparación de objetivo de aprendizaje antes de una rejilla grande de learning rates: la pérdida actual promedia muchos tokens de alternativas/JSON y solo una selección, mientras la sonda decisional no vio cambios de decisiones en los adaptadores previos. Eso hace plausible una señal decisional diluida, pero no demuestra que sea la causa: también pueden intervenir capacidad, inicialización, datos o discrepancia del operador.
+
+Se verificó origin PentaVM/ArchieOS-Nvidia. Se leyeron completos STEERING, worker compartido, suffix compartido/aislado y auditoría previa; lectura de HEAD compartido `7fac7e81489cf958cb8e33c436e0d46cb3092a5f`. El worker leído tiene SHA256 `330a6b5a53345ff5964a3cd3be79f90a1949161b1db1bda9ae1951081d4cd548`; suffix `5b5ade03eb2e666f5161a451c25b330aca4024fe4b286024b3abf4f997b52554`. No se inspeccionaron ítems de development/benchmarks, no se descargaron pesos/corpus, no se importó Torch ni se llamó GPU/tokenizador/runtime. No se tocó el proceso comunicado como PID 7864, que puede retener CUDA aun idle. Único archivo escrito: este informe. Claude conserva decisiones de código, recursos y experimentos.
+
+## 1. La ampliación es un grafo híbrido, no cuatro copias del bloque 31
+
+Hecho local: `wider-geometry.json` (inspección CPU del coordinador Codex; SHA256 `7d0ba03ff4eee9d179809ea6ec75fac82db0c5bfcf0fa694cf9e7f51467e3b0c`) vincula el GGUF exacto SHA256 `3561df7ac7d26a71ffa991ac2db740b10841c3a350aa2676ccd3ff5d428b4e8b`, 1.997.486.976 bytes, embedding 4096, FFN 12288 e intervalo full-attention 4. Los bloques 28–30 son recurrentes Gated DeltaNet; 31 es atención completa. El [grafo Prism fijado](https://github.com/PrismML-Eng/llama.cpp/blob/e3de715222b2667c54a267441159a5729f11155e/src/models/qwen35.cpp) marca la recurrencia por `(i+1)%interval` y ejecuta ramas distintas antes de FFN. La inferencia aquí es que multiplicar por cuatro el suffix existente produciría otro modelo, aunque conservara shapes de entrada/salida.
+
+Propuesta de mapa explícito para revisar, **no mapa ya implementado**:
+
+- En 28–30: `attn_qkv.weight` [4096,8192], `attn_gate.weight` [4096,4096], `ssm_out.weight` [4096,4096], además de FFN gate/up/down 4096↔12288.
+- En 31: q [4096,8192], k/v [4096,1024], output [4096,4096], además de las tres FFN.
+- Mantener congelados conv1d, normas, ssm_a/dt y, en este primer mapa, `ssm_alpha/beta`. Estos últimos son matrices [4096,32], pero incluirlos sería una ampliación adicional de targets que necesita declaración y prueba. No convertir “attention” automáticamente en todos los tensores recurrentes.
+
+`attn_qkv` conjunto puede usar una A compartida o tres adaptadores por porción; no son la misma parametrización ni número de parámetros. El recuento inferior supone **una pareja A/B conjunta**. La división q/k/v, su orden y gate separado deben verificarse contra el grafo/exportador; las letras q/v del worker actual no especifican esa operación. La delta debe actuar en la base de activación original, con orientación/exportación compatibles con las rotaciones Hadamard de PTQ; un nombre de tensor parecido no basta.
+
+## 2. Recuentos analíticos y el riesgo real de memoria
+
+Para una matriz [entrada n, salida m], una pareja LoRA r8 aporta `8(n+m)`. Se mantendrían r8/alpha16, escala alpha/r=2. Estas sumas se calcularon con Python estándar sobre el directorio de shapes recibido; **no son VRAM medida ni promesa de que quepa**.
+
+| Mapa | Parámetros | Parámetros FP32 MiB | Dos momentos Adam FP32 MiB | Parámetros+gradientes+dos momentos MiB |
+| --- | ---: | ---: | ---: | ---: |
+| 31 q/v actual | 139264 | 0,53125 | 1,0625 | 2,125 |
+| 31 q/k/v/o | 245760 | 0,9375 | 1,875 | 3,75 |
+| 31 atención+MLP | 638976 | 2,4375 | 4,875 | 9,75 |
+| 28–31 mapa explícito anterior | 2506752 | 9,5625 | 19,125 | 38,25 |
+
+Última fila: `3×229376` de proyecciones recurrentes + `245760` de atención 31 + `4×393216` de FFN. FP32 parámetros+gradiente+m/v son 16 bytes/parámetro: 40.108.032 bytes. Excluye tensores temporales/foreach, objetos Adam, estados escalares, copias/checkpoints, base empaquetada, head, cachés, activaciones y allocator. Añadir alpha/beta recurrentes daría 198144 parámetros adicionales; no se incluyen silenciosamente. No hay master weights extra si el parámetro ya es FP32; otra política de dtype cambia la cuenta.
+
+Riesgo nuevo prioritario: con 32 cabezas de valor y dimensión 128, un estado recurrente 32×128×128 en FP32 ocupa 2 MiB. **Si una implementación ingenua retiene un estado completo por posición**, T1024 y tres bloques suman 6 GiB solo en esos estados. Es una hipótesis de asignación, no uso real observado; exige elegir backward/recomputation/chunking con gradiente completo antes de anunciar viabilidad. Hacer detach entre chunks reduce memoria pero cambia a BPTT truncado: no es una optimización equivalente sin declararlo. Por comparación, un scores de atención 16×1024² FP32 son 64 MiB, y un chunk denso 2048×12288 FP32 son 96 MiB antes de scratch. El pequeño Adam no resuelve esto.
+
+## 3. Ablación mínima: supervisión decisional sin prefijo gold
+
+**Hipótesis que necesita aprobación de Claude, implementación y tests**, no un ajuste soportado hoy. El worker actual tiene cross-entropy full-vocab media por ejemplo y acumulación de medias de ejemplos; no pondera cada ejemplo por su cantidad de tokens. Mantener ese comportamiento común en ambos brazos para no mezclar normalización, orden y objetivo.
+
+Proponer `L = L_JSON + lambda × L_decisión`, con lambda 0 frente a 1. L_JSON conserva todos los tokens assistant actuales. L_decisión predice únicamente la letra desde el prompt y un prefijo estructural fijo de selección, sin consecuencias, explicación ni respuesta correcta en el contexto. Ese prefijo es constante entre ejemplos; la etiqueta procede **solo de TRAIN propio admitido**. Una segunda pasada distingue esta tarea de la fila teacher-forced posterior a las consecuencias correctas. Preferir CE sobre vocabulario completo en esa posición, con replay del head acotado, antes que llamar equivalente a una clasificación renormalizada solo entre tres/cuatro letras. Verificar que cada letra sea un único token y que el contexto/token boundary sea idéntico al probe; si no, puntuar la secuencia correcta explícita, no asumir IDs.
+
+La salida pública sigue siendo decision_v1 y Core decide: la tarea auxiliar interna no sustituye JSON ni cambia contratos de autoridad. El probe decisional y generación completa tras razonamiento propio siguen siendo mediciones distintas. Se conservan ambas para detectar que la auxiliar solo enseñe a completar un prefijo.
+
+Protocolo concreto para piloto, después de los gates del grafo elegido:
+
+1. Fijar ocho familias work TRAIN ya revisadas, cuatro variantes completas cada una; sin derivadas duplicadas ni contenido de dev. Si no existen ocho admitidas, declarar otro tamaño y recalcular el plan antes de correr, sin rellenar con dev ni otros dominios. Publicar hashes, secuencia y tokens en un manifiesto. s1K/s1K-1.1 quedan excluidos mientras su linaje/solapamiento no esté resuelto; el nombre de la receta no autoriza sus datos.
+2. Dos ciclos sobre las 32 variantes = 64 presentaciones; acumulación 8, ocho updates exactos. Cada update contiene dos familias con sus cuatro variantes: clean/noise/cosmetic/CF pesan por igual y la CF que invierte la acción no desaparece por azar de lote. Mismo orden por seed 17/29 para lambda 0 y 1. El worker actual baraja ejemplos; agrupar así requiere cambio revisado y prueba del sampler, no un flag existente. No hay minibatches parciales en este diseño.
+3. Dos brazos × dos seeds = cuatro ejecuciones acotadas: misma arquitectura admitida, A/B iniciales y RNG por seed, AdamW beta=(0,9;0,999), eps1e-8, decay0, clip global1, LR constante **5e-5 propuesto**, sin init_from ni cambio simultáneo de escala/dropout/schedule. El LR es una hipótesis conservadora para el mapa más amplio, no valor demostrado por s1. Evaluar al inicio y updates 2/4/8; comparar endpoint fijo 8 para esta hipótesis, preservando todos los checkpoints sin escoger un pico oportunista.
+4. Primero se puede probar lambda0/1 en q/v31 ya soportado para depurar pérdida/sampler; eso no valida ampliación. Repetir la comparación en el mismo mapa amplio solo tras sus gates. No atribuir a la auxiliar una diferencia donde también cambió arquitectura. Solo si la telemetría muestra señal útil y falta de progreso sin inestabilidad, proponer posteriormente LR1e-4 bajo el mismo presupuesto, en vez de abrir una rejilla grande ahora.
+
+Igualar exactamente por brazo: familias/variantes y repeticiones, tokens de prompt procesados, **T tokens assistant no enmascarados de L_JSON**, 64 posiciones auxiliares evaluadas, ocho updates y frecuencias de evaluación. Ejecutar la pasada auxiliar también en control con peso cero para aproximar cómputo; registrar tiempo/FLOPs si no puede igualarse. No decir que los tokens con gradiente efectivo son idénticos: control pesa cero esas posiciones y tratamiento no. Contabilizar por separado T, 64 eventos auxiliares y sus pesos, además de tokens procesados totales y cualquier recomputación. El contraste intencional es el peso de la misma etiqueta ya disponible en TRAIN, no más familias o más pasos. Ambos brazos conservan el mismo T de targets completos; comparar solo epochs no acredita igualdad.
+
+## 4. Diagnósticos que distinguen formato, señal decisional y clipping
+
+Registrar antes/después del clip, por update y por proyección/bloque:
+
+- Normas de gradiente A y B, norma global sin recortar y coeficiente `min(1,1/(norma+epsilon))`; fracción de updates recortados. Al ampliar módulos, el clip global fijo puede reducir cada componente aunque el LR sea igual. No concluir “LR bajo” mirando solo la norma post-clip.
+- Normas A/B, norma de update de parámetros y delta efectiva. Para `DeltaW=2BA`, `||DeltaW||F²=4 tr[(BᵀB)(AAᵀ)]`: se calcula con matrices r×r sin materializar un 4096×12288. Dividir por `||W_efectiva||F` con base/basis declaradas. Además medir `RMS(delta(x))/max(RMS(base(x)),eps)` en activaciones TRAIN fijas y posiciones de decisión; en q separar contenido de query y gate. Cambios de ese cociente indican efecto local, no calidad.
+- En una muestra TRAIN fija, gradientes separados de L_JSON y L_decisión y su coseno, antes de mezclarlos. Informar normas/contribuciones, no igualar automáticamente lambdas a partir de dev. Comparar pérdidas de selección en prefijo prompt-only y fila teacher-forced, pérdida de consecuencias/estructura y JSON válido en generación propia. Instrumentar exige revisión/tests; no está todo en metrics.jsonl actual.
+
+Inicialización observada: A~N(0,0,001²), B=0; por ello gradiente A cero en la primera backward es correcto, y B debe recibir gradiente finito donde haya señal. Después de B no nulo, seguir verificando A sin exigir idéntica norma entre módulos. Para n4096, norma L2 de fila de A ≈sqrt(n)×0,001=0,064; el RMS por elemento sigue siendo 0,001. Microsoft Linear usa Kaiming-uniform cuya norma de fila típica es ≈0,577. La diferencia merece diagnóstico de gradiente y delta, **no demuestra causa de los resultados**: Adam normaliza momentos y la geometría importa. Mantener inicialización actual en esta primera ablación; cambiarla necesita otro experimento y cadena de identidad. rsLoRA con alpha16/r8 usaría 16/sqrt(8)≈5,657 en lugar de 2; sería otra escala efectiva aunque los campos numéricos parecieran iguales, por lo que no activarlo tácitamente.
+
+Criterio piloto propuesto: mejora de pares clean+CF **ambos correctos**, con cambio en dirección gold, en ambas seeds, sin perder aciertos base en clean/noise/cosmetic, sin collapse de letras ni regresión de generación JSON/grounding. Flip aislado no basta: cambiar una letra correcta por otra errónea suma flip pero no mejora. Informar conteos por familia y condición; tres pares del ancla no prueban generalización. Usar nuevos held-out propios separados por mecanismo/ancestro solo tras su creación/revisión; no convertir round2/3 TRAIN en test. La pérdida menor sin decisiones nuevas vuelve a ser resultado nulo para este objetivo.
+
+P(correct) menor por sí solo no prueba peor calibración. En held-out legítimo, registrar NLL y Brier multiclase, reliability con tamaños de bin/conteos y distribución de márgenes, declarando si se usa la distribución restringida a letras. Esa distribución condicional no es probabilidad de emitir una respuesta válida en vocabulario completo ni calibración de consecuencias sociales. Con ancla pequeña, curvas por bins son descriptivas e inciertas; no reutilizar sus etiquetas/trazas para la auxiliar.
+
+## 5. Gates antes de ampliar o servir
+
+El prefix congelado debe terminar **después de 27 y antes de 28**, con tokens/posiciones/layout/reset y perfil ligados a nuevos recibos. Cachés pre31 no alimentan un suffix entrenable28–31; caches independientes de entradas nativas a29/30 quedarían obsoletos al actualizar28 y cortarían el gradiente. Se necesita toda la composición diferenciable recurrente28–30→full31→head, aunque algunos pesos intermedios estén congelados.
+
+Exigir forward cero-adapter por bloque y final bajo tolerancias originales fijadas; microbatch/reset fresh-sequence con longitudes distintas y estados de conv/DeltaNet; backward real finito por nuevo target; prueba de gradiente en una versión pequeña comprobable; export/reload nativo **con deltas no nulas** por cada nombre/orientación nuevo, enable/disable/restauración y correspondencia del checkpoint. El comportamiento mecánico de q/v31 no cubre MLP ni proyecciones recurrentes. Medir picos allocated/reserved/total y termales en el grafo real bajo los límites existentes; ningún recuento de Adam autoriza sobrepasarlos. No ejecutar una segunda carga mientras el worker retenga CUDA.
+
+La auditoría anterior demostró un perfil de referencia **prefill FP32 controlado**, no compatibilidad automática con serving Q8 ni con decode de un token. Mantener dos etiquetas de operador y sus cachés. En casos propios fijados, comparar separadamente: base FP32↔base native-Q8; adapter FP32↔base FP32; adapter native-Q8↔base native-Q8; y adapter FP32↔adapter native-Q8. Reportar RMS/KL/márgenes/decisiones para prefill y decode, no restar errores como si fueran independientes. Si el efecto adaptador es menor que la discrepancia del operador, no atribuir un cambio nativo al aprendizaje sin más evidencia; un efecto grande tampoco acredita parity. No mezclar corrección de cuantización y aprendizaje social en la misma afirmación.
+
+Un futuro fake-quant de activación Q8 requeriría reproducir redondeo, escalas y layouts del runtime, y declarar cualquier STE. El trabajo QLoRA NF4 no prueba equivalencia de Prism PTQ1_0 con activaciones Q8, Hadamard, kernel recurrente y nuestro backward. No cambiar base, formato ni parámetros aprobados para imitar una receta externa.
+
+## 6. Budget forcing dentro de 1024
+
+La metadata de contexto262144 no amplía el contrato actual de 1024. Para cada caso exigir `tokens(prompt)+tokens(razonamiento)+tokens(Wait/delimitadores)+tokens(JSON final)+terminación <=1024`, con conteos del tokenizer fijado. Reservar primero JSON válido según los targets propios y un margen explícito; si no queda espacio, no extender ni truncar evidencia/JSON.
+
+Propuesta posterior a un candidato congelado: baseline sin razonamiento extra y presupuestos 64/128 **solo donde quepan**, máximo una extensión Wait y una condición de cierre declarada. Comparar con razonamiento de igual número de tokens sin Wait para separar más cómputo del control de parada. El coste debe incluir prompts reejecutados, no solo salida. El renderer actual cierra un think vacío antes del JSON: appending Wait allí no equivale a prolongar una cadena activa. Hace falta una ruta de generación revisada con estado/template y delimitadores verificables. Reportar truncadas/inválidas como tales. Congelar presupuesto en dev propio y luego evaluar externamente una vez; no adaptarlo por respuestas de benchmarks.
+
+## Fuentes primarias consultadas el 2026-10-17
+
+- [s1, arXiv2501.19393v3](https://arxiv.org/abs/2501.19393v3), original 2025-01-31, revisión 2025-03-01: selección por calidad/diversidad/dificultad y control de pensamiento por terminar o extender. Son ideas de diseño, no prueba en social/PTQ.
+- [Script oficial s1](https://github.com/simplescaling/s1/blob/main/train/sft.sh), consulta de rama mutable en esta fecha: Qwen2.5-32B, LR1e-5, cinco epochs, bloque32768, cosine/warmup0,05, beta2=0,95, bf16 y FSDP. Ninguna de esas cifras se transfiere automáticamente al suffix LoRA/PTQ; se mantiene beta2 actual para no confundir la ablación. No se descargó s1K ni trazas.
+- [LoRA, arXiv2106.09685](https://arxiv.org/abs/2106.09685), 2021-06-17, y [Linear de Microsoft](https://github.com/microsoft/LoRA/blob/main/loralib/layers.py), consulta de rama mutable: parametrización A/B y escala alpha/r; código Linear inicializa A Kaiming y B cero. Sustenta las fórmulas, no una mejora del adapter aquí.
+- [rsLoRA, arXiv2312.03732](https://arxiv.org/abs/2312.03732), 2023-11-28: analiza escala con raíz de rango. Sirve para identificar que cambiar scaling es una intervención, no recomendación de incumplir r8/alpha16/escala actual.
+- [QLoRA, arXiv2305.14314](https://arxiv.org/abs/2305.14314), 2023-05-23: usa NF4, double quantization y optimizadores paginados. No valida nuestro operador PTQ1_0 ni representa su memoria medida.
+- [Prism qwen35.cpp fijado](https://github.com/PrismML-Eng/llama.cpp/blob/e3de715222b2667c54a267441159a5729f11155e/src/models/qwen35.cpp): topología híbrida y nombres de proyecciones. Shapes efectivos proceden del recibo local exacto, no de sustituir pesos Qwen por Bonsai.
+
+Las sumas de parámetros/bytes y los ejemplos de memoria son análisis CPU; los brazos, umbrales y diagnósticos son propuestas; la topología/código/shapes son hechos leídos. No se ejecutó ninguno de los gates nuevos ni se verificaron VRAM, velocidad, gradientes nuevos, deployment o mejora del modelo en esta tarea.

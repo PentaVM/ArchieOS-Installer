@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "receipt_id": "e4425ffc-7ea4-43d2-8dd3-341b9217e9b8",
+  "checkpoint_id": "inference-checkpoint:ca2bf2f0-331a-415c-a325-9a3ce7b160e2",
+  "binding": {
+    "schema_version": 1,
+    "domain": "personal/owner",
+    "focus_id": "ai:dfab238551c43701b831a9320d81271aea6c7c1d44109a2187455a5630fb4c5a",
+    "task_id": "27423eda-d264-423c-807f-c31d792fc125",
+    "objective_ref": "vault:personal/owner/objectives/2eda0667e1459b3ed25cbf3f",
+    "runner_id": "api",
+    "provider_id": "llama-cpp",
+    "account_id": "deployment:265c57d2fccb381edb86d7c249b58dc8b112dc5d6f37f894cc02b12e96de69f8"
+  },
+  "session_id": null,
+  "model_id": "local.bonsai-2-9b",
+  "request_sha256": "91103e22ee7e2ac8ee28a839f5bfd64994d2ecd246549bb31b0c8b8339d4fc3f",
+  "output_sha256": "75c131e04fc99ce284ad2720af1bbfb5376ff4f81bb2a18cfcc8f44d0c821353",
+  "admitted_evidence_refs": [],
+  "result_ref": {
+    "reference": "vault:personal/owner/inference/e4425ffc-7ea4-43d2-8dd3-341b9217e9b8",
+    "account_id": "deployment:265c57d2fccb381edb86d7c249b58dc8b112dc5d6f37f894cc02b12e96de69f8"
+  },
+  "status": "completed",
+  "error_code": null,
+  "observed_at_ms": 1792831523380,
+  "usage": {
+    "input_tokens": 683,
+    "output_tokens": 1307,
+    "duration_ms": 15762
+  }
+}

@@ -15,10 +15,12 @@ std::string_view name(RelationKind kind) noexcept {
         case RelationKind::Coauthor:         return "coauthor";
         case RelationKind::PublishedBy:      return "published_by";
         case RelationKind::Represents:       return "represents";
+        case RelationKind::Manager:          return "manager";
         case RelationKind::Household:        return "household";
         case RelationKind::Family:           return "family";
         case RelationKind::Friend:           return "friend";
         case RelationKind::EmergencyContact: return "emergency_contact";
+        case RelationKind::Partner:          return "partner";
         case RelationKind::AuthorizedGuest:  return "authorized_guest";
     }
     return "unknown";

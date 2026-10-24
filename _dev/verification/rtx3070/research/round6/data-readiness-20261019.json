@@ -1,0 +1,583 @@
+{
+  "scope": "existing TRAIN candidates only; CPU vocab-only; no admission or training",
+  "review": "pending-human",
+  "seed": 17,
+  "candidates": [
+    {
+      "path": "round2/curriculum-003-candidate.json",
+      "sha256": "98c9929a3b8836bd25b422d499f9648933c5577084cac673f859e5ffd5ae5461",
+      "families": 16,
+      "rows": [
+        {
+          "id": "r2-cabina-interprete:clean",
+          "family": "r2-cabina-interprete",
+          "domain": "work",
+          "full_tokens": 519,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-cabina-interprete:noise",
+          "family": "r2-cabina-interprete",
+          "domain": "work",
+          "full_tokens": 571,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-cabina-interprete:cosmetic",
+          "family": "r2-cabina-interprete",
+          "domain": "work",
+          "full_tokens": 520,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-cabina-interprete:counterfactual",
+          "family": "r2-cabina-interprete",
+          "domain": "work",
+          "full_tokens": 516,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-mandato-feria:clean",
+          "family": "r2-mandato-feria",
+          "domain": "work",
+          "full_tokens": 493,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-mandato-feria:noise",
+          "family": "r2-mandato-feria",
+          "domain": "work",
+          "full_tokens": 545,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-mandato-feria:cosmetic",
+          "family": "r2-mandato-feria",
+          "domain": "work",
+          "full_tokens": 496,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-mandato-feria:counterfactual",
+          "family": "r2-mandato-feria",
+          "domain": "work",
+          "full_tokens": 494,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-garantia-traduccion:clean",
+          "family": "r2-garantia-traduccion",
+          "domain": "work",
+          "full_tokens": 572,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-garantia-traduccion:noise",
+          "family": "r2-garantia-traduccion",
+          "domain": "work",
+          "full_tokens": 620,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-garantia-traduccion:cosmetic",
+          "family": "r2-garantia-traduccion",
+          "domain": "work",
+          "full_tokens": 574,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-garantia-traduccion:counterfactual",
+          "family": "r2-garantia-traduccion",
+          "domain": "work",
+          "full_tokens": 571,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-quorum-archivo:clean",
+          "family": "r2-quorum-archivo",
+          "domain": "work",
+          "full_tokens": 517,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-quorum-archivo:noise",
+          "family": "r2-quorum-archivo",
+          "domain": "work",
+          "full_tokens": 567,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-quorum-archivo:cosmetic",
+          "family": "r2-quorum-archivo",
+          "domain": "work",
+          "full_tokens": 517,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-quorum-archivo:counterfactual",
+          "family": "r2-quorum-archivo",
+          "domain": "work",
+          "full_tokens": 518,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-licencia-repetida:clean",
+          "family": "r2-licencia-repetida",
+          "domain": "work",
+          "full_tokens": 533,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-licencia-repetida:noise",
+          "family": "r2-licencia-repetida",
+          "domain": "work",
+          "full_tokens": 583,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-licencia-repetida:cosmetic",
+          "family": "r2-licencia-repetida",
+          "domain": "work",
+          "full_tokens": 533,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-licencia-repetida:counterfactual",
+          "family": "r2-licencia-repetida",
+          "domain": "work",
+          "full_tokens": 518,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-testigos-parada:clean",
+          "family": "r2-testigos-parada",
+          "domain": "work",
+          "full_tokens": 574,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-testigos-parada:noise",
+          "family": "r2-testigos-parada",
+          "domain": "work",
+          "full_tokens": 630,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-testigos-parada:cosmetic",
+          "family": "r2-testigos-parada",
+          "domain": "work",
+          "full_tokens": 575,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-testigos-parada:counterfactual",
+          "family": "r2-testigos-parada",
+          "domain": "work",
+          "full_tokens": 579,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-bono-metrica:clean",
+          "family": "r2-bono-metrica",
+          "domain": "work",
+          "full_tokens": 586,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-bono-metrica:noise",
+          "family": "r2-bono-metrica",
+          "domain": "work",
+          "full_tokens": 645,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-bono-metrica:cosmetic",
+          "family": "r2-bono-metrica",
+          "domain": "work",
+          "full_tokens": 586,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-bono-metrica:counterfactual",
+          "family": "r2-bono-metrica",
+          "domain": "work",
+          "full_tokens": 576,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-errata-audiencia:clean",
+          "family": "r2-errata-audiencia",
+          "domain": "work",
+          "full_tokens": 547,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-errata-audiencia:noise",
+          "family": "r2-errata-audiencia",
+          "domain": "work",
+          "full_tokens": 595,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-errata-audiencia:cosmetic",
+          "family": "r2-errata-audiencia",
+          "domain": "work",
+          "full_tokens": 547,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-errata-audiencia:counterfactual",
+          "family": "r2-errata-audiencia",
+          "domain": "work",
+          "full_tokens": 541,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-ensayo-sustituta:clean",
+          "family": "r2-ensayo-sustituta",
+          "domain": "personal",
+          "full_tokens": 485,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-ensayo-sustituta:noise",
+          "family": "r2-ensayo-sustituta",
+          "domain": "personal",
+          "full_tokens": 537,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-ensayo-sustituta:cosmetic",
+          "family": "r2-ensayo-sustituta",
+          "domain": "personal",
+          "full_tokens": 489,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-ensayo-sustituta:counterfactual",
+          "family": "r2-ensayo-sustituta",
+          "domain": "personal",
+          "full_tokens": 489,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-cancha-horarios:clean",
+          "family": "r2-cancha-horarios",
+          "domain": "personal",
+          "full_tokens": 541,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-cancha-horarios:noise",
+          "family": "r2-cancha-horarios",
+          "domain": "personal",
+          "full_tokens": 594,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-cancha-horarios:cosmetic",
+          "family": "r2-cancha-horarios",
+          "domain": "personal",
+          "full_tokens": 541,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-cancha-horarios:counterfactual",
+          "family": "r2-cancha-horarios",
+          "domain": "personal",
+          "full_tokens": 553,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-club-silencio:clean",
+          "family": "r2-club-silencio",
+          "domain": "personal",
+          "full_tokens": 519,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-club-silencio:noise",
+          "family": "r2-club-silencio",
+          "domain": "personal",
+          "full_tokens": 580,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-club-silencio:cosmetic",
+          "family": "r2-club-silencio",
+          "domain": "personal",
+          "full_tokens": 519,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-club-silencio:counterfactual",
+          "family": "r2-club-silencio",
+          "domain": "personal",
+          "full_tokens": 531,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-entrada-reventa:clean",
+          "family": "r2-entrada-reventa",
+          "domain": "personal",
+          "full_tokens": 563,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-entrada-reventa:noise",
+          "family": "r2-entrada-reventa",
+          "domain": "personal",
+          "full_tokens": 613,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-entrada-reventa:cosmetic",
+          "family": "r2-entrada-reventa",
+          "domain": "personal",
+          "full_tokens": 563,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-entrada-reventa:counterfactual",
+          "family": "r2-entrada-reventa",
+          "domain": "personal",
+          "full_tokens": 571,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-telescopio-reputacion:clean",
+          "family": "r2-telescopio-reputacion",
+          "domain": "personal",
+          "full_tokens": 553,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-telescopio-reputacion:noise",
+          "family": "r2-telescopio-reputacion",
+          "domain": "personal",
+          "full_tokens": 613,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-telescopio-reputacion:cosmetic",
+          "family": "r2-telescopio-reputacion",
+          "domain": "personal",
+          "full_tokens": 553,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-telescopio-reputacion:counterfactual",
+          "family": "r2-telescopio-reputacion",
+          "domain": "personal",
+          "full_tokens": 553,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-intercambio-vinilo:clean",
+          "family": "r2-intercambio-vinilo",
+          "domain": "personal",
+          "full_tokens": 634,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-intercambio-vinilo:noise",
+          "family": "r2-intercambio-vinilo",
+          "domain": "personal",
+          "full_tokens": 690,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-intercambio-vinilo:cosmetic",
+          "family": "r2-intercambio-vinilo",
+          "domain": "personal",
+          "full_tokens": 641,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-intercambio-vinilo:counterfactual",
+          "family": "r2-intercambio-vinilo",
+          "domain": "personal",
+          "full_tokens": 650,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-cena-indirecta:clean",
+          "family": "r2-cena-indirecta",
+          "domain": "personal",
+          "full_tokens": 510,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-cena-indirecta:noise",
+          "family": "r2-cena-indirecta",
+          "domain": "personal",
+          "full_tokens": 561,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-cena-indirecta:cosmetic",
+          "family": "r2-cena-indirecta",
+          "domain": "personal",
+          "full_tokens": 510,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-cena-indirecta:counterfactual",
+          "family": "r2-cena-indirecta",
+          "domain": "personal",
+          "full_tokens": 522,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-huerto-portavoz:clean",
+          "family": "r2-huerto-portavoz",
+          "domain": "personal",
+          "full_tokens": 506,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-huerto-portavoz:noise",
+          "family": "r2-huerto-portavoz",
+          "domain": "personal",
+          "full_tokens": 560,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-huerto-portavoz:cosmetic",
+          "family": "r2-huerto-portavoz",
+          "domain": "personal",
+          "full_tokens": 510,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r2-huerto-portavoz:counterfactual",
+          "family": "r2-huerto-portavoz",
+          "domain": "personal",
+          "full_tokens": 563,
+          "target_keys_before_choice": 1
+        }
+      ]
+    },
+    {
+      "path": "round3/curriculum-004-candidate.json",
+      "sha256": "557cea647e785de1ae64778b03ffa0260b31fe66ca747618b152557d4eabd8bd",
+      "families": 4,
+      "rows": [
+        {
+          "id": "r3-agencia-salida:clean",
+          "family": "r3-agencia-salida",
+          "domain": "work",
+          "full_tokens": 642,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r3-agencia-salida:noise",
+          "family": "r3-agencia-salida",
+          "domain": "work",
+          "full_tokens": 710,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r3-agencia-salida:cosmetic",
+          "family": "r3-agencia-salida",
+          "domain": "work",
+          "full_tokens": 651,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r3-agencia-salida:counterfactual",
+          "family": "r3-agencia-salida",
+          "domain": "work",
+          "full_tokens": 632,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r3-asesor-incentivo:clean",
+          "family": "r3-asesor-incentivo",
+          "domain": "work",
+          "full_tokens": 667,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r3-asesor-incentivo:noise",
+          "family": "r3-asesor-incentivo",
+          "domain": "work",
+          "full_tokens": 721,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r3-asesor-incentivo:cosmetic",
+          "family": "r3-asesor-incentivo",
+          "domain": "work",
+          "full_tokens": 670,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r3-asesor-incentivo:counterfactual",
+          "family": "r3-asesor-incentivo",
+          "domain": "work",
+          "full_tokens": 682,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r3-alias-fecha:clean",
+          "family": "r3-alias-fecha",
+          "domain": "personal",
+          "full_tokens": 591,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r3-alias-fecha:noise",
+          "family": "r3-alias-fecha",
+          "domain": "personal",
+          "full_tokens": 654,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r3-alias-fecha:cosmetic",
+          "family": "r3-alias-fecha",
+          "domain": "personal",
+          "full_tokens": 600,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r3-alias-fecha:counterfactual",
+          "family": "r3-alias-fecha",
+          "domain": "personal",
+          "full_tokens": 595,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r3-dueto-confirmacion:clean",
+          "family": "r3-dueto-confirmacion",
+          "domain": "personal",
+          "full_tokens": 615,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r3-dueto-confirmacion:noise",
+          "family": "r3-dueto-confirmacion",
+          "domain": "personal",
+          "full_tokens": 673,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r3-dueto-confirmacion:cosmetic",
+          "family": "r3-dueto-confirmacion",
+          "domain": "personal",
+          "full_tokens": 617,
+          "target_keys_before_choice": 1
+        },
+        {
+          "id": "r3-dueto-confirmacion:counterfactual",
+          "family": "r3-dueto-confirmacion",
+          "domain": "personal",
+          "full_tokens": 609,
+          "target_keys_before_choice": 1
+        }
+      ]
+    }
+  ],
+  "elapsed_seconds": 74.94,
+  "cuda_inference_jobs": 0
+}

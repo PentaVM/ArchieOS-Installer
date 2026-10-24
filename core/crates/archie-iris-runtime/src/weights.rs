@@ -11,8 +11,9 @@ use candle_core::pickle::{Object, Stack};
 use candle_core::{DType, Device, Tensor};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::io::{BufReader, Read};
+use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 /// The formats `iris_infer.from_weights` accepts.
 const FORMATS: [&str; 2] = [
@@ -55,22 +56,56 @@ pub struct Release {
     pub config: ModelConfig,
 }
 
-/// Every tensor of the state dict, converted to the dtype inference runs in.
+/// Where a tensor of a release lives in its zip.
+#[derive(Debug, Clone)]
+struct Stored {
+    path: String,
+    dtype: DType,
+    dims: Vec<usize>,
+    /// Bytes of the storage before the tensor's first element.
+    skip: u64,
+}
+
+impl Stored {
+    fn elem_count(&self) -> usize {
+        self.dims.iter().product()
+    }
+}
+
+enum Source {
+    /// Tensors already in memory: tests, and the text tower's own file.
+    Memory(HashMap<String, Tensor>),
+    /// A release read lazily: a tensor leaves the zip, in the inference dtype and on the
+    /// inference device, the first time something asks for it.
+    Release {
+        archive: Mutex<zip::ZipArchive<BufReader<std::fs::File>>>,
+        index: HashMap<String, Stored>,
+        device: Device,
+        dtype: DType,
+        resident: Mutex<HashMap<String, Tensor>>,
+    },
+}
+
+/// The state dict of a release. Only what the served model asks for reaches the device,
+/// so heads the runtime does not port (reading, temporal, masks) never take VRAM, and the
+/// host never holds the whole file at once.
 pub struct Weights {
-    tensors: HashMap<String, Tensor>,
+    source: Source,
     pub release: Release,
 }
 
 impl Weights {
     /// Read a release. `expected_sha256`, when given, must match the file before anything
-    /// in it is parsed.
+    /// in it is parsed. The file is hashed and parsed through one open handle, so the
+    /// tensors read later come from the bytes that were hashed.
     pub fn load(
         path: &Path,
         expected_sha256: Option<&str>,
         device: &Device,
         dtype: DType,
     ) -> Result<Self, Error> {
-        let sha256 = file_sha256(path)?;
+        let mut file = std::fs::File::open(path)?;
+        let sha256 = reader_sha256(&mut file)?;
         if let Some(expected) = expected_sha256 {
             if !expected.eq_ignore_ascii_case(&sha256) {
                 return Err(Error::Weights(format!(
@@ -78,7 +113,7 @@ impl Weights {
                 )));
             }
         }
-        let file = std::fs::File::open(path)?;
+        file.seek(SeekFrom::Start(0))?;
         let mut zip = zip::ZipArchive::new(BufReader::new(file))
             .map_err(|error| Error::Weights(format!("not a PyTorch zip: {error}")))?;
         let pickle_name = (0..zip.len())
@@ -128,7 +163,7 @@ impl Weights {
         };
 
         let dir = PathBuf::from(format!("{root}data"));
-        let mut tensors = HashMap::with_capacity(state.len());
+        let mut index = HashMap::with_capacity(state.len());
         for (key, value) in state {
             let Object::Unicode(name) = key.clone() else {
                 continue;
@@ -139,27 +174,33 @@ impl Weights {
             if !info.layout.is_contiguous() {
                 return Err(Error::Weights(format!("{name} is not contiguous")));
             }
-            let mut entry = zip
-                .by_name(&info.path)
-                .map_err(|error| Error::Weights(format!("{name}: {error}")))?;
-            let skip = (info.layout.start_offset() * info.dtype.size_in_bytes()) as u64;
-            if skip > 0 {
-                std::io::copy(&mut entry.by_ref().take(skip), &mut std::io::sink())?;
-            }
-            let mut bytes =
-                vec![0u8; info.layout.shape().elem_count() * info.dtype.size_in_bytes()];
-            entry.read_exact(&mut bytes)?;
-            let tensor =
-                Tensor::from_raw_buffer(&bytes, info.dtype, info.layout.dims(), &Device::Cpu)?;
-            let tensor = if tensor.dtype().is_float() {
-                tensor.to_dtype(dtype)?
-            } else {
-                tensor
+            let stored = Stored {
+                path: info.path,
+                dtype: info.dtype,
+                dims: info.layout.dims().to_vec(),
+                // candle's layout already counts the offset in bytes.
+                skip: info.layout.start_offset() as u64,
             };
-            tensors.insert(name, tensor.to_device(device)?);
+            let size = zip
+                .by_name(&stored.path)
+                .map_err(|error| Error::Weights(format!("{name}: {error}")))?
+                .size();
+            let needed = stored.skip + (stored.elem_count() * stored.dtype.size_in_bytes()) as u64;
+            if needed > size {
+                return Err(Error::Weights(format!(
+                    "{name} reaches byte {needed} of a {size}-byte storage"
+                )));
+            }
+            index.insert(name, stored);
         }
         Ok(Self {
-            tensors,
+            source: Source::Release {
+                archive: Mutex::new(zip),
+                index,
+                device: device.clone(),
+                dtype,
+                resident: Mutex::new(HashMap::new()),
+            },
             release: Release {
                 path: path.to_owned(),
                 sha256,
@@ -173,34 +214,121 @@ impl Weights {
 
     /// Weights from tensors already in memory: tests, and the text tower's own file.
     pub fn from_tensors(tensors: HashMap<String, Tensor>, release: Release) -> Self {
-        Self { tensors, release }
+        Self {
+            source: Source::Memory(tensors),
+            release,
+        }
     }
 
+    /// The tensor, in the inference dtype on the inference device. Asking twice gives the
+    /// same storage, so a weight shared by two modules is on the device once.
     pub fn get(&self, name: &str) -> Result<Tensor, Error> {
-        self.tensors
-            .get(name)
-            .cloned()
-            .ok_or_else(|| Error::MissingTensor(name.to_owned()))
+        match &self.source {
+            Source::Memory(tensors) => tensors
+                .get(name)
+                .cloned()
+                .ok_or_else(|| Error::MissingTensor(name.to_owned())),
+            Source::Release {
+                archive,
+                index,
+                device,
+                dtype,
+                resident,
+            } => {
+                let mut resident = resident
+                    .lock()
+                    .map_err(|_| Error::Weights("the weights reader failed earlier".into()))?;
+                if let Some(tensor) = resident.get(name) {
+                    return Ok(tensor.clone());
+                }
+                let stored = index
+                    .get(name)
+                    .ok_or_else(|| Error::MissingTensor(name.to_owned()))?;
+                let tensor = read_stored(archive, name, stored, stored.elem_count())?;
+                let tensor = if tensor.dtype().is_float() {
+                    tensor.to_dtype(*dtype)?
+                } else {
+                    tensor
+                };
+                let tensor = tensor.to_device(device)?;
+                resident.insert(name.to_owned(), tensor.clone());
+                Ok(tensor)
+            }
+        }
     }
 
     pub fn contains(&self, name: &str) -> bool {
-        self.tensors.contains_key(name)
+        match &self.source {
+            Source::Memory(tensors) => tensors.contains_key(name),
+            Source::Release { index, .. } => index.contains_key(name),
+        }
     }
 
     pub fn parameter_count(&self) -> usize {
-        self.tensors.values().map(Tensor::elem_count).sum()
+        match &self.source {
+            Source::Memory(tensors) => tensors.values().map(Tensor::elem_count).sum(),
+            Source::Release { index, .. } => index.values().map(Stored::elem_count).sum(),
+        }
     }
 
-    pub fn names(&self) -> impl Iterator<Item = &String> {
-        self.tensors.keys()
+    pub fn names(&self) -> Box<dyn Iterator<Item = &String> + '_> {
+        match &self.source {
+            Source::Memory(tensors) => Box::new(tensors.keys()),
+            Source::Release { index, .. } => Box::new(index.keys()),
+        }
+    }
+
+    /// How many tensors have reached the device so far (all of them for in-memory weights).
+    pub fn resident_count(&self) -> usize {
+        match &self.source {
+            Source::Memory(tensors) => tensors.len(),
+            Source::Release { resident, .. } => resident.lock().map_or(0, |r| r.len()),
+        }
+    }
+
+    /// Name, shape and the first `limit` values of a tensor, in the inference dtype, on
+    /// the host. A release reads only those values from the zip.
+    fn head(&self, name: &str, limit: usize) -> Result<(Vec<usize>, Tensor), Error> {
+        match &self.source {
+            Source::Memory(tensors) => {
+                let tensor = tensors
+                    .get(name)
+                    .ok_or_else(|| Error::MissingTensor(name.to_owned()))?;
+                let flat = tensor.flatten_all()?;
+                let count = flat.elem_count().min(limit);
+                let sample = if count < flat.elem_count() {
+                    flat.narrow(0, 0, count)?
+                } else {
+                    flat
+                };
+                Ok((tensor.dims().to_vec(), sample.to_device(&Device::Cpu)?))
+            }
+            Source::Release {
+                archive,
+                index,
+                dtype,
+                ..
+            } => {
+                let stored = index
+                    .get(name)
+                    .ok_or_else(|| Error::MissingTensor(name.to_owned()))?;
+                let count = stored.elem_count().min(limit);
+                let sample = read_stored(archive, name, stored, count)?.flatten_all()?;
+                let sample = if sample.dtype().is_float() {
+                    sample.to_dtype(*dtype)?
+                } else {
+                    sample
+                };
+                Ok((stored.dims.clone(), sample))
+            }
+        }
     }
 
     /// `lora.base_fingerprint`: every parameter's name, shape and first 1024 values (rounded
     /// through bfloat16), hashed in sorted order, excluding frozen pretrained towers.
     pub fn base_fingerprint(&self) -> Result<String, Error> {
         let mut names: Vec<&String> = self
-            .tensors
-            .keys()
+            .names()
             .filter(|name| {
                 !name.starts_with("text.model.")
                     && !name.starts_with("instance_teacher.")
@@ -210,9 +338,8 @@ impl Weights {
         names.sort();
         let mut digest = Sha256::new();
         for name in names {
-            let tensor = &self.tensors[name];
+            let (dims, sample) = self.head(name, 1024)?;
             digest.update(name.as_bytes());
-            let dims = tensor.dims();
             let shape = match dims.len() {
                 0 => "()".to_owned(),
                 1 => format!("({},)", dims[0]),
@@ -225,15 +352,7 @@ impl Weights {
                 ),
             };
             digest.update(shape.as_bytes());
-            let flat = tensor.flatten_all()?;
-            let count = flat.elem_count().min(1024);
-            let sample = if count < flat.elem_count() {
-                flat.narrow(0, 0, count)?
-            } else {
-                flat
-            };
             let values: Vec<f32> = sample
-                .to_device(&Device::Cpu)?
                 .to_dtype(DType::BF16)?
                 .to_dtype(DType::F32)?
                 .to_vec1()?;
@@ -245,18 +364,47 @@ impl Weights {
     }
 }
 
-pub fn file_sha256(path: &Path) -> Result<String, Error> {
-    let mut file = std::fs::File::open(path)?;
+/// The first `count` elements of a stored tensor, flat, in its file dtype, on the host.
+fn read_stored(
+    archive: &Mutex<zip::ZipArchive<BufReader<std::fs::File>>>,
+    name: &str,
+    stored: &Stored,
+    count: usize,
+) -> Result<Tensor, Error> {
+    let mut archive = archive
+        .lock()
+        .map_err(|_| Error::Weights("the weights reader failed earlier".into()))?;
+    let mut entry = archive
+        .by_name(&stored.path)
+        .map_err(|error| Error::Weights(format!("{name}: {error}")))?;
+    if stored.skip > 0 {
+        std::io::copy(&mut entry.by_ref().take(stored.skip), &mut std::io::sink())?;
+    }
+    let mut bytes = vec![0u8; count * stored.dtype.size_in_bytes()];
+    entry.read_exact(&mut bytes)?;
+    let tensor = Tensor::from_raw_buffer(&bytes, stored.dtype, &[count], &Device::Cpu)?;
+    if count == stored.elem_count() {
+        Ok(tensor.reshape(stored.dims.as_slice())?)
+    } else {
+        Ok(tensor)
+    }
+}
+
+fn reader_sha256(reader: &mut impl Read) -> Result<String, Error> {
     let mut digest = Sha256::new();
     let mut buffer = vec![0u8; 16 * 1024 * 1024];
     loop {
-        let read = file.read(&mut buffer)?;
+        let read = reader.read(&mut buffer)?;
         if read == 0 {
             break;
         }
         digest.update(&buffer[..read]);
     }
     Ok(hex::encode(digest.finalize()))
+}
+
+pub fn file_sha256(path: &Path) -> Result<String, Error> {
+    reader_sha256(&mut std::fs::File::open(path)?)
 }
 
 fn as_i64(value: &Object) -> Option<i64> {

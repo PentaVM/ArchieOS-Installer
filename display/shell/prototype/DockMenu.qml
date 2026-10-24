@@ -38,7 +38,7 @@ Panel {
             Text { x: 10; anchors.verticalCenter: parent.verticalCenter; text: dm.isOrb ? "Orb" : Wm.title(dm.target)
                 color: Theme.t3; font.family: Theme.font; font.pixelSize: 11; font.weight: Font.DemiBold; font.letterSpacing: 0.6; font.capitalization: Font.AllUppercase } }
         Repeater { model: dm.items
-            delegate: Item { width: col.width; height: modelData.sep ? 9 : 30
+            delegate: Item { objectName: modelData.sep ? "" : "dockmenu." + modelData.act; width: col.width; height: modelData.sep ? 9 : 30
                 Rectangle { visible: modelData.sep === true; x: 8; y: 4; width: parent.width - 16; height: 1; color: Theme.hair }
                 Rectangle { visible: modelData.sep !== true; anchors.fill: parent; radius: 7
                     color: (ima.containsMouse && !modelData.dis) ? Theme.hover : "transparent"

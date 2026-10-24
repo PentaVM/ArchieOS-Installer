@@ -3,6 +3,7 @@
 #include "LumenField.h"
 #include "DisplayControl.h"
 #include "ShellRuntime.h"
+#include "UiWalk.h"
 
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
@@ -17,6 +18,7 @@
 #include <QEvent>
 #include <QtQuick3D/qquick3d.h>
 
+#include <algorithm>
 #include <cstdlib>
 
 // Presentation is a property of the actual host surface. A window can still
@@ -70,6 +72,10 @@ int main(int argc, char *argv[])
     arguments.addOption(QCommandLineOption(QStringLiteral("screen"), QStringLiteral("Full-screen display number (one-based)."), QStringLiteral("number"), QStringLiteral("1")));
     arguments.addOption(QCommandLineOption(QStringLiteral("scene"), QStringLiteral("Initial observatory scene: ") + displayControl.scenes().join(QStringLiteral(", ")) + QLatin1Char('.'), QStringLiteral("name"), displayControl.scenes().front()));
     arguments.addOption(QCommandLineOption(QStringLiteral("lens"), QStringLiteral("Initial orb lens: architecture, folders, or entities."), QStringLiteral("name"), QStringLiteral("architecture")));
+    arguments.addOption(QCommandLineOption(QStringLiteral("preset"), QStringLiteral("Initial look preset, e.g. holograma (Xavi's desktop sphere)."), QStringLiteral("name")));
+    arguments.addOption(QCommandLineOption(QStringLiteral("content-root"), QStringLiteral("Folder the content sphere lists (read-only)."), QStringLiteral("path")));
+    arguments.addOption(QCommandLineOption(QStringLiteral("ui-walk"), QStringLiteral("Shell only: click through the steps in this JSON file and record each click (verification)."), QStringLiteral("steps")));
+    arguments.addOption(QCommandLineOption(QStringLiteral("ui-walk-out"), QStringLiteral("Where --ui-walk writes its screenshots and report.jsonl."), QStringLiteral("dir"), QStringLiteral("ui-walk")));
     arguments.process(app);
     const bool shellMode = arguments.isSet(QStringLiteral("shell"));
     const QString theme=arguments.value(QStringLiteral("theme"));
@@ -90,6 +96,10 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("shellRuntime"), &shellRuntime);
     engine.rootContext()->setContextProperty(QStringLiteral("shellColorMode"), theme);
     lumen.setLens(arguments.value(QStringLiteral("lens")));
+    if (arguments.isSet(QStringLiteral("content-root")))
+        lumen.setContentRoot(arguments.value(QStringLiteral("content-root")));
+    if (arguments.isSet(QStringLiteral("preset")) && !lumen.applyProfile(arguments.value(QStringLiteral("preset"))))
+        qWarning("archie-display: unknown preset %s", qPrintable(arguments.value(QStringLiteral("preset"))));
     if (shellMode) engine.load(QUrl(QStringLiteral("qrc:/archie/shell/prototype/ShellWindow.qml")));
     else engine.loadFromModule(QStringLiteral("Archie.Observatory"), QStringLiteral("Main"));
     if (engine.rootObjects().isEmpty())
@@ -122,12 +132,31 @@ int main(int argc, char *argv[])
         shellRuntime.setRunning(true);
         QObject::connect(&app, &QCoreApplication::aboutToQuit, &shellRuntime, [&shellRuntime] { shellRuntime.setRunning(false); });
     }
+    if (arguments.isSet(QStringLiteral("ui-walk"))) {
+        if (!window || !shellMode) {
+            qCritical("archie-display: --ui-walk needs --shell");
+            return EXIT_FAILURE;
+        }
+        window->setVisibility(QWindow::Windowed);
+        window->resize(1920, 1080);
+        auto *walk = new UiWalk(window, arguments.value(QStringLiteral("ui-walk")), arguments.value(QStringLiteral("ui-walk-out")), &app);
+        if (!walk->ready()) {
+            qCritical("archie-display: --ui-walk: no steps read, or the report cannot be written");
+            return EXIT_FAILURE;
+        }
+        // The bridge's first frames and the orb's first field arrive in the first seconds.
+        walk->start(8000);
+    }
     if (arguments.isSet(QStringLiteral("render-check"))) {
         if (!window) return EXIT_FAILURE;
         window->setVisibility(QWindow::Windowed);
         window->resize(1600,900);
         const QString path=arguments.value(QStringLiteral("render-check"));
-        QTimer::singleShot(10000,&app,[window,path,shellMode,&shellRuntime,&bridge,&app] {
+        // A software renderer may need longer than 10 s for a field to settle.
+        bool delayValid=false;
+        const int delay=qEnvironmentVariableIntValue("ARCHIE_RENDER_CHECK_MS",&delayValid);
+        QTimer::singleShot(delayValid ? std::clamp(delay,1000,120000) : 10000,&app,[window,path,shellMode,&shellRuntime,&bridge,&app,&lumen] {
+            qInfo("archie-display render-check: orb fps=%d", lumen.fps());
             const QImage frame=window->grabWindow();
             QFile file(path);
             const bool saved=!frame.isNull() && file.open(QIODevice::WriteOnly | QIODevice::NewOnly) && frame.save(&file,"PNG");

@@ -1,0 +1,8 @@
+archie-talk: the model on this machine answers (archie-talk --cloud for Nebius)
+[asr] model=.nemotron-3.5-asr-streaming-0.6b.q8_0.gguf head=rnnt backend=CPU
+ears ready in 40 ms (NeMo-Speech.cpp nemo-speech-asr 0.1.0)
+voice (piper) ready in 2 ms, 22050 Hz
+escuchando (es-US, di «Archie» para hablarme)
+[asr] mode=streaming head=rnnt left=56 center=1 right=13 attention=70 encoder-frames step=1120ms
+[asr] RNNT word boosting requested but no phrases could be tokenized (no embedded SentencePiece tokenizer in the GGUF?); boosting disabled.
+Terminated                 XDG_RUNTIME_DIR="$RUN_DIR/xdg" OMP_WAIT_POLICY=PASSIVE QT_QUICK_BACKEND=software LIBGL_ALWAYS_SOFTWARE=1 QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 "$ARCHIE_VOICE" "$@"

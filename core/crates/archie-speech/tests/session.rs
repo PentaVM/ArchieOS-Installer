@@ -20,6 +20,43 @@ const ASKED: &str = "how is the disk";
 const FIRST: &str = "The array is healthy.";
 const SECOND: &str = "One drive is at eighty percent.";
 
+#[test]
+fn bounded_pump_preserves_order_without_releasing_the_whole_response() {
+    let mut session = session("en");
+    session
+        .heard("bounded", ASKED, &floor_is_free_with_a_real_answer())
+        .unwrap();
+    assert!(session.pump_up_to(0).is_empty());
+    let first = session.pump_up_to(1);
+    assert_eq!(first.len(), 1);
+    assert!(matches!(&first[0], SessionEvent::Speak(segment) if segment.text == FIRST));
+    let second = session.pump_up_to(1);
+    assert!(matches!(&second[0], SessionEvent::Speak(segment) if segment.text == SECOND));
+    assert!(session
+        .pump()
+        .iter()
+        .any(|event| matches!(event, SessionEvent::Finished)));
+}
+
+#[test]
+fn a_failed_backend_marks_the_turn_terminal_without_inventing_an_answer() {
+    let mut session = session("en");
+    session
+        .heard(
+            "failed",
+            "unknown request",
+            &floor_is_free_with_a_real_answer(),
+        )
+        .unwrap();
+    assert!(!session.turn_finished());
+    let events = session.pump();
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, SessionEvent::Alert(_))));
+    assert!(session.turn_finished());
+    assert!(session.heard_text().is_empty());
+}
+
 // A transport may race cancellation. The session must fence its own output,
 // regardless of whether the backend has stopped returning queued events yet.
 struct LateBackend(ScriptedCognitiveModel);

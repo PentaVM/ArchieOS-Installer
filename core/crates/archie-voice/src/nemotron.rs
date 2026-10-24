@@ -26,8 +26,8 @@
 use crate::segment::{Segmenter, Spoken};
 use archie_model_runtime::routed::{ChatDisclosure, Routed, RoutedError};
 use archie_model_runtime::{
-    provider_model_id, InferenceClient, ProviderEndpoint, StreamEvent, StreamUnveiler, ToolCall,
-    ToolChatMessage, ToolChatRequest, ToolDefinition,
+    provider_model_id, InferenceClient, ProviderEndpoint, RuntimeError, StreamEvent,
+    StreamUnveiler, ToolCall, ToolChatMessage, ToolChatRequest, ToolDefinition,
 };
 use archie_speech::{
     validate_request, CancelReason, CognitiveError, CognitiveEvent, CognitiveModelAdapter,
@@ -100,6 +100,9 @@ impl TurnSource for RoutedSource {
         let timeout = self.timeout;
 
         let task = self.runtime.spawn(async move {
+            // A local server that has stopped is offline here, so the turn goes veiled to
+            // the cloud when its grade allows, and is refused aloud when it does not.
+            routed.refresh_liveness().await;
             match routed.disclose_chat(&request, privacy, role, &veil) {
                 Err(RoutedError::Withheld(reason)) => {
                     let refusal = match privacy {
@@ -216,6 +219,7 @@ pub struct NebiusSource {
     descriptor: ModelDescriptor,
     privacy: PrivacyGrade,
     runtime: tokio::runtime::Handle,
+    wanda_access: crate::wanda::WandaVoiceAccess,
 }
 
 impl NebiusSource {
@@ -233,7 +237,30 @@ impl NebiusSource {
             descriptor,
             privacy,
             runtime,
+            wanda_access: crate::wanda::WandaVoiceAccess::default(),
         }
+    }
+    /// Construct the source from the selected endpoint so access proof and transport
+    /// cannot accidentally refer to different providers.
+    pub fn from_endpoint(
+        endpoint: ProviderEndpoint,
+        descriptor: ModelDescriptor,
+        privacy: PrivacyGrade,
+        runtime: tokio::runtime::Handle,
+    ) -> Result<Self, RuntimeError> {
+        let wanda_access =
+            crate::wanda::WandaVoiceAccess::from_selected(&endpoint, &descriptor, privacy);
+        let mut source = Self::new(
+            InferenceClient::new(endpoint)?,
+            descriptor,
+            privacy,
+            runtime,
+        );
+        source.wanda_access = wanda_access;
+        Ok(source)
+    }
+    pub fn wanda_access(&self) -> crate::wanda::WandaVoiceAccess {
+        self.wanda_access
     }
 }
 
@@ -262,8 +289,9 @@ impl TurnSource for NebiusSource {
 }
 
 /// How the model is asked to speak, before any particular turn.
-pub const PERSONA_ES: &str = "Eres Archie, el asistente de voz de ArchieOS. Hablas español \
-de Chile, natural y cercano, tuteando: nunca uses voseo como querés o tenés. Todo lo que escribes se dice en voz alta: frases cortas, sin \
+pub const PERSONA_ES: &str = "Eres Archie, el asistente de voz de ArchieOS. Contesta en el \
+idioma en que te hablaron: en español, el de Chile, natural y cercano, tuteando (nunca voseo \
+como querés o tenés); en inglés si te hablan en inglés. Todo lo que escribes se dice en voz alta: frases cortas, sin \
 markdown, sin listas, sin emojis, sin símbolos que no se pronuncian. Escribe los números, las \
 horas y las fechas con palabras, como se dicen: son las tres y veinticinco, el veintitrés de \
 septiembre, dos mil veintiséis. No inventes datos que no \
@@ -285,6 +313,7 @@ struct Turn {
     gate: ResponseGate,
     next_sequence: u32,
     tool_calls: u32,
+    text_bytes: usize,
     queue: VecDeque<CognitiveEvent>,
     ended: bool,
 }
@@ -472,6 +501,13 @@ impl<S: TurnSource> NemotronCognitive<S> {
             }
         };
         let mut system = format!("{}\n\n{length}", self.persona);
+        // Everything above is in Spanish, and a small local model answers in Spanish even to
+        // English, even told so there: the turn says it in English, beside what was said too.
+        let english = matches!(self.chain.first(),
+            Some(ToolChatMessage::User(said)) if crate::language::spoken_language(said) == "en");
+        if english {
+            system.push_str("\n\nThe person spoke to you in English: answer in English.");
+        }
         let beside = self.context_with_utterance;
         if let (Some(context), false) = (&self.context, beside) {
             system.push_str("\n\nContexto de este momento, que puedes usar como cierto:\n");
@@ -491,6 +527,12 @@ impl<S: TurnSource> NemotronCognitive<S> {
             }
         }
         messages.extend(chain);
+        // What was said is the first message after the history; the history keeps it as said.
+        if english {
+            if let Some(ToolChatMessage::User(said)) = messages.get_mut(1 + self.history.len()) {
+                said.push_str("\n\n(Answer in English.)");
+            }
+        }
         ToolChatRequest {
             model: self.provider_model.clone(),
             messages,
@@ -534,10 +576,32 @@ impl<S: TurnSource> CognitiveModelAdapter for NemotronCognitive<S> {
     fn poll(&mut self) -> Option<CognitiveEvent> {
         let name = self.name.clone();
         let turn = self.turn.as_mut()?;
-        loop {
+        if turn.queue.is_empty() && !turn.ended {
+            for spoken in turn.segmenter.push_up_to("", 1) {
+                release(turn, spoken);
+            }
+        }
+        // Leave transport output pending once an event is ready. Also cap invisible
+        // fragments per tick so an unfinished/empty burst cannot monopolise hearing.
+        for _ in 0..32 {
+            if !turn.queue.is_empty() || turn.ended {
+                break;
+            }
             match turn.stream.updates.try_recv() {
                 Ok(Update::Event(StreamEvent::Text(words))) => {
-                    for spoken in turn.segmenter.push(&words) {
+                    // Normal speech is requested with a 400-token budget. Refuse a
+                    // misbehaving backend before one huge delta/buffer can stall ASR.
+                    turn.text_bytes = turn.text_bytes.saturating_add(words.len());
+                    if words.len() > 16 * 1024 || turn.text_bytes > 64 * 1024 {
+                        (turn.stream.stop)();
+                        turn.queue.push_back(CognitiveEvent::Failed {
+                            turn_id: turn.id.clone(),
+                            reason: "the answer exceeded the realtime text limit".into(),
+                        });
+                        turn.ended = true;
+                        break;
+                    }
+                    for spoken in turn.segmenter.push_up_to(&words, 1) {
                         release(turn, spoken);
                     }
                 }
@@ -643,6 +707,7 @@ impl Turn {
             gate: ResponseGate::new(budget),
             next_sequence: 0,
             tool_calls: 0,
+            text_bytes: 0,
             queue: VecDeque::new(),
             ended: false,
         }
@@ -654,6 +719,72 @@ mod tests {
     use super::*;
     use archie_model_runtime::SseAssembler;
     use std::sync::{Arc, Mutex};
+
+    struct Burst(bool);
+    impl TurnSource for Burst {
+        fn start(&mut self, _: ToolChatRequest) -> TurnStream {
+            let (send, updates) = mpsc::channel();
+            for _ in 0..if self.0 { 1 } else { 1000 } {
+                send.send(Update::Event(StreamEvent::Text(
+                    "Una frase. ".repeat(if self.0 { 1000 } else { 1 }),
+                )))
+                .unwrap();
+            }
+            send.send(Update::Event(StreamEvent::Finished {
+                reason: Some("stop".into()),
+            }))
+            .unwrap();
+            TurnStream {
+                updates,
+                stop: Box::new(|| {}),
+            }
+        }
+    }
+
+    #[test]
+    fn one_poll_does_not_drain_a_prequeued_transport_burst() {
+        let mut cognitive = NemotronCognitive::new(Burst(false), "test", vec!["es".into()], vec![]);
+        cognitive
+            .begin(ask("burst", "hola", SpeechBudget::Full))
+            .unwrap();
+        assert!(matches!(cognitive.poll(), Some(CognitiveEvent::Segment(_))));
+        let turn = cognitive.turn.as_ref().expect("transport remains pending");
+        assert_eq!(
+            turn.next_sequence, 1,
+            "one released segment per poll, without parsing the whole backlog"
+        );
+        assert!(turn.queue.is_empty());
+        let rest = drain(&mut cognitive);
+        assert_eq!(
+            rest.iter()
+                .filter(|event| matches!(event, CognitiveEvent::Segment(_)))
+                .count(),
+            999
+        );
+        assert!(matches!(
+            rest.last(),
+            Some(CognitiveEvent::Completed { .. })
+        ));
+    }
+
+    #[test]
+    fn one_poll_does_not_segment_a_whole_answer_delivered_in_one_update() {
+        let mut cognitive = NemotronCognitive::new(Burst(true), "test", vec!["es".into()], vec![]);
+        cognitive
+            .begin(ask("combined", "hola", SpeechBudget::Full))
+            .unwrap();
+        assert!(matches!(cognitive.poll(), Some(CognitiveEvent::Segment(_))));
+        let turn = cognitive.turn.as_ref().unwrap();
+        assert_eq!(turn.next_sequence, 1);
+        assert!(turn.queue.is_empty());
+        assert_eq!(
+            drain(&mut cognitive)
+                .iter()
+                .filter(|event| matches!(event, CognitiveEvent::Segment(_)))
+                .count(),
+            999
+        );
+    }
 
     const TEXT: &[u8] = include_bytes!("../../archie-model-runtime/tests/fixtures/nebius-text.sse");
     const TOOL: &[u8] =
@@ -870,6 +1001,47 @@ mod tests {
         assert!(
             cognitive.last_request().is_none(),
             "none of that left the machine"
+        );
+    }
+
+    #[test]
+    fn an_english_question_is_answered_in_english() {
+        let mut cognitive = adapter(TEXT);
+        let mut english = ask(
+            "t10",
+            "what time is it in Tokyo when it is nine in the evening here?",
+            SpeechBudget::Full,
+        );
+        english.language = "en-US".into();
+        cognitive.begin(english).unwrap();
+        let told = |cognitive: &NemotronCognitive<Replay>| {
+            let sent = &cognitive.last_request().unwrap().messages;
+            let system = matches!(&sent[0],
+                ToolChatMessage::System(text) if text.contains("answer in English"));
+            let beside = matches!(sent.last(),
+                Some(ToolChatMessage::User(text)) if text.ends_with("(Answer in English.)"));
+            assert_eq!(system, beside, "both places, or neither");
+            system
+        };
+        assert!(
+            told(&cognitive),
+            "the turn says it was spoken to in English"
+        );
+        cognitive.cancel("t10", CancelReason::Interrupted);
+        cognitive.remember(
+            "what time is it in Tokyo when it is nine in the evening here?",
+            "It is nine in the morning there.",
+        );
+        assert!(
+            matches!(&cognitive.history[0], ToolChatMessage::User(text) if !text.contains("Answer in")),
+            "the history keeps what was said, as it was said"
+        );
+        cognitive
+            .begin(ask("t11", "¿qué hora es en Tokio?", SpeechBudget::Full))
+            .unwrap();
+        assert!(
+            !told(&cognitive),
+            "and a Spanish one says nothing of the kind"
         );
     }
 

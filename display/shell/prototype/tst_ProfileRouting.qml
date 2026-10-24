@@ -50,7 +50,7 @@ Item {
             Demo.orbProfile=0
             verify(typeof window.applyVisualProfile==="function","IPC and settings share profile state")
             verify(window.applyVisualProfile("neural"))
-            compare(Demo.orbProfile,3)
+            compare(Demo.orbProfile,Demo.orbProfiles.indexOf("neural"))
             Demo.orbProfile=0
             compare(Demo.orbProfile,0)
             verify(!window.applyVisualProfile("execute"))

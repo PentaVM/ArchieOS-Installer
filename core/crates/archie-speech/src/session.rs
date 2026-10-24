@@ -211,6 +211,12 @@ impl<C: CognitiveModelAdapter> SpeechSession<C> {
     /// Move the turn forward: take whatever the cognitive plane has produced, record it,
     /// and release what the budget allows.
     pub fn pump(&mut self) -> Vec<SessionEvent> {
+        self.pump_up_to(usize::MAX)
+    }
+
+    /// Consume at most `limit` cognitive events. A realtime renderer grants only the
+    /// capacity it has, leaving the rest in the adapter instead of queuing speech ahead.
+    pub fn pump_up_to(&mut self, limit: usize) -> Vec<SessionEvent> {
         let mut events = Vec::new();
         let Some(turn) = self.turn.as_mut() else {
             return events;
@@ -219,8 +225,26 @@ impl<C: CognitiveModelAdapter> SpeechSession<C> {
             return events;
         }
 
-        while let Some(event) = self.cognitive.poll() {
-            if event.turn_id() != turn.id {
+        for _ in 0..limit {
+            let Some(event) = self.cognitive.poll() else {
+                break;
+            };
+            let belongs = match &event {
+                CognitiveEvent::ToolIntent(intent) => {
+                    intent.correlation_id == turn.id
+                        || intent
+                            .correlation_id
+                            .strip_prefix(&turn.id)
+                            .and_then(|suffix| suffix.strip_prefix('#'))
+                            .is_some_and(|ordinal| {
+                                !ordinal.is_empty()
+                                    && ordinal.bytes().all(|b| b.is_ascii_digit())
+                                    && ordinal.parse::<u32>().is_ok()
+                            })
+                }
+                _ => event.turn_id() == turn.id,
+            };
+            if !belongs {
                 // Left over from a turn that was cancelled. It belongs to nobody now.
                 continue;
             }
@@ -342,6 +366,11 @@ impl<C: CognitiveModelAdapter> SpeechSession<C> {
 
     pub fn commit_log(&self) -> Option<&ResponseCommitLog> {
         self.turn.as_ref().map(|turn| &turn.log)
+    }
+
+    /// Terminal completion or failure, independent of whether audio is still draining.
+    pub fn turn_finished(&self) -> bool {
+        self.turn.as_ref().is_some_and(|turn| turn.finished)
     }
 
     pub fn cognitive(&self) -> &C {

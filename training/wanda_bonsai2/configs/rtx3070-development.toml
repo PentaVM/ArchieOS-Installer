@@ -1,0 +1,10 @@
+model_path = "/home/archie/wanda/models/Ternary-Bonsai-2-9B-PTQ1_0.gguf"
+runtime_dir = "/opt/archie/llama-cuda"
+run_dir = "/home/archie/wanda/run"
+host_system_path = "/mnt/c"
+sequence_length = 4096
+row_chunk = 2048
+cache_cap_bytes = 34359738368
+rank = 8
+alpha = 16.0
+seed = 17

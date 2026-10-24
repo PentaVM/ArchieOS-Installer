@@ -1,6 +1,7 @@
 # Pendientes — ArchieOS
 
-Estado al 2026-10-11. `main` es la única rama; todo lo hecho hasta hoy está fusionado.
+Base de esta lista: 2026-10-11; sección Sentry actualizada al 2026-10-13. Los avances
+del Draft PR39 se indican por separado de `main`; no están en el release ya descargado.
 Esta lista es lo que falta para llamar terminado a cada parte. Cada punto dice quién lo
 tiene y dónde está el detalle. Se marca aquí cuando se cierra.
 
@@ -43,6 +44,57 @@ tiene y dónde está el detalle. Se marca aquí cuando se cierra.
 - [x] `PentaVM/archie-iris#27` fusionado (float32 en GPU sin bf16 nativo, `einops`).
 
 ## 3. Sentry — Kimi K3 trabaja aquí
+
+**Monitor autónomo (2026-10-13, Codex, PR39):** backend suplementario `mdns-sd`
+0.21.5, historial privado con procedencia, cadencias light/deep independientes,
+reinicio, backoff, health y protección de escritores concurrentes. Core conserva
+permisos/procesos/actuación; el feeder no revive filas históricas. Diseño, repos
+investigados y validaciones reproducibles: [`SENTRY-AUTONOMY.md`](SENTRY-AUTONOMY.md).
+Prueba real: 3795 sondeos TCP completos, resolución de anuncios IPv4/IPv6 y segundo
+arranque sin repetir el pase profundo. Son registros de direcciones, no prueba de
+propiedad ni de siete dispositivos únicos. Pendiente desplegar el binario actualizado
+bajo Core y validar radios/hubs/IPv6 multicast en hardware; no incluido en el WSL
+que Sheriff ya está probando.
+
+**Sesión continua del host (2026-10-13):** `archie-netwatch live` activo sin límite
+de duración, más `archie-lan watch --autonomous` con inventario ligero cada 30 s y
+TCP profundo cada 600 s. Binarios copiados a una ruta estable del usuario; estado,
+historial y health privados. Se verificaron escrituras frescas y cero fallos del
+watcher. **No equivale a despliegue bajo Core ni a arranque automático de Windows**:
+faltan esa gestión y el transporte host/guest hacia el feeder. Detalle y auditoría
+de GUI: [`bitácora`](../_dev/SENTRY-CONTINUOUS-XAVI-GUI-2026-10-13.md).
+
+**Descubrimiento ampliado (2026-10-12, Codex):** rama `codex/sentry-discovery`;
+[`SENTRY-LAN.md`](SENTRY-LAN.md) y [`bitácora`](../_dev/SENTRY-DISCOVERY-2026-10-12.md).
+Incluye mDNS multicast/consultas explícitas, WS-Discovery, TCP acotado y candidatos
+ARP observados por Sentry. Mantiene el inventario y las autoridades existentes.
+No sustituye el trabajo de Kimi ni prueba cobertura universal de IoT.
+
+- [ ] Validar bombillas, hubs y dispositivos Matter/Thread/Zigbee/Bluetooth reales,
+  incluidas redes aisladas y equipos dormidos; los servicios de un hub no prueban
+  que se hayan enumerado sus dispositivos hijos.
+- [ ] Captura pasiva en la LAN física del host y tráfico de otros nodos mediante
+  gateway/espejo. **2026-10-13:** TShark 4.6.9 local en Windows y prueba con TShark
+  real/PCAP sintético pasadas. **Npcap 1.89 instalado y captura LAN del host verificada:**
+  Sentry seleccionó la interfaz por su alcance actual y procesó 565 tramas en 20 s,
+  con 4 registros MAC y 4 avisos `new-device`; salida 0. No son 4 IoT identificados.
+  Falta captura desde gateway/espejo para tráfico entre otros nodos. TShark 4.7.4,
+  Nmap y tcpdump disponibles en ArchieOS-Builder; captura Sentry real en `eth0`
+  verificada, con alcance virtual WSL. No demuestra cobertura de toda la casa.
+  Seguimiento: `archie-netwatch live --seconds 1..86400` guarda estado al acabar
+  aun sin paquetes; prueba real extcap de inactividad pasada. Mantener timeout
+  de proceso en Core. Npcap ya permite captura desde la sesión del host; PktMon
+  dio acceso denegado en la sesión no elevada. Comparación
+  de WinDivert, PcapPlusPlus y NDISAPI en el informe del router.
+- [ ] Canal administrativo del router real: no hay credencial/clave en Vault.
+  SSH abierto (Dropbear 2019.78), acceso autenticado/firmware exacto sin verificar.
+  Reutilizar el adaptador router existente; ya están conectados la sonda CLI
+  (`archie-sentry-probe router`), la sonda real en Core (`RouterBinding::probe_router_config`
+  en `operator_session`) y el descubrimiento/validación de control URL IGD
+  (`upnp.igd_control_url` + `RouterBinding::with_discovered_igd_url`). Opciones,
+  herramientas y límites: [`SENTRY-ROUTER-AUDIT.md`](SENTRY-ROUTER-AUDIT.md).
+- [ ] Identificar la impresora desde evidencia de Sentry y completar la impresión
+  autorizada con recibo de trabajo; la búsqueda actual no obtuvo una impresora.
 
 **Lo último (2026-10-12):** [`HANDOFF-2026-10-12-SENTRY-OLA3.md`](HANDOFF-2026-10-12-SENTRY-OLA3.md),
 con la lista de validación en hardware, en orden, y las decisiones pendientes de Nelson.
@@ -147,13 +199,18 @@ fixture se reporta como fixture, no como dispositivo real. Un PR por avance, con
   cuando:* sale una página y el recibo dice `completed`, con el formato que aceptó.
 - [~] **11. Respuesta.** Hoy todo es observación. Primera respuesta reversible: aviso
   por voz y por el Observatory. Bloqueo o cuarentena solo como `Intent` aprobado.
-  **Parcial (Claude, 2026-10-12):** tablón de avisos del dueño (`archie-notices`), que
-  `sentry-follow` alimenta aunque no haya modelo local. Lo leen `archie sentry-notices`
-  (listar y acusar) y `GET /api/notices` de displayd. Cada aviso trae una frase hablable
-  que no nombra nada de la red. Umbral en `[sentry.response] min_severity`. Faltan el
-  panel QML (GUI de Claude/Xavi) y que la voz los diga: el contrato está en
-  [`SENTRY-RESPUESTA.md`](SENTRY-RESPUESTA.md). El bloqueo como `Intent` sigue sin
-  existir.
+  **Parcial (Claude, 2026-10-12; voz cableada 2026-10-18):** tablón de avisos del dueño
+  (`archie-notices`), que `sentry-follow` alimenta aunque no haya modelo local. Lo leen
+  `archie sentry-notices` (listar y acusar), `GET /api/notices` de displayd y
+  `archie-voice` (`converse`/`live`, que dice `notice.spoken` literal durante el silencio
+  por orden de gravedad y marca `spoken_ms` al terminar de reproducirlo; ver
+  [`SENTRY-RESPUESTA.md`](SENTRY-RESPUESTA.md)). Cada aviso trae una frase hablable que
+  no nombra nada de la red. Umbral en `[sentry.response] min_severity`. Falta el panel
+  QML (GUI de Claude/Xavi). **Bloqueo (Claude, 2026-10-15):**
+  `Command::DeviceBlock` por el router como `Intent` aprobado (`archie sentry-node
+  block|unblock`), regla `FORWARD` por MAC en iptables/ip6tables con postcondición
+  `-C`, `protected_macs` rechazadas. *Hecho cuando:* bloquear y desbloquear un equipo
+  real en el MitraStar con recibo `verified`. Cuarentena (VLAN/aislamiento) no existe.
 - [~] **12. Control más allá de Home Assistant.** **Parcial (Kimi, 2026-10-11):** Roku
   ECP actúa (teclas con postcondición medible y lanzamiento de apps, verificado contra el
   propio dispositivo); MQTT actúa switches/luces/clima con estado medido; ONVIF observa
@@ -219,14 +276,14 @@ fixture se reporta como fixture, no como dispositivo real. Un PR por avance, con
   un nodo sin modelo local esos pases terminan en rechazo. Hace falta un modelo local o
   que Cerebra gradúe por contenido y use `ask_private` (el velo).
 - [ ] **Transporte Enterprise.** `POST /sync` responde 501: no hay envío a ningún tablero.
-- [ ] Productores reales de Sentry, Wanda, Vault, IRIS y Forge hacia `PillarContext`.
+- [x] Productores reales de Sentry, Wanda, Vault, IRIS y Forge hacia `PillarContext`.
   **Parcial (Kimi, 2026-10-12):** Sentry (punto 3 de la sección 3) y Wanda ya producen —
   `archie_cerebra::wanda_bridge` parsea exports de WhatsApp (.txt), Instagram (JSON) y
   notificaciones on-device (JSONL), clasifica cada conversación en un vector de 10
   categorías con saliencia 0–100 (ES/EN) y lo registra con `record_chat_context`:
   Vault en grado Restricted + referencia `PillarContext` del pilar Wanda. El seudónimo
   usa doble FNV (sha2 no es dependencia de cerebra): es seudónimo, no protección.
-  Faltan Vault, IRIS y Forge. **Llamador en vivo (2026-10-12):**
+  **Llamador en vivo (2026-10-12):**
   `archie_cerebra::wanda_watcher` sigue el directorio configurado
   (`[sentry.chat_exports] watch_dir` + `salt`), con journal de hashes de contenido
   para que reiniciar no duplique. CLI: `archie wanda-watch [--once]` y
@@ -240,8 +297,12 @@ fixture se reporta como fixture, no como dispositivo real. Un PR por avance, con
   nota) sale del front-matter `kind:` o del nombre del archivo, nunca de adivinar por la
   prosa. CLI `archie vault-docs --dir … --domain work/<org>/<proyecto>`. El feeder los
   pesa (encargo 90, restricción 80, versión 60, nota 40): entran en `trabajo` y
-  `personal`, nunca en `pantalla-1`. Faltan IRIS (nada escribe sus episodios ni sus
-  recibos a disco) y Forge (`core.forge` no tiene worker).
+  `personal`, nunca en `pantalla-1`.
+  **IRIS y Forge (2026-10-18):** `archie_cerebra::iris_bridge` sella episodios/recibos
+  semánticos acotados (`PrivateMemory`/`Restricted`, nunca frames) como `Pillar::Iris`
+  (y `Pillar::VerifiedOutcome` si se verificó la postcondición), y
+  `archie_cerebra::forge_bridge` sella recibos de build/test/patch/review como
+  `Pillar::Forge`, integrados en `feeder::collect_from_vault` y `FocusProfile`.
 
 ## 5. Voz
 
@@ -254,51 +315,89 @@ Detalle: [`HANDOFF-2026-10-11-SPEECH-FLOOR.md`](HANDOFF-2026-10-11-SPEECH-FLOOR.
 
 ## 6. Diseño — Xavi termina aquí
 
-**Lo que hay** (commit `4b282cd`, ya en `main`): `display/shell/prototype/`, doce
-componentes QML con `Theme.qml` (tokens de las tres direcciones y la síntesis) y
-`Synthetic.qml` (todos los datos, inventados y rotulados). Documentos en
-[`gui/`](gui/README.md): `DESIGN_SYSTEM.md`, `SCREEN_SPECS.md`, `MOTION_CINEMATICS.md`,
-`ARCHITECTURE_GUI.md`, `GUI_FUNCTION_BACKLOG.md`. Capturas en `gui/screenshots/`.
+**Actualización 2026-10-14:** PR41 ahora tiene head `eeeb68c`, seis commits y
+172 archivos (+15008/-651). Commit nuevo: 24 archivos (+970/-113), Orbe web de
+fondo mediante QtWebEngine/Python/Lumenfield externo, menús y navegación local,
+colores vivos. Vault sigue con datos de ejemplo. Repetidos 21+79 checks, pero el
+escritorio Windows falla por falta de QtWebEngine; WSL arranca el fallback con el
+módulo instalado, sin validar el visor externo/GPU. El aviso QColor persiste.
+PR40 sigue en `e460341`. Detalle:
+[`UPDATE-2026-10-14.md`](../_dev/verification/xavi/UPDATE-2026-10-14.md).
 
-**Lo que no hay:** nada del diseño nuevo de **Lumenfield para el Orbe**. El Orbe de
-`display/native` (`LumenScene.qml`, `LumenField.cpp`, shaders `lumen_orb.*`) es el de
-septiembre, y desde `4b282cd` no entró ningún commit de diseño. Si existe fuera del
-repositorio, hay que subirlo.
+- [ ] Empaquetar/validar dependencias del visor externo y decidir su runtime Python.
+- [ ] Mantener arranque/fallback por plataforma y probar Main/LiveOrb, no sólo panels.
+- [ ] Validar visor real: arranque en frío, refresh, navegación/Esc, perfiles y GPU.
 
-**Decisiones que son de Xavi** (bloquean lo demás):
+**Estado verificado al 2026-10-13:** PR31 (prototipo inicial) y PR34 (bridge de
+lectura, inventario LAN y jobs) fusionados. La rama de Xavi
+`feat/professional-gui-quickshell-vault` tiene ahora el
+[Draft PR41](https://github.com/PentaVM/ArchieOS-Nvidia/pull/41), head `9f98235`:
+los cuatro commits de rediseño del 12 de octubre más una corrección del 13 de
+octubre para avisos QML al abrir la ventana real. 161 archivos, +14 144/-644 líneas;
+CI verde. Xavi reporta ventana Windows real y guards/defaults corregidos en Alt-Tab,
+Sentry, Actividad, medidores y Panel, con 21+79 comprobaciones QML pasadas.
+Los nuevos datos/operaciones siguen siendo muestras. Integrar contra main actual.
+Auditoría independiente posterior: Qt 6.11.2 Windows/Linux reporta 21+79 checks;
+Windows termina con salida 0 y renderiza escritorio/14 overlays offscreen. Persisten
+avisos de color indefinido en `WindowSwitcher.qml:35` con app desconocida/degraded;
+las assertions no los cuentan. No considerar la GUI limpia sólo por CI verde.
 
-- [ ] **D1. La dirección visual.** Frost, Workspace, Signature o la síntesis propuesta
-  (superficies de Frost, acento `#6fc8f5`, radio 12, densidad 0,94). Dejarla como la única
-  en `Theme.qml`.
-- [ ] **D2. Tipografía.** El prototipo usa la del sistema; las capturas salieron con
-  Segoe UI porque se renderizaron en Windows.
-- [ ] **D3. Los ADR** de `gui/ARCHITECTURE_GUI.md`: aceptar o rechazar cada uno.
-- [ ] **D4. Lumenfield nuevo para el Orbe.** Subir el diseño y decir qué reemplaza de
-  `display/native`. El acento de la síntesis se eligió para convivir con el cian del
-  Orbe actual (`#6fe3f5`); si el Orbe cambia, revisar ese par.
+**PR40 sí existe para el Orbe nativo**, en otra rama: `design/orb-presets-cli`,
+head `e460341`, Draft de Xavi creado el 2026-10-13. Añade CLI `archie visual` y
+herramienta de voz `orb_preset`, con presets field/sphere/orb/neural. Tres commits,
+15 archivos, +281/-141 líneas: ahora los presets están en JSON embebido y también
+se elimina el botón «Antes». **Xavi reporta compilación y arranque Windows** con
+MSVC/Qt 6.8.3: el Orbe se dibuja y el canal acepta `preset sphere`, pero sin el
+observador de 7666 no hay nodos. Ahora se reprodujo el build C++/QML en Linux/Qt
+6.11.2, 19+2 tests visual/OSM y 82 comprobaciones sobre presets/recursos reales.
+Arranque, captura PNG y canal 7668 pasan en WSLg/Wayland, pero el renderer fue
+**llvmpipe software**: NVIDIA y presets con nodos reales siguen sin verificar.
+CI native-contracts verde; Rust falla en `cargo fmt` de `visual.rs`, antes de tests.
+Los shaders para halos/formas/enlaces/cerebro vivo siguen pendientes. Este PR no
+contiene los cuatro commits de la GUI Archie Mac. Revisar antes de fusionar la
+retirada de cinematic/overlay y crown/atlas/dense, por compatibilidad con funciones
+existentes. Enlace: [PR40](https://github.com/PentaVM/ArchieOS-Nvidia/pull/40).
 
-**Diseño por terminar:**
+**Diseño nuevo sí existe:** Archie Mac, grafito oscuro, dock/barra, 81 iconos,
+Inter y Space Grotesk empaquetadas, superficies opacas/cristal y cuatro perfiles
+de movimiento con transiciones QML. Además: Alt-Tab, notificaciones/autorización,
+Forge, inspector IRIS/Cortex, Ajustes, bloqueo/arranque/instalador, selector de
+espacio/placeholder del Orbe y búsqueda; seis estados de ejemplo por superficie.
+El Orbe/Lumenfield real no se modificó ni se integró en ese fondo.
 
-- [ ] **10 de 15 superficies sin dibujar** (lista en `gui/SCREEN_SPECS.md`). Dibujadas:
-  barra superior, dock, Vault (lista y cuadrícula), centro de control, centro de
-  actividad, paleta de comandos.
-- [ ] **Movimiento**: `MOTION_CINEMATICS.md` es especificación; nada está animado.
-- [ ] **Estados** de cada superficie: vacío, cargando, error, sin permiso, sin conexión.
-- [ ] **Vista de Sentry**: dispositivos de la red y alertas (depende del punto 1 de
-  Sentry). Hoy no tiene superficie.
-- [ ] **Vista del Stage**: quién tiene la autoridad y cómo se toma el control.
+**Tamaño de los cuatro commits:** 161 archivos, +14 132/-641 líneas. QML: 45
+archivos, +2 192/-560; HTML de referencia: 45 archivos, +9 900; resto documentos,
+tokens, imágenes y fuentes. No hay cambios nuevos de backend Rust. No presentar
+todo el HTML/los assets como código nuevo del sistema operativo.
 
-**Integración** (Claude, cuando D1–D3 estén decididas):
+**Qué funciona y qué es muestra:** el bridge de lectura existente entrega
+display/kernel, inventario LAN y estado de jobs. Vault sigue usando `Synthetic`;
+las ocho superficies nuevas son `Demo` con datos de ejemplo. Quickshell sigue
+marcado sin verificar. Se reprodujeron las 21 comprobaciones BridgeModel y 79
+SurfacesTest en Qt stock; ver resultados y límites en
+[`_dev/verification/xavi/README.md`](../_dev/verification/xavi/README.md).
 
-- [ ] **Conectar a datos reales** por el bridge de solo lectura (`display/native/src/ArchieBridge.h`),
-  reemplazando `Synthetic.qml` superficie por superficie. Primero: dominio
-  (personal o trabajo), autoridad del Stage, presión de CPU.
-- [ ] **Chips de contexto de Vault** desde `ContextDomain` (`core/crates/archie-vault/src/domain.rs`).
-- [ ] **Pausa de emergencia de autoridad**: `archied` no expone ese control; el
-  prototipo ya lo muestra como no disponible.
-- [ ] **Vault**: las 24 acciones `GUI-VAULT-*` de `gui/GUI_FUNCTION_BACKLOG.md`.
-- [ ] **Sin verificar**: Quickshell, blur del compositor, NVIDIA, Wayland, lectores de
-  pantalla, presupuesto de frame. El prototipo solo se renderizó por software.
+- [ ] Revisar e integrar PR41 conservando main; el PR ya está abierto.
+- [ ] Corregir el binding de color de Alt-Tab en degraded y exigir logs QML limpios.
+- [ ] Resolver retirada de funciones del PR40 e inventario de capacidades obsoleto;
+  corregir formato Rust y ejecutar checks antes de fusionar.
+- [ ] Probar Quickshell, Linux/Wayland/NVIDIA, blur real, accesibilidad y rendimiento.
+- [ ] Conectar el control principalmente por voz a la shell nueva; los cuatro
+  commits no demuestran ese cableado. Conservar el sistema de voz existente.
+- [ ] Sustituir muestras por contratos reales, incluidos dominios personal/trabajo,
+  Vault como gestor de archivos, autorizaciones, Stage y estados de Forge. Auditar
+  primero lo existente; las capacidades del backend no se deducen del mockup.
+- [ ] Resolver decisiones de producción: escala, fondo/Orbe, modo opaco automático
+  y ADR de arquitectura. La rama registra cuatro cambios de interacción aprobados;
+  esto es evidencia documental de Xavi, no una instrucción para ejecutar su trabajo.
+- [ ] Actualizar el texto de Sentry: hoy el panel afirma «no escanea», aunque el
+  colector actual incluye WSD/TCP/historial. Distinguir «bridge real» de un inventario
+  de ejemplo en las capturas y conservar procedencia/frescura/caché.
+
+Detalle del rediseño en la
+[rama auditada](https://github.com/PentaVM/ArchieOS-Nvidia/blob/a1a240efcc21ab3c0f38b183d1cdf44996f5dcc6/docs/gui/DESIGN_ARCHIE_MAC.md).
+La GUI y su implementación siguen siendo trabajo de Claude/Xavi; no se modificaron
+en esta auditoría.
 
 ## 7. Plataforma
 
@@ -310,3 +409,23 @@ repositorio, hay que subirlo.
 - [ ] Compatibilidad multiplataforma: [`TODO-COMPATIBILIDAD-MULTIPLATAFORMA.md`](TODO-COMPATIBILIDAD-MULTIPLATAFORMA.md).
 - [ ] Biometría real, conectores de nodos y móviles, app iOS.
 - [ ] Trello al día con esta lista. — Nelson
+
+## 8. Wanda: integración de contexto (rama Codex, todavía fuera del WSL)
+
+Implementado en la rama de integración: grafo C++ existente con transacciones y
+proyección, canal de contenido separado, Vault cifrado con dominio/caducidad,
+Cerebra/router para propuestas locales, gate de voz y mapa/lista de relaciones.
+Detalle, ejecución y límites: [WANDA-CONTEXT.md](WANDA-CONTEXT.md).
+
+- [ ] Revisión independiente del conjunto antes de integrar a main.
+- [ ] Android: build con SDK/Gradle y notificaciones reales.
+- [ ] WhatsApp real: selectores, remitentes, cambios y alcance del chat visible.
+- [ ] Captura real de todos los monitores por el productor existente de IRIS/host.
+- [ ] Resolver remitente → persona y confirmar/corregir perfiles y etiquetas por voz.
+- [ ] Recuperación relevante para grafos grandes y combinación explícita de agendas.
+- [ ] Ofertas con precio, moneda, stock, fuente y caducidad verificadas.
+- [ ] Evals de recomendaciones con modelo local real; incertidumbre y alternativas
+  sociales, abstención ante evidencia insuficiente y conservación de citas.
+- [ ] Interrupción de voz durante tools lentos y prueba real de ASR/TTS.
+- [ ] Quickshell y empaquetado WSL con Claude/Xavi. El release draft de Sheriff
+  conserva la imagen anterior; estos cambios no se agregan al archivo ya subido.

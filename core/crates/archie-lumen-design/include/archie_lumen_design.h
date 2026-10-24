@@ -10,7 +10,9 @@ extern "C" {
 typedef struct DesignVec3 { float x,y,z; } DesignVec3;
 typedef struct DesignBody { DesignVec3 position,velocity,anchor; uint32_t fixed; } DesignBody;
 typedef struct DesignMotion { float radius,spring,damping,reach,reaction; } DesignMotion;
-// Static null-terminated UTF-8 {schema,defaults,presets:[{id,name,description,settings}]}.
+// Static null-terminated UTF-8 {schema,defaults,profiles:[{id,name,overrides}],legacy,
+// presets:[{id,name,description,settings}]}: profiles are main.js's field/crown/atlas/dense
+// and legacy the "Antes" look, both as overrides of defaults.
 const char *design_presets_json(void);
 // Style IDs: 0 original,1 prism,2 obsidian,3 titanium,4 hologram,5 crystal,
 // 6 circuit,7 photon,8 ceramic. Invalid arguments return 0/false, never unwind.
@@ -38,6 +40,15 @@ typedef struct DesignShellInput {
 // Caller provides distinct aligned input/output allocations; Rust retains nothing.
 bool design_shell(const DesignShellInput *input,float *vertices,size_t vertex_capacity,
     uint32_t *indices,size_t index_capacity,size_t *vertex_count,size_t *index_count,float *radius);
+// Content sphere (Xavi's desktop): read-only, bounded listing of a folder laid out by
+// field.js buildField ("regions"). Writes the scene JSON LumenField::accept reads into
+// out and returns its length, or 0 if the folder is unreadable or it does not fit.
+typedef struct DesignContentOptions {
+    uint32_t limit, files_per_folder;
+    float category_pull, hierarchy_pull, radial_layers, size_influence, scale;
+} DesignContentOptions;
+size_t design_content_scene(const char *root, size_t root_len, const DesignContentOptions *options,
+    int64_t generated_at_ms, char *out, size_t capacity);
 #ifdef __cplusplus
 }
 #endif

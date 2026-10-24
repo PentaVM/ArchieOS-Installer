@@ -16,14 +16,15 @@ QtObject {
     // The orb's profiles, by index: the one list the shell, Settings and LiveOrb use.
     property var nativeProfiles: []
     readonly property var orbProfiles: {
-        var result=["sphere", "orb", "field", "neural", "crown", "atlas", "dense"]
+        // First, Xavi's desktop sphere: the system's own files as a cold hologram.
+        var result=["holograma", "holograma-calido", "sphere", "orb", "field", "neural", "crown", "atlas", "dense"]
         for (var i=0;i<nativeProfiles.length;i++)
             if (result.indexOf(nativeProfiles[i])<0) result.push(nativeProfiles[i])
         return result
     }
     // The local control server has already validated/applied this profile atomically.
     property string orbAcceptedProfile: ""
-    property int orbProfile: 0          // index into orbProfiles; 0 Sphere (the main one)
+    property int orbProfile: 0          // index into orbProfiles; 0 Holograma (Xavi's desktop sphere)
     property int orbBrightI: 1
     property int orbActI: 2
     property bool orbSpin: true

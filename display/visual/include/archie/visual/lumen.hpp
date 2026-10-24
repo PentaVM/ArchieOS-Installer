@@ -139,4 +139,21 @@ struct Guides {
 };
 [[nodiscard]] Guides guides(float field_radius);
 
+/// A filament between two nodes of the content sphere (Xavi's desktop): a cubic curve
+/// whose two bends are chosen by `seed`, so a chain of links reads as one long, wavy
+/// strand rather than a row of arcs. `phase` runs from 0 at `a` to 1 at `b`.
+[[nodiscard]] Vec3 filament(const Vec3& a, const Vec3& b, float phase, std::uint32_t seed) noexcept;
+
+/// The hologram's frame around the content sphere of `radius`, as line-segment pairs:
+/// - `rings`: two tilted orbit rings with tick marks, and the dotted rim of the sphere;
+/// - `beam`: the projector below it, two base rings with ticks and the cone of light
+///   rising from the base to the sphere;
+/// - `core`: the bright beam from the centre down to the projector.
+struct HoloFrame {
+    std::vector<Vec3> rings;
+    std::vector<Vec3> beam;
+    std::vector<Vec3> core;
+};
+[[nodiscard]] HoloFrame holo_frame(float radius);
+
 }  // namespace archie::visual::lumen

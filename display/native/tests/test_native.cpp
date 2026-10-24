@@ -3,7 +3,13 @@
 #include "LumenGeometry.h"
 #include <cstring>
 #include <QCoreApplication>
+#include <QDir>
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSignalSpy>
+#include <QTemporaryDir>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QtTest>
@@ -52,6 +58,90 @@ private slots:
         QCOMPARE(field.settings(),original);
         field.applyProfile(QStringLiteral("crown"));
         QCOMPARE(field.profile(),QStringLiteral("crown"));
+    }
+    void contentSphereListsItsFolderWithoutTheObserver() {
+        // Xavi's desktop sphere: the holograma preset lists a folder (read-only, in Rust)
+        // and draws it, with no archie-displayd behind the display.
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        QDir root(dir.path());
+        QVERIFY(root.mkpath(QStringLiteral("core/src")) && root.mkpath(QStringLiteral("docs")) && root.mkpath(QStringLiteral(".git")));
+        for (const auto &name : {"core/src/lib.rs", "core/Cargo.toml", "docs/a.md", ".git/HEAD", "README.md"}) {
+            QFile file(root.filePath(QString::fromLatin1(name)));
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write("x");
+        }
+        LumenField field(nullptr, QUrl(QStringLiteral("http://127.0.0.1:9/api/orb/lumen")));
+        field.setContentRoot(dir.path());
+        QVERIFY(field.applyProfile(QStringLiteral("holograma")));
+        QCOMPARE(field.settings().value(QStringLiteral("fieldSource")).toString(), QStringLiteral("content"));
+        QVERIFY(field.look().value(QStringLiteral("graded")).toBool());
+        field.setActive(true);
+        QTRY_VERIFY_WITH_TIMEOUT(field.loaded(), 5000);
+        QVERIFY(field.error().isEmpty());
+        // ., core, core/src, core/src/lib.rs, core/Cargo.toml, docs, docs/a.md, README.md
+        QCOMPARE(field.scene().value(QStringLiteral("nodeCount")).toInt(), 8);
+        QCOMPARE(field.scene().value(QStringLiteral("contentBytes")).toDouble(), 4.0);
+        QVERIFY(field.positionOf(QStringLiteral(".git/HEAD")).isNull());
+        QStringList labelled;
+        for (const auto &row : field.labelAnchors())
+            labelled.push_back(row.toMap().value(QStringLiteral("name")).toString());
+        labelled.sort();
+        QCOMPARE(labelled, (QStringList{QStringLiteral("core"), QStringLiteral("docs")}));
+        field.setActive(false);
+        field.applyProfile(QStringLiteral("field"));
+        QCOMPARE(field.settings().value(QStringLiteral("fieldSource")).toString(), QStringLiteral("tfog"));
+    }
+    // Every value of the design's composition profiles and its "Antes" look, as node read
+    // them from the original main.js (archie-lumen-design/fixtures/presets.golden.json).
+    void originalProfilesApplyEveryValueOfTheOriginal() {
+        QFile file(QStringLiteral(ARCHIE_LUMEN_FIXTURES "/presets.golden.json"));
+        QVERIFY2(file.open(QIODevice::ReadOnly), qPrintable(file.fileName()));
+        const QJsonObject golden = QJsonDocument::fromJson(file.readAll()).object();
+        const QVariantMap defaults = golden.value(QStringLiteral("defaults")).toObject().toVariantMap();
+        const auto same = [](const QVariant &port, const QVariant &original) {
+            if (original.typeId() == QMetaType::Bool || original.typeId() == QMetaType::QString)
+                return port == original;
+            return port.canConvert<double>() && port.toDouble() == original.toDouble();
+        };
+        const auto check = [&](const QString &label, const QVariantMap &port, const QVariantMap &original) {
+            QStringList wrong;
+            for (auto it = original.begin(); it != original.end(); ++it) {
+                // The one deliberate difference: the original draws 2400 nodes; the OS keeps
+                // the port inside its own density budget (12..420, see
+                // deliveredPresetsShareValidatedCatalogAndKeepOsDensity), whatever a profile says.
+                if (it.key() == QLatin1String("visibleLimit")) {
+                    const int limit = port.value(it.key()).toInt();
+                    if (limit < 12 || limit > 420)
+                        wrong.push_back(label + QStringLiteral(".visibleLimit: port ") + QString::number(limit)
+                                        + QStringLiteral(", outside the OS budget 12..420"));
+                    continue;
+                }
+                if (!port.contains(it.key()) || !same(port.value(it.key()), it.value()))
+                    wrong.push_back(label + QLatin1Char('.') + it.key() + QStringLiteral(": port ")
+                                    + port.value(it.key()).toString() + QStringLiteral(", original ")
+                                    + it.value().toString());
+            }
+            return wrong;
+        };
+        LumenField field;
+        QStringList wrong;
+        const QJsonArray profiles = golden.value(QStringLiteral("original")).toArray();
+        QCOMPARE(profiles.size(), 4);
+        for (const auto &value : profiles) {
+            const QJsonObject profile = value.toObject();
+            const QString id = profile.value(QStringLiteral("id")).toString();
+            QVERIFY2(field.applyProfile(id), qPrintable(id));
+            QVariantMap expected = defaults;
+            const QVariantMap overrides = profile.value(QStringLiteral("overrides")).toObject().toVariantMap();
+            for (auto it = overrides.begin(); it != overrides.end(); ++it)
+                expected.insert(it.key(), it.value());
+            wrong += check(id, field.settings(), expected);
+        }
+        field.applyProfile(QStringLiteral("field"));
+        field.toggleCompare();
+        wrong += check(QStringLiteral("legacy"), field.settings(), golden.value(QStringLiteral("legacy")).toObject().toVariantMap());
+        QVERIFY2(wrong.isEmpty(), qPrintable(wrong.join(QLatin1Char('\n'))));
     }
     void ribbonGeometryPreservesBothEndpointsAndBounds() {
         LumenGeometry line;

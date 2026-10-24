@@ -3,7 +3,7 @@
 //! ```text
 //! archie-voice ask "<what the person said>" --grade public
 //!              [--model nvidia/Nemotron-3_5-Lightning] [--budget full|sentence]
-//!              [--language es-CL]
+//!              [--language es-CL] [--endpoint <llama-server url> [--thinking off|on]]
 //!
 //! archie-voice do  "<what the person said>" --grade public
 //!              --socket <stage control socket> --key-file <stage key> --policy <apps.toml>
@@ -105,6 +105,8 @@ struct Asking {
     grade: PrivacyGrade,
     runtime: tokio::runtime::Runtime,
     cognitive: NemotronCognitive<RoutedSource>,
+    #[cfg(feature = "live")]
+    wanda_access: archie_voice::wanda::WandaVoiceAccess,
     clock: String,
 }
 
@@ -163,10 +165,10 @@ fn asking(
     offset: Option<time::UtcOffset>,
     words: bool,
 ) -> Result<Asking, String> {
-    // A reasoning model on this machine (any OpenAI-compatible server on loopback, such as
-    // llama-server) answers instead of Nebius when its address is given. Nothing said then
-    // leaves the machine, and no key is needed. The environment names it too, so the
-    // launcher that starts a conversation need not know.
+    // A reasoning model on this machine (Bonsai on llama-server, on loopback) answers
+    // instead of Nebius when its address is given. Nothing said then leaves the machine,
+    // and no key is needed. The environment names it too, so the launcher that starts a
+    // conversation need not know.
     let set = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
     let local = take(&mut args, "--endpoint").or_else(|| set("ARCHIE_VOICE_ENDPOINT"));
     let timeout = request_timeout(take(&mut args, "--timeout-seconds").as_deref())?;
@@ -174,6 +176,14 @@ fn asking(
         .or_else(|| set("ARCHIE_VOICE_MODEL"))
         .unwrap_or_else(|| "nvidia/Nemotron-3_5-Lightning".into());
     let language = take(&mut args, "--language").unwrap_or_else(|| "es-CL".into());
+    // Whether the local model reasons before it speaks. Off by default: a voice waits for
+    // the first words, and Bonsai's thought comes before them.
+    let thinking = take(&mut args, "--thinking")
+        .or_else(|| set("ARCHIE_VOICE_THINKING"))
+        .unwrap_or_else(|| "off".into());
+    if !matches!(thinking.as_str(), "on" | "off") {
+        return Err(format!("--thinking is on or off, not {thinking}"));
+    }
     let budget = match take(&mut args, "--budget").as_deref() {
         None | Some("full") => SpeechBudget::Full,
         Some("sentence") => SpeechBudget::Sentence,
@@ -217,19 +227,36 @@ fn asking(
         ModelRegistry::new()
     };
     if let Some(url) = &local {
-        let desc = descriptor(&model, "voice", false, PrivacyGrade::Restricted, Some(url))?;
-        let _ = registry.register(desc);
+        let _ = registry.register(local_voice(&model, url, &thinking)?);
     } else if !registry.iter().any(|m| {
         m.display_name == model || m.labels.get("provider-model").is_some_and(|p| p == &model)
     }) {
-        let desc = descriptor(&model, "voice", true, PrivacyGrade::Public, None)?;
+        let desc = descriptor(
+            &model,
+            "voice",
+            ProviderKind::NebiusTokenFactory,
+            PrivacyGrade::Public,
+            None,
+        )?;
         let _ = registry.register(desc);
     }
+    // Wanda's private tool context is graded Restricted for the entire local continuation,
+    // so the router can only choose models that permit it; the public/cloud path keeps its
+    // caller's grade. Wanda is offered only if every model the router could choose at that
+    // grade is local and on loopback (`WandaVoiceAccess::from_registry`).
+    let source_grade = if local.is_some() {
+        PrivacyGrade::Restricted
+    } else {
+        grade
+    };
+    #[cfg(feature = "live")]
+    let wanda_access =
+        archie_voice::wanda::WandaVoiceAccess::from_registry(&registry, source_grade);
     let routed = Arc::new(Routed::new(registry));
     let veil = Arc::new(Veil::new());
     let source = RoutedSource::new(
         routed,
-        grade,
+        source_grade,
         ModelRole::CognitiveResponse,
         veil,
         timeout,
@@ -267,6 +294,8 @@ fn asking(
         grade,
         runtime,
         cognitive,
+        #[cfg(feature = "live")]
+        wanda_access,
         clock: clock(offset),
     })
 }
@@ -459,10 +488,15 @@ fn connect(
             Some(url) => ProviderEndpoint::nvidia_nim(url, Locality::Local),
         }
         .map_err(|error| error.to_string())?;
+        // The grounding model's local server is a NIM, unlike the voice's llama-server.
         let descriptor = descriptor(
             model,
             "look",
-            cloud,
+            if cloud {
+                ProviderKind::NebiusTokenFactory
+            } else {
+                ProviderKind::NvidiaNim
+            },
             asking.grade,
             flags.ground_endpoint.as_deref(),
         )?;
@@ -622,9 +656,34 @@ struct SpeechFlags {
     name_boost: f32,
     /// The CUDA device the ears run on; -1 is the CPU.
     asr_gpu: i32,
+    /// Where Sentry's owner notice board (`notices.json`) lives.
+    notices: Option<std::path::PathBuf>,
+}
+
+fn default_notices_path() -> std::path::PathBuf {
+    if let Ok(state_dir) = std::env::var("ARCHIE_STATE_DIR") {
+        if !state_dir.is_empty() {
+            return std::path::PathBuf::from(state_dir).join("cerebra/notices.json");
+        }
+    }
+    if let Ok(root) = std::env::var("ARCHIE_ROOT") {
+        if !root.is_empty() {
+            return std::path::PathBuf::from(root).join("var/lib/archie/cerebra/notices.json");
+        }
+    }
+    std::path::PathBuf::from("/var/lib/archie/cerebra/notices.json")
 }
 
 fn speech_flags(args: &mut Vec<String>) -> Result<SpeechFlags, String> {
+    let wav_in = take(args, "--wav-in");
+    let explicit_notices = take(args, "--notices")
+        .or_else(|| {
+            std::env::var("ARCHIE_NOTICES")
+                .ok()
+                .filter(|v| !v.is_empty())
+        })
+        .map(std::path::PathBuf::from);
+    let notices = explicit_notices.or_else(|| wav_in.is_none().then(default_notices_path));
     Ok(SpeechFlags {
         asr_model: take(args, "--asr-model").ok_or("converse needs --asr-model")?,
         // Piper keeps up with speech on a laptop CPU; Magpie needs a GPU to.
@@ -640,7 +699,7 @@ fn speech_flags(args: &mut Vec<String>) -> Result<SpeechFlags, String> {
         listen_language: take(args, "--listen-language").unwrap_or_else(|| "es-US".into()),
         always: flag(args, "--always"),
         headphones: flag(args, "--headphones"),
-        wav_in: take(args, "--wav-in"),
+        wav_in,
         wav_out: take(args, "--wav-out"),
         threads: take(args, "--threads")
             .map(|n| n.parse::<i32>().map_err(|_| "--threads is a number"))
@@ -670,6 +729,7 @@ fn speech_flags(args: &mut Vec<String>) -> Result<SpeechFlags, String> {
             })
             .transpose()?
             .unwrap_or(-1),
+        notices,
     })
 }
 
@@ -907,7 +967,14 @@ fn live(asking: Asking, speech: SpeechFlags, flags: LiveFlags) -> Result<ExitCod
             "off (no TAVILY_API_KEY)"
         }
     );
-    let senses = live::Senses::new(audio_in, identifier, researcher, rate, flags.curiosity);
+    let senses = live::Senses::new_with_wanda(
+        audio_in,
+        identifier,
+        researcher,
+        rate,
+        flags.curiosity,
+        asking.wanda_access,
+    );
     let eyes = eyes::IrisEyes::with_timeout(
         &flags.iris,
         0.35,
@@ -957,16 +1024,25 @@ fn live(asking: Asking, speech: SpeechFlags, flags: LiveFlags) -> Result<ExitCod
     cognitive.put_context_beside_utterance();
     let mut session =
         SpeechSession::new(plan, FloorPolicy::default(), cognitive).map_err(|e| e.to_string())?;
-    let mut act = |intent: &archie_speech::SpeechToolIntentCandidate| -> String {
-        runtime
-            .block_on(senses.handle_tool(&intent.tool_name, &intent.raw_arguments))
-            .unwrap_or_else(|| {
-                format!(
-                    "No se hizo: aquí no tengo la herramienta {}.",
-                    intent.tool_name
-                )
-            })
-    };
+    let tool_senses = senses.clone();
+    let mut act = archie_voice::actions::AsyncActions::new(
+        runtime.handle().clone(),
+        Duration::from_secs(90),
+        move |intent: archie_speech::SpeechToolIntentCandidate| {
+            let senses = tool_senses.clone();
+            async move {
+                senses
+                    .handle_tool(&intent.tool_name, &intent.raw_arguments)
+                    .await
+                    .unwrap_or_else(|| {
+                        format!(
+                            "No se hizo: aquí no tengo la herramienta {}.",
+                            intent.tool_name
+                        )
+                    })
+            }
+        },
+    );
     let mut context = || senses.context(&clock);
     let started = Instant::now();
     let mut report = |moment: conversation::Moment| {
@@ -976,6 +1052,14 @@ fn live(asking: Asking, speech: SpeechFlags, flags: LiveFlags) -> Result<ExitCod
         senses.publish(live::moment_json(&moment));
         let at = started.elapsed().as_millis();
         match &moment {
+            conversation::Moment::Timing {
+                turn_id,
+                phase,
+                elapsed_ms,
+                queued_segments,
+            } => println!(
+                "{at:>7} ms  timing   {turn_id} {phase} +{elapsed_ms} ms queue={queued_segments}"
+            ),
             conversation::Moment::Heard { text, .. } => println!("{at:>7} ms  oí       {text}"),
             conversation::Moment::Said { text, .. } => println!("{at:>7} ms  dije     {text}"),
             conversation::Moment::Proposed { tool, arguments } => {
@@ -995,6 +1079,7 @@ fn live(asking: Asking, speech: SpeechFlags, flags: LiveFlags) -> Result<ExitCod
         steps: 4,
         phrases: vec!["Archie".into(), "Archi".into()],
         phrase_boost: speech.name_boost,
+        notices: speech.notices.clone(),
     };
     println!(
         "{}",
@@ -1004,7 +1089,7 @@ fn live(asking: Asking, speech: SpeechFlags, flags: LiveFlags) -> Result<ExitCod
             "answering when named, or within the follow-up window"
         }
     );
-    conversation::converse(
+    conversation::converse_with_actions(
         &setup,
         &ears,
         rehear
@@ -1049,7 +1134,6 @@ fn converse(
     use archie_voice::audio::{Microphone, Speaker};
     use archie_voice::conversation::{self, Hearing, Moment, Saying, Setup};
     use archie_voice::native::{Ears, Voice, VoiceFiles};
-    use std::cell::RefCell;
     use std::path::Path;
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
@@ -1158,25 +1242,47 @@ fn converse(
     let mut session =
         SpeechSession::new(plan, FloorPolicy::default(), cognitive).map_err(|e| e.to_string())?;
 
-    let stage = RefCell::new(stage);
-    let mut act = |intent: &SpeechToolIntentCandidate| -> String {
-        let mut stage = stage.borrow_mut();
-        let Some((hands, policy)) = stage.as_mut() else {
-            return "No se hizo: en esta conversación no tengo el escritorio conectado.".into();
-        };
-        match archie_voice::decide(intent, policy, hands.front().as_deref()) {
-            Ok(plan) => runtime.block_on(hands.perform(&plan)).report,
-            Err(refusal) => format!("No se hizo: {}", refusal.spoken),
-        }
-    };
+    // Context never waits on a tool holding the Stage across an await. Mark cached
+    // focus unknown during an operation; the next action still checks Stage policy.
+    let front = Arc::new(std::sync::Mutex::new(
+        stage.as_ref().and_then(|(hands, _)| hands.front()),
+    ));
+    let stage = Arc::new(tokio::sync::Mutex::new(stage));
+    let action_front = front.clone();
+    let mut act = archie_voice::actions::AsyncActions::new(
+        runtime.handle().clone(),
+        Duration::from_secs(90),
+        move |intent: SpeechToolIntentCandidate| {
+            let stage = stage.clone();
+            let front = action_front.clone();
+            async move {
+                // Own the transport while awaiting an operation. Cancellation drops
+                // it instead of reusing a possibly half-read protocol connection.
+                let Some(mut connection) = stage.lock().await.take() else {
+                    return "No se hizo: el escritorio no está conectado o su operación fue interrumpida. Vuelve a iniciar la sesión de voz para reconectarlo.".into();
+                };
+                *front.lock().expect("front lock") = None;
+                let (hands, policy) = &mut connection;
+                let outcome = match archie_voice::decide(&intent, policy, hands.front().as_deref())
+                {
+                    Ok(plan) => hands.perform(&plan).await.report,
+                    Err(refusal) => format!("No se hizo: {}", refusal.spoken),
+                };
+                *front.lock().expect("front lock") = hands.front();
+                *stage.lock().await = Some(connection);
+                outcome
+            }
+        },
+    );
     let mut context = || {
-        let front = stage.borrow().as_ref().and_then(|(hands, _)| hands.front());
+        let front = front.lock().expect("front lock").clone();
         context_for(&clock, front, &openable)
     };
     let started = Instant::now();
     let mut report = |moment: Moment| {
         let at = started.elapsed().as_millis();
         match moment {
+            Moment::Timing { turn_id, phase, elapsed_ms, queued_segments } => println!("{at:>7} ms  timing   {turn_id} {phase} +{elapsed_ms} ms queue={queued_segments}"),
             Moment::Heard { text, .. } => println!("{at:>7} ms  oí       {text}"),
             Moment::Floor {
                 action,
@@ -1211,6 +1317,7 @@ fn converse(
         steps,
         phrases: vec!["Archie".into()],
         phrase_boost: speech.name_boost,
+        notices: speech.notices.clone(),
     };
     println!(
         "escuchando ({}{}){}",
@@ -1226,7 +1333,7 @@ fn converse(
             ""
         }
     );
-    conversation::converse(
+    conversation::converse_with_actions(
         &setup,
         &ears,
         None,
@@ -1322,15 +1429,36 @@ fn month(month: time::Month) -> &'static str {
     }
 }
 
+/// The voice's model on this machine: a llama.cpp model, so the router asks its server's
+/// /health before each turn, and each request carries the reasoning switch pinned here, in
+/// both forms the local models read: `enable_thinking` (Bonsai 2 9B) and `reasoning_effort`
+/// (Bonsai 2 27B, "medium" being its shorter reasoning).
+fn local_voice(model: &str, url: &str, thinking: &str) -> Result<ModelDescriptor, String> {
+    let mut desc = descriptor(
+        model,
+        "voice",
+        ProviderKind::LlamaCpp,
+        PrivacyGrade::Restricted,
+        Some(url),
+    )?;
+    desc.labels.insert("thinking".into(), thinking.into());
+    desc.labels.insert(
+        "reasoning-effort".into(),
+        if thinking == "on" { "medium" } else { "none" }.into(),
+    );
+    Ok(desc)
+}
+
 /// A model as the router knows it. In the cloud, with retention nobody has verified, it
 /// may see what was graded public and nothing more, whatever the command line asked for.
 fn descriptor(
     provider_model: &str,
     role: &str,
-    cloud: bool,
+    provider: ProviderKind,
     grade: PrivacyGrade,
     endpoint: Option<&str>,
 ) -> Result<ModelDescriptor, String> {
+    let cloud = provider == ProviderKind::NebiusTokenFactory;
     let mut labels = BTreeMap::new();
     labels.insert("provider-model".to_string(), provider_model.to_string());
     if let Some(url) = endpoint {
@@ -1351,18 +1479,19 @@ fn descriptor(
         id: ModelId::parse(format!("{role}.model-{sanitized}"))
             .map_err(|_| "the model name cannot become an Archie model id".to_string())?,
         display_name: provider_model.to_string(),
-        provider: if cloud {
-            ProviderKind::NebiusTokenFactory
-        } else {
-            ProviderKind::NvidiaNim
-        },
         locality: if cloud {
             Locality::Cloud
         } else {
             Locality::Local
         },
         node: None,
-        context_window: 32_000,
+        // llama-server splits its 65,536-token cache over 4 slots (archie-bonsai.service).
+        context_window: if provider == ProviderKind::LlamaCpp {
+            16_384
+        } else {
+            32_000
+        },
+        provider,
         // A grounding model that reasons before it answers needs room for one box.
         max_output_tokens: if role == "look" { 512 } else { 400 },
         capabilities: vec![
@@ -1429,5 +1558,50 @@ mod timeout_tests {
         for bad in ["0", "901", "-1", "inf", "", "18446744073709551616"] {
             assert!(request_timeout(Some(bad)).is_err(), "accepted {bad:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod local_voice_tests {
+    use super::*;
+    use archie_model_runtime::liveness::Liveness;
+
+    #[test]
+    fn the_local_voice_is_bonsai_on_llama_cpp_with_its_thinking_pinned() {
+        let desc = local_voice("bonsai", "http://127.0.0.1:8081/v1", "off").unwrap();
+        assert_eq!(desc.provider, ProviderKind::LlamaCpp);
+        assert_eq!(desc.locality, Locality::Local);
+        assert!(desc.permits_privacy(PrivacyGrade::Restricted));
+        assert_eq!(desc.labels.get("thinking").map(String::as_str), Some("off"));
+        assert_eq!(
+            desc.labels.get("reasoning-effort").map(String::as_str),
+            Some("none")
+        );
+        let on = local_voice("bonsai", "http://127.0.0.1:8082/v1", "on").unwrap();
+        assert_eq!(
+            on.labels.get("reasoning-effort").map(String::as_str),
+            Some("medium")
+        );
+        // The endpoint builds, and the router knows where to ask whether it is up.
+        let endpoint = ProviderEndpoint::for_model(&desc).unwrap();
+        assert_eq!(endpoint.locality(), Locality::Local);
+        assert_eq!(
+            Liveness::health_url(&desc).map(|url| url.to_string()),
+            Some("http://127.0.0.1:8081/health".into())
+        );
+        // A switch the server would not understand is refused before any turn.
+        let bad = local_voice("bonsai", "http://127.0.0.1:8081/v1", "maybe").unwrap();
+        assert!(ProviderEndpoint::for_model(&bad).is_err());
+        // The cloud voice stays Nebius, graded public.
+        let cloud = descriptor(
+            "nvidia/Nemotron-3_5-Lightning",
+            "voice",
+            ProviderKind::NebiusTokenFactory,
+            PrivacyGrade::Internal,
+            None,
+        )
+        .unwrap();
+        assert_eq!(cloud.locality, Locality::Cloud);
+        assert_eq!(cloud.max_privacy_grade, PrivacyGrade::Public);
     }
 }

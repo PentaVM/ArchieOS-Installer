@@ -1335,6 +1335,31 @@ fn is_lowercase_sha256(value: &str) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "request", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ControlRequest {
+    /// Bounded text proposal. Only a kernel-authenticated local operator may
+    /// invoke this; the wire cannot configure executables or grant authority.
+    AiInfer {
+        #[serde(rename = "request_body")]
+        request: archie_workstation::ai::InferenceRequest,
+    },
+    /// Run the configured pinned Harness² worker through the same admitted
+    /// runtime. Worker configuration and state paths never come from this wire.
+    AiHarness {
+        #[serde(rename = "request_body")]
+        request: archie_workstation::harness_runtime::HarnessRunRequest,
+    },
+    /// Recall exactly one committed, attributed result under its original scope.
+    AiRecall {
+        binding: archie_memory::inference::InferenceBinding,
+        receipt_id: String,
+    },
+    /// Set Core's emergency pause: every AI dispatch is refused from now on, including
+    /// one already admitted, and so is every other mutating lease. Only the operator
+    /// profile's kernel-identified owner may ask, and the pause outlives a restart.
+    AiPause,
+    /// Lift the emergency pause the same owner set.
+    AiResume,
+    /// Whether the emergency pause is set and recorded.
+    AiStatus,
     /// Everything `archie status` shows.
     Status,
     /// The capability/resource graph.
@@ -1407,12 +1432,39 @@ impl ControlRequest {
     pub fn is_mutating(&self) -> bool {
         matches!(
             self,
-            Self::SentryPrepare { .. } | Self::SentryApprove { .. } | Self::SentryCancel
+            Self::SentryPrepare { .. }
+                | Self::SentryApprove { .. }
+                | Self::SentryCancel
+                | Self::AiInfer { .. }
+                | Self::AiRecall { .. }
+                | Self::AiHarness { .. }
+                | Self::AiPause
+                | Self::AiResume
+        )
+    }
+
+    /// These requests can write inference state, disclose admitted Vault text, or stop
+    /// and resume AI dispatch. All of them need the kernel-identified operator.
+    pub fn is_ai(&self) -> bool {
+        matches!(
+            self,
+            Self::AiInfer { .. }
+                | Self::AiRecall { .. }
+                | Self::AiHarness { .. }
+                | Self::AiPause
+                | Self::AiResume
+                | Self::AiStatus
         )
     }
 
     pub fn name(&self) -> &'static str {
         match self {
+            Self::AiInfer { .. } => "ai-infer",
+            Self::AiHarness { .. } => "ai-harness",
+            Self::AiRecall { .. } => "ai-recall",
+            Self::AiPause => "ai-pause",
+            Self::AiResume => "ai-resume",
+            Self::AiStatus => "ai-status",
             Self::Status => "status",
             Self::Topology => "topology",
             Self::Modules => "modules",
@@ -1609,6 +1661,19 @@ pub struct StatusView {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "response", rename_all = "snake_case")]
 pub enum ControlResponse {
+    AiResult {
+        outcome: Box<archie_workstation::ai::InferenceOutcome>,
+    },
+    AiHarnessResult {
+        outcome: Box<archie_workstation::harness_runtime::HarnessRunOutcome>,
+    },
+    /// Core's emergency pause as it stands after the request.
+    AiPolicy {
+        /// Whether the live engine refuses AI dispatch now.
+        paused: bool,
+        /// Whether a pause is recorded beside Core state, so a restart keeps it.
+        recorded: bool,
+    },
     Status(Box<StatusView>),
     Topology {
         /// capability → node ids providing it.

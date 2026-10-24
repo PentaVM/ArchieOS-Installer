@@ -1,0 +1,47 @@
+# Ternary Bonsai 2 9B: Archie's local reasoning model.
+#
+# PrismML's ternary quantization of Qwen3.5-9B, Apache-2.0
+# (https://huggingface.co/prism-ml/Ternary-Bonsai-2-9B-gguf). llama.cpp serves it on
+# loopback with the OpenAI wire format (archie-bonsai.service). It never leaves the
+# machine, so it may reason over restricted context; secret context goes to no model.
+#
+# The mail trial of 2026-10-21 showed it needs its reasoning on to ask the right
+# question; with it off it copied the mail. On CPU the whole trial took ~12 minutes.
+id = "local.bonsai-2-9b"
+display_name = "Ternary Bonsai 2 9B"
+provider = "llama-cpp"
+locality = "local"
+
+# The server shares one 65,536-token cache across 4 parallel slots.
+context_window = 16384
+max_output_tokens = 4096
+
+capabilities = ["cognition.reasoning"]
+max_privacy_grade = "restricted"
+
+# Shipped offline: the router chooses it only on a node whose llama-server serves these
+# weights, which sets availability = "ready" in its installed copy. Cold would route every
+# private and voice request to a server that may not be there.
+availability = "offline"
+
+# Assigned by hand, below the cloud reasoning models it stands in for. latency_ema_ms is
+# the RTX 3070 prompt-plus-answer time for a short question, not a CPU figure.
+quality_tier = 55
+latency_ema_ms = 2500
+
+[cost]
+input_micros_per_mtok = 0
+output_micros_per_mtok = 0
+
+[labels]
+base-url = "http://127.0.0.1:8081/v1/"
+provider-model = "bonsai"
+# Reasoning on: the mail trial asked the right question only with it. The runtime gives
+# the thought half of each request's output budget and keeps the other half for the
+# answer; unbounded, a Harness2 proposal reasoned past 4,096 tokens and never answered.
+thinking = "on"
+weights = "Ternary-Bonsai-2-9B-PTQ1_0.gguf"
+weights_sha256 = "3561df7ac7d26a71ffa991ac2db740b10841c3a350aa2676ccd3ff5d428b4e8b"
+weights_bytes = "1997486976"
+source = "https://huggingface.co/prism-ml/Ternary-Bonsai-2-9B-gguf"
+license = "apache-2.0"

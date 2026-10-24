@@ -20,7 +20,11 @@
 #                 (WSLg: /mnt/wslg/runtime-dir/wayland-0)
 #   SCREEN        which screen the stage takes     default: the last one
 #   RUN_DIR       key, sockets, logs               default: /tmp/archie-run
+#   LISTEN_LANGUAGE  what the recogniser listens for: es-US, en-US or auto  default: es-US
+#                 (auto: either, and Archie answers in the language it was spoken to)
 #   HEADPHONES=1  keep listening while Archie speaks, so it can be interrupted
+#   ALWAYS=1      answer whatever is heard, named or not (one person alone)
+#   SESSION_LOG   also write the session there, each line with its time
 set -eu
 
 GRADE=${1:-}
@@ -49,8 +53,10 @@ ASR_MODEL=${ASR_MODEL:-$(ls "$HOME"/.cache/nemo-speech/models/nvidia/nemotron-3.
 PIPER_PYTHON=${PIPER_PYTHON:-python3}
 PIPER=${PIPER:-$REPO/scripts/models/piper-json-bridge.py}
 PIPER_VOICES=${PIPER_VOICES:-$REPO/models-cache/piper}
-PIPER_MODEL=${PIPER_MODEL:-$PIPER_VOICES/es_MX-ald-medium.onnx}
-PIPER_MODEL_EN=${PIPER_MODEL_EN:-$PIPER_VOICES/en_US-john-medium.onnx}
+# The voices heard best (scripts/models/install-piper-voices.sh), else the earlier pair.
+default_voice() { if [ -f "$PIPER_VOICES/$1.onnx" ]; then echo "$PIPER_VOICES/$1.onnx"; else echo "$PIPER_VOICES/$2.onnx"; fi; }
+PIPER_MODEL=${PIPER_MODEL:-$(default_voice es_MX-claude-high es_MX-ald-medium)}
+PIPER_MODEL_EN=${PIPER_MODEL_EN:-$(default_voice en_US-kristin-medium en_US-john-medium)}
 HOST_WAYLAND=${HOST_WAYLAND:-${WAYLAND_DISPLAY:-}}
 RUN_DIR=${RUN_DIR:-/tmp/archie-run}
 SOCKET_NAME=archie-stage
@@ -110,10 +116,34 @@ if [ -f "$PIPER_MODEL_EN" ]; then
 else
     echo "run-archie: English Piper voice is not installed; using Spanish for every reply" >&2
 fi
+[ -n "${LISTEN_LANGUAGE:-}" ] && set -- "$@" --listen-language "$LISTEN_LANGUAGE"
 [ "${HEADPHONES:-0}" = 1 ] && set -- "$@" --headphones
+[ "${ALWAYS:-0}" = 1 ] && set -- "$@" --always
 
 # Two thread pools share this process's cores; spinning ones starve each other.
 # Applications opened by voice inherit the stage's runtime directory and software rendering.
-XDG_RUNTIME_DIR="$RUN_DIR/xdg" OMP_WAIT_POLICY=PASSIVE \
-    QT_QUICK_BACKEND=software LIBGL_ALWAYS_SOFTWARE=1 QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 \
-    "$ARCHIE_VOICE" "$@"
+voice() {
+    XDG_RUNTIME_DIR="$RUN_DIR/xdg" OMP_WAIT_POLICY=PASSIVE \
+        QT_QUICK_BACKEND=software LIBGL_ALWAYS_SOFTWARE=1 QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 \
+        "$ARCHIE_VOICE" "$@"
+}
+[ -n "${SESSION_LOG:-}" ] || { voice "$@"; exit; }
+
+# The session is kept as the window shows it, each line with its wall-clock time: what was
+# heard, what was said, the floor's decisions and the timings. Only the owner can read it.
+mkdir -p "$(dirname "$SESSION_LOG")"
+chmod 700 "$(dirname "$SESSION_LOG")"
+(umask 077 && : >>"$SESSION_LOG")
+{
+    echo "# archie session $(date -Iseconds)"
+    echo "# grade=$GRADE model=${ARCHIE_VOICE_MODEL:-default} endpoint=${ARCHIE_VOICE_ENDPOINT:-nebius} headphones=${HEADPHONES:-0} always=${ALWAYS:-0}"
+} >>"$SESSION_LOG"
+voice "$@" 2>&1 | {
+    # Ctrl+C reaches the voice too; this reader keeps writing until the voice has stopped.
+    trap '' INT TERM
+    while IFS= read -r line; do
+        printf '%s\n' "$line"
+        printf '%s %s\n' "$(date +%T.%3N)" "$line" >>"$SESSION_LOG"
+    done
+}
+echo "# ended $(date -Iseconds)" >>"$SESSION_LOG"

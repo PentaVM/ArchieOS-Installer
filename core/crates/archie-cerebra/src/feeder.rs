@@ -302,6 +302,24 @@ impl FeedItem {
             category: None,
         }
     }
+    pub fn from_iris_episode(record: &crate::iris_bridge::IrisEpisodeRecord) -> Self {
+        Self {
+            source: FeedSource::IrisEpisode,
+            reference: record.reference.clone(),
+            at_ms: record.at_ms,
+            weight: record.weight,
+            category: None,
+        }
+    }
+    pub fn from_forge_artifact(record: &crate::forge_bridge::ForgeArtifactRecord) -> Self {
+        Self {
+            source: FeedSource::ForgeArtifact,
+            reference: record.reference.clone(),
+            at_ms: record.at_ms,
+            weight: record.weight,
+            category: None,
+        }
+    }
 }
 
 fn category_from_label(label: &str) -> Option<Category> {
@@ -340,6 +358,10 @@ pub fn collect_from_vault(
             FeedSource::WandaChat
         } else if relative.starts_with("vault/documents/") {
             FeedSource::VaultDocument
+        } else if relative.starts_with("iris/episodes/") {
+            FeedSource::IrisEpisode
+        } else if relative.starts_with("forge/artifacts/") {
+            FeedSource::ForgeArtifact
         } else {
             continue;
         };
@@ -454,6 +476,40 @@ pub fn collect_from_vault(
                     category: None,
                 }
             }
+            FeedSource::IrisEpisode => {
+                let Ok(content) =
+                    serde_json::from_value::<crate::iris_bridge::IrisEpisodeContent>(value.clone())
+                else {
+                    continue;
+                };
+                if content.format != crate::iris_bridge::EPISODE_FORMAT {
+                    continue;
+                }
+                FeedItem {
+                    source: kind,
+                    reference,
+                    at_ms,
+                    weight: content.weight(),
+                    category: None,
+                }
+            }
+            FeedSource::ForgeArtifact => {
+                let Ok(content) = serde_json::from_value::<crate::forge_bridge::ForgeArtifactContent>(
+                    value.clone(),
+                ) else {
+                    continue;
+                };
+                if content.format != crate::forge_bridge::ARTIFACT_FORMAT {
+                    continue;
+                }
+                FeedItem {
+                    source: kind,
+                    reference,
+                    at_ms,
+                    weight: content.weight(),
+                    category: None,
+                }
+            }
             FeedSource::WandaChat => {
                 let Some(count) = value.get("message_count").and_then(|v| v.as_u64()) else {
                     continue;
@@ -557,6 +613,8 @@ fn pillar_of(source: FeedSource) -> Pillar {
             Pillar::Wanda
         }
         FeedSource::VaultDocument => Pillar::Vault,
+        FeedSource::IrisEpisode => Pillar::Iris,
+        FeedSource::ForgeArtifact => Pillar::Forge,
     }
 }
 

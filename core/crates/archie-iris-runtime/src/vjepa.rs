@@ -9,7 +9,7 @@
 
 use crate::nn::{attend, merge_heads, LayerNorm, Linear, Mlp, Result};
 use crate::weights::Weights;
-use candle_core::{DType, Device, Tensor, D};
+use candle_core::{DType, Device, Tensor};
 
 const PREFIX: &str = "vjepa.encoder";
 const DEPTH: usize = 12;
@@ -41,6 +41,12 @@ pub struct VJepa {
 pub struct Rope {
     cos: Tensor,
     sin: Tensor,
+    /// The same tables on the host, for the CPU kernel.
+    cos_host: Vec<f32>,
+    sin_host: Vec<f32>,
+    /// `[64, 64]`: `x @ swap` turns each pair `(a, b)` into `(-b, a)`. One nonzero term
+    /// per output, so the product is exact in any dtype.
+    swap: Tensor,
 }
 
 impl Rope {
@@ -84,20 +90,28 @@ impl Rope {
                 }
             }
         }
+        let mut swap = vec![0f32; head * head];
+        for pair in 0..head / 2 {
+            swap[(2 * pair + 1) * head + 2 * pair] = -1.0;
+            swap[(2 * pair) * head + 2 * pair + 1] = 1.0;
+        }
         Ok(Self {
-            cos: Tensor::from_vec(cos, (1, 1, count, head), device)?.to_dtype(dtype)?,
-            sin: Tensor::from_vec(sin, (1, 1, count, head), device)?.to_dtype(dtype)?,
+            cos: Tensor::from_vec(cos.clone(), (1, 1, count, head), device)?.to_dtype(dtype)?,
+            sin: Tensor::from_vec(sin.clone(), (1, 1, count, head), device)?.to_dtype(dtype)?,
+            cos_host: cos,
+            sin_host: sin,
+            swap: Tensor::from_vec(swap, (head, head), device)?.to_dtype(dtype)?,
         })
     }
 
-    /// `x * cos + rotate_half_pairs(x) * sin`, pairs `(a, b)` rotated to `(-b, a)`.
+    /// `x * cos + rotate_half_pairs(x) * sin`, pairs `(a, b)` rotated to `(-b, a)`. On the
+    /// CPU in f32, one pass over the rows; elsewhere the rotation is one product with a
+    /// signed permutation instead of two narrows, a negation and a concatenation.
     pub fn apply(&self, x: &Tensor) -> Result<Tensor> {
-        let (batch, heads, length, width) = x.dims4()?;
-        let pairs = x.reshape((batch, heads, length, width / 2, 2))?;
-        let first = pairs.narrow(D::Minus1, 0, 1)?;
-        let second = pairs.narrow(D::Minus1, 1, 1)?;
-        let rotated = Tensor::cat(&[&second.neg()?, &first], D::Minus1)?
-            .reshape((batch, heads, length, width))?;
+        if matches!(x.device(), Device::Cpu) && x.dtype() == DType::F32 {
+            return crate::fast::rope(x, &self.cos_host, &self.sin_host);
+        }
+        let rotated = x.broadcast_matmul(&self.swap)?;
         Ok((x.broadcast_mul(&self.cos)? + rotated.broadcast_mul(&self.sin)?)?)
     }
 }
@@ -176,4 +190,48 @@ pub fn patchify(images: &Tensor, patch: usize) -> Result<Tensor> {
         .permute((0, 2, 4, 1, 3, 5))?
         .contiguous()?
         .reshape((batch, rows * cols, channels * patch * patch))?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The rotation as it was written before: narrows, negation and concatenation.
+    fn reference(rope: &Rope, x: &Tensor) -> Tensor {
+        use candle_core::D;
+        let (batch, heads, length, width) = x.dims4().unwrap();
+        let pairs = x.reshape((batch, heads, length, width / 2, 2)).unwrap();
+        let first = pairs.narrow(D::Minus1, 0, 1).unwrap();
+        let second = pairs.narrow(D::Minus1, 1, 1).unwrap();
+        let rotated = Tensor::cat(&[&second.neg().unwrap(), &first], D::Minus1)
+            .unwrap()
+            .reshape((batch, heads, length, width))
+            .unwrap();
+        (x.broadcast_mul(&rope.cos).unwrap() + rotated.broadcast_mul(&rope.sin).unwrap()).unwrap()
+    }
+
+    fn bits(t: &Tensor) -> Vec<u32> {
+        t.flatten_all()
+            .unwrap()
+            .to_vec1::<f32>()
+            .unwrap()
+            .iter()
+            .map(|v| v.to_bits())
+            .collect()
+    }
+
+    #[test]
+    fn both_rotations_match_the_old_one_to_the_bit() {
+        let device = Device::Cpu;
+        let rope = Rope::new(4, 6, &device, DType::F32).unwrap();
+        let x = Tensor::randn(0f32, 1.0, (2, HEADS, 24, WIDTH / HEADS), &device).unwrap();
+        let want = bits(&reference(&rope, &x));
+        assert_eq!(bits(&rope.apply(&x).unwrap()), want);
+        // The product route, which a GPU takes, on the same numbers.
+        let rotated = x.broadcast_matmul(&rope.swap).unwrap();
+        let product = (x.broadcast_mul(&rope.cos).unwrap()
+            + rotated.broadcast_mul(&rope.sin).unwrap())
+        .unwrap();
+        assert_eq!(bits(&product), want);
+    }
 }

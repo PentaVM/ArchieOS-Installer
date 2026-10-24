@@ -85,3 +85,47 @@ pub trait SharedThoughtStore {
         expected_revision: Option<u64>,
     ) -> Result<(), Self::Error>;
 }
+
+/// Scoped inference attribution layered over the existing authoritative experience
+/// store. Calls do not authorize inference or assert that a model result is a fact.
+pub trait InferenceStore {
+    type Error: std::fmt::Display;
+    /// Register the exact immutable task identity before external I/O. All tasks in
+    /// one Focus share one exact ContextDomain, but can use different runners.
+    fn bind_inference(
+        &self,
+        binding: &crate::inference::InferenceBinding,
+    ) -> Result<(), Self::Error>;
+    /// Receipt, checkpoint and both outbox entries commit in the same transaction.
+    /// The caller checks sealed artifact existence/digest through Vault first.
+    fn commit_inference(
+        &self,
+        receipt: &crate::inference::InferenceReceipt,
+        checkpoint: &ExecutionCheckpoint,
+        expected_head: Option<&str>,
+    ) -> Result<(), Self::Error>;
+    fn inference_receipt(
+        &self,
+        binding: &crate::inference::InferenceBinding,
+        id: &str,
+    ) -> Result<Option<crate::inference::InferenceReceipt>, Self::Error>;
+    /// Exact task binding only, including failed/cancelled attributed attempts.
+    fn recent_inferences(
+        &self,
+        binding: &crate::inference::InferenceBinding,
+        limit: u32,
+    ) -> Result<Vec<crate::inference::InferenceReceipt>, Self::Error>;
+    /// Active-lineage receipts across tasks in the exact session authorization
+    /// scope. A full registered task binding is still required. Limit is 1..=128.
+    fn recent_session_inferences(
+        &self,
+        binding: &crate::inference::InferenceBinding,
+        limit: u32,
+    ) -> Result<Vec<crate::inference::InferenceReceipt>, Self::Error>;
+    /// Requires a registered task binding. Reuses only the same exact
+    /// domain/focus/objective/runner/provider/account, possibly across tasks.
+    fn inference_session(
+        &self,
+        binding: &crate::inference::InferenceBinding,
+    ) -> Result<Option<crate::inference::OpaqueSessionId>, Self::Error>;
+}

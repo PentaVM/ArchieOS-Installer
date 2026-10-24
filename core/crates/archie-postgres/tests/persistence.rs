@@ -649,16 +649,19 @@ fn tampered_indexes_payloads_and_unknown_schema_fail_closed() {
     assert!(store.focus_at("focus:migration", 100).is_err());
     assert!(store.graph_at(100).is_err());
     assert!(store.thought_at("thought:migration", 100).is_err());
-    raw.batch_execute("UPDATE schema_migrations SET version=99")
+    raw.batch_execute("UPDATE schema_migrations SET version=99 WHERE version=1")
         .unwrap();
     assert!(matches!(
         PostgresStore::open_local(fixture.config.clone(), &fixture.schema),
         Err(StoreError::Schema)
     ));
     assert_eq!(
-        raw.query_one("SELECT version FROM schema_migrations", &[])
-            .unwrap()
-            .get::<_, i32>(0),
+        raw.query_one(
+            "SELECT version FROM schema_migrations WHERE version=99",
+            &[]
+        )
+        .unwrap()
+        .get::<_, i32>(0),
         99
     );
 }

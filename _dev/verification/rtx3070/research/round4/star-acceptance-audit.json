@@ -1,0 +1,114 @@
+{
+  "scope": "pure-function CPU audit; synthetic adversarial inputs only",
+  "source": "training\\wanda_bonsai2\\src\\archie_wanda\\star.py",
+  "source_sha256": "2803dcf3dd313e70b0793284e45c528544189a9abb4c187670b214ab801c0a62",
+  "functions": {
+    "normalise": {
+      "start": 14,
+      "end": 17
+    },
+    "answer_of": {
+      "start": 20,
+      "end": 23
+    },
+    "answers": {
+      "start": 26,
+      "end": 30
+    },
+    "accept": {
+      "start": 33,
+      "end": 39
+    },
+    "accept_rationale": {
+      "start": 56,
+      "end": 58
+    }
+  },
+  "cases": [
+    {
+      "case": "valid_bare_label",
+      "accepted": true,
+      "desired": true,
+      "matches_desired": true
+    },
+    {
+      "case": "valid_label_explanation",
+      "accepted": true,
+      "desired": true,
+      "matches_desired": true
+    },
+    {
+      "case": "longer_word",
+      "accepted": false,
+      "desired": false,
+      "matches_desired": true
+    },
+    {
+      "case": "forced_end",
+      "accepted": false,
+      "desired": false,
+      "matches_desired": true
+    },
+    {
+      "case": "over_cap",
+      "accepted": false,
+      "desired": false,
+      "matches_desired": true
+    },
+    {
+      "case": "negated_label",
+      "accepted": true,
+      "desired": false,
+      "matches_desired": false
+    },
+    {
+      "case": "explicit_self_correction",
+      "accepted": true,
+      "desired": false,
+      "matches_desired": false
+    },
+    {
+      "case": "missing_completion_flag",
+      "accepted": true,
+      "desired": false,
+      "matches_desired": false
+    },
+    {
+      "case": "missing_token_count",
+      "accepted": true,
+      "desired": false,
+      "matches_desired": false
+    },
+    {
+      "case": "negative_token_count",
+      "accepted": true,
+      "desired": false,
+      "matches_desired": false
+    },
+    {
+      "case": "nan_token_count",
+      "accepted": true,
+      "desired": false,
+      "matches_desired": false
+    },
+    {
+      "case": "unlisted_hint_paraphrase",
+      "accepted": true,
+      "interpretation": "Lexical exclusion is not a certificate of causal independence."
+    },
+    {
+      "case": "spanish_substring_false_positive",
+      "accepted": false,
+      "interpretation": "The substring pista also occurs in the ordinary word despistada."
+    }
+  ],
+  "early_stop_fixture": {
+    "completion_fixture": "non-delimiter stop after 10 tokens, then correct answer",
+    "forced_end": false,
+    "accepted": true,
+    "native_source_sha256": "e79c789176162b8260802097d036d08e3b4e62da0a88850586f73d53fd8abc94",
+    "hardware_or_live_incidence_claim": false
+  },
+  "adversarial_mismatches": 6,
+  "no_live_trace_incidence_estimated": true
+}

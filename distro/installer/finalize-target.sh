@@ -7,6 +7,11 @@ root_uuid=$(blkid -s PARTUUID -o value -- "$1")
 [[ "$root_uuid" =~ ^[a-fA-F0-9-]+$ ]] || exit 65
 # The installed machine boots its own disk, not the archiso squashfs on the USB.
 rm -f -- /etc/mkinitcpio.conf.d/archiso.conf
+# mkarchiso empties the live /boot after copying the kernel onto the ISO, so the
+# copied airootfs has none. The linux package keeps its own copy under modules.
+kernels=(/usr/lib/modules/*/vmlinuz)
+[[ ${#kernels[@]} == 1 && -f ${kernels[0]} ]] || exit 66
+install -Dm644 -- "${kernels[0]}" /boot/vmlinuz-linux
 cat >/etc/mkinitcpio.d/linux.preset <<'PRESET'
 ALL_config='/etc/mkinitcpio.conf'
 ALL_kver='/boot/vmlinuz-linux'
@@ -23,7 +28,7 @@ HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont bl
 INITRAMFS
 install -d /boot/loader/entries
 printf 'default archieos.conf\ntimeout 3\neditor no\n' >/boot/loader/loader.conf
-printf 'title ArchieOS\nlinux /vmlinuz-linux\ninitrd /initramfs-linux.img\noptions root=PARTUUID=%s rw\n' "$root_uuid" >/boot/loader/entries/archieos.conf
+printf 'title ArchieOS\nlinux /vmlinuz-linux\ninitrd /initramfs-linux.img\noptions root=PARTUUID=%s rw console=ttyS0,115200 console=tty1\n' "$root_uuid" >/boot/loader/entries/archieos.conf
 # Lock the passwordless root account inherited from the live image.
 usermod --lock root
 visudo -c

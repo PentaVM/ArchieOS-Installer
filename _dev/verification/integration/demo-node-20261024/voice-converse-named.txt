@@ -1,0 +1,5 @@
+ears ready in 60 ms (NeMo-Speech.cpp nemo-speech-asr 0.1.0)
+voice (piper) ready in 1 ms, 22050 Hz
+escuchando (es-US, di «Archie» para hablarme)
+  12206 ms  oí       Qué dirá es hoy.
+  12206 ms  piso     Silent: there is nothing worth saying  [it neither names Archie nor answers it; it is a question; 2025 ms of silence, and the recogniser called the turn over]

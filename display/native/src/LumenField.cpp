@@ -2,10 +2,15 @@
 
 #include "LumenGeometry.h"
 #include "XaviDesignBridge.h"
+#include "archie_lumen_design.h"
 
 #include <QColor>
+#include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QThreadPool>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -21,6 +26,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <span>
 
 namespace lumen = archie::visual::lumen;
 using archie::visual::Vec3;
@@ -61,12 +67,46 @@ QString categoryOfKind(const QString &kind)
     return QStringLiteral("system");
 }
 
+// The content sphere's types are the design's own seven, with its colours (field.js and
+// main.js of Xavi's source), for files rather than system entities.
+constexpr Category contentCategoryTable[] = {
+    {"code", "Código", "#73b9d5"},       {"documents", "Documentos", "#e8c189"},
+    {"media", "Medios", "#7fceb2"},      {"data", "Datos", "#b8d08c"},
+    {"archive", "Comprimidos", "#b6a3cf"}, {"executable", "Ejecutables", "#dc9887"},
+    {"other", "Otros", "#bdc7bf"},
+};
+
 QString categoryLabel(const QString &key)
 {
     for (const auto &c : categoryTable)
         if (key == QLatin1String(c.key))
             return QString::fromUtf8(c.label);
+    for (const auto &c : contentCategoryTable)
+        if (key == QLatin1String(c.key))
+            return QString::fromUtf8(c.label);
     return key;
+}
+
+const QStringList fieldSources{QStringLiteral("tfog"), QStringLiteral("content")};
+
+/// The folder the content sphere lists when nothing chose one: ARCHIE_CONTENT_ROOT, the
+/// repository this display was built from (as Xavi's desktop showed ArchieOS itself),
+/// the desktop's copy of it, or the home folder.
+QString defaultContentRoot()
+{
+    if (const QString chosen = qEnvironmentVariable("ARCHIE_CONTENT_ROOT"); !chosen.isEmpty())
+        return chosen;
+    QDir dir(QCoreApplication::applicationDirPath());
+    for (int up = 0; up < 6; ++up) {
+        if (dir.exists(QStringLiteral("core/Cargo.toml")) && dir.exists(QStringLiteral("display/native")))
+            return dir.absolutePath();
+        if (!dir.cdUp())
+            break;
+    }
+    for (const QString &candidate : {QStringLiteral("/srv/archieos"), QStringLiteral("/usr/share/archieos")})
+        if (QFileInfo(candidate).isDir())
+            return candidate;
+    return QDir::homePath();
 }
 
 /// The design's defaults ("Regiones vivas"), with the density limit in this scene's
@@ -100,8 +140,23 @@ QVariantMap defaults()
         {QStringLiteral("pulses"), true}, {QStringLiteral("bloom"), true},
         {QStringLiteral("physics"), true}, {QStringLiteral("rotate"), true},
         {QStringLiteral("pauseOnInspect"), true}, {QStringLiteral("labels"), true},
+        // The content sphere (Xavi's desktop): what it lists and how its frame looks.
+        {QStringLiteral("fieldSource"), QStringLiteral("tfog")},
+        {QStringLiteral("contentLimit"), 2500}, {QStringLiteral("contentFiles"), 30},
+        {QStringLiteral("linkSegments"), 5}, {QStringLiteral("holoFrame"), false},
+        {QStringLiteral("holoOpacity"), 0.35}, {QStringLiteral("coreGlow"), 0.0},
+        // A colour grade over the finished frame, as the CSS filter Xavi's desktop laid
+        // over the sphere's canvas: hue-rotate, saturate, contrast and brightness.
+        {QStringLiteral("gradeHue"), 0.0}, {QStringLiteral("gradeSaturate"), 1.0},
+        {QStringLiteral("gradeContrast"), 1.0}, {QStringLiteral("gradeBrightness"), 1.0},
+        // The hologram's screen: faint scan lines and a small red/cyan split at edges.
+        {QStringLiteral("gradeScanlines"), 0.0}, {QStringLiteral("gradeSplit"), 0.0},
+        // The design's bloom inside the grade pass, for when the scene's own bloom is off.
+        {QStringLiteral("gradeGlow"), 0.0},
     };
     for (const auto &c : categoryTable)
+        s.insert(QStringLiteral("color") + QLatin1String(c.key), QString::fromLatin1(c.colour));
+    for (const auto &c : contentCategoryTable)
         s.insert(QStringLiteral("color") + QLatin1String(c.key), QString::fromLatin1(c.colour));
     // Source appearance defaults extend the existing OS model. The OS keeps its
     // density ceiling and semantic category palette; source file scanning is absent.
@@ -117,49 +172,6 @@ QVariantMap defaults()
     return s;
 }
 
-QVariantMap profileOverrides(const QString &name)
-{
-    if (name == QLatin1String("crown"))
-        return {{QStringLiteral("categoryPull"), 0.58}, {QStringLiteral("hierarchyPull"), 0.42},
-                {QStringLiteral("radialLayers"), 0.77}, {QStringLiteral("scale"), 1.12},
-                {QStringLiteral("shellOpacity"), 0.055}, {QStringLiteral("ambientCount"), 780},
-                {QStringLiteral("nodeSize"), 1.45}, {QStringLiteral("rotationSpeed"), 0.55},
-                {QStringLiteral("bloomStrength"), 0.47}};
-    if (name == QLatin1String("atlas"))
-        return {{QStringLiteral("categoryPull"), 0.29}, {QStringLiteral("hierarchyPull"), 0.78},
-                {QStringLiteral("radialLayers"), 0.53}, {QStringLiteral("scale"), 1.06},
-                {QStringLiteral("ambientCount"), 180}, {QStringLiteral("shellOpacity"), 0.02},
-                {QStringLiteral("links"), true}, {QStringLiteral("linkBudget"), 320},
-                {QStringLiteral("nodeSize"), 2.0}, {QStringLiteral("bloomStrength"), 0.18}};
-    if (name == QLatin1String("dense"))
-        return {{QStringLiteral("categoryPull"), 0.52}, {QStringLiteral("hierarchyPull"), 0.67},
-                {QStringLiteral("radialLayers"), 0.42}, {QStringLiteral("scale"), 0.82},
-                {QStringLiteral("ambientCount"), 950}, {QStringLiteral("shellOpacity"), 0.05},
-                {QStringLiteral("nodeSize"), 1.55}, {QStringLiteral("bloomStrength"), 0.46}};
-    return {};
-}
-
-/// The earlier V2 look, which the design's "Antes" button shows for comparison.
-QVariantMap legacy()
-{
-    QVariantMap s = defaults();
-    const QVariantMap o{
-        {QStringLiteral("layoutMode"), QStringLiteral("legacy")}, {QStringLiteral("categoryPull"), 0.72},
-        {QStringLiteral("hierarchyPull"), 0.35}, {QStringLiteral("radialLayers"), 0.64},
-        {QStringLiteral("nodeSize"), 1.4}, {QStringLiteral("shellOpacity"), 0.075},
-        {QStringLiteral("ambientCount"), 1400}, {QStringLiteral("ambientSize"), 0.9},
-        {QStringLiteral("ghostOpacity"), 0.42}, {QStringLiteral("metalness"), 0.58},
-        {QStringLiteral("roughness"), 0.31}, {QStringLiteral("emissive"), 0.8},
-        {QStringLiteral("linkOpacity"), 0.09}, {QStringLiteral("linkBudget"), 1200},
-        {QStringLiteral("bloomStrength"), 0.64}, {QStringLiteral("bloomThreshold"), 0.68},
-        {QStringLiteral("ambientLight"), 1.5}, {QStringLiteral("warmLight"), 26000},
-        {QStringLiteral("coolLight"), 21000}, {QStringLiteral("background"), QStringLiteral("#070d13")},
-        {QStringLiteral("guides"), true},
-    };
-    for (auto it = o.begin(); it != o.end(); ++it)
-        s.insert(it.key(), it.value());
-    return s;
-}
 
 struct Range {
     const char *key;
@@ -174,7 +186,10 @@ constexpr Range ranges[] = {
     {"shellOpacity", 0, 0.4}, {"metalness", 0, 1}, {"roughness", 0, 1}, {"emissive", 0, 2},
     {"textureContrast", 0, 3}, {"textureDepth", 0, 0.15}, {"ambientCount", 0, 3500},
     {"ambientSize", 0.1, 2}, {"ghostOpacity", 0, 0.6}, {"linkOpacity", 0, 0.25},
-    {"linkBudget", 0, 2000}, {"highlightOpacity", 0, 1}, {"highlightBudget", 10, 500},
+    {"linkBudget", 0, 6000}, {"highlightOpacity", 0, 1}, {"highlightBudget", 10, 500},
+    {"contentLimit", 60, 6000}, {"contentFiles", 1, 200}, {"linkSegments", 1, 24},
+    {"holoOpacity", 0, 1}, {"coreGlow", 0, 3}, {"gradeHue", 0, 360}, {"gradeSaturate", 0, 3},
+    {"gradeContrast", 0, 2}, {"gradeBrightness", 0, 2}, {"gradeScanlines", 0, 1}, {"gradeSplit", 0, 4}, {"gradeGlow", 0, 3},
     {"reaction", 0, 500}, {"reach", 5, 180}, {"spring", 1, 60}, {"damping", 0.5, 0.98},
     {"rotationSpeed", 0, 2}, {"pulseSpeed", 0, 2}, {"bloomStrength", 0, 2},
     {"bloomRadius", 0, 1}, {"bloomThreshold", 0, 1}, {"exposure", 0.4, 2.5},
@@ -220,6 +235,9 @@ QVariant validated(const QString &key, const QVariant &current, const QVariant &
         if (key == QLatin1String("layoutMode")) {
             if (!layoutModes.contains(text))
                 return refuse(QStringLiteral("expected ") + layoutModes.join(QStringLiteral(" or ")));
+        } else if (key == QLatin1String("fieldSource")) {
+            if (!fieldSources.contains(text))
+                return refuse(QStringLiteral("expected ") + fieldSources.join(QStringLiteral(" or ")));
         } else if (const auto choices = xaviChoices(key); !choices.isEmpty()) {
             if (!choices.contains(text))
                 return refuse(QStringLiteral("expected ") + choices.join(QStringLiteral(" or ")));
@@ -246,6 +264,41 @@ QVariant validated(const QString &key, const QVariant &current, const QVariant &
         number = std::clamp(number, range.low, range.high);
     }
     return whole ? QVariant(static_cast<int>(std::lround(number))) : QVariant(number);
+}
+
+/// `defaults()` with overrides from the design's catalog, each one checked as a preset
+/// file's would be; nullopt, with the reason, if one is refused.
+std::optional<QVariantMap> withOverrides(const QVariantMap &overrides, QString &reason)
+{
+    QVariantMap s = defaults();
+    for (auto it = overrides.begin(); it != overrides.end(); ++it) {
+        const QVariant next = validated(it.key(), s.value(it.key()), it.value(), Bounds::Strict, reason);
+        if (!next.isValid())
+            return std::nullopt;
+        s.insert(it.key(), next);
+    }
+    return s;
+}
+
+/// The design's composition profiles beyond "field" (crown, atlas, dense): main.js
+/// PROFILES, from the Rust catalog. Empty for any other name.
+std::optional<QVariantMap> originalProfile(const QString &name, QString &reason)
+{
+    const auto overrides = xaviProfile(name);
+    if (!overrides || overrides->isEmpty())
+        return std::nullopt;
+    return withOverrides(*overrides, reason);
+}
+
+/// The earlier V2 look, which the design's "Antes" button shows for comparison
+/// (main.js LEGACY_SETTINGS).
+QVariantMap legacy()
+{
+    QString reason;
+    const auto settings = withOverrides(xaviLegacy(), reason);
+    if (!settings)
+        qWarning("archie-display: the catalog's legacy look is refused: %s", qPrintable(reason));
+    return settings.value_or(defaults());
 }
 
 /// Look presets are the JSON files embedded under :/archie/presets (presets/*.json in the
@@ -416,9 +469,49 @@ LumenField::LumenField(QObject *parent, QUrl endpoint)
     if (!presetNames().contains(basePreset))
         qWarning("archie-display: the base preset %s is not embedded", qPrintable(basePreset));
     m_profile = basePreset;
+    m_contentRoot = defaultContentRoot();
     updateLook();
     updateCategoryRows();
     setStatus(QStringLiteral("ESPERANDO EL CAMPO"));
+}
+
+void LumenField::setContentRoot(const QString &root)
+{
+    const QString cleaned = root.isEmpty() ? defaultContentRoot() : QDir::cleanPath(root);
+    if (cleaned == m_contentRoot)
+        return;
+    m_contentRoot = cleaned;
+    m_contentDirty = true;
+    if (contentSource())
+        scheduleRequest(0);
+    emit contentRootChanged();
+}
+
+bool LumenField::contentSource() const
+{
+    return m_settings.value(QStringLiteral("fieldSource")).toString() == QLatin1String("content");
+}
+
+QVariantList LumenField::labelAnchors() const
+{
+    std::vector<int> top;
+    const int root = indexOf(m_rootId);
+    for (std::size_t i = 0; i < m_nodes.size(); ++i)
+        if (m_nodes[i].parentIndex == root && root >= 0 && m_nodes[i].branch && drawn(static_cast<int>(i)))
+            top.push_back(static_cast<int>(i));
+    std::sort(top.begin(), top.end(), [this](int a, int b) {
+        return m_nodes[static_cast<std::size_t>(a)].memberCount > m_nodes[static_cast<std::size_t>(b)].memberCount;
+    });
+    if (top.size() > 24)
+        top.resize(24);
+    QVariantList out;
+    for (const int i : top) {
+        const QVector3D p = positionAt(i);
+        out.push_back(QVariantMap{{QStringLiteral("id"), m_nodes[static_cast<std::size_t>(i)].id},
+                                  {QStringLiteral("name"), m_nodes[static_cast<std::size_t>(i)].name},
+                                  {QStringLiteral("x"), p.x()}, {QStringLiteral("y"), p.y()}, {QStringLiteral("z"), p.z()}});
+    }
+    return out;
 }
 
 void LumenField::setActive(bool active)
@@ -583,9 +676,16 @@ void LumenField::setSetting(const QString &key, const QVariant &value)
     static const QStringList shapeKeys{QStringLiteral("categoryPull"), QStringLiteral("hierarchyPull"),
                                        QStringLiteral("radialLayers"), QStringLiteral("sizeInfluence"),
                                        QStringLiteral("scale"), QStringLiteral("visibleLimit"),
-                                       QStringLiteral("layoutMode")};
-    if (shapeKeys.contains(key))
+                                       QStringLiteral("layoutMode"), QStringLiteral("fieldSource"),
+                                       QStringLiteral("contentLimit"), QStringLiteral("contentFiles")};
+    if (shapeKeys.contains(key)) {
+        m_contentDirty = true;
         scheduleRequest(140);
+    }
+    if (key == QLatin1String("fieldSource"))
+        updateCategoryRows();
+    if (key == QLatin1String("holoFrame") || key == QLatin1String("linkSegments"))
+        m_structureDirty = true;
     if (key.startsWith(QLatin1String("color")) || key == QLatin1String("accentWarm")
         || key == QLatin1String("accentCool") || key == QLatin1String("shellScale")
         || key == QLatin1String("shellStyle") || key == QLatin1String("shellDensity")
@@ -617,6 +717,7 @@ QString LumenField::loadProfile(const QString &name)
     m_saved.clear();
     m_profile = name;
     m_settings = *settings;
+    m_contentDirty = true;
     updateLook();
     updateCategoryRows();
     rebuildMembrane();
@@ -630,19 +731,24 @@ QString LumenField::loadProfile(const QString &name)
 
 bool LumenField::applyProfile(const QString &name)
 {
-    const QVariantMap cinematic = profileOverrides(name);
-    if (cinematic.isEmpty()) {
+    QString refused;
+    const std::optional<QVariantMap> original = originalProfile(name, refused);
+    if (!refused.isEmpty()) {
+        qWarning("archie-display: profile %s: %s", qPrintable(name), qPrintable(refused));
+        return false;
+    }
+    if (!original) {
         const QString reason = loadProfile(name);
         if (!reason.isEmpty())
             qWarning("archie-display: %s", qPrintable(reason));
         return reason.isEmpty();
     }
-    // Legacy camera looks remain separate from the file-backed preset catalog.
+    // The design's own composition profiles (the voice's cinematics) stay apart from the
+    // file-backed preset catalog.
     m_saved.clear();
     m_profile = name;
-    m_settings = defaults();
-    for (auto it = cinematic.begin(); it != cinematic.end(); ++it)
-        m_settings.insert(it.key(), it.value());
+    m_settings = *original;
+    m_contentDirty = true;
     updateLook();
     updateCategoryRows();
     rebuildMembrane();
@@ -864,6 +970,8 @@ QString LumenField::structureKey() const
 {
     QStringList expanded(m_expanded.cbegin(), m_expanded.cend());
     expanded.sort();
+    if (contentSource())
+        return QStringLiteral("content|") + m_contentRoot;
     return m_lens + QLatin1Char('|') + expanded.join(QLatin1Char(',')) + QLatin1Char('|') + m_focus
            + QLatin1Char('|') + m_settings.value(QStringLiteral("layoutMode")).toString();
 }
@@ -883,6 +991,10 @@ void LumenField::request()
         return;
     if (m_requestPending) {
         m_requestAgain = true;
+        return;
+    }
+    if (contentSource()) {
+        requestContent();
         return;
     }
     QStringList expanded;
@@ -943,6 +1055,56 @@ void LumenField::request()
             // A debounce still running sends it when the burst settles.
             if (!m_requestDelay.isActive()) this->request();
         }
+    });
+}
+
+void LumenField::requestContent()
+{
+    // The folder changes rarely: list it again every 5 s (so new files appear, as on
+    // Xavi's desktop) or as soon as what it is asked for changes.
+    if (!m_contentDirty && m_contentClock.isValid() && m_contentClock.elapsed() < 5000)
+        return;
+    m_contentDirty = false;
+    m_contentClock.restart();
+    m_requestPending = true;
+    const QByteArray root = m_contentRoot.toUtf8();
+    const DesignContentOptions options{
+        static_cast<std::uint32_t>(number("contentLimit")), static_cast<std::uint32_t>(number("contentFiles")),
+        number("categoryPull"), number("hierarchyPull"), number("radialLayers"), number("sizeInfluence"), number("scale")};
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const quint64 generation = m_queryGeneration;
+    const QString structure = structureKey();
+    QPointer<LumenField> self(this);
+    QThreadPool::globalInstance()->start([self, root, options, now, generation, structure] {
+        QByteArray body(maximumSceneBytes, Qt::Uninitialized);
+        const std::size_t written = design_content_scene(root.constData(), static_cast<std::size_t>(root.size()), &options,
+                                                         now, body.data(), static_cast<std::size_t>(body.size()));
+        body.truncate(static_cast<qsizetype>(written));
+        if (!self)
+            return;
+        QMetaObject::invokeMethod(self.data(), [self, body, generation, structure, root] {
+            if (!self)
+                return;
+            LumenField &field = *self;
+            field.m_requestPending = false;
+            if (!field.m_active || field.m_frameIntervalMs == 0 || generation != field.m_queryGeneration) {
+                // A listing from before the view stopped drawing; a view drawing again asks afresh.
+                field.m_requestAgain = false;
+                field.m_contentDirty = true;
+                if (field.m_active && field.m_frameIntervalMs > 0) field.request();
+                return;
+            }
+            if (body.isEmpty())
+                field.setStatus(QStringLiteral("SIN CAMPO"), QStringLiteral("no se pudo leer ") + QString::fromUtf8(root));
+            else if (structure == field.structureKey())
+                field.accept(body);
+            else
+                field.m_contentDirty = true;
+            if (field.m_requestAgain) {
+                field.m_requestAgain = false;
+                if (!field.m_requestDelay.isActive()) field.request();
+            }
+        }, Qt::QueuedConnection);
     });
 }
 
@@ -1114,13 +1276,29 @@ void LumenField::updateLook()
         {QStringLiteral("bloomRadius"), number("bloomRadius")},
         {QStringLiteral("bloomThreshold"), number("bloomThreshold")},
         {QStringLiteral("exposure"), number("exposure")},
+        {QStringLiteral("holoFrame"), flag("holoFrame")},
+        {QStringLiteral("holoOpacity"), flag("holoFrame") ? number("holoOpacity") : 0.0F},
+        {QStringLiteral("coreGlow"), number("coreGlow")},
+        {QStringLiteral("content"), contentSource()},
+        {QStringLiteral("gradeHue"), number("gradeHue")},
+        {QStringLiteral("gradeSaturate"), number("gradeSaturate")},
+        {QStringLiteral("gradeContrast"), number("gradeContrast")},
+        {QStringLiteral("gradeBrightness"), number("gradeBrightness")},
+        {QStringLiteral("gradeScanlines"), number("gradeScanlines")},
+        {QStringLiteral("gradeSplit"), number("gradeSplit")},
+        {QStringLiteral("gradeGlow"), number("gradeGlow")},
+        {QStringLiteral("graded"), number("gradeHue") != 0.0F || number("gradeSaturate") != 1.0F
+                                       || number("gradeContrast") != 1.0F || number("gradeBrightness") != 1.0F
+                                       || number("gradeScanlines") > 0.0F || number("gradeSplit") > 0.0F
+                                       || number("gradeGlow") > 0.0F},
     };
 }
 
 void LumenField::updateCategoryRows()
 {
     QVariantList rows;
-    for (const auto &c : categoryTable) {
+    const bool content = contentSource();
+    for (const auto &c : content ? std::span<const Category>(contentCategoryTable) : std::span<const Category>(categoryTable)) {
         const QString key = QString::fromLatin1(c.key);
         rows.push_back(QVariantMap{
             {QStringLiteral("key"), key},
@@ -1291,6 +1469,15 @@ void LumenField::accept(const QByteArray &body)
         {QStringLiteral("audio"), state.value(QStringLiteral("audio_envelope")).toDouble()},
         {QStringLiteral("workflows"), object.value(QStringLiteral("workflows")).toArray().toVariantList()},
     };
+    // The content sphere says what it lists, as the root label of Xavi's desktop did
+    // ("ARCHIEOS-NVIDIA · 2499 ELEMENTOS · 3 GB").
+    if (const QJsonObject content = object.value(QStringLiteral("content")).toObject(); !content.isEmpty()) {
+        const QString named = qEnvironmentVariable("ARCHIE_CONTENT_NAME");
+        m_sceneInfo.insert(QStringLiteral("contentName"), named.isEmpty() ? content.value(QStringLiteral("name")).toString() : named);
+        m_sceneInfo.insert(QStringLiteral("contentElements"), content.value(QStringLiteral("elements")).toDouble());
+        m_sceneInfo.insert(QStringLiteral("contentBytes"), content.value(QStringLiteral("bytes")).toDouble());
+        m_sceneInfo.insert(QStringLiteral("contentTruncated"), content.value(QStringLiteral("truncated")).toBool());
+    }
 
     QVariantList modules;
     for (const Node &node : m_nodes) {
@@ -1340,8 +1527,11 @@ void LumenField::accept(const QByteArray &body)
         m_projection.start();
         emit projectionStarted();
     }
-    setStatus(m_lens == QLatin1String("entities") ? QStringLiteral("ENTIDADES · UNA POR OBSERVACIÓN")
-                                                  : QStringLiteral("ESTRUCTURA + RELACIONES OBSERVADAS"));
+    if (m_sceneInfo.contains(QStringLiteral("contentName")))
+        setStatus(QStringLiteral("CONTENIDO · ") + m_sceneInfo.value(QStringLiteral("contentName")).toString().toUpper());
+    else
+        setStatus(m_lens == QLatin1String("entities") ? QStringLiteral("ENTIDADES · UNA POR OBSERVACIÓN")
+                                                      : QStringLiteral("ESTRUCTURA + RELACIONES OBSERVADAS"));
     emit sceneChanged();
 }
 
@@ -1385,6 +1575,22 @@ void LumenField::rebuildStatic()
             points.insert(points.end(), {p.x, p.y, p.z});
         guides->setLines(points);
     }
+
+    // The hologram's frame (Xavi's desktop): orbit rings, dotted rim, projector and beam.
+    const auto frame = flag("holoFrame") ? lumen::holo_frame(std::max(m_shellRadius, m_fieldRadius * 0.6F))
+                                         : lumen::HoloFrame{};
+    const auto upload = [this](const char *name, const std::vector<Vec3> &segments) {
+        if (const auto g = m_geometry.value(QLatin1String(name)); g) {
+            std::vector<float> points;
+            points.reserve(segments.size() * 3);
+            for (const Vec3 &p : segments)
+                points.insert(points.end(), {p.x, p.y, p.z});
+            g->setLines(points);
+        }
+    };
+    upload("holoRings", frame.rings);
+    upload("holoBeam", frame.beam);
+    upload("holoCore", frame.core);
     m_structureDirty = false;
 }
 
@@ -1403,6 +1609,15 @@ void LumenField::rebuildMembrane()
         colours.push_back(colourOf(m_nodes[i].category));
         const auto color=colours.back();
         shellNodes.push_back({points.back(),{color.r,color.g,color.b},m_nodes[i].branch});
+    }
+    // The design's shells take at most the 420 orbs of an observed field; a content
+    // sphere of thousands of files gives them an even sample of its nodes.
+    if (shellNodes.size() > 420) {
+        std::vector<XaviShellNode> sample;
+        sample.reserve(420);
+        for (std::size_t k = 0; k < 420; ++k)
+            sample.push_back(shellNodes[k * shellNodes.size() / 420]);
+        shellNodes = std::move(sample);
     }
     const auto warm = lumen::to_linear(lumen::parse_hex(m_settings.value(QStringLiteral("accentWarm")).toString().toStdString())
                                            .value_or(lumen::Rgb{0.9F, 0.7F, 0.5F}));
@@ -1577,9 +1792,26 @@ void LumenField::updateLayers()
         g->setLines(fibres);
 
     const bool curved = m_lens != QLatin1String("entities") && xaviLink(m_settings.value(QStringLiteral("visualLinkStyle")).toString())==0;
+    const int segments = std::max(1, static_cast<int>(number("linkSegments")));
     std::vector<float> backbone;
-    for (const int i : m_backbone)
-        appendCurve(backbone, positionAt(m_nodes[static_cast<std::size_t>(i)].parentIndex), positionAt(i), curved ? 5 : 1, false);
+    if (contentSource() && curved) {
+        // The content sphere's links are filaments: smooth, wavy strands, as on Xavi's desktop.
+        backbone.reserve(m_backbone.size() * static_cast<std::size_t>(segments) * 6);
+        for (const int i : m_backbone) {
+            const Vec3 a = toV(positionAt(m_nodes[static_cast<std::size_t>(i)].parentIndex));
+            const Vec3 b = toV(positionAt(i));
+            const std::uint32_t seed = seedOf(m_nodes[static_cast<std::size_t>(i)].id);
+            Vec3 previous = a;
+            for (int s = 1; s <= segments; ++s) {
+                const Vec3 next = lumen::filament(a, b, static_cast<float>(s) / static_cast<float>(segments), seed);
+                backbone.insert(backbone.end(), {previous.x, previous.y, previous.z, next.x, next.y, next.z});
+                previous = next;
+            }
+        }
+    } else {
+        for (const int i : m_backbone)
+            appendCurve(backbone, positionAt(m_nodes[static_cast<std::size_t>(i)].parentIndex), positionAt(i), curved ? segments : 1, false);
+    }
     if (const auto g = m_geometry.value(QStringLiteral("backbone")); g)
         g->setLines(backbone);
 

@@ -424,7 +424,9 @@ mod tests {
     use crate::live::eyes::Seen;
     use std::sync::Arc;
 
-    fn frame(at: Instant, items: &[(&str, [f32; 4], Option<Vec<f32>>)]) -> Scene {
+    type SceneItem<'a> = (&'a str, [f32; 4], Option<Vec<f32>>);
+
+    fn frame(at: Instant, items: &[SceneItem<'_>]) -> Scene {
         Scene {
             seen: items
                 .iter()

@@ -19,6 +19,10 @@ pub use stream::{
     ToolChatRequest, ToolDefinition,
 };
 
+mod anthropic;
+pub mod liveness;
+pub mod llama_slots;
+pub mod provider;
 pub mod routed;
 
 /// Nebius Token Factory's OpenAI-compatible API.
@@ -38,6 +42,7 @@ pub enum ProviderFamily {
     NvidiaNim,
     NebiusTokenFactory,
     OpenAiCompatible,
+    Anthropic,
 }
 
 impl ProviderFamily {
@@ -47,6 +52,10 @@ impl ProviderFamily {
             (Self::NvidiaNim, ProviderKind::NvidiaNim)
                 | (Self::NebiusTokenFactory, ProviderKind::NebiusTokenFactory)
                 | (Self::OpenAiCompatible, ProviderKind::OpenAiCompatible)
+                | (Self::OpenAiCompatible, ProviderKind::OpenAi)
+                | (Self::OpenAiCompatible, ProviderKind::LlamaCpp)
+                | (Self::OpenAiCompatible, ProviderKind::NebiusTokenFactory)
+                | (Self::Anthropic, ProviderKind::Anthropic)
         )
     }
 }
@@ -62,6 +71,15 @@ pub struct ProviderEndpoint {
 }
 
 impl ProviderEndpoint {
+    /// Native Anthropic Messages API. The model remains cloud-backed behind a proxy.
+    pub fn anthropic(base_url: &str, credential_env: Option<String>) -> Result<Self, RuntimeError> {
+        Self::new(
+            ProviderFamily::Anthropic,
+            base_url,
+            Locality::Cloud,
+            credential_env,
+        )
+    }
     pub fn nvidia_nim(base_url: &str, locality: Locality) -> Result<Self, RuntimeError> {
         let credential = (locality == Locality::Cloud).then(|| "NVIDIA_API_KEY".to_string());
         Self::new(ProviderFamily::NvidiaNim, base_url, locality, credential)
@@ -106,7 +124,25 @@ impl ProviderEndpoint {
 
         let loopback = base_url
             .host_str()
-            .is_some_and(|host| matches!(host, "localhost" | "127.0.0.1" | "::1"));
+            .is_some_and(|host| matches!(host, "localhost" | "127.0.0.1" | "::1" | "[::1]"));
+        if locality == Locality::Local && !loopback {
+            return Err(RuntimeError::LocalityMismatch);
+        }
+        // These are service endpoints, not arbitrary operator-controlled deployments.
+        // Generic local/fabric servers still use their explicit operator declaration.
+        let known_cloud_host = base_url.host_str().is_some_and(|host| {
+            matches!(
+                host.trim_end_matches('.').to_ascii_lowercase().as_str(),
+                "api.openai.com"
+                    | "api.tokenfactory.nebius.com"
+                    | "api.cerebras.ai"
+                    | "openrouter.ai"
+                    | "api.anthropic.com"
+            )
+        });
+        if known_cloud_host && locality != Locality::Cloud {
+            return Err(RuntimeError::LocalityMismatch);
+        }
         match base_url.scheme() {
             "https" => {}
             "http" if locality == Locality::Local && loopback => {}
@@ -142,9 +178,25 @@ impl ProviderEndpoint {
     pub fn for_model(descriptor: &ModelDescriptor) -> Result<Self, RuntimeError> {
         let label = |name: &str| descriptor.labels.get(name).map(String::as_str);
         match &descriptor.provider {
-            ProviderKind::NebiusTokenFactory => {
-                Self::nebius(label("base-url").unwrap_or(NEBIUS_BASE_URL))
-            }
+            ProviderKind::NebiusTokenFactory => Self::new(
+                ProviderFamily::NebiusTokenFactory,
+                label("base-url").unwrap_or(NEBIUS_BASE_URL),
+                Locality::Cloud,
+                Some(
+                    label("credential-env")
+                        .unwrap_or("NEBIUS_TOKEN_FACTORY_KEY")
+                        .to_string(),
+                ),
+            ),
+            ProviderKind::OpenAi => Self::openai_compatible(
+                label("base-url").unwrap_or("https://api.openai.com/v1/"),
+                Locality::Cloud,
+                Some(
+                    label("credential-env")
+                        .unwrap_or("OPENAI_API_KEY")
+                        .to_string(),
+                ),
+            ),
             ProviderKind::NvidiaNim => Self::nvidia_nim(
                 label("base-url").ok_or(RuntimeError::InvalidEndpoint)?,
                 descriptor.locality,
@@ -153,6 +205,26 @@ impl ProviderEndpoint {
                 label("base-url").ok_or(RuntimeError::InvalidEndpoint)?,
                 descriptor.locality,
                 label("credential-env").map(str::to_string),
+            ),
+            // llama.cpp's server speaks the OpenAI wire format. It is a local model by
+            // definition, so it takes no credential and the locality checks refuse
+            // any base URL that is not on this machine.
+            ProviderKind::LlamaCpp => {
+                llama_thinking(descriptor)?;
+                llama_effort(descriptor)?;
+                Self::openai_compatible(
+                    label("base-url").unwrap_or("http://127.0.0.1:8081/v1/"),
+                    Locality::Local,
+                    None,
+                )
+            }
+            ProviderKind::Anthropic => Self::anthropic(
+                label("base-url").unwrap_or("https://api.anthropic.com/v1/"),
+                Some(
+                    label("credential-env")
+                        .unwrap_or("ANTHROPIC_API_KEY")
+                        .to_string(),
+                ),
             ),
             _ => Err(RuntimeError::ProviderMismatch),
         }
@@ -232,6 +304,54 @@ pub struct ChatRequest {
     pub temperature: Option<f32>,
     #[serde(default)]
     pub stream: bool,
+    /// The JSON Schema the reply must match, for servers that decode under it. Only the
+    /// OpenAI wire carries it, as `response_format`; Anthropic never receives it. It
+    /// shapes decoding and proves nothing: the caller still validates the reply.
+    #[serde(skip)]
+    pub reply_schema: Option<serde_json::Value>,
+}
+
+/// A reply schema stays small: it names a reply's shape, not its content.
+const MAX_REPLY_SCHEMA_BYTES: usize = 16 * 1024;
+
+/// The schema has to be a JSON object that describes an object, so a server cannot read
+/// it as an invitation to free text.
+fn valid_reply_schema(schema: &serde_json::Value) -> bool {
+    schema.get("type").and_then(serde_json::Value::as_str) == Some("object")
+        && serde_json::to_vec(schema).is_ok_and(|bytes| bytes.len() <= MAX_REPLY_SCHEMA_BYTES)
+}
+
+/// OpenAI's structured-output form, which llama.cpp, vLLM and the hosted APIs accept.
+/// llama.cpp's grammar converter enforces a string's `minLength` and `maxLength`; strict
+/// validators elsewhere differ in whether they accept them, so other servers receive the
+/// schema without them and the caller's own check still refuses a reply that breaks them.
+fn attach_reply_schema(
+    descriptor: &ModelDescriptor,
+    body: &mut serde_json::Value,
+    schema: &serde_json::Value,
+) {
+    let mut schema = schema.clone();
+    if descriptor.provider != ProviderKind::LlamaCpp {
+        drop_string_lengths(&mut schema);
+    }
+    body["response_format"] = serde_json::json!({
+        "type": "json_schema",
+        "json_schema": { "name": "reply", "strict": true, "schema": schema },
+    });
+}
+
+fn drop_string_lengths(schema: &mut serde_json::Value) {
+    match schema {
+        serde_json::Value::Object(map) => {
+            if map.get("type").and_then(serde_json::Value::as_str) == Some("string") {
+                map.remove("minLength");
+                map.remove("maxLength");
+            }
+            map.values_mut().for_each(drop_string_lengths);
+        }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(drop_string_lengths),
+        _ => {}
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -302,16 +422,26 @@ impl VisionChatRequest<'_> {
 impl ChatRequest {
     pub fn validate(&self) -> Result<(), RuntimeError> {
         if self.model.trim().is_empty()
+            || self.model.len() > 256
             || self.messages.is_empty()
             || self.messages.len() > MAX_MESSAGES
             || self.stream
             || self.messages.iter().any(|message| {
                 message.content.is_empty() || message.content.len() > MAX_CONTENT_BYTES
             })
+            || self
+                .messages
+                .iter()
+                .fold(0_usize, |n, m| n.saturating_add(m.content.len()))
+                > MAX_CONTENT_BYTES
             || self.max_tokens == Some(0)
             || self
                 .temperature
                 .is_some_and(|value| !value.is_finite() || !(0.0..=2.0).contains(&value))
+            || self
+                .reply_schema
+                .as_ref()
+                .is_some_and(|schema| !valid_reply_schema(schema))
         {
             return Err(RuntimeError::InvalidRequest);
         }
@@ -369,6 +499,8 @@ pub enum RuntimeError {
     MissingCredential(String),
     #[error("transport limits must be greater than zero")]
     InvalidLimits,
+    #[error("inference exceeded its total deadline")]
+    DeadlineExceeded,
     #[error("inference request is empty, streaming, or outside supported bounds")]
     InvalidRequest,
     #[error("model descriptor does not match the configured provider endpoint")]
@@ -383,6 +515,8 @@ pub enum RuntimeError {
     ResponseTooLarge,
     #[error("provider response did not contain a completion")]
     EmptyCompletion,
+    #[error("native provider protocol error: {0}")]
+    NativeProtocol(&'static str),
     #[error("provider transport failed: {0}")]
     Transport(#[from] reqwest::Error),
     #[error("provider returned invalid JSON: {0}")]
@@ -401,17 +535,28 @@ pub struct InferenceClient {
 
 impl InferenceClient {
     pub fn new(endpoint: ProviderEndpoint) -> Result<Self, RuntimeError> {
-        let client = Client::builder()
+        let builder = Client::builder()
             .timeout(endpoint.timeout)
             .https_only(false)
             // A provider may not redirect private context to an endpoint that was
             // never checked by the router/egress gate (including 307/308 POST replay).
-            .redirect(reqwest::redirect::Policy::none())
-            .build()?;
+            .redirect(reqwest::redirect::Policy::none());
+        // Local inference must reach the admitted endpoint directly; an environment
+        // proxy would receive private request bodies despite local classification.
+        let builder = if endpoint.locality == Locality::Local {
+            builder.no_proxy()
+        } else {
+            builder
+        };
+        let client = builder.build()?;
         Ok(Self { endpoint, client })
     }
 
     pub async fn ready(&self) -> Result<bool, RuntimeError> {
+        self.with_deadline(self.ready_inner()).await
+    }
+
+    async fn ready_inner(&self) -> Result<bool, RuntimeError> {
         let response = self
             .send::<()>(self.endpoint.url("health/ready")?, None)
             .await?;
@@ -419,12 +564,30 @@ impl InferenceClient {
     }
 
     pub async fn models(&self) -> Result<ModelList, RuntimeError> {
+        self.with_deadline(self.models_inner()).await
+    }
+
+    async fn models_inner(&self) -> Result<ModelList, RuntimeError> {
         let response = self.send::<()>(self.endpoint.url("models")?, None).await?;
+        let status = response.status();
         let bytes = self.bounded_body(response).await?;
+        if !status.is_success() {
+            return Err(RuntimeError::HttpStatus(status));
+        }
         Ok(serde_json::from_slice(&bytes)?)
     }
 
     pub async fn chat(
+        &self,
+        descriptor: &ModelDescriptor,
+        privacy: PrivacyGrade,
+        request: &ChatRequest,
+    ) -> Result<ChatResponse, RuntimeError> {
+        self.with_deadline(self.chat_inner(descriptor, privacy, request))
+            .await
+    }
+
+    async fn chat_inner(
         &self,
         descriptor: &ModelDescriptor,
         privacy: PrivacyGrade,
@@ -438,9 +601,29 @@ impl InferenceClient {
         if request.model != provider_model_id(descriptor)? {
             return Err(RuntimeError::ProviderMismatch);
         }
-        let response = self
-            .send(self.endpoint.url("chat/completions")?, Some(request))
-            .await?;
+        if self.endpoint.family == ProviderFamily::Anthropic {
+            let body = anthropic::chat_body(request)?;
+            let response = self
+                .send(self.endpoint.url("messages")?, Some(&body))
+                .await?;
+            let status = response.status();
+            let bytes = self.bounded_body(response).await?;
+            if !status.is_success() {
+                return Err(RuntimeError::HttpStatus(status));
+            }
+            return anthropic::decode(&bytes);
+        }
+        let url = self.endpoint.url("chat/completions")?;
+        let response = if llama_reasoning_pinned(descriptor)? || request.reply_schema.is_some() {
+            let mut body = serde_json::to_value(request)?;
+            pin_llama_reasoning(descriptor, &mut body, request.max_tokens)?;
+            if let Some(schema) = &request.reply_schema {
+                attach_reply_schema(descriptor, &mut body, schema);
+            }
+            self.send(url, Some(&body)).await?
+        } else {
+            self.send(url, Some(request)).await?
+        };
         let status = response.status();
         let bytes = self.bounded_body(response).await?;
         if !status.is_success() {
@@ -459,31 +642,64 @@ impl InferenceClient {
         privacy: PrivacyGrade,
         request: &VisionChatRequest<'_>,
     ) -> Result<ChatResponse, RuntimeError> {
+        self.with_deadline(self.vision_chat_inner(descriptor, privacy, request))
+            .await
+    }
+
+    async fn vision_chat_inner(
+        &self,
+        descriptor: &ModelDescriptor,
+        privacy: PrivacyGrade,
+        request: &VisionChatRequest<'_>,
+    ) -> Result<ChatResponse, RuntimeError> {
         request.validate()?;
         self.authorize(descriptor, privacy)?;
         let provider_model = provider_model_id(descriptor)?;
         let encoded = base64::engine::general_purpose::STANDARD.encode(request.image.bytes);
         let data_url = format!("data:{};base64,{encoded}", request.image.mime.as_str());
-        let body = serde_json::json!({
-            "model": provider_model,
-            "messages": [
-                {"role": "system", "content": request.instruction},
-                {"role": "user", "content": [
-                    {"type": "text", "text": request.context},
-                    {"type": "image_url", "image_url": {"url": data_url}}
-                ]}
-            ],
-            "max_tokens": request.max_tokens,
-            "temperature": 0.0,
-            "stream": false
-        });
+        let native = self.endpoint.family == ProviderFamily::Anthropic;
+        let body = if native {
+            serde_json::json!({
+                "model":provider_model,
+                "system":request.instruction,
+                "messages":[{"role":"user","content":[
+                    {"type":"text","text":request.context},
+                    {"type":"image","source":{"type":"base64","media_type":request.image.mime.as_str(),"data":encoded}}
+                ]}],
+                "max_tokens":request.max_tokens,"temperature":0.0,"stream":false
+            })
+        } else {
+            serde_json::json!({
+                "model": provider_model,
+                "messages": [
+                    {"role": "system", "content": request.instruction},
+                    {"role": "user", "content": [
+                        {"type": "text", "text": request.context},
+                        {"type": "image_url", "image_url": {"url": data_url}}
+                    ]}
+                ],
+                "max_tokens": request.max_tokens,
+                "temperature": 0.0,
+                "stream": false
+            })
+        };
         let response = self
-            .send(self.endpoint.url("chat/completions")?, Some(&body))
+            .send(
+                self.endpoint.url(if native {
+                    "messages"
+                } else {
+                    "chat/completions"
+                })?,
+                Some(&body),
+            )
             .await?;
         let status = response.status();
         let bytes = self.bounded_body(response).await?;
         if !status.is_success() {
             return Err(RuntimeError::HttpStatus(status));
+        }
+        if native {
+            return anthropic::decode(&bytes);
         }
         let decoded: ChatResponse = serde_json::from_slice(&bytes)?;
         if decoded.choices.is_empty() {
@@ -504,6 +720,20 @@ impl InferenceClient {
         descriptor: &ModelDescriptor,
         privacy: PrivacyGrade,
         request: &stream::ToolChatRequest,
+        on_event: F,
+    ) -> Result<(), RuntimeError>
+    where
+        F: FnMut(stream::StreamEvent),
+    {
+        self.with_deadline(self.chat_stream_inner(descriptor, privacy, request, on_event))
+            .await
+    }
+
+    async fn chat_stream_inner<F>(
+        &self,
+        descriptor: &ModelDescriptor,
+        privacy: PrivacyGrade,
+        request: &stream::ToolChatRequest,
         mut on_event: F,
     ) -> Result<(), RuntimeError>
     where
@@ -514,10 +744,22 @@ impl InferenceClient {
         if request.model != provider_model_id(descriptor)? {
             return Err(RuntimeError::ProviderMismatch);
         }
+        let native = self.endpoint.family == ProviderFamily::Anthropic;
+        let body = if native {
+            anthropic::tool_body(request)?
+        } else {
+            let mut body = request.body();
+            pin_llama_reasoning(descriptor, &mut body, Some(request.max_tokens))?;
+            body
+        };
         let response = self
             .send(
-                self.endpoint.url("chat/completions")?,
-                Some(&request.body()),
+                self.endpoint.url(if native {
+                    "messages"
+                } else {
+                    "chat/completions"
+                })?,
+                Some(&body),
             )
             .await?;
         let status = response.status();
@@ -525,6 +767,7 @@ impl InferenceClient {
             return Err(RuntimeError::HttpStatus(status));
         }
         let mut assembler = stream::SseAssembler::new();
+        let mut native_assembler = anthropic::AnthropicSse::new();
         let mut received = 0_usize;
         let mut bytes = response.bytes_stream();
         while let Some(chunk) = bytes.next().await {
@@ -533,17 +776,42 @@ impl InferenceClient {
             if received > self.endpoint.max_response_bytes {
                 return Err(RuntimeError::ResponseTooLarge);
             }
-            for event in assembler.feed(&chunk).map_err(RuntimeError::Stream)? {
+            let events = if native {
+                native_assembler.feed(&chunk)
+            } else {
+                assembler.feed(&chunk)
+            }
+            .map_err(RuntimeError::Stream)?;
+            for event in events {
                 on_event(event);
             }
-            if assembler.is_finished() {
+            if if native {
+                native_assembler.is_finished()
+            } else {
+                assembler.is_finished()
+            } {
                 break;
             }
         }
-        for event in assembler.close().map_err(RuntimeError::Stream)? {
+        let events = if native {
+            native_assembler.close()
+        } else {
+            assembler.close()
+        }
+        .map_err(RuntimeError::Stream)?;
+        for event in events {
             on_event(event);
         }
         Ok(())
+    }
+
+    async fn with_deadline<T>(
+        &self,
+        operation: impl std::future::Future<Output = Result<T, RuntimeError>>,
+    ) -> Result<T, RuntimeError> {
+        tokio::time::timeout(self.endpoint.timeout, operation)
+            .await
+            .map_err(|_| RuntimeError::DeadlineExceeded)?
     }
 
     fn authorize(
@@ -578,7 +846,14 @@ impl InferenceClient {
                 None => self.client.get(url.clone()),
             };
             if let Some(credential) = self.endpoint.credential()? {
-                request = request.bearer_auth(credential);
+                request = if self.endpoint.family == ProviderFamily::Anthropic {
+                    request.header("x-api-key", credential)
+                } else {
+                    request.bearer_auth(credential)
+                };
+            }
+            if self.endpoint.family == ProviderFamily::Anthropic {
+                request = request.header("anthropic-version", "2023-06-01");
             }
             let response = request.send().await?;
 
@@ -640,6 +915,79 @@ impl InferenceClient {
         }
         Ok(output)
     }
+}
+
+/// The reasoning mode a llama.cpp manifest pins with `thinking = "on" | "off"`. The
+/// mode belongs to the manifest the router chose, never to the prompt. Any other value
+/// is refused: a misspelt switch would silently leave the template's default on.
+fn llama_thinking(descriptor: &ModelDescriptor) -> Result<Option<bool>, RuntimeError> {
+    if descriptor.provider != ProviderKind::LlamaCpp {
+        return Ok(None);
+    }
+    match descriptor.labels.get("thinking").map(String::as_str) {
+        None => Ok(None),
+        Some("on") => Ok(Some(true)),
+        Some("off") => Ok(Some(false)),
+        Some(_) => Err(RuntimeError::InvalidRequest),
+    }
+}
+
+/// The reasoning effort a llama.cpp manifest pins with `reasoning-effort`, for chat templates
+/// that read it instead of `enable_thinking` (PrismML's Ternary Bonsai 2 27B: "none" turns its
+/// reasoning off, "medium" shortens it, "xhigh" is its default). "high" is refused: that
+/// template answers it with HTTP 500 (PrismML KNOWN_ISSUES, 2026-10). Any other value too.
+fn llama_effort(descriptor: &ModelDescriptor) -> Result<Option<&'static str>, RuntimeError> {
+    if descriptor.provider != ProviderKind::LlamaCpp {
+        return Ok(None);
+    }
+    match descriptor
+        .labels
+        .get("reasoning-effort")
+        .map(String::as_str)
+    {
+        None => Ok(None),
+        Some("none") => Ok(Some("none")),
+        Some("medium") => Ok(Some("medium")),
+        Some("xhigh") => Ok(Some("xhigh")),
+        Some(_) => Err(RuntimeError::InvalidRequest),
+    }
+}
+
+/// Whether a llama.cpp request carries any reasoning field of the manifest's.
+fn llama_reasoning_pinned(descriptor: &ModelDescriptor) -> Result<bool, RuntimeError> {
+    Ok(llama_thinking(descriptor)?.is_some() || llama_effort(descriptor)?.is_some())
+}
+
+/// What llama.cpp says when a model's reasoning budget runs out, before the answer.
+const REASONING_BUDGET_MESSAGE: &str =
+    "\n\nTime is up. I will stop thinking and give the final answer now.\n";
+
+/// llama.cpp reads the reasoning switch from the chat template's own arguments. Other
+/// OpenAI-compatible servers never receive these fields.
+///
+/// With reasoning on, the thought may spend half of the output budget and the other half
+/// is kept for the answer; llama.cpp closes a thought that reaches it with the message
+/// above. Unbounded, Bonsai reasoned past 4,096 tokens on a Harness² proposal and never
+/// answered (2026-10-22).
+fn pin_llama_reasoning(
+    descriptor: &ModelDescriptor,
+    body: &mut serde_json::Value,
+    max_tokens: Option<u32>,
+) -> Result<(), RuntimeError> {
+    let thinking = llama_thinking(descriptor)?;
+    let effort = llama_effort(descriptor)?;
+    if let Some(thinking) = thinking {
+        body["chat_template_kwargs"] = serde_json::json!({ "enable_thinking": thinking });
+    }
+    if let Some(effort) = effort {
+        body["reasoning_effort"] = effort.into();
+    }
+    let reasons = thinking.unwrap_or_else(|| effort.is_some_and(|e| e != "none"));
+    if let (true, Some(max_tokens)) = (reasons, max_tokens) {
+        body["thinking_budget_tokens"] = (max_tokens / 2).into();
+        body["reasoning_budget_message"] = REASONING_BUDGET_MESSAGE.into();
+    }
+    Ok(())
 }
 
 /// Resolves the provider-facing model name from a trusted router descriptor. Archie model
@@ -789,6 +1137,7 @@ mod tests {
             max_tokens: Some(100),
             temperature: Some(0.2),
             stream: false,
+            reply_schema: None,
         };
         assert!(valid.validate().is_ok());
         let mut invalid = valid.clone();
@@ -814,6 +1163,7 @@ mod tests {
             max_tokens: Some(32),
             temperature: Some(0.0),
             stream: false,
+            reply_schema: None,
         };
 
         let response = client
@@ -832,6 +1182,375 @@ mod tests {
         assert!(request_text.contains("\"model\":\"test.model\""));
         assert!(request_text.contains("\"content\":\"status\""));
         assert!(!request_text.to_ascii_lowercase().contains("authorization:"));
+    }
+
+    #[tokio::test]
+    async fn llama_cpp_manifest_pins_the_reasoning_effort_on_the_wire() {
+        let body = r#"{"model":"bonsai","choices":[{"message":{"role":"assistant","content":"ready"},"finish_reason":"stop"}]}"#;
+        for effort in ["none", "medium", "xhigh"] {
+            let (base_url, observed) = one_response(body).await;
+            let mut model = descriptor(ProviderKind::LlamaCpp, Locality::Local);
+            model.labels.insert("base-url".into(), base_url.clone());
+            model
+                .labels
+                .insert("provider-model".into(), "bonsai".into());
+            model
+                .labels
+                .insert("reasoning-effort".into(), effort.into());
+            let client =
+                InferenceClient::new(ProviderEndpoint::for_model(&model).unwrap()).unwrap();
+            let request = ChatRequest {
+                model: "bonsai".into(),
+                messages: vec![ChatMessage {
+                    role: MessageRole::User,
+                    content: "status".into(),
+                }],
+                max_tokens: Some(32),
+                temperature: None,
+                stream: false,
+                reply_schema: None,
+            };
+            client
+                .chat(&model, PrivacyGrade::Restricted, &request)
+                .await
+                .unwrap();
+            let request_text = observed.await.unwrap();
+            assert!(
+                request_text.contains(&format!("\"reasoning_effort\":\"{effort}\"")),
+                "{effort}: {request_text}"
+            );
+            // Without a thinking label, only an effort that reasons spends half the budget on it.
+            assert_eq!(
+                request_text.contains("\"thinking_budget_tokens\":16"),
+                effort != "none",
+                "{effort}: {request_text}"
+            );
+            assert!(
+                !request_text.contains("enable_thinking"),
+                "{effort}: {request_text}"
+            );
+        }
+        // "high" answers HTTP 500 on the 27B's template: refused before any request.
+        let mut model = descriptor(ProviderKind::LlamaCpp, Locality::Local);
+        model
+            .labels
+            .insert("reasoning-effort".into(), "high".into());
+        assert!(ProviderEndpoint::for_model(&model).is_err());
+    }
+
+    #[tokio::test]
+    async fn llama_cpp_manifest_pins_the_reasoning_switch_on_the_wire() {
+        let body = r#"{"model":"bonsai","choices":[{"message":{"role":"assistant","content":"ready"},"finish_reason":"stop"}]}"#;
+        for (label, expected) in [("off", "false"), ("on", "true")] {
+            let (base_url, observed) = one_response(body).await;
+            let mut model = descriptor(ProviderKind::LlamaCpp, Locality::Local);
+            model.labels.insert("base-url".into(), base_url.clone());
+            model
+                .labels
+                .insert("provider-model".into(), "bonsai".into());
+            model.labels.insert("thinking".into(), label.into());
+            let client =
+                InferenceClient::new(ProviderEndpoint::for_model(&model).unwrap()).unwrap();
+            let request = ChatRequest {
+                model: "bonsai".into(),
+                messages: vec![ChatMessage {
+                    role: MessageRole::User,
+                    content: "status".into(),
+                }],
+                max_tokens: Some(32),
+                temperature: None,
+                stream: false,
+                reply_schema: None,
+            };
+            client
+                .chat(&model, PrivacyGrade::Restricted, &request)
+                .await
+                .unwrap();
+            let request_text = observed.await.unwrap();
+            assert!(
+                request_text.contains(&format!(
+                    "\"chat_template_kwargs\":{{\"enable_thinking\":{expected}}}"
+                )),
+                "{label}: {request_text}"
+            );
+            // Reasoning may spend half of the output budget; the other half is the
+            // answer's, and llama.cpp closes the thought with Archie's message.
+            assert_eq!(
+                request_text.contains("\"thinking_budget_tokens\":16"),
+                label == "on",
+                "{label}: {request_text}"
+            );
+            assert_eq!(
+                request_text.contains("\"reasoning_budget_message\":"),
+                label == "on",
+                "{label}: {request_text}"
+            );
+        }
+        // An OpenAI-compatible server that is not llama.cpp never sees the field.
+        let (base_url, observed) = one_response(body).await;
+        let endpoint = ProviderEndpoint::nvidia_nim(&base_url, Locality::Local).unwrap();
+        let mut model = descriptor(ProviderKind::NvidiaNim, Locality::Local);
+        model.labels.insert("thinking".into(), "off".into());
+        let request = ChatRequest {
+            model: model.id.to_string(),
+            messages: vec![ChatMessage {
+                role: MessageRole::User,
+                content: "status".into(),
+            }],
+            max_tokens: Some(32),
+            temperature: None,
+            stream: false,
+            reply_schema: None,
+        };
+        InferenceClient::new(endpoint)
+            .unwrap()
+            .chat(&model, PrivacyGrade::Restricted, &request)
+            .await
+            .unwrap();
+        assert!(!observed.await.unwrap().contains("chat_template_kwargs"));
+    }
+
+    fn reply_shape() -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "artifact": { "type": "string", "minLength": 1 },
+                "trajectory": { "type": "string" },
+            },
+            "required": ["artifact", "trajectory"],
+            "additionalProperties": false,
+        })
+    }
+
+    /// The same shape without the string lengths only llama.cpp is known to enforce.
+    fn portable_reply_shape() -> serde_json::Value {
+        let mut shape = reply_shape();
+        shape["properties"]["artifact"] = serde_json::json!({ "type": "string" });
+        shape
+    }
+
+    fn schema_request(model: &str, reply_schema: Option<serde_json::Value>) -> ChatRequest {
+        ChatRequest {
+            model: model.into(),
+            messages: vec![ChatMessage {
+                role: MessageRole::User,
+                content: "status".into(),
+            }],
+            max_tokens: Some(32),
+            temperature: None,
+            stream: false,
+            reply_schema,
+        }
+    }
+
+    fn wire_body(captured: &str) -> serde_json::Value {
+        let (_, body) = captured.split_once("\r\n\r\n").expect("an HTTP request");
+        serde_json::from_str(body).expect("a JSON body")
+    }
+
+    /// A pinned llama.cpp model decodes under the stage's schema: the schema rides the
+    /// OpenAI wire as `response_format`, next to the reasoning switch, not instead of it.
+    #[tokio::test]
+    async fn a_reply_schema_rides_the_openai_wire_as_response_format() {
+        let body = r#"{"model":"bonsai","choices":[{"message":{"role":"assistant","content":"{}"},"finish_reason":"stop"}]}"#;
+        for thinking in ["on", "off"] {
+            let (base_url, observed) = one_response(body).await;
+            let mut model = descriptor(ProviderKind::LlamaCpp, Locality::Local);
+            model.labels.insert("base-url".into(), base_url);
+            model
+                .labels
+                .insert("provider-model".into(), "bonsai".into());
+            model.labels.insert("thinking".into(), thinking.into());
+            InferenceClient::new(ProviderEndpoint::for_model(&model).unwrap())
+                .unwrap()
+                .chat(
+                    &model,
+                    PrivacyGrade::Restricted,
+                    &schema_request("bonsai", Some(reply_shape())),
+                )
+                .await
+                .unwrap();
+            let sent = wire_body(&observed.await.unwrap());
+            assert_eq!(
+                sent["response_format"],
+                serde_json::json!({
+                    "type": "json_schema",
+                    "json_schema": { "name": "reply", "strict": true, "schema": reply_shape() },
+                }),
+                "{thinking}"
+            );
+            assert_eq!(
+                sent["chat_template_kwargs"]["enable_thinking"],
+                thinking == "on",
+                "{thinking}"
+            );
+            // The schema is never a message the model reads.
+            assert_eq!(sent["messages"].as_array().unwrap().len(), 1);
+            assert!(sent.get("reply_schema").is_none());
+        }
+
+        // Without a schema nothing changes on the wire.
+        let (base_url, observed) = one_response(body).await;
+        let mut model = descriptor(ProviderKind::LlamaCpp, Locality::Local);
+        model.labels.insert("base-url".into(), base_url);
+        model
+            .labels
+            .insert("provider-model".into(), "bonsai".into());
+        model.labels.insert("thinking".into(), "on".into());
+        InferenceClient::new(ProviderEndpoint::for_model(&model).unwrap())
+            .unwrap()
+            .chat(
+                &model,
+                PrivacyGrade::Restricted,
+                &schema_request("bonsai", None),
+            )
+            .await
+            .unwrap();
+        let sent = wire_body(&observed.await.unwrap());
+        assert!(sent.get("response_format").is_none());
+        assert!(sent.get("reply_schema").is_none());
+
+        // Another OpenAI-compatible server without a reasoning switch gets the schema too,
+        // without the string lengths its strict validator might refuse.
+        let (base_url, observed) = one_response(body).await;
+        let endpoint = ProviderEndpoint::nvidia_nim(&base_url, Locality::Local).unwrap();
+        let model = descriptor(ProviderKind::NvidiaNim, Locality::Local);
+        InferenceClient::new(endpoint)
+            .unwrap()
+            .chat(
+                &model,
+                PrivacyGrade::Restricted,
+                &schema_request(&model.id.to_string(), Some(reply_shape())),
+            )
+            .await
+            .unwrap();
+        let sent = wire_body(&observed.await.unwrap());
+        assert_eq!(
+            sent["response_format"]["json_schema"]["schema"],
+            portable_reply_shape()
+        );
+        assert!(sent.get("chat_template_kwargs").is_none());
+    }
+
+    /// Only a string schema loses its lengths: a property that happens to be named
+    /// `minLength` stays, at any depth.
+    #[test]
+    fn only_string_lengths_are_dropped() {
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "minLength": { "type": "string", "minLength": 1, "maxLength": 9 },
+                "list": { "type": "array", "items": { "type": "string", "minLength": 2 } },
+                "count": { "type": "integer", "minimum": 1 },
+            },
+            "required": ["minLength", "list", "count"],
+            "additionalProperties": false,
+        });
+        drop_string_lengths(&mut schema);
+        assert_eq!(
+            schema,
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "minLength": { "type": "string" },
+                    "list": { "type": "array", "items": { "type": "string" } },
+                    "count": { "type": "integer", "minimum": 1 },
+                },
+                "required": ["minLength", "list", "count"],
+                "additionalProperties": false,
+            })
+        );
+    }
+
+    /// Anthropic's Messages API has no such field; its body never carries the schema.
+    #[test]
+    fn anthropic_never_receives_a_reply_schema() {
+        let body = anthropic::chat_body(&schema_request("claude", Some(reply_shape()))).unwrap();
+        let text = body.to_string();
+        assert!(!text.contains("response_format"), "{text}");
+        assert!(!text.contains("trajectory"), "{text}");
+    }
+
+    /// A schema that does not describe an object, or that is not small, is refused before
+    /// any connection is opened.
+    #[tokio::test]
+    async fn an_unusable_reply_schema_is_refused_before_any_call() {
+        let oversized = serde_json::json!({
+            "type": "object",
+            "description": "x".repeat(MAX_REPLY_SCHEMA_BYTES),
+        });
+        for schema in [
+            serde_json::json!({ "type": "string" }),
+            serde_json::json!("object"),
+            serde_json::json!({ "properties": {} }),
+            oversized,
+        ] {
+            let request = schema_request("bonsai", Some(schema.clone()));
+            assert!(
+                matches!(request.validate(), Err(RuntimeError::InvalidRequest)),
+                "{schema}"
+            );
+            // Port 9 on loopback: the call fails on the request, not on a connection.
+            let mut model = descriptor(ProviderKind::LlamaCpp, Locality::Local);
+            model
+                .labels
+                .insert("base-url".into(), "http://127.0.0.1:9/v1/".into());
+            model
+                .labels
+                .insert("provider-model".into(), "bonsai".into());
+            let error = InferenceClient::new(ProviderEndpoint::for_model(&model).unwrap())
+                .unwrap()
+                .chat(&model, PrivacyGrade::Restricted, &request)
+                .await
+                .unwrap_err();
+            assert!(matches!(error, RuntimeError::InvalidRequest), "{error:?}");
+        }
+        assert!(schema_request("bonsai", Some(reply_shape()))
+            .validate()
+            .is_ok());
+    }
+
+    /// Voice streams its answers, so a streamed request to the direct manifest must not
+    /// fall back to the template's default and start reasoning.
+    #[tokio::test]
+    async fn llama_cpp_streaming_carries_the_same_reasoning_switch() {
+        let body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"ready\"},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let (base_url, observed) = one_response(body).await;
+        let mut model = descriptor(ProviderKind::LlamaCpp, Locality::Local);
+        model.labels.insert("base-url".into(), base_url);
+        model
+            .labels
+            .insert("provider-model".into(), "bonsai".into());
+        model.labels.insert("thinking".into(), "off".into());
+        let request = stream::ToolChatRequest {
+            model: "bonsai".into(),
+            messages: vec![stream::ToolChatMessage::User("status".into())],
+            tools: vec![],
+            max_tokens: 32,
+            temperature: 0.2,
+        };
+        InferenceClient::new(ProviderEndpoint::for_model(&model).unwrap())
+            .unwrap()
+            .chat_stream(&model, PrivacyGrade::Restricted, &request, |_| {})
+            .await
+            .unwrap();
+        assert!(observed
+            .await
+            .unwrap()
+            .contains("\"chat_template_kwargs\":{\"enable_thinking\":false}"));
+    }
+
+    #[test]
+    fn a_misspelt_reasoning_switch_is_refused_before_any_call() {
+        let mut model = descriptor(ProviderKind::LlamaCpp, Locality::Local);
+        model.labels.insert("thinking".into(), "true".into());
+        assert!(matches!(
+            ProviderEndpoint::for_model(&model),
+            Err(RuntimeError::InvalidRequest)
+        ));
     }
 
     #[tokio::test]
@@ -948,6 +1667,7 @@ mod tests {
             max_tokens: Some(32),
             temperature: Some(0.0),
             stream: false,
+            reply_schema: None,
         };
         assert!(matches!(
             client

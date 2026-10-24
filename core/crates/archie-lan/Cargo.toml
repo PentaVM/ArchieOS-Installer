@@ -16,5 +16,20 @@ path = "src/bin/archie-netwatch.rs"
 
 [dependencies]
 archie-types.workspace = true
+# The IEEE OUI registry, embedded at build time (MIT): who made a network card.
+oui-data = "0.2.3"
+# Mozilla's Public Suffix List, compiled in (MIT/Apache-2.0; one types crate): the domain
+# someone registered under `co.uk` or `github.io`.
+psl = "2.1.241"
 serde.workspace = true
 serde_json.workspace = true
+socket2 = { version = "0.6", features = ["all"] }
+if-addrs = "0.13"
+roxmltree = "0.20"
+uuid.workspace = true
+clap.workspace = true
+fs2.workspace = true
+mdns-sd = { version = "=0.21.5", default-features = false }
+
+[dev-dependencies]
+mdns-sd = { version = "=0.21.5", default-features = false, features = ["serde"] }

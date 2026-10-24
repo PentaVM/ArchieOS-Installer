@@ -5,6 +5,7 @@
 //! callers may open and drop the store from a Tokio runtime safely.
 mod correction;
 mod execution;
+mod inference;
 use archie_memory::{
     cognitive::{reference, CognitiveEvent, CognitivePayload, FocusRecord},
     graph::GraphSnapshot,
@@ -18,6 +19,7 @@ use sha2::{Digest, Sha256};
 use std::{net::IpAddr, sync::Mutex, time::Duration};
 
 const SCHEMA: &str = include_str!("schema.sql");
+const INFERENCE_V2: &str = include_str!("inference-v2.sql");
 // One database-wide writer lock also serializes migration with normal writes.
 // This preserves single-writer ordering, including replay watermarks.
 const WRITER_LOCK: i64 = 0x4152_4348_4945_5047;
@@ -111,7 +113,7 @@ impl PostgresStore {
         tx.batch_execute(&format!("CREATE SCHEMA IF NOT EXISTS {schema}; REVOKE ALL ON SCHEMA {schema} FROM PUBLIC; SET search_path TO {schema}, pg_catalog;"))?;
         tx.batch_execute("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, schema_sha256 TEXT NOT NULL)")?;
         let versions = tx.query(
-            "SELECT version,schema_sha256 FROM schema_migrations ORDER BY version LIMIT 2",
+            "SELECT version,schema_sha256 FROM schema_migrations ORDER BY version LIMIT 3",
             &[],
         )?;
         if versions.is_empty() {
@@ -120,11 +122,25 @@ impl PostgresStore {
                 "INSERT INTO schema_migrations VALUES (1,$1)",
                 &[&schema_digest()],
             )?;
-        } else if versions.len() != 1
+        } else if versions.len() > 2
             || versions[0].try_get::<_, i32>(0)? != 1
             || versions[0].try_get::<_, String>(1)? != schema_digest()
         {
             return Err(StoreError::Schema);
+        }
+        if versions.len() == 2 {
+            if versions[1].try_get::<_, i32>(0)? != 2
+                || versions[1].try_get::<_, String>(1)?
+                    != digest(&INFERENCE_V2.replace("\r\n", "\n"))
+            {
+                return Err(StoreError::Schema);
+            }
+        } else {
+            tx.batch_execute(INFERENCE_V2)?;
+            tx.execute(
+                "INSERT INTO schema_migrations VALUES (2,$1)",
+                &[&digest(&INFERENCE_V2.replace("\r\n", "\n"))],
+            )?;
         }
         tx.commit()?;
         Ok(Self {
@@ -166,6 +182,53 @@ impl PostgresStore {
         f: impl FnOnce(&mut Transaction<'_>) -> Result<T> + Send,
     ) -> Result<T> {
         self.with_transaction(f)
+    }
+    /// A stricter caller-owned deadline, never a grant of storage/model authority.
+    /// The monotonic guard includes connection/writer-lock waits. Both checks run
+    /// inside the existing transaction so expiry rolls back all secondary writes.
+    pub(crate) fn write_before<T: Send>(
+        &self,
+        deadline_ms: i64,
+        f: impl FnOnce(&mut Transaction<'_>) -> Result<T> + Send,
+    ) -> Result<T> {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| StoreError::Invariant("inference commit clock invalid"))?
+            .as_millis();
+        let remaining = i128::from(deadline_ms) - now_ms as i128;
+        if !(1..=600000).contains(&remaining) {
+            return Err(StoreError::Invariant(
+                "inference commit deadline expired or unbounded",
+            ));
+        }
+        let deadline = std::time::Instant::now() + Duration::from_millis(remaining as u64);
+        self.with_transaction(|tx| {
+            let check = || {
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_err(|_| StoreError::Invariant("inference commit clock invalid"))?
+                    .as_millis();
+                if std::time::Instant::now() >= deadline
+                    || now_ms as i128 >= i128::from(deadline_ms)
+                {
+                    Err(StoreError::Invariant("inference commit deadline expired"))
+                } else {
+                    Ok(())
+                }
+            };
+            check()?;
+            let milliseconds = deadline
+                .saturating_duration_since(std::time::Instant::now())
+                .as_millis()
+                .max(1);
+            tx.query_one(
+                "SELECT set_config('statement_timeout',$1,true)",
+                &[&format!("{milliseconds}ms")],
+            )?;
+            let result = f(tx)?;
+            check()?;
+            Ok(result)
+        })
     }
     pub fn pending_outbox(&self, limit: u32) -> Result<Vec<OutboxEntry>> {
         bounded_limit(limit)?;

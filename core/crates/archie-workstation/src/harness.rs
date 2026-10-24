@@ -2,7 +2,7 @@ use archie_types::PrivacyGrade;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -45,22 +45,63 @@ impl HarnessSpec {
     }
 
     pub fn probe(&self) -> Result<String, HarnessError> {
-        let command = self
-            .command
-            .as_deref()
-            .ok_or(HarnessError::MissingCommand)?;
-        let output = Command::new(command)
-            .arg("--version")
-            .stdin(Stdio::null())
-            .output()?;
-        if !output.status.success() {
+        let spec = self.clone();
+        // Preserve the synchronous API without nesting a runtime in CLI Tokio.
+        std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(HarnessError::Io)?
+                .block_on(spec.probe_bounded(Duration::from_secs(5)))
+        })
+        .join()
+        .map_err(|_| HarnessError::ProcessFailure)?
+    }
+
+    pub async fn probe_bounded(&self, timeout: Duration) -> Result<String, HarnessError> {
+        use tokio::io::AsyncReadExt;
+        if timeout.is_zero() || timeout > Duration::from_secs(30) {
             return Err(HarnessError::ProcessFailure);
         }
-        Ok(String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .chars()
-            .take(256)
-            .collect())
+        let mut command = tokio::process::Command::new(
+            self.command
+                .as_deref()
+                .ok_or(HarnessError::MissingCommand)?,
+        );
+        command
+            .args(&self.args)
+            .arg("--version")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        #[cfg(windows)]
+        command.creation_flags(0x08000000);
+        let mut child = command.spawn()?;
+        let mut stdout = child.stdout.take().ok_or(HarnessError::ProcessFailure)?;
+        let result = tokio::time::timeout(timeout, async {
+            let mut bytes = Vec::new();
+            (&mut stdout).take(4097).read_to_end(&mut bytes).await?;
+            if bytes.len() > 4096 {
+                return Err(HarnessError::ResponseTooLarge);
+            }
+            if !child.wait().await?.success() {
+                return Err(HarnessError::ProcessFailure);
+            }
+            Ok(String::from_utf8_lossy(&bytes)
+                .trim()
+                .chars()
+                .take(256)
+                .collect())
+        })
+        .await
+        .map_err(|_| HarnessError::Timeout)
+        .and_then(|v| v);
+        if result.is_err() {
+            let _ = child.start_kill();
+            let _ = tokio::time::timeout(Duration::from_secs(1), child.wait()).await;
+        }
+        result
     }
 }
 
@@ -96,6 +137,10 @@ pub enum HarnessError {
     PrivacyDenied,
     #[error("harness response exceeded its byte budget")]
     ResponseTooLarge,
+    #[error("harness probe deadline expired")]
+    Timeout,
+    #[error("harness input is invalid or exceeds its byte budget")]
+    InvalidRequest,
     #[error("harness returned HTTP {0}")]
     Status(reqwest::StatusCode),
     #[error("harness transport failed: {0}")]
@@ -147,8 +192,15 @@ impl UhpClient {
         let mut endpoint = Url::parse(endpoint).map_err(|_| HarnessError::InvalidEndpoint)?;
         let loopback = endpoint
             .host_str()
-            .is_some_and(|host| matches!(host, "localhost" | "127.0.0.1" | "::1"));
-        if endpoint.scheme() != "http" || !loopback || timeout.is_zero() {
+            .is_some_and(|host| matches!(host, "localhost" | "127.0.0.1" | "::1" | "[::1]"));
+        if endpoint.scheme() != "http"
+            || !loopback
+            || timeout.is_zero()
+            || !endpoint.username().is_empty()
+            || endpoint.password().is_some()
+            || endpoint.query().is_some()
+            || endpoint.fragment().is_some()
+        {
             return Err(HarnessError::InvalidEndpoint);
         }
         if !endpoint.path().ends_with('/') {
@@ -166,10 +218,25 @@ impl UhpClient {
         privacy: PrivacyGrade,
         request: &UhpRequest,
     ) -> Result<UhpResponse, HarnessError> {
-        if !privacy.permits(archie_types::Locality::Local) {
+        // A loopback proxy proves transport placement, not downstream locality or
+        // retention. Legacy UHP has no admitted backend descriptor: public only.
+        if privacy != PrivacyGrade::Public {
             return Err(HarnessError::PrivacyDenied);
         }
-        let response = self
+        let valid_id = |id: &str| {
+            !id.is_empty()
+                && id.len() <= 256
+                && id
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':'))
+        };
+        if request.input.len() > 64 * 1024
+            || !valid_id(&request.model)
+            || !valid_id(&request.metadata.harness_id)
+        {
+            return Err(HarnessError::InvalidRequest);
+        }
+        let mut response = self
             .client
             .post(
                 self.endpoint
@@ -188,9 +255,12 @@ impl UhpClient {
         {
             return Err(HarnessError::ResponseTooLarge);
         }
-        let bytes = response.bytes().await?;
-        if bytes.len() > MAX_RESPONSE_BYTES {
-            return Err(HarnessError::ResponseTooLarge);
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await? {
+            if bytes.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
+                return Err(HarnessError::ResponseTooLarge);
+            }
+            bytes.extend_from_slice(&chunk);
         }
         Ok(serde_json::from_slice(&bytes)?)
     }
@@ -243,7 +313,7 @@ mod tests {
         .unwrap();
         let response = client
             .invoke(
-                PrivacyGrade::Restricted,
+                PrivacyGrade::Public,
                 &UhpRequest {
                     model: "worker".into(),
                     input: "bounded capsule".into(),
@@ -283,6 +353,51 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn loopback_proxy_does_not_establish_local_inference_or_retention() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = UhpClient::loopback(
+            &format!("http://{}/", listener.local_addr().unwrap()),
+            Duration::from_millis(100),
+        )
+        .unwrap();
+        for privacy in [
+            PrivacyGrade::Internal,
+            PrivacyGrade::Sensitive,
+            PrivacyGrade::Restricted,
+        ] {
+            let result = client
+                .invoke(
+                    privacy,
+                    &UhpRequest {
+                        model: "cloud-worker".into(),
+                        input: "not sent".into(),
+                        metadata: UhpMetadata {
+                            harness_id: "codex".into(),
+                        },
+                    },
+                )
+                .await;
+            assert!(matches!(result, Err(HarnessError::PrivacyDenied)));
+        }
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), listener.accept())
+                .await
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn proxy_endpoint_rejects_embedded_credentials_query_and_fragment() {
+        for endpoint in [
+            "http://user:password@localhost:8000/",
+            "http://localhost:8000/?key=value",
+            "http://localhost:8000/#fragment",
+        ] {
+            assert!(UhpClient::loopback(endpoint, Duration::from_secs(1)).is_err());
+        }
     }
 
     #[tokio::test]

@@ -1,0 +1,50 @@
+{
+  "protocol_version": 1,
+  "upstream_commit": "1cfe254e8d25b15f37048c3730134686abe60335",
+  "encoding": "UTF-8 JSONL; exact object keys; no duplicate keys or nonfinite numbers",
+  "max_frame_bytes": 1048576,
+  "messages": {
+    "start": {
+      "direction": "parent_to_worker",
+      "fields": {
+        "type": "start", "protocol_version": 1,
+        "run_id": "bounded path segment", "task_id": "bounded path segment",
+        "task_family": "bounded path segment", "domain": "personal/owner or work/organisation/project",
+        "focus_id": "reference", "objective_ref": "reference", "policy_revision_ref": "reference",
+        "model_identity_sha256": "lowercase SHA-256 of selected models/account/config",
+        "input_sha256": "lowercase SHA-256 of task UTF-8 bytes", "task": "string, 1..32768 UTF-8 bytes",
+        "evidence": [{"reference": "reference", "sha256": "SHA-256 of text", "text": "admitted string"}],
+        "base_harness": {"systemprompt.md": "text", "guardrails.md": "immutable text", "LongTermMEMORY.md": "text", "tool_descriptions/tool_guidance.md": "text"},
+        "state_root": "absolute path from trusted configuration",
+        "limits": {"max_calls": "1..128", "max_input_tokens": "positive integer", "max_output_tokens": "positive integer", "max_cost_micros": "positive integer, or null together with per_call_cost_micros when no trusted price exists", "per_call_input_tokens": "1..500000", "per_call_output_tokens": "1..32768", "per_call_cost_micros": "positive integer, or null together with max_cost_micros", "max_frame_bytes": "4096..1048576", "deadline_unix_ms": "absolute UTC Unix milliseconds"}
+      }
+    },
+    "inference": {
+      "direction": "worker_to_parent",
+      "fields": {"type": "inference", "protocol_version": 1, "request_id": "stage-N", "run_id": "string", "task_id": "string", "domain": "canonical domain", "focus_id": "reference", "objective_ref": "reference", "policy_revision_ref": "reference", "stage": "upstream label", "role": "solver|proposer|selector|reflection", "response_format": "artifact|harness|selection|experience", "prompt": "string", "input_sha256": "SHA-256 of prompt", "reserved_input_tokens": "integer", "max_output_tokens": "integer", "reserved_cost_micros": "integer, or null when money is unbounded by price", "evidence_refs": ["reference"], "deadline_unix_ms": "integer"}
+    },
+    "inference_result": {
+      "direction": "parent_to_worker",
+      "fields": {"type": "inference_result", "protocol_version": 1, "request_id": "matching ID", "status": "completed|failed", "admitted": "boolean, must be true to continue", "domain": "matching canonical domain", "policy_revision_ref": "matching freshly admitted policy", "text": "model response string", "usage": {"input_tokens": "nonnegative integer or null", "output_tokens": "nonnegative integer or null", "cost_micros": "nonnegative integer or null"}}
+    },
+    "promotion": {
+      "direction": "worker_to_parent",
+      "fields": {"type": "promotion", "protocol_version": 1, "request_id": "promotion-1", "run_id": "string", "task_id": "string", "domain": "canonical domain", "policy_revision_ref": "reference", "identity_sha256": "SHA-256", "base_artifact": "string", "chosen_artifact": "string", "harness": "complete four-file map", "experience": "upstream cue/lesson/evidence/confidence/edits object", "base_artifact_sha256": "SHA-256", "chosen_artifact_sha256": "SHA-256", "harness_sha256": "SHA-256 of canonical JSON harness", "evidence_refs": ["reference"]}
+    },
+    "promotion_result": {
+      "direction": "parent_to_worker",
+      "fields": {"type": "promotion_result", "protocol_version": 1, "request_id": "promotion-1", "admitted": "boolean", "domain": "matching canonical domain", "policy_revision_ref": "matching freshly admitted policy", "approved": "boolean", "reason_code": "bounded path segment"}
+    },
+    "cancel": {"direction": "parent_to_worker", "fields": {"type": "cancel", "protocol_version": 1}},
+    "result_success": {
+      "direction": "worker_to_parent",
+      "fields": {"type": "result", "protocol_version": 1, "status": "completed|resumed", "upstream_commit": "pinned SHA", "identity_sha256": "SHA-256", "run_id": "string", "task_id": "string", "domain": "canonical domain", "ledger": "real upstream ledger object, R=4/P=3", "usage": "cumulative_usage", "selection": {"chosen_label": "string", "chosen_run_id": "string", "trivial": "boolean", "ok": "boolean", "harness_fingerprint": "upstream fingerprint"}, "promotion": {"status": "promoted|baseline_retained", "reason_code": "string; no_lesson when the reflection wrote NO_ENTRY and no promotion request was sent", "improvement_verified": false}, "library": {"committed": [{"reference": "opaque stable reference", "manifest_path": "absolute state path", "sha256": "manifest SHA-256", "harness_sha256": "tree SHA-256"}], "reused_tasks": ["task ID"]}}
+    },
+    "result_failure": {
+      "direction": "worker_to_parent",
+      "fields": {"type": "result", "protocol_version": 1, "status": "failed", "error_code": "stable string", "upstream_commit": "pinned SHA", "usage": "cumulative_usage or null before admission"}
+    }
+  },
+  "cumulative_usage": {"calls": "integer", "charged_input_tokens": "integer", "charged_output_tokens": "integer", "charged_cost_micros": "integer, or null when money is unbounded by price", "observed_input_tokens": "integer or null if any unknown", "observed_output_tokens": "integer or null if any unknown", "observed_cost_micros": "integer or null if any unknown"},
+  "canonical_json": "sorted keys, separators comma and colon, Unicode emitted directly, UTF-8, no trailing newline for SHA-256"
+}

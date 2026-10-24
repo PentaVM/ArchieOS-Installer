@@ -181,9 +181,9 @@ pub struct VoiceActivity {
     /// How many times louder than the floor counts as a voice.
     ratio: f32,
     /// Consecutive loud frames needed before it counts: a cough is one or two.
-    needed: u32,
-    loud: u32,
-    quiet_frames: u32,
+    needed_ms: u32,
+    loud_us: u64,
+    quiet_us: u64,
 }
 
 impl Default for VoiceActivity {
@@ -191,9 +191,9 @@ impl Default for VoiceActivity {
         Self {
             floor: 0.003,
             ratio: 4.0,
-            needed: 6,
-            loud: 0,
-            quiet_frames: 0,
+            needed_ms: 120,
+            loud_us: 0,
+            quiet_us: 0,
         }
     }
 }
@@ -201,28 +201,88 @@ impl Default for VoiceActivity {
 impl VoiceActivity {
     /// Takes one 20 ms frame's loudness; says whether a voice is present.
     pub fn hear(&mut self, level: f32) -> bool {
+        self.hear_for(level, 20_000)
+    }
+
+    /// Measures audio time, independent of network packet size. Inspect short windows
+    /// so a packet containing both speech and silence does not smear their boundary.
+    /// Missing/invalid audio supplies no evidence that the room became quiet.
+    pub fn hear_audio(&mut self, samples: &[f32], rate: u32) -> bool {
+        if samples.is_empty() {
+            return false;
+        }
+        if !(8_000..=192_000).contains(&rate)
+            || samples.iter().any(|s| !s.is_finite() || s.abs() > 1.0)
+        {
+            self.loud_us = 0;
+            self.quiet_us = 0;
+            return false;
+        }
+        let mut voiced = false;
+        for frame in samples.chunks((rate / 50) as usize) {
+            let micros = frame.len() as u64 * 1_000_000 / u64::from(rate);
+            voiced = self.hear_for(loudness(frame), micros);
+        }
+        voiced
+    }
+
+    fn hear_for(&mut self, level: f32, micros: u64) -> bool {
+        if !level.is_finite() || !(0.0..=1.0).contains(&level) {
+            self.loud_us = 0;
+            self.quiet_us = 0;
+            return false;
+        }
         let voiced = level > (self.floor * self.ratio).max(0.01);
         if voiced {
-            self.loud += 1;
-            self.quiet_frames = 0;
+            self.loud_us = self.loud_us.saturating_add(micros);
+            self.quiet_us = 0;
         } else {
-            self.loud = 0;
-            self.quiet_frames = self.quiet_frames.saturating_add(1);
+            self.loud_us = 0;
+            self.quiet_us = self.quiet_us.saturating_add(micros);
             // The floor follows quiet sound slowly, and never learns from speech.
-            self.floor = self.floor * 0.98 + level * 0.02;
+            let retain = 0.98_f32.powf(micros as f32 / 20_000.0);
+            self.floor = self.floor * retain + level * (1.0 - retain);
         }
-        self.loud >= self.needed
+        self.loud_us >= u64::from(self.needed_ms) * 1000
     }
 
     /// Milliseconds since the last loud frame.
     pub fn quiet_ms(&self) -> u32 {
-        self.quiet_frames.saturating_mul(20)
+        (self.quiet_us / 1000).min(u64::from(u32::MAX)) as u32
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transport_packet_size_does_not_change_voice_or_silence_time() {
+        for chunk in [320, 1600, 2560] {
+            let mut activity = VoiceActivity::default();
+            for frame in vec![0.1; 16_000].chunks(chunk) {
+                activity.hear_audio(frame, 16_000);
+            }
+            assert!(activity.hear_audio(&[0.1; 320], 16_000));
+            for frame in vec![0.0; 16_000].chunks(chunk) {
+                activity.hear_audio(frame, 16_000);
+            }
+            assert_eq!(activity.quiet_ms(), 1000, "packet size {chunk}");
+        }
+    }
+
+    #[test]
+    fn empty_or_invalid_audio_is_not_evidence_of_a_quiet_room() {
+        let mut activity = VoiceActivity::default();
+        activity.hear_audio(&[0.0; 1600], 16_000);
+        assert_eq!(activity.quiet_ms(), 100);
+        activity.hear_audio(&[], 16_000);
+        assert_eq!(activity.quiet_ms(), 100);
+        activity.hear_audio(&[f32::NAN; 320], 16_000);
+        assert_eq!(activity.quiet_ms(), 0);
+        assert!(!activity.hear_audio(&[0.1; 320], 0));
+        assert_eq!(activity.quiet_ms(), 0);
+    }
 
     #[test]
     fn a_voice_is_a_run_of_loud_frames_not_a_click() {

@@ -222,6 +222,43 @@ void colours_parse_as_the_settings_write_them() {
     CHECK(hash01(7) >= 0.0F && hash01(7) <= 1.0F);
 }
 
+void filaments_start_and_end_on_their_orbs_and_bend_the_same_way() {
+    CASE("filaments start and end on their orbs and bend the same way twice");
+    const Vec3 a{0, 0, 0};
+    const Vec3 b{100, 20, -30};
+    const Vec3 start = filament(a, b, 0.0F, 7U);
+    const Vec3 end = filament(a, b, 1.0F, 7U);
+    CHECK(length(sub(start, a)) < 1e-3F);
+    CHECK(length(sub(end, b)) < 1e-3F);
+    const Vec3 middle = filament(a, b, 0.5F, 7U);
+    CHECK(finite(middle));
+    const Vec3 straight{50, 10, -15};
+    CHECK_BECAUSE(length(sub(middle, straight)) > 1.0F, "a filament is a curve, not the chord");
+    CHECK_BECAUSE(length(sub(middle, straight)) < 0.3F * length(sub(b, a)), "the sweep is gentle");
+    CHECK(length(sub(filament(a, b, 0.5F, 7U), middle)) == 0.0F);
+    CHECK(length(sub(filament(a, a, 0.5F, 7U), a)) == 0.0F);
+}
+
+void the_hologram_frame_rings_the_sphere_and_its_projector_sits_below() {
+    CASE("the hologram's frame rings the sphere and its projector sits below");
+    const float radius = 200.0F;
+    const auto frame = holo_frame(radius);
+    CHECK(!frame.rings.empty() && frame.rings.size() % 2 == 0);
+    CHECK(!frame.beam.empty() && frame.beam.size() % 2 == 0);
+    CHECK(frame.core.size() == 2);
+    float widest = 0.0F;
+    for (const Vec3& p : frame.rings) {
+        CHECK(finite(p));
+        widest = std::max(widest, std::hypot(p.x, p.z));
+    }
+    CHECK_BECAUSE(widest > radius * 1.1F && widest < radius * 1.4F, "orbit rings reach past the sphere, not far");
+    for (const Vec3& p : frame.beam)
+        CHECK_BECAUSE(p.y < -0.3F * radius, "the projector's light rises from below the sphere");
+    CHECK(frame.core[1].y < -radius);
+    CHECK(holo_frame(0.0F).rings.empty());
+    CHECK(holo_frame(std::nanf("")).rings.empty());
+}
+
 }  // namespace
 
 int main() {
@@ -238,5 +275,7 @@ int main() {
     orb_meshes_are_closed_unit_spheres();
     guides_ring_the_field();
     colours_parse_as_the_settings_write_them();
+    filaments_start_and_end_on_their_orbs_and_bend_the_same_way();
+    the_hologram_frame_rings_the_sphere_and_its_projector_sits_below();
     return archie::visual::test::report();
 }

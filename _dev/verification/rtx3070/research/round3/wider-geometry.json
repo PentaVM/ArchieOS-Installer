@@ -1,0 +1,390 @@
+{
+  "observed_utc": "2026-10-17T01:14:11.325950+00:00",
+  "scope": "CPU file SHA256, metadata and tensor-directory inspection only",
+  "base_sha256": "3561df7ac7d26a71ffa991ac2db740b10841c3a350aa2676ccd3ff5d428b4e8b",
+  "file_bytes": 1997486976,
+  "metadata": {
+    "general.architecture": "qwen35",
+    "qwen35.block_count": 32,
+    "qwen35.context_length": 262144,
+    "qwen35.embedding_length": 4096,
+    "qwen35.feed_forward_length": 12288,
+    "qwen35.attention.head_count": 16,
+    "qwen35.attention.head_count_kv": 4,
+    "qwen35.rope.dimension_sections": [
+      11,
+      11,
+      10,
+      0
+    ],
+    "qwen35.rope.freq_base": 10000000.0,
+    "qwen35.attention.layer_norm_rms_epsilon": 9.999999974752427e-07,
+    "qwen35.attention.key_length": 256,
+    "qwen35.attention.value_length": 256,
+    "qwen35.ssm.conv_kernel": 4,
+    "qwen35.ssm.state_size": 128,
+    "qwen35.ssm.group_count": 16,
+    "qwen35.ssm.time_step_rank": 32,
+    "qwen35.ssm.inner_size": 4096,
+    "qwen35.full_attention_interval": 4,
+    "qwen35.rope.dimension_count": 64
+  },
+  "tensors_blocks_28_31": {
+    "blk.28.attn_gate.weight": {
+      "shape": [
+        4096,
+        4096
+      ],
+      "ggml_type": 143
+    },
+    "blk.28.attn_norm.weight": {
+      "shape": [
+        4096
+      ],
+      "ggml_type": 0
+    },
+    "blk.28.attn_qkv.weight": {
+      "shape": [
+        4096,
+        8192
+      ],
+      "ggml_type": 143
+    },
+    "blk.28.ffn_down.weight": {
+      "shape": [
+        12288,
+        4096
+      ],
+      "ggml_type": 143
+    },
+    "blk.28.ffn_gate.weight": {
+      "shape": [
+        4096,
+        12288
+      ],
+      "ggml_type": 143
+    },
+    "blk.28.ffn_up.weight": {
+      "shape": [
+        4096,
+        12288
+      ],
+      "ggml_type": 143
+    },
+    "blk.28.post_attention_norm.weight": {
+      "shape": [
+        4096
+      ],
+      "ggml_type": 0
+    },
+    "blk.28.ssm_a": {
+      "shape": [
+        32
+      ],
+      "ggml_type": 0
+    },
+    "blk.28.ssm_alpha.weight": {
+      "shape": [
+        4096,
+        32
+      ],
+      "ggml_type": 0
+    },
+    "blk.28.ssm_beta.weight": {
+      "shape": [
+        4096,
+        32
+      ],
+      "ggml_type": 0
+    },
+    "blk.28.ssm_conv1d.weight": {
+      "shape": [
+        4,
+        8192
+      ],
+      "ggml_type": 0
+    },
+    "blk.28.ssm_dt.bias": {
+      "shape": [
+        32
+      ],
+      "ggml_type": 0
+    },
+    "blk.28.ssm_norm.weight": {
+      "shape": [
+        128
+      ],
+      "ggml_type": 0
+    },
+    "blk.28.ssm_out.weight": {
+      "shape": [
+        4096,
+        4096
+      ],
+      "ggml_type": 143
+    },
+    "blk.29.attn_gate.weight": {
+      "shape": [
+        4096,
+        4096
+      ],
+      "ggml_type": 143
+    },
+    "blk.29.attn_norm.weight": {
+      "shape": [
+        4096
+      ],
+      "ggml_type": 0
+    },
+    "blk.29.attn_qkv.weight": {
+      "shape": [
+        4096,
+        8192
+      ],
+      "ggml_type": 143
+    },
+    "blk.29.ffn_down.weight": {
+      "shape": [
+        12288,
+        4096
+      ],
+      "ggml_type": 143
+    },
+    "blk.29.ffn_gate.weight": {
+      "shape": [
+        4096,
+        12288
+      ],
+      "ggml_type": 143
+    },
+    "blk.29.ffn_up.weight": {
+      "shape": [
+        4096,
+        12288
+      ],
+      "ggml_type": 143
+    },
+    "blk.29.post_attention_norm.weight": {
+      "shape": [
+        4096
+      ],
+      "ggml_type": 0
+    },
+    "blk.29.ssm_a": {
+      "shape": [
+        32
+      ],
+      "ggml_type": 0
+    },
+    "blk.29.ssm_alpha.weight": {
+      "shape": [
+        4096,
+        32
+      ],
+      "ggml_type": 0
+    },
+    "blk.29.ssm_beta.weight": {
+      "shape": [
+        4096,
+        32
+      ],
+      "ggml_type": 0
+    },
+    "blk.29.ssm_conv1d.weight": {
+      "shape": [
+        4,
+        8192
+      ],
+      "ggml_type": 0
+    },
+    "blk.29.ssm_dt.bias": {
+      "shape": [
+        32
+      ],
+      "ggml_type": 0
+    },
+    "blk.29.ssm_norm.weight": {
+      "shape": [
+        128
+      ],
+      "ggml_type": 0
+    },
+    "blk.29.ssm_out.weight": {
+      "shape": [
+        4096,
+        4096
+      ],
+      "ggml_type": 143
+    },
+    "blk.30.attn_gate.weight": {
+      "shape": [
+        4096,
+        4096
+      ],
+      "ggml_type": 143
+    },
+    "blk.30.attn_norm.weight": {
+      "shape": [
+        4096
+      ],
+      "ggml_type": 0
+    },
+    "blk.30.attn_qkv.weight": {
+      "shape": [
+        4096,
+        8192
+      ],
+      "ggml_type": 143
+    },
+    "blk.30.ffn_down.weight": {
+      "shape": [
+        12288,
+        4096
+      ],
+      "ggml_type": 143
+    },
+    "blk.30.ffn_gate.weight": {
+      "shape": [
+        4096,
+        12288
+      ],
+      "ggml_type": 143
+    },
+    "blk.30.ffn_up.weight": {
+      "shape": [
+        4096,
+        12288
+      ],
+      "ggml_type": 143
+    },
+    "blk.30.post_attention_norm.weight": {
+      "shape": [
+        4096
+      ],
+      "ggml_type": 0
+    },
+    "blk.30.ssm_a": {
+      "shape": [
+        32
+      ],
+      "ggml_type": 0
+    },
+    "blk.30.ssm_alpha.weight": {
+      "shape": [
+        4096,
+        32
+      ],
+      "ggml_type": 0
+    },
+    "blk.30.ssm_beta.weight": {
+      "shape": [
+        4096,
+        32
+      ],
+      "ggml_type": 0
+    },
+    "blk.30.ssm_conv1d.weight": {
+      "shape": [
+        4,
+        8192
+      ],
+      "ggml_type": 0
+    },
+    "blk.30.ssm_dt.bias": {
+      "shape": [
+        32
+      ],
+      "ggml_type": 0
+    },
+    "blk.30.ssm_norm.weight": {
+      "shape": [
+        128
+      ],
+      "ggml_type": 0
+    },
+    "blk.30.ssm_out.weight": {
+      "shape": [
+        4096,
+        4096
+      ],
+      "ggml_type": 143
+    },
+    "blk.31.attn_k.weight": {
+      "shape": [
+        4096,
+        1024
+      ],
+      "ggml_type": 143
+    },
+    "blk.31.attn_k_norm.weight": {
+      "shape": [
+        256
+      ],
+      "ggml_type": 0
+    },
+    "blk.31.attn_norm.weight": {
+      "shape": [
+        4096
+      ],
+      "ggml_type": 0
+    },
+    "blk.31.attn_output.weight": {
+      "shape": [
+        4096,
+        4096
+      ],
+      "ggml_type": 143
+    },
+    "blk.31.attn_q.weight": {
+      "shape": [
+        4096,
+        8192
+      ],
+      "ggml_type": 143
+    },
+    "blk.31.attn_q_norm.weight": {
+      "shape": [
+        256
+      ],
+      "ggml_type": 0
+    },
+    "blk.31.attn_v.weight": {
+      "shape": [
+        4096,
+        1024
+      ],
+      "ggml_type": 143
+    },
+    "blk.31.ffn_down.weight": {
+      "shape": [
+        12288,
+        4096
+      ],
+      "ggml_type": 143
+    },
+    "blk.31.ffn_gate.weight": {
+      "shape": [
+        4096,
+        12288
+      ],
+      "ggml_type": 143
+    },
+    "blk.31.ffn_up.weight": {
+      "shape": [
+        4096,
+        12288
+      ],
+      "ggml_type": 143
+    },
+    "blk.31.post_attention_norm.weight": {
+      "shape": [
+        4096
+      ],
+      "ggml_type": 0
+    }
+  },
+  "tensor_payloads_loaded": false,
+  "tokenizer_loaded": false,
+  "torch_imported": false,
+  "gpu_used": false
+}

@@ -1,0 +1,525 @@
+{
+  "read_at_utc": "2026-10-18T23:30:54.535467+00:00",
+  "read_only": true,
+  "g3_star": {
+    "attempted": 400,
+    "accepted": 172,
+    "self": 172,
+    "rationalized": 0,
+    "tranche": "/home/archie/wanda/run/tranches/g3-base-640.json",
+    "budget": 2048,
+    "created_ms": 1792323544318
+  },
+  "runs": {
+    "g2-direct-qkvo-s17": {
+      "receipt": {
+        "run_digest": "ca19c0c1a9224422800edd4ab06a788edcdda54ac65e2f03d20067359be5aff5",
+        "base_sha256": "3561df7ac7d26a71ffa991ac2db740b10841c3a350aa2676ccd3ff5d428b4e8b",
+        "train_examples": 1574,
+        "dev_examples": 186,
+        "opt_steps": 394,
+        "elapsed_seconds": 7444.690224284001,
+        "stop_reason": "schedule_complete",
+        "method": "native-quantized-base LoRA on exact Bonsai2 9B block 31 (not canonical QLoRA)",
+        "data_review": "owned-synthetic families authored by Claude, pending human review",
+        "baseline": {
+          "dev_examples": 186,
+          "dev_loss": 3.3616600586201555,
+          "scored": 32,
+          "choice_accuracy": 0.90625,
+          "accuracy_counterfactual": 0.625,
+          "probe_choice_accuracy": 0.90625,
+          "probe_accuracy_counterfactual": 0.625,
+          "probe_counterfactual_flip_rate": 0
+        },
+        "final": {
+          "dev_examples": 186,
+          "dev_loss": 0.7016735665740506,
+          "scored": 32,
+          "choice_accuracy": 0.90625,
+          "accuracy_counterfactual": 0.625,
+          "probe_choice_accuracy": 0.90625,
+          "probe_accuracy_counterfactual": 0.625,
+          "probe_counterfactual_flip_rate": 0
+        },
+        "best": {
+          "opt_step": 360,
+          "dev_examples": 186,
+          "dev_loss": 0.6949395832595646,
+          "scored": 32,
+          "choice_accuracy": 0.90625,
+          "accuracy_counterfactual": 0.625,
+          "probe_choice_accuracy": 0.90625,
+          "probe_accuracy_counterfactual": 0.625,
+          "probe_counterfactual_flip_rate": 0
+        }
+      },
+      "settings": {
+        "targets": [
+          "q",
+          "k",
+          "v",
+          "o"
+        ],
+        "lr": 0.0002,
+        "epochs": 2,
+        "accumulation": 8,
+        "max_optimizer_steps": 450,
+        "max_minutes": 150,
+        "seed": 17,
+        "eval_every": 40,
+        "init_from": null,
+        "betas": [
+          0.9,
+          0.999
+        ],
+        "eps": 1e-8,
+        "weight_decay": 0,
+        "grad_clip": 1,
+        "rank": 8,
+        "alpha": 16,
+        "answer_weight": 1,
+        "keep_pairs": true
+      },
+      "train_examples": 1574,
+      "dev_examples": 186,
+      "checkpoint_files": {
+        "best.pt": {
+          "bytes": 988045,
+          "mtime": 1792227181.2858205
+        },
+        "last.pt": {
+          "bytes": 2967357,
+          "mtime": 1792227853.4456303
+        }
+      },
+      "last_events": {
+        "baseline": {
+          "opt_step": 0,
+          "dev_examples": 186,
+          "dev_loss": 3.3616600586201555,
+          "scored": 32,
+          "choice_accuracy": 0.90625,
+          "accuracy_counterfactual": 0.625,
+          "probe_choice_accuracy": 0.90625,
+          "probe_accuracy_counterfactual": 0.625,
+          "probe_counterfactual_flip_rate": 0
+        },
+        "step": {
+          "opt_step": 394,
+          "train_loss": 0.7449133346478144
+        },
+        "eval": {
+          "opt_step": 360,
+          "dev_examples": 186,
+          "dev_loss": 0.6949395832595646,
+          "scored": 32,
+          "choice_accuracy": 0.90625,
+          "accuracy_counterfactual": 0.625,
+          "probe_choice_accuracy": 0.90625,
+          "probe_accuracy_counterfactual": 0.625,
+          "probe_counterfactual_flip_rate": 0
+        },
+        "final": {
+          "opt_step": 394,
+          "dev_examples": 186,
+          "dev_loss": 0.7016735665740506,
+          "scored": 32,
+          "choice_accuracy": 0.90625,
+          "accuracy_counterfactual": 0.625,
+          "probe_choice_accuracy": 0.90625,
+          "probe_accuracy_counterfactual": 0.625,
+          "probe_counterfactual_flip_rate": 0
+        }
+      }
+    },
+    "g3-star-qkvo-s17": {
+      "receipt": {
+        "run_digest": "9573345eeaec0de097925a8925c86929bb0e2ed93dd3b7af621121370efb504f",
+        "base_sha256": "3561df7ac7d26a71ffa991ac2db740b10841c3a350aa2676ccd3ff5d428b4e8b",
+        "train_examples": 1746,
+        "dev_examples": 186,
+        "opt_steps": 330,
+        "elapsed_seconds": 10809.671047868007,
+        "stop_reason": "max_minutes",
+        "method": "native-quantized-base LoRA on exact Bonsai2 9B block 31 (not canonical QLoRA)",
+        "data_review": "owned-synthetic families authored by Claude, pending human review",
+        "baseline": {
+          "dev_examples": 186,
+          "dev_loss": 3.3616600586201555,
+          "scored": 32,
+          "choice_accuracy": 0.90625,
+          "accuracy_counterfactual": 0.625,
+          "probe_choice_accuracy": 0.90625,
+          "probe_accuracy_counterfactual": 0.625,
+          "probe_counterfactual_flip_rate": 0
+        },
+        "final": {
+          "dev_examples": 186,
+          "dev_loss": 0.7548491921355968,
+          "scored": 32,
+          "choice_accuracy": 0.90625,
+          "accuracy_counterfactual": 0.625,
+          "probe_choice_accuracy": 0.90625,
+          "probe_accuracy_counterfactual": 0.625,
+          "probe_counterfactual_flip_rate": 0
+        },
+        "best": {
+          "opt_step": 320,
+          "dev_examples": 186,
+          "dev_loss": 0.6994628791487024,
+          "scored": 32,
+          "choice_accuracy": 0.90625,
+          "accuracy_counterfactual": 0.625,
+          "probe_choice_accuracy": 0.90625,
+          "probe_accuracy_counterfactual": 0.625,
+          "probe_counterfactual_flip_rate": 0
+        }
+      },
+      "settings": {
+        "targets": [
+          "q",
+          "k",
+          "v",
+          "o"
+        ],
+        "lr": 0.0002,
+        "epochs": 2,
+        "accumulation": 8,
+        "max_optimizer_steps": 500,
+        "max_minutes": 180,
+        "seed": 17,
+        "eval_every": 40,
+        "init_from": null,
+        "betas": [
+          0.9,
+          0.999
+        ],
+        "eps": 1e-8,
+        "weight_decay": 0,
+        "grad_clip": 1,
+        "rank": 8,
+        "alpha": 16,
+        "answer_weight": 1,
+        "keep_pairs": true
+      },
+      "train_examples": 1746,
+      "dev_examples": 186,
+      "checkpoint_files": {
+        "best.pt": {
+          "bytes": 988045,
+          "mtime": 1792334687.4936743
+        },
+        "last.pt": {
+          "bytes": 2972669,
+          "mtime": 1792335080.9036655
+        }
+      },
+      "last_events": {
+        "baseline": {
+          "opt_step": 0,
+          "dev_examples": 186,
+          "dev_loss": 3.3616600586201555,
+          "scored": 32,
+          "choice_accuracy": 0.90625,
+          "accuracy_counterfactual": 0.625,
+          "probe_choice_accuracy": 0.90625,
+          "probe_accuracy_counterfactual": 0.625,
+          "probe_counterfactual_flip_rate": 0
+        },
+        "step": {
+          "opt_step": 330,
+          "train_loss": 0.8525510244071484
+        },
+        "eval": {
+          "opt_step": 320,
+          "dev_examples": 186,
+          "dev_loss": 0.6994628791487024,
+          "scored": 32,
+          "choice_accuracy": 0.90625,
+          "accuracy_counterfactual": 0.625,
+          "probe_choice_accuracy": 0.90625,
+          "probe_accuracy_counterfactual": 0.625,
+          "probe_counterfactual_flip_rate": 0
+        },
+        "final": {
+          "opt_step": 330,
+          "dev_examples": 186,
+          "dev_loss": 0.7548491921355968,
+          "scored": 32,
+          "choice_accuracy": 0.90625,
+          "accuracy_counterfactual": 0.625,
+          "probe_choice_accuracy": 0.90625,
+          "probe_accuracy_counterfactual": 0.625,
+          "probe_counterfactual_flip_rate": 0
+        }
+      }
+    },
+    "g4-behav-star-qkvo-s17": {
+      "receipt": {
+        "absent": true
+      },
+      "settings": null,
+      "train_examples": null,
+      "dev_examples": null,
+      "checkpoint_files": {}
+    }
+  },
+  "benchmarks": {
+    "opentom-base": {
+      "bench_id": "opentom-base",
+      "benchmark": "opentom",
+      "adapter": null,
+      "base_sha256": "3561df7ac7d26a71ffa991ac2db740b10841c3a350aa2676ccd3ff5d428b4e8b",
+      "items": 3250,
+      "max_tokens": 256,
+      "thinking": false,
+      "truncated": 0,
+      "report": {
+        "location-fo": {
+          "macro_f1": 0.4134114772069631,
+          "accuracy": 0.7060000000000001,
+          "corrupted": 0
+        },
+        "location-so": {
+          "macro_f1": 0.2920972884771445,
+          "accuracy": 0.398,
+          "corrupted": 0
+        },
+        "multihop-fo_overall": {
+          "macro_f1": 0.3625437383440163,
+          "accuracy": 0.46099999999999997,
+          "corrupted": 0
+        },
+        "multihop-so_overall": {
+          "macro_f1": 0.29881344227777495,
+          "accuracy": 0.3430000000000001,
+          "corrupted": 0
+        },
+        "attitude": {
+          "macro_f1": 0.35113720089342315,
+          "accuracy": 0.46399999999999997,
+          "corrupted": 0
+        }
+      },
+      "created_ms": 1792204986948,
+      "protocol": "OpenToM run_baseline.py sampling (seed 42, 5x50, coarse) + official evaluator"
+    },
+    "opentom-g2-think512-pilot": {
+      "bench_id": "opentom-g2-think512-pilot",
+      "benchmark": "opentom",
+      "adapter": "/home/archie/wanda/run/bench/opentom-g2-think512-pilot/adapter.gguf",
+      "base_sha256": "3561df7ac7d26a71ffa991ac2db740b10841c3a350aa2676ccd3ff5d428b4e8b",
+      "items": 260,
+      "max_tokens": 256,
+      "thinking": false,
+      "mode": "think",
+      "budget": {
+        "think_budget": 512,
+        "min_think": 0,
+        "max_waits": 0,
+        "answer_tokens": 32
+      },
+      "forced_end": 171,
+      "mean_thinking_tokens": 481.8423076923077,
+      "filters": {
+        "batches": [
+          1
+        ],
+        "max_keys": 20,
+        "limit": null
+      },
+      "truncated": 0,
+      "report": {
+        "location-fo": {
+          "macro_f1": 0.5618153364632238,
+          "accuracy": 0.825,
+          "corrupted": 0
+        },
+        "location-so": {
+          "macro_f1": 0.5248078266946191,
+          "accuracy": 0.575,
+          "corrupted": 0
+        },
+        "multihop-fo_overall": {
+          "macro_f1": 0.5783123979845292,
+          "accuracy": 0.725,
+          "corrupted": 0
+        },
+        "multihop-so_overall": {
+          "macro_f1": 0.4715909090909091,
+          "accuracy": 0.575,
+          "corrupted": 0
+        },
+        "attitude": {
+          "macro_f1": 0.5079365079365079,
+          "accuracy": 0.65,
+          "corrupted": 0
+        }
+      },
+      "created_ms": 1792231036515,
+      "protocol": "OpenToM run_baseline.py sampling (seed 42, 5x50, coarse) + official evaluator"
+    },
+    "opentom-g3-think512-pilot": {
+      "bench_id": "opentom-g3-think512-pilot",
+      "benchmark": "opentom",
+      "adapter": "/home/archie/wanda/run/bench/opentom-g3-think512-pilot/adapter.gguf",
+      "base_sha256": "3561df7ac7d26a71ffa991ac2db740b10841c3a350aa2676ccd3ff5d428b4e8b",
+      "items": 260,
+      "max_tokens": 256,
+      "thinking": false,
+      "mode": "think",
+      "budget": {
+        "think_budget": 2048,
+        "min_think": 0,
+        "max_waits": 0,
+        "answer_tokens": 32
+      },
+      "forced_end": 49,
+      "mean_thinking_tokens": 967.4961538461539,
+      "filters": {
+        "batches": [
+          1
+        ],
+        "max_keys": 20,
+        "limit": null
+      },
+      "truncated": 0,
+      "report": {
+        "location-fo": {
+          "macro_f1": 0.8622273249138921,
+          "accuracy": 0.925,
+          "corrupted": 0
+        },
+        "location-so": {
+          "macro_f1": 0.52,
+          "accuracy": 0.55,
+          "corrupted": 0
+        },
+        "multihop-fo_overall": {
+          "macro_f1": 0.6116959064327486,
+          "accuracy": 0.7375,
+          "corrupted": 0
+        },
+        "multihop-so_overall": {
+          "macro_f1": 0.5551570221584569,
+          "accuracy": 0.5875,
+          "corrupted": 0
+        },
+        "attitude": {
+          "macro_f1": 0.519047619047619,
+          "accuracy": 0.65,
+          "corrupted": 0
+        }
+      },
+      "created_ms": 1792341001310,
+      "protocol": "OpenToM run_baseline.py sampling (seed 42, 5x50, coarse) + official evaluator"
+    },
+    "longchat-24k-pack2-direct": {
+      "bench_id": "longchat-24k-pack2-direct",
+      "benchmark": "longchat",
+      "adapter": null,
+      "base_sha256": "3561df7ac7d26a71ffa991ac2db740b10841c3a350aa2676ccd3ff5d428b4e8b",
+      "items": 232,
+      "max_tokens": 48,
+      "thinking": false,
+      "mode": "direct",
+      "budget": null,
+      "forced_end": 0,
+      "mean_thinking_tokens": 0,
+      "filters": {
+        "batches": null,
+        "max_keys": null,
+        "limit": null
+      },
+      "truncated": 28,
+      "report": {
+        "knowledge": {
+          "accuracy": 0.6982758620689655,
+          "n": 116
+        },
+        "belief": {
+          "accuracy": 0.3620689655172414,
+          "n": 116
+        }
+      },
+      "created_ms": 1792247759806,
+      "protocol": "FANToM eval_fantom.py setup (short input, set aggregation, seed 99); ALL*/belief distance need the official embedder and are None until it runs"
+    },
+    "longchat-24k-pack2-v2": {
+      "bench_id": "longchat-24k-pack2-v2",
+      "benchmark": "longchat",
+      "adapter": null,
+      "base_sha256": "3561df7ac7d26a71ffa991ac2db740b10841c3a350aa2676ccd3ff5d428b4e8b",
+      "items": 232,
+      "max_tokens": 48,
+      "thinking": false,
+      "mode": "direct",
+      "budget": null,
+      "forced_end": 0,
+      "mean_thinking_tokens": 0,
+      "filters": {
+        "batches": null,
+        "max_keys": null,
+        "limit": null
+      },
+      "truncated": 17,
+      "report": {
+        "knowledge": {
+          "accuracy": 0.8275862068965517,
+          "n": 116
+        },
+        "belief": {
+          "accuracy": 0.39655172413793105,
+          "n": 116
+        }
+      },
+      "created_ms": 1792356252354,
+      "protocol": "FANToM eval_fantom.py setup (short input, set aggregation, seed 99); ALL*/belief distance need the official embedder and are None until it runs"
+    },
+    "fantom-base": {
+      "bench_id": "fantom-base",
+      "benchmark": "fantom",
+      "adapter": null,
+      "base_sha256": "3561df7ac7d26a71ffa991ac2db740b10841c3a350aa2676ccd3ff5d428b4e8b",
+      "items": 12832,
+      "max_tokens": 256,
+      "thinking": false,
+      "mode": "direct",
+      "budget": null,
+      "forced_end": 0,
+      "mean_thinking_tokens": 0,
+      "filters": {
+        "batches": null,
+        "max_keys": null,
+        "limit": null
+      },
+      "truncated": 1558,
+      "report": {
+        "fact_word-f1": 0.3892836887642151,
+        "inaccessible:set:ALL*": 0.00778816199376947,
+        "inaccessible:set:ALL": 0.028037383177570093,
+        "inaccessible:belief:multiple-choice": 0.608257804632427,
+        "inaccessible:belief:distance": 0.3685800604229607,
+        "inaccessible:answerability:set:ALL": 0.1669266770670827,
+        "inaccessible:answerability:list": 0.36973478939157567,
+        "inaccessible:answerability:binary-f1": 0.6757670801908171,
+        "inaccessible:info_accessibility:set:ALL": 0.11856474258970359,
+        "inaccessible:info_accessibility:list": 0.1669266770670827,
+        "inaccessible:info_accessibility:binary-f1": 0.8295679297819468,
+        "accessible:set:ALL*": 0.05263157894736842,
+        "accessible:set:ALL": 0.06140350877192982,
+        "accessible:belief:multiple-choice": 0.6837294332723949,
+        "accessible:belief:distance": 0.8848263254113345,
+        "accessible:answerability:set:ALL": 0.08733624454148471,
+        "accessible:answerability:list": 0.6200873362445415,
+        "accessible:answerability:binary-f1": 0.5870740958438738,
+        "accessible:info_accessibility:set:ALL": 0.5458515283842795,
+        "accessible:info_accessibility:list": 0.8602620087336245,
+        "accessible:info_accessibility:binary-f1": 0.9257998638529612
+      },
+      "created_ms": 1792355922023,
+      "protocol": "FANToM eval_fantom.py setup (short input, set aggregation, seed 99); ALL*/belief distance need the official embedder and are None until it runs"
+    }
+  }
+}

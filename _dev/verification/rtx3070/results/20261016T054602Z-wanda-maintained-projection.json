@@ -1,0 +1,22 @@
+{
+  "format_version": 1,
+  "scope": "maintained_one_projection_forward_input_gradient",
+  "base_sha256": "3561df7ac7d26a71ffa991ac2db740b10841c3a350aa2676ccd3ff5d428b4e8b",
+  "tensor": "blk.31.attn_v.weight",
+  "prism_unpack_bit_identical": true,
+  "forward_max_abs": 1.7583370208740234e-06,
+  "gradient_max_abs": 6.984919309616089e-10,
+  "peak_allocated_mib": 48.7353515625,
+  "device": "NVIDIA GeForce RTX 3070",
+  "resources": {
+    "total_gpu_mib": 8192,
+    "used_gpu_mib": 2075,
+    "free_gpu_mib": 5944,
+    "worker_budget_mib": 5093,
+    "available_ram_bytes": 7325925376,
+    "guest_free_disk_bytes": 1008392761344,
+    "host_free_disk_bytes": 3961204736
+  },
+  "full_model_backward": false,
+  "wanda_training": false
+}

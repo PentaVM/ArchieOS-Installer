@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
-# Talk with Archie. Say "Archie" to be heard. It answers aloud, in Spanish or English,
-# and opens the applications the Stage's policy names (Kdenlive, the browser) when asked.
+# Talk with Archie. Say "Archie" to be heard. It answers aloud in the language it was
+# spoken to, Spanish or English, each with its own voice, and opens the applications the
+# Stage's policy names (Kdenlive, the browser) when asked.
 #
 #   archie-talk                 the microphone goes quiet while Archie speaks
 #   archie-talk --headphones    keeps listening while it speaks, so it can be interrupted
-#   archie-talk --local         the reasoning model on this machine answers (archie-local)
+#   archie-talk --local         the reasoning model on this machine answers: the one
+#                               archie-local use 27b|9b chose
+#   archie-talk --spanish       listens for Spanish only (by default, either language)
 #   archie-talk --cloud         Nemotron on Nebius answers
+#   archie-talk --always        answers whatever it hears, its name or not: for one person
+#                               alone, since the recogniser often misses "Archie"
 #
 # What you say is recognised on this machine. Which model answers: the one on this
 # machine once its GPU runtime is built (archie-local gpu), and nothing then leaves;
 # otherwise Nemotron on Nebius, which is sent the words of what you ask.
+# Each session is also kept in ~/.archie/talk/sessions/<date>.log, readable only by you.
 set -euo pipefail
 KEY=$HOME/.config/archie/nebius.key
 grade=public
@@ -19,7 +25,9 @@ for option in "$@"; do
     --headphones) export HEADPHONES=1 ;;
     --local) where=local ;;
     --cloud) where=cloud ;;
-    *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
+    --always) export ALWAYS=1 ;;
+    --spanish) export LISTEN_LANGUAGE=es-US ;;
+    *) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
   esac
 done
 if [ "$where" = auto ]; then
@@ -27,11 +35,12 @@ if [ "$where" = auto ]; then
 fi
 if [ "$where" = local ]; then
   archie-local up
-  export ARCHIE_VOICE_ENDPOINT=http://127.0.0.1:8081/v1 ARCHIE_VOICE_MODEL=bonsai
+  read -r local_name local_url local_alias < <(archie-local current)
+  export ARCHIE_VOICE_ENDPOINT=$local_url ARCHIE_VOICE_MODEL=$local_alias
   # A small model is shown how to speak or to call a tool; IRIS does the seeing.
   export ARCHIE_VOICE_GUIDE=/usr/share/archie/skills/voice-local/SKILL.md
   grade=internal
-  echo 'archie-talk: the model on this machine answers (archie-talk --cloud for Nebius)' >&2
+  echo "archie-talk: Bonsai $local_name on this machine answers (archie-local use 27b|9b to change it; archie-talk --cloud for Nebius)" >&2
 fi
 if [ -z "${ARCHIE_VOICE_ENDPOINT:-}" ] && [ -z "${NEBIUS_TOKEN_FACTORY_KEY:-}" ]; then
   [ -s "$KEY" ] || { echo 'archie-talk: run archie-setup first' >&2; exit 1; }
@@ -44,13 +53,21 @@ archie-session down >/dev/null 2>&1 || true
 
 export ASR_MODEL=/var/lib/archie/models/asr/nemotron-3.5-asr-streaming-0.6b.q8_0.gguf
 export PIPER=/usr/lib/archie/piper-json-bridge.py
-export PIPER_PYTHON=/opt/archie/voice-venv/bin/python
+# Piper runs under the Python that has it: the image's voice venv, or IRIS's on a node set
+# up before the voice had its own.
+venv=/opt/archie/voice-venv
+[ -x "$venv/bin/python" ] || venv=/opt/archie/iris-venv
+export PIPER_PYTHON=$venv/bin/python
 export PIPER_VOICES=/var/lib/archie/models/piper
+# Either language is heard, and each reply is spoken by the voice of its language.
+export LISTEN_LANGUAGE=${LISTEN_LANGUAGE:-auto}
 export POLICY=/usr/share/archie/stage/apps.toml
 export HOST_WAYLAND=/mnt/wslg/runtime-dir/wayland-0
 export RUN_DIR=$HOME/.archie/talk
-# Piper's adapter runs under the Python that has Piper; the Stage draws without a GPU,
-# since WSLg shares no buffers with a nested compositor.
-export PATH=/opt/archie/voice-venv/bin:$PATH
+export SESSION_LOG=$RUN_DIR/sessions/$(date +%F_%H-%M-%S).log
+echo "archie-talk: this conversation is also kept in $SESSION_LOG" >&2
+# That Python first on the PATH; the Stage draws without a GPU, since WSLg shares no
+# buffers with a nested compositor.
+export PATH=$venv/bin:$PATH
 export LIBGL_ALWAYS_SOFTWARE=1
 exec /usr/lib/archie/run-archie.sh "$grade"

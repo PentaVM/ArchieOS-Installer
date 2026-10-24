@@ -1,0 +1,32 @@
+{
+  "format_version": 1,
+  "observed_utc": "2026-10-17 00:44:46 UTC",
+  "status": "blocked_before_hold_creation_or_any_child",
+  "scope": "documented_hold_protocol_precheck",
+  "coordination_documents_read": [
+    "training/wanda_bonsai2/STEERING.md: Sharing the GPU with Codex and the owner",
+    "_dev/verification/rtx3070/results/weekly/LOG.md: For Codex: sharing the GPU"
+  ],
+  "shared_head_observed": "652ce2306b35f144dfce26176eebd44b652633fc",
+  "hold_preexisted": false,
+  "hold_created": false,
+  "worker_observed": {
+    "format_version": 1,
+    "pid": 7864,
+    "boot_id": "062a7c2e-aab4-49f5-85c4-66976ecc27c3",
+    "state": "paused",
+    "job": null,
+    "updated_ms": 1792197836550,
+    "cutoff_epoch": 1792785600.0
+  },
+  "temperature_c": 24,
+  "total_used_gpu_mib": 1523,
+  "cuda_compute_process_query_pids": [7864],
+  "reason": "Existing CUDA context/process violates the owned diagnostic's no-CUDA-process precondition; paused status alone does not free the measured GPU allocation.",
+  "limits_unchanged": {"start_below_c": 60, "stop_at_c": 70, "gpu_ceiling_mib": 7168, "whole_experiment_seconds": 180},
+  "owned_phase_children_created": 0,
+  "owned_semantic_optimizer_steps": 0,
+  "automatic_retry": false,
+  "old_worker_controls_source_queue_or_watchdogs_modified": false,
+  "promoted": false
+}

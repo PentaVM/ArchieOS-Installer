@@ -529,3 +529,79 @@ fn work_documents_enter_as_the_vault_pillar_briefs_first_and_never_on_screen() {
         .iter()
         .all(|i| i.source != FeedSource::VaultDocument));
 }
+
+#[test]
+fn iris_episodes_and_forge_artifacts_enter_work_focus_and_never_on_screen() {
+    use archie_cerebra::forge_bridge::{record_artifact, ForgeArtifactInput, ForgeArtifactKind};
+    use archie_cerebra::iris_bridge::{record_episode, IrisEpisodeInput};
+
+    let mut v = vault();
+    let ep = record_episode(
+        &mut v,
+        &office(),
+        "stage-run",
+        &IrisEpisodeInput {
+            session_id: "sess-01".into(),
+            instruction: "open project timeline".into(),
+            skill: "kdenlive.timeline".into(),
+            step_count: 4,
+            verified: true,
+            at_ms: 25_000,
+            summary: "timeline focused and clip split verified".into(),
+        },
+    )
+    .unwrap();
+    assert_eq!(ep.weight, 75);
+    assert!(ep.context.references()[&ep.reference].contains(&Pillar::Iris));
+    assert!(ep.context.references()[&ep.reference].contains(&Pillar::VerifiedOutcome));
+
+    let failed_build = record_artifact(
+        &mut v,
+        &office(),
+        "ci-run",
+        &ForgeArtifactInput {
+            job_id: "forge-job-42".into(),
+            kind: ForgeArtifactKind::Build,
+            succeeded: false,
+            at_ms: 26_000,
+            summary: "cargo check failed in workspace crate".into(),
+        },
+    )
+    .unwrap();
+    assert_eq!(failed_build.weight, 85);
+
+    let items = collect_from_vault(&mut v, &office(), 0, 30_000);
+    assert!(items
+        .iter()
+        .any(|i| i.source == FeedSource::IrisEpisode && i.weight == 75));
+    assert!(items
+        .iter()
+        .any(|i| i.source == FeedSource::ForgeArtifact && i.weight == 85));
+
+    let work = plan(
+        &FocusProfile::preset("trabajo").unwrap(),
+        &office(),
+        "work",
+        &items,
+    )
+    .unwrap();
+    assert!(work
+        .context()
+        .references()
+        .values()
+        .any(|p| p.contains(&Pillar::Iris)));
+    assert!(work
+        .context()
+        .references()
+        .values()
+        .any(|p| p.contains(&Pillar::Forge)));
+
+    let screen = plan(
+        &FocusProfile::preset("pantalla-1").unwrap(),
+        &office(),
+        "screen",
+        &items,
+    )
+    .unwrap();
+    assert!(screen.admitted().is_empty());
+}

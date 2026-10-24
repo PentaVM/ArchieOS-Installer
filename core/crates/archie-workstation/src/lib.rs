@@ -5,10 +5,15 @@
 
 #![forbid(unsafe_code)]
 
+pub mod ai;
+pub mod ai_policy;
 pub mod board_api;
+pub mod codex;
 pub mod enterprise_bridge;
 pub mod freecad;
 pub mod harness;
+pub mod harness2;
+pub mod harness_runtime;
 pub mod health;
 pub mod host;
 pub mod live;

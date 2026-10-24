@@ -92,7 +92,8 @@ async fn the_routed_planner_answers_with_a_plan_for_iris() {
     assert!(plan["skill"].is_string());
     assert!(!plan["steps"].as_array().unwrap().is_empty());
 
-    // Private data has no local reasoning model to go to here, so it is refused, not sent.
+    // Private data has no local reasoning model to go to here (Bonsai ships offline until
+    // its server runs), so it is refused, not sent.
     let private = Question {
         privacy: PrivacyGrade::Restricted,
         ..question
@@ -110,13 +111,33 @@ mod private {
 
     const KEY: &str = "sk-live-7Hq2ZxVb91LmTn4cRw8yKd3PfAeU6sGj";
 
-    /// The shipped models with their key present: cloud only.
+    /// The shipped models with their key present: cloud only, because Bonsai ships offline
+    /// until the node that runs llama-server marks its installed copy ready.
     fn cloud_only() -> Routed {
         std::env::set_var(
             "NEBIUS_TOKEN_FACTORY_KEY",
             "a-key-for-tests-that-call-nothing",
         );
         Routed::from_dir(shipped_models()).unwrap()
+    }
+
+    /// A node without llama-server still answers public text: the shipped Bonsai manifests
+    /// do not hold it for a local server that is not there (review of 2026-10-22).
+    #[test]
+    fn as_shipped_public_text_is_not_held_for_a_local_server_that_is_not_there() {
+        let text = "Write a .env with LOG_LEVEL=info.";
+        match cloud_only()
+            .disclosure(&question(PrivacyGrade::Public, text), &Veil::new())
+            .unwrap()
+        {
+            Disclosure::Veiled { models, .. } => {
+                assert!(
+                    models[0].as_str().starts_with("nebius.nemotron"),
+                    "{models:?}"
+                );
+            }
+            other => panic!("public text must reach the cloud model, got {other:?}"),
+        }
     }
 
     fn question<'a>(privacy: PrivacyGrade, user: &'a str) -> Question<'a> {

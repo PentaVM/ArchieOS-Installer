@@ -80,20 +80,21 @@ QtObject {
         { group: "Apps", icon: "dkSentry", name: "Sentry",   hint: "Red local · inventario de dispositivos", kind: "App", act: "app.sentry", pref: true },
         { group: "Apps", icon: "dkStage",  name: "Stage",    hint: "Ventana de composición", kind: "App", act: "app.stage", pref: true },
         { group: "Apps", icon: "dkSet",    name: "Ajustes",  hint: "Proveedores, modelos y diagnóstico", kind: "App", act: "app.set" },
-        { group: "Archivos", icon: "file", name: "soporte-v3.step", hint: "Vault · Diseño / Mecánica · modificado hoy 13:56", kind: "Archivo", act: "file:soporte-v3.step", pref: true },
-        { group: "Archivos", icon: "file", name: "informe-q3.docx", hint: "Vault · Trabajo · modificado ayer 18:40", kind: "Archivo", act: "file:informe-q3.docx" },
-        { group: "Archivos", icon: "file", name: "presupuesto.xlsx", hint: "Vault · Trabajo · modificado 8 oct 11:30", kind: "Archivo", act: "file:presupuesto.xlsx" },
-        { group: "Archivos", icon: "file", name: "notas.md", hint: "Vault · Personal · modificado 11 oct 22:47", kind: "Archivo", act: "file:notas.md" },
-        { group: "Archivos", icon: "file", name: "esquema.kicad_pcb", hint: "Vault · Entregas · modificado hoy 13:56", kind: "Archivo", act: "file:esquema.kicad_pcb" },
-        { group: "Archivos", icon: "file", name: "render-final.mp4", hint: "Vault · Entregas · modificado 10 oct 09:12", kind: "Archivo", act: "file:render-final.mp4" },
-        { group: "Archivos", icon: "file", name: "boceto.svg", hint: "Vault · Entregas · modificado 5 oct 16:02", kind: "Archivo", act: "file:boceto.svg" },
+        // Vault's places (VaultWindow.places, same order): read-only navigation.
+        { group: "Carpetas", icon: "personal", name: "Inicio", hint: "Vault · tu carpeta personal", kind: "Carpeta", act: "go:0", pref: true },
+        { group: "Carpetas", icon: "spaces", name: "Escritorio", hint: "Vault · Escritorio", kind: "Carpeta", act: "go:1" },
+        { group: "Carpetas", icon: "documents", name: "Documentos", hint: "Vault · Documentos", kind: "Carpeta", act: "go:2" },
+        { group: "Carpetas", icon: "deliveries", name: "Descargas", hint: "Vault · Descargas", kind: "Carpeta", act: "go:3" },
+        { group: "Carpetas", icon: "image", name: "Imágenes", hint: "Vault · Imágenes", kind: "Carpeta", act: "go:4" },
+        { group: "Carpetas", icon: "stack", name: "Sistema", hint: "Vault · la raíz del sistema", kind: "Carpeta", act: "go:5" },
         { group: "Acciones", icon: "activity", name: "Mostrar actividad de Archie", hint: "Abre el panel de trabajos y autorizaciones", kind: "Acción", act: "overlay.activity", pref: true },
         { group: "Acciones", icon: "windows",  name: "Abrir la vista general de ventanas", hint: "Muestra las ventanas por app y por dominio", kind: "Acción", act: "overlay.switcher" },
         { group: "Acciones", icon: "bell",     name: "Mostrar notificaciones", hint: "Historial de avisos de Archie", kind: "Acción", act: "overlay.notif" },
         { group: "Acciones", icon: "control",  name: "Abrir el centro de control", hint: "Estado del sistema y medidores", kind: "Acción", act: "overlay.control" },
         { group: "Acciones", icon: "trace",    name: "Abrir el inspector", hint: "IRIS y Cortex", kind: "Acción", act: "overlay.inspector" },
-        { group: "Acciones", icon: "lock",     name: "Bloquear pantalla", hint: "Muestra la pantalla de bloqueo", kind: "Acción", act: "overlay.lock" },
-        { group: "Acciones", icon: "dkOrb",    name: "Cambiar al Orbe", hint: "Volver al modo principal", kind: "Acción", why: "sin contrato todavía", pref: true }
+        { group: "Acciones", icon: "dkOrb",    name: "Cambiar al Orbe", hint: "Volver al escritorio con el Orbe", kind: "Acción", act: "app.orb", pref: true },
+        { group: "Acciones", icon: "windows",  name: "Mostrar todas las ventanas", hint: "Restaura las ventanas minimizadas", kind: "Acción", act: "win.showAll" },
+        { group: "Acciones", icon: "dkSet",    name: "Abrir los ajustes", hint: "Proveedores, modelos, autoridad y apariencia", kind: "Acción", act: "app.set" }
     ]
     function search(q) {
         q = (q || "").trim().toLowerCase()

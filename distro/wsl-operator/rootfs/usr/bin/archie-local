@@ -1,29 +1,83 @@
 #!/usr/bin/env bash
-# A reasoning model on this machine: Bonsai (PrismML, Apache 2.0), run by PrismML's
-# llama.cpp. With it, what is said to Archie does not leave the machine.
+# Reasoning models on this machine: Bonsai (PrismML, Apache 2.0), run by PrismML's llama.cpp.
+# With them, what is said to Archie does not leave the machine. Several can be kept here; one
+# answers at a time, and changing which one is a single command.
 #
-#   archie-local setup [4b|1.7b]   fetch the model (572 MB, or 248 MB)
-#   archie-local gpu               build the runtime for the NVIDIA GPU (as root; about 8 GB
-#                                  of CUDA toolkit and a quarter of an hour, once)
-#   archie-local up | down | status
+#   archie-local list [--json]            the models: which are here, which one answers
+#   archie-local use 27b|9b|4b|1.7b       that one answers from now on (the other stops)
+#   archie-local current                  the chosen one as "name endpoint alias", for scripts
+#   archie-local setup [27b|9b|4b|1.7b]   fetch a model, checked against its digest (default 9b)
+#   archie-local gpu                      build the runtime for the NVIDIA GPU (as root, once:
+#                                         about 8 GB of CUDA toolkit and a quarter of an hour)
+#   archie-local up | down | status | ready
 #
-# On the GPU it is meant to be quick. On the CPU alone it is not: on a six-core laptop the
-# 4B model took 40 to 60 s to answer. Once the GPU runtime is built, `archie-talk` uses
-# this model; `archie-talk --cloud` goes back to Nebius.
+# Bonsai 2 27B answers best. On an 8 GB card its 5.9 GB of weights share the work with the
+# CPU: the runtime puts on the GPU as many layers as there is room for when it starts. Bonsai
+# 2 9B fits whole and answers sooner. Bonsai 4B and 1.7B are for a machine without a GPU; on
+# a six-core laptop the 4B took 40 to 60 s to answer. Core's router reaches each model by its
+# own port, and only while its server answers /health, so stopping one and starting another
+# changes which model it asks without restarting anything.
 set -euo pipefail
 dir=/var/lib/archie/models/local
 run=$HOME/.archie/local
 cpu=/opt/archie/llama
 gpu=/opt/archie/llama-cuda
-# The revision of PrismML-Eng/llama.cpp (branch prism) the CPU runtime in the image is.
-revision=e8fd209c975c80aa7fb36a8423571ff3b1b7e955
+# The revision of PrismML-Eng/llama.cpp (branch prism) `archie-local gpu` builds: b10787,
+# the first with --fit (layers placed by the room the GPU has) and --reasoning-effort-allow.
+revision=73bfe6cc485554822f80c473a3c0c4f25e80f41b
 
-fetch() { # repository, file, sha256
-  local out=$dir/$2
-  if [ -f "$out" ] && printf '%s  %s\n' "$3" "$out" | sha256sum --check --status; then return 0; fi
+# name, file, Hugging Face repository (prism-ml/…), sha256, port, alias, what it is
+catalog() {
+  cat <<'MODELS'
+27b Ternary-Bonsai-2-27B-PTQ1_0.gguf Ternary-Bonsai-2-27B-gguf 53107f530aa52eb00912263ab1ee29bd199261c87cd7b4ad4ca1318c1fe33ee3 8082 bonsai-27b Bonsai 2 27B, ternary (5.9 GB)
+9b Ternary-Bonsai-2-9B-PTQ1_0.gguf Ternary-Bonsai-2-9B-gguf 3561df7ac7d26a71ffa991ac2db740b10841c3a350aa2676ccd3ff5d428b4e8b 8081 bonsai Bonsai 2 9B, ternary (2.0 GB)
+4b Bonsai-4B-Q1_0.gguf Bonsai-4B-gguf 4524b3f997f0f06444e568d1f26e2efd69effa3218c7ad3047432fb171e42168 8083 bonsai-4b Bonsai 4B, 1-bit (572 MB)
+1.7b Bonsai-1.7B-Q1_0.gguf Bonsai-1.7B-gguf 3d7c6c90dd98717a203adb22d5eacd2581850e40aa5327e144b97766cae5f7e3 8084 bonsai-1.7b Bonsai 1.7B, 1-bit (248 MB)
+MODELS
+}
+names() { catalog | awk '{ print $1 }'; }
+lookup() { # name → name file repo sha port alias label
+  catalog | awk -v n="$1" '$1 == n' | grep . || { echo "archie-local: no model called '$1' (one of: $(names | tr '\n' ' '))" >&2; exit 64; }
+}
+here() { [ -e "$dir/$1" ]; }
+healthy() { curl -fsS -m 2 "http://127.0.0.1:$1/health" >/dev/null 2>&1; }
+has_gpu() { [ -x "$gpu/bin/llama-server" ] && command -v nvidia-smi >/dev/null && nvidia-smi >/dev/null 2>&1; }
+
+# The one chosen with `use`; until then, the best one here this machine can run.
+chosen() {
+  local name
+  if [ -s "$run/choice" ]; then
+    name=$(cat "$run/choice")
+    catalog | awk -v n="$name" '$1 == n { found = 1 } END { exit !found }' && { echo "$name"; return; }
+  fi
+  # Before `use` there was one model, linked as current.gguf by `setup`.
+  if [ -L "$dir/current.gguf" ]; then
+    name=$(catalog | awk -v f="$(basename "$(readlink "$dir/current.gguf")")" '$2 == f { print $1 }')
+    [ -n "$name" ] && { echo "$name"; return; }
+  fi
+  local order="4b 1.7b 9b"
+  has_gpu && order="27b 9b 4b 1.7b"
+  for name in $order; do
+    here "$(lookup "$name" | awk '{ print $2 }')" && { echo "$name"; return; }
+  done
+  echo 9b
+}
+
+stop_port() {
+  pkill -f -- "llama-server.*--port $1( |\$)" 2>/dev/null || true
+  for _ in $(seq 1 30); do pgrep -f -- "llama-server.*--port $1( |\$)" >/dev/null || return 0; sleep 1; done
+  echo "archie-local: the server on :$1 did not stop" >&2; return 1
+}
+
+fetch() { # name
+  local name file repo sha
+  lookup "$1" >/dev/null
+  read -r name file repo sha _ < <(lookup "$1")
+  local out=$dir/$file
+  if [ -f "$out" ] && printf '%s  %s\n' "$sha" "$out" | sha256sum --check --status; then return 0; fi
   mkdir -p "$dir"
-  curl --fail --location --proto '=https' --tlsv1.2 "https://huggingface.co/prism-ml/$1/resolve/main/$2" -o "$out.part"
-  printf '%s  %s\n' "$3" "$out.part" | sha256sum --check --status || { rm -f "$out.part"; echo 'archie-local: the model did not arrive whole' >&2; exit 1; }
+  curl --fail --location --proto '=https' --tlsv1.2 "https://huggingface.co/prism-ml/$repo/resolve/main/$file" -o "$out.part"
+  printf '%s  %s\n' "$sha" "$out.part" | sha256sum --check --status || { rm -f "$out.part"; echo 'archie-local: the model did not arrive whole' >&2; exit 1; }
   mv "$out.part" "$out"
 }
 
@@ -47,41 +101,105 @@ build_gpu() {
   echo 'archie-local: the GPU runtime is built'
 }
 
-case "${1:-status}" in
-  setup)
-    case "${2:-4b}" in
-      4b) fetch Bonsai-4B-gguf Bonsai-4B-Q1_0.gguf 4524b3f997f0f06444e568d1f26e2efd69effa3218c7ad3047432fb171e42168; ln -sfn Bonsai-4B-Q1_0.gguf "$dir/current.gguf" ;;
-      1.7b) fetch Bonsai-1.7B-gguf Bonsai-1.7B-Q1_0.gguf 3d7c6c90dd98717a203adb22d5eacd2581850e40aa5327e144b97766cae5f7e3; ln -sfn Bonsai-1.7B-Q1_0.gguf "$dir/current.gguf" ;;
-      *) echo 'archie-local setup 4b|1.7b' >&2; exit 64 ;;
+up() {
+  local name file port alias
+  read -r name file _ _ port alias _ < <(lookup "$(chosen)")
+  here "$file" || { echo "archie-local: $name is not here yet; run archie-local setup $name" >&2; exit 1; }
+  healthy "$port" && return 0
+  # One model at a time: the GPU has room for one, and the others would only hold memory.
+  local other
+  for other in $(catalog | awk -v n="$name" '$1 != n { print $5 }'); do stop_port "$other"; done
+  stop_port "$port"
+  mkdir -p "$run"
+  local runtime=$cpu
+  local args=(-m "$dir/$file" --host 127.0.0.1 --port "$port" --alias "$alias" --jinja)
+  if has_gpu; then
+    runtime=$gpu
+    # The KV cache quantised to q8_0 with flash attention, requests batched continuously and a
+    # cached prompt prefix reused, so a follow-up question does not re-read it.
+    args+=(--flash-attn on --cache-type-k q8_0 --cache-type-v q8_0 --cont-batching --cache-reuse 256)
+    case $name in
+      # The 27B leaves the GPU half a gigabyte for Windows' own use and fits the rest. Its chat
+      # template knows reasoning_effort none, medium and xhigh; anything else (a "high" would
+      # be an HTTP 500) is answered at medium.
+      27b) args+=(-ngl auto --fit on --fit-target 512 --ctx-size 16384 --parallel 1
+                  --reasoning-effort-allow none,medium,xhigh --reasoning-effort-fallback medium) ;;
+      # The 9B whole on the GPU (~4 GB with its cache), four requests at once: Wanda and the
+      # voice ask it at the same time.
+      *) args+=(-ngl 99 --ctx-size 65536 --parallel 4 --kv-unified) ;;
     esac
-    echo "archie-local: $(readlink "$dir/current.gguf") is ready"
+  else
+    args+=(-ngl 0 --threads "$(nproc)" --ctx-size 8192)
+  fi
+  LD_LIBRARY_PATH=$runtime/lib:/opt/cuda/lib64 setsid nohup "$runtime/bin/llama-server" "${args[@]}" \
+    > "$run/$name.log" 2>&1 < /dev/null &
+  local pid=$!
+  printf 'archie-local: loading %s' "$name" >&2
+  # The 27B reads 5.9 GB before it answers; from a slow disk that can take minutes.
+  for _ in $(seq 1 600); do
+    if healthy "$port"; then echo ' ready' >&2; return 0; fi
+    kill -0 "$pid" 2>/dev/null || { echo >&2; echo "archie-local: it stopped; see $run/$name.log" >&2; exit 1; }
+    printf '.' >&2
+    sleep 1
+  done
+  echo >&2; echo "archie-local: it did not come up; see $run/$name.log" >&2; exit 1
+}
+
+list() {
+  local current name file repo sha port alias label state
+  current=$(chosen)
+  while read -r name file repo sha port alias label; do
+    if healthy "$port"; then state="answering on 127.0.0.1:$port"
+    elif here "$file"; then state=here
+    else state="not here (archie-local setup $name)"; fi
+    printf '%s %-5s %-46s %s\n' "$([ "$name" = "$current" ] && echo '*' || echo ' ')" "$name" "$label" "$state"
+  done < <(catalog)
+}
+
+# The same, for the shell's Settings: [{"name", "label", "port", "here", "answering", "chosen"}].
+list_json() {
+  local current name file repo sha port alias label sep=''
+  current=$(chosen)
+  printf '['
+  while read -r name file repo sha port alias label; do
+    printf '%s{"name":"%s","label":"%s","port":%s,"here":%s,"answering":%s,"chosen":%s}' "$sep" "$name" "$label" "$port" \
+      "$(here "$file" && echo true || echo false)" "$(healthy "$port" && echo true || echo false)" \
+      "$([ "$name" = "$current" ] && echo true || echo false)"
+    sep=,
+  done < <(catalog)
+  printf ']\n'
+}
+
+case "${1:-status}" in
+  list) if [ "${2:-}" = --json ]; then list_json; else list; fi ;;
+  use)
+    [ -n "${2:-}" ] || { echo "archie-local use $(names | paste -sd '|')" >&2; exit 64; }
+    lookup "$2" >/dev/null
+    read -r name file _ < <(lookup "$2")
+    here "$file" || { echo "archie-local: $name is not here yet; run archie-local setup $name" >&2; exit 1; }
+    mkdir -p "$run"
+    echo "$name" > "$run/choice"
+    up
+    echo "archie-local: $name answers now"
+    ;;
+  current)
+    read -r name _ _ _ port alias _ < <(lookup "$(chosen)")
+    echo "$name http://127.0.0.1:$port/v1 $alias"
+    ;;
+  setup)
+    lookup "${2:-9b}" >/dev/null
+    fetch "${2:-9b}"
+    echo "archie-local: $(lookup "${2:-9b}" | awk '{ print $2 }') is ready"
     ;;
   gpu) build_gpu ;;
-  ready) [ -e "$dir/current.gguf" ] && [ -x "$gpu/bin/llama-server" ] ;;
-  up)
-    [ -e "$dir/current.gguf" ] || { echo 'archie-local: no model yet; run archie-local setup' >&2; exit 1; }
-    if curl -fsS -m 2 http://127.0.0.1:8081/health >/dev/null 2>&1; then exit 0; fi
-    mkdir -p "$run"
-    if [ -x "$gpu/bin/llama-server" ]; then runtime=$gpu; layers=(-ngl 99); else runtime=$cpu; layers=(); fi
-    LD_LIBRARY_PATH=$runtime/lib:/opt/cuda/lib64 "$runtime/bin/llama-server" -m "$dir/current.gguf" \
-      --host 127.0.0.1 --port 8081 --jinja -c 8192 -t "$(nproc)" --alias bonsai "${layers[@]}" > "$run/server.log" 2>&1 &
-    echo $! > "$run/server.pid"
-    printf 'archie-local: loading the model' >&2
-    for _ in $(seq 1 300); do
-      if curl -fsS -m 2 http://127.0.0.1:8081/health >/dev/null 2>&1; then echo ' ready' >&2; exit 0; fi
-      kill -0 "$(cat "$run/server.pid")" 2>/dev/null || { echo >&2; echo "archie-local: it stopped; see $run/server.log" >&2; exit 1; }
-      printf '.' >&2
-      sleep 1
-    done
-    echo >&2; echo "archie-local: it did not come up; see $run/server.log" >&2; exit 1
-    ;;
-  down)
-    if [ -f "$run/server.pid" ]; then kill "$(cat "$run/server.pid")" 2>/dev/null || true; rm -f "${run:?}/server.pid"; fi
-    ;;
+  ready) read -r _ file _ < <(lookup "$(chosen)"); here "$file" && [ -x "$gpu/bin/llama-server" ] ;;
+  up) up ;;
+  down) for port in $(catalog | awk '{ print $5 }'); do stop_port "$port"; done ;;
   status)
-    if [ -e "$dir/current.gguf" ]; then echo "model:   $(readlink "$dir/current.gguf")"; else echo 'model:   none (archie-local setup)'; fi
-    if [ -x "$gpu/bin/llama-server" ]; then echo 'runtime: GPU'; else echo 'runtime: CPU only (archie-local gpu builds the GPU one)'; fi
-    if curl -fsS -m 2 http://127.0.0.1:8081/health >/dev/null 2>&1; then echo 'server:  running on 127.0.0.1:8081'; else echo 'server:  stopped'; fi
+    if has_gpu; then echo "runtime: GPU ($(LD_LIBRARY_PATH=$gpu/lib:/opt/cuda/lib64 "$gpu/bin/llama-server" --version 2>&1 | grep -o 'build [0-9]*' || echo 'build unknown'))"
+    elif [ -x "$gpu/bin/llama-server" ]; then echo 'runtime: GPU built, but no GPU is visible now'
+    else echo 'runtime: CPU only (archie-local gpu builds the GPU one)'; fi
+    list
     ;;
   *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
 esac

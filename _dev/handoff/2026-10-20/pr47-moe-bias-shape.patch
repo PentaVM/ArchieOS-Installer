@@ -1,0 +1,51 @@
+From 9fc97b9a74d051dd0d3e77d5958d884032fefd41 Mon Sep 17 00:00:00 2001
+From: PentaVM <n18867428@gmail.com>
+Date: Tue, 20 Oct 2026 23:50:11 -0300
+Subject: [PATCH] fix(iris): expert biases are [E, 1, H] in the release; the
+ device route broke on them
+
+route_on_device added `b_in.narrow(..).unsqueeze(1)`, which is right for a
+[E, H] bias (what the tests built) but makes [E, 1, 1, H] from the release's
+[E, 1, H] and the following batched matmul fails, so the CUDA path could not
+run on the real weights. Reshape to [count, 1, H] for either layout, and
+build the test biases as the release stores them; with the old code the two
+routing tests fail, with this they pass.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ core/crates/archie-iris-runtime/src/model.rs | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/core/crates/archie-iris-runtime/src/model.rs b/core/crates/archie-iris-runtime/src/model.rs
+index 2c94fa2..0a66f8d 100644
+--- a/core/crates/archie-iris-runtime/src/model.rs
++++ b/core/crates/archie-iris-runtime/src/model.rs
+@@ -270,11 +270,11 @@ impl SparseMoe {
+                 .reshape((count, capacity, width))?;
+             let hidden = input
+                 .matmul(&self.w_in.narrow(0, first, count)?)?
+-                .broadcast_add(&self.b_in.narrow(0, first, count)?.unsqueeze(1)?)?;
++                .broadcast_add(&self.b_in.narrow(0, first, count)?.reshape((count, 1, ()))?)?;
+             let hidden = crate::fast::gelu_erf(&hidden)?;
+             let out = hidden
+                 .matmul(&self.w_out.narrow(0, first, count)?)?
+-                .broadcast_add(&self.b_out.narrow(0, first, count)?.unsqueeze(1)?)?;
++                .broadcast_add(&self.b_out.narrow(0, first, count)?.reshape((count, 1, ()))?)?;
+             routed.push(out.reshape((count * capacity, width))?);
+         }
+         routed.push(Tensor::zeros((1, width), dtype, device)?);
+@@ -952,9 +952,9 @@ mod tests {
+         put("shared.2.weight", randn(&[WIDTH, HIDDEN]));
+         put("shared.2.bias", randn(&[WIDTH]));
+         put("w_in", randn(&[experts, WIDTH, HIDDEN]));
+-        put("b_in", randn(&[experts, HIDDEN]));
++        put("b_in", randn(&[experts, 1, HIDDEN]));
+         put("w_out", randn(&[experts, HIDDEN, WIDTH]));
+-        put("b_out", randn(&[experts, WIDTH]));
++        put("b_out", randn(&[experts, 1, WIDTH]));
+         let config = config(experts, top_k);
+         let weights = Weights::from_tensors(
+             map,
+-- 
+2.56.0.windows.2
+

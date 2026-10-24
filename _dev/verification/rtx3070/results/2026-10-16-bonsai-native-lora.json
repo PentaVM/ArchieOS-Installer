@@ -1,0 +1,458 @@
+{
+  "scope": "synthetic_one_layer_adapter_loading_only",
+  "full_qlora_training": false,
+  "promoted": false,
+  "native_adapters": [
+    {
+      "id": 0,
+      "path": "/mnt/d/ArchieLocal/compatibility-probes/bonsai9b-zero-lora-PROBE.gguf",
+      "scale": 1.0,
+      "task_name": "",
+      "prompt_prefix": ""
+    },
+    {
+      "id": 1,
+      "path": "/mnt/d/ArchieLocal/compatibility-probes/bonsai9b-one-layer-lora-PROBE.gguf",
+      "scale": 1.0,
+      "task_name": "",
+      "prompt_prefix": ""
+    }
+  ],
+  "zero_delta": 0.0,
+  "nonzero_delta": 0.025000572204589844,
+  "restore_delta": 0.0,
+  "responses": {
+    "base": {
+      "choices": [
+        {
+          "finish_reason": "length",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "LIST"
+          },
+          "logprobs": {
+            "content": [
+              {
+                "id": 22141,
+                "token": "LIST",
+                "bytes": [
+                  76,
+                  73,
+                  83,
+                  84
+                ],
+                "logprob": -0.0010152843315154314,
+                "top_logprobs": [
+                  {
+                    "id": 22141,
+                    "token": "LIST",
+                    "bytes": [
+                      76,
+                      73,
+                      83,
+                      84
+                    ],
+                    "logprob": -0.0010152843315154314
+                  },
+                  {
+                    "id": 826,
+                    "token": "List",
+                    "bytes": [
+                      76,
+                      105,
+                      115,
+                      116
+                    ],
+                    "logprob": -7.394669055938721
+                  },
+                  {
+                    "id": 17982,
+                    "token": "LI",
+                    "bytes": [
+                      76,
+                      73
+                    ],
+                    "logprob": -9.156144142150879
+                  },
+                  {
+                    "id": 26102,
+                    "token": " LIST",
+                    "bytes": [
+                      32,
+                      76,
+                      73,
+                      83,
+                      84
+                    ],
+                    "logprob": -9.631091117858887
+                  },
+                  {
+                    "id": 42172,
+                    "token": "Lista",
+                    "bytes": [
+                      76,
+                      105,
+                      115,
+                      116,
+                      97
+                    ],
+                    "logprob": -10.022601127624512
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1792124880,
+      "model": "/mnt/d/ArchieLocal/models/Ternary-Bonsai-2-9B-PTQ1_0.gguf",
+      "system_fingerprint": "b10777-e3de71522",
+      "object": "chat.completion",
+      "usage": {
+        "completion_tokens": 1,
+        "prompt_tokens": 21,
+        "total_tokens": 22,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "id": "chatcmpl-JhWWUknGqi6kpMhCHvd71VKCtvr0YWvD",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 21,
+        "prompt_ms": 262.139,
+        "prompt_per_token_ms": 12.482809523809525,
+        "prompt_per_second": 80.11017055836788,
+        "predicted_n": 1,
+        "predicted_ms": 0.001,
+        "predicted_per_token_ms": 0.0,
+        "predicted_per_second": 0.0
+      }
+    },
+    "zero": {
+      "choices": [
+        {
+          "finish_reason": "length",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "LIST"
+          },
+          "logprobs": {
+            "content": [
+              {
+                "id": 22141,
+                "token": "LIST",
+                "bytes": [
+                  76,
+                  73,
+                  83,
+                  84
+                ],
+                "logprob": -0.0010152843315154314,
+                "top_logprobs": [
+                  {
+                    "id": 22141,
+                    "token": "LIST",
+                    "bytes": [
+                      76,
+                      73,
+                      83,
+                      84
+                    ],
+                    "logprob": -0.0010152843315154314
+                  },
+                  {
+                    "id": 826,
+                    "token": "List",
+                    "bytes": [
+                      76,
+                      105,
+                      115,
+                      116
+                    ],
+                    "logprob": -7.394669055938721
+                  },
+                  {
+                    "id": 17982,
+                    "token": "LI",
+                    "bytes": [
+                      76,
+                      73
+                    ],
+                    "logprob": -9.156144142150879
+                  },
+                  {
+                    "id": 26102,
+                    "token": " LIST",
+                    "bytes": [
+                      32,
+                      76,
+                      73,
+                      83,
+                      84
+                    ],
+                    "logprob": -9.631091117858887
+                  },
+                  {
+                    "id": 42172,
+                    "token": "Lista",
+                    "bytes": [
+                      76,
+                      105,
+                      115,
+                      116,
+                      97
+                    ],
+                    "logprob": -10.022601127624512
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1792124881,
+      "model": "/mnt/d/ArchieLocal/models/Ternary-Bonsai-2-9B-PTQ1_0.gguf",
+      "system_fingerprint": "b10777-e3de71522",
+      "object": "chat.completion",
+      "usage": {
+        "completion_tokens": 1,
+        "prompt_tokens": 21,
+        "total_tokens": 22,
+        "prompt_tokens_details": {
+          "cached_tokens": 17
+        }
+      },
+      "id": "chatcmpl-rzyiELi3kAa86VJNysKNnbWMznIFgLS8",
+      "timings": {
+        "cache_n": 17,
+        "prompt_n": 4,
+        "prompt_ms": 69.159,
+        "prompt_per_token_ms": 17.28975,
+        "prompt_per_second": 57.837736231003916,
+        "predicted_n": 1,
+        "predicted_ms": 0.001,
+        "predicted_per_token_ms": 0.0,
+        "predicted_per_second": 0.0
+      }
+    },
+    "nonzero": {
+      "choices": [
+        {
+          "finish_reason": "length",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "LIST"
+          },
+          "logprobs": {
+            "content": [
+              {
+                "id": 22141,
+                "token": "LIST",
+                "bytes": [
+                  76,
+                  73,
+                  83,
+                  84
+                ],
+                "logprob": -0.001016954891383648,
+                "top_logprobs": [
+                  {
+                    "id": 22141,
+                    "token": "LIST",
+                    "bytes": [
+                      76,
+                      73,
+                      83,
+                      84
+                    ],
+                    "logprob": -0.001016954891383648
+                  },
+                  {
+                    "id": 826,
+                    "token": "List",
+                    "bytes": [
+                      76,
+                      105,
+                      115,
+                      116
+                    ],
+                    "logprob": -7.4003753662109375
+                  },
+                  {
+                    "id": 17982,
+                    "token": "LI",
+                    "bytes": [
+                      76,
+                      73
+                    ],
+                    "logprob": -9.143036842346191
+                  },
+                  {
+                    "id": 26102,
+                    "token": " LIST",
+                    "bytes": [
+                      32,
+                      76,
+                      73,
+                      83,
+                      84
+                    ],
+                    "logprob": -9.606340408325195
+                  },
+                  {
+                    "id": 42172,
+                    "token": "Lista",
+                    "bytes": [
+                      76,
+                      105,
+                      115,
+                      116,
+                      97
+                    ],
+                    "logprob": -9.997600555419922
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1792124881,
+      "model": "/mnt/d/ArchieLocal/models/Ternary-Bonsai-2-9B-PTQ1_0.gguf",
+      "system_fingerprint": "b10777-e3de71522",
+      "object": "chat.completion",
+      "usage": {
+        "completion_tokens": 1,
+        "prompt_tokens": 21,
+        "total_tokens": 22,
+        "prompt_tokens_details": {
+          "cached_tokens": 17
+        }
+      },
+      "id": "chatcmpl-hZE7Ofjmo3SkiRVOM5qtjgNXKQOttmkf",
+      "timings": {
+        "cache_n": 17,
+        "prompt_n": 4,
+        "prompt_ms": 50.614,
+        "prompt_per_token_ms": 12.6535,
+        "prompt_per_second": 79.02951752479551,
+        "predicted_n": 1,
+        "predicted_ms": 0.001,
+        "predicted_per_token_ms": 0.0,
+        "predicted_per_second": 0.0
+      }
+    },
+    "restored": {
+      "choices": [
+        {
+          "finish_reason": "length",
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "LIST"
+          },
+          "logprobs": {
+            "content": [
+              {
+                "id": 22141,
+                "token": "LIST",
+                "bytes": [
+                  76,
+                  73,
+                  83,
+                  84
+                ],
+                "logprob": -0.0010152843315154314,
+                "top_logprobs": [
+                  {
+                    "id": 22141,
+                    "token": "LIST",
+                    "bytes": [
+                      76,
+                      73,
+                      83,
+                      84
+                    ],
+                    "logprob": -0.0010152843315154314
+                  },
+                  {
+                    "id": 826,
+                    "token": "List",
+                    "bytes": [
+                      76,
+                      105,
+                      115,
+                      116
+                    ],
+                    "logprob": -7.394669055938721
+                  },
+                  {
+                    "id": 17982,
+                    "token": "LI",
+                    "bytes": [
+                      76,
+                      73
+                    ],
+                    "logprob": -9.156144142150879
+                  },
+                  {
+                    "id": 26102,
+                    "token": " LIST",
+                    "bytes": [
+                      32,
+                      76,
+                      73,
+                      83,
+                      84
+                    ],
+                    "logprob": -9.631091117858887
+                  },
+                  {
+                    "id": 42172,
+                    "token": "Lista",
+                    "bytes": [
+                      76,
+                      105,
+                      115,
+                      116,
+                      97
+                    ],
+                    "logprob": -10.022601127624512
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "created": 1792124881,
+      "model": "/mnt/d/ArchieLocal/models/Ternary-Bonsai-2-9B-PTQ1_0.gguf",
+      "system_fingerprint": "b10777-e3de71522",
+      "object": "chat.completion",
+      "usage": {
+        "completion_tokens": 1,
+        "prompt_tokens": 21,
+        "total_tokens": 22,
+        "prompt_tokens_details": {
+          "cached_tokens": 17
+        }
+      },
+      "id": "chatcmpl-IGUh82mzkSdrg47c1pv0xiVUhmjsWrRa",
+      "timings": {
+        "cache_n": 17,
+        "prompt_n": 4,
+        "prompt_ms": 48.625,
+        "prompt_per_token_ms": 12.15625,
+        "prompt_per_second": 82.26221079691517,
+        "predicted_n": 1,
+        "predicted_ms": 0.001,
+        "predicted_per_token_ms": 0.0,
+        "predicted_per_second": 0.0
+      }
+    }
+  }
+}

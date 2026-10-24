@@ -16,18 +16,28 @@
 //! the table that reverses them stays in this process, and the real values are put back
 //! into the answer here. The cloud model writes the file or the letter and never holds
 //! what goes in it.
+//!
+//! # Local models whose server is down
+//!
+//! A local model marked `ready` whose llama-server has stopped is offline to routing
+//! once [`Routed::refresh_liveness`] has found it so ([`crate::liveness`]). The async
+//! entry points here refresh first; a caller that decides with [`Routed::disclose_chat`]
+//! or [`Routed::candidates`] refreshes before it.
 
+use crate::liveness::Liveness;
 use crate::{
     provider_model_id, ChatMessage, ChatRequest, InferenceClient, MessageRole, ProviderEndpoint,
     RuntimeError, VisionChatRequest, VisionImage,
 };
 use archie_registry::{ModelRegistry, ModelRegistryError};
 use archie_router::{Router, RoutingRequest, Weights};
-use archie_types::{Locality, ModelId, ModelRole, PrivacyGrade};
+use archie_types::{Availability, Locality, ModelId, ModelRole, PrivacyGrade};
 use archie_vault::veil::Kind;
 use archie_vault::{Veil, Veiled};
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use thiserror::Error;
 
@@ -35,6 +45,8 @@ use thiserror::Error;
 pub enum RoutedError {
     #[error(transparent)]
     Registry(#[from] ModelRegistryError),
+    #[error(transparent)]
+    ProviderConfig(#[from] crate::provider::ProviderConfigError),
     /// The router's own words for why nothing may serve the request.
     #[error("no model may answer this: {0}")]
     NoModel(String),
@@ -109,12 +121,16 @@ pub struct Answered {
     pub text: String,
     pub seconds: f32,
     pub completion_tokens: u64,
+    /// Provider terminal reason. A semantic refusal is terminal, not a transport retry.
+    pub finish_reason: Option<String>,
 }
 
 /// The node's models and the router over them.
 pub struct Routed {
     registry: ModelRegistry,
     router: Router,
+    min_quality_tier: u8,
+    liveness: Option<Arc<Liveness>>,
 }
 
 impl Routed {
@@ -122,7 +138,53 @@ impl Routed {
         Self {
             registry,
             router: Router::new(Weights::default()),
+            min_quality_tier: 0,
+            liveness: Some(Liveness::shared()),
         }
+    }
+
+    /// Operator-configured quality floor, using the existing router's admission.
+    pub fn requiring_quality(mut self, tier: u8) -> Self {
+        self.min_quality_tier = tier.min(100);
+        self
+    }
+
+    /// Whose record of local servers routing consults: the process's own by default, a
+    /// private one in a test, or none, which takes every manifest at its word.
+    pub fn with_liveness(mut self, liveness: Option<Arc<Liveness>>) -> Self {
+        self.liveness = liveness;
+        self
+    }
+
+    /// Ask each local llama.cpp server whether it is up, unless it answered within the
+    /// last few seconds. Until it answers again, one that is down is offline to routing.
+    pub async fn refresh_liveness(&self) {
+        if let Some(liveness) = &self.liveness {
+            liveness.refresh(self.registry.iter()).await;
+        }
+    }
+
+    /// The registry as routing sees it now: the manifests, with every model whose server
+    /// was just found down marked offline.
+    fn live_registry(&self) -> Cow<'_, ModelRegistry> {
+        let Some(liveness) = &self.liveness else {
+            return Cow::Borrowed(&self.registry);
+        };
+        let down: Vec<_> = self
+            .registry
+            .iter()
+            .filter(|model| liveness.is_down(model))
+            .cloned()
+            .collect();
+        if down.is_empty() {
+            return Cow::Borrowed(&self.registry);
+        }
+        let mut registry = self.registry.clone();
+        for mut model in down {
+            model.availability = Availability::Offline;
+            let _ = registry.upsert(model);
+        }
+        Cow::Owned(registry)
     }
 
     /// From the node's model manifests, e.g. `/etc/archie/models`.
@@ -130,19 +192,28 @@ impl Routed {
         Ok(Self::new(ModelRegistry::load_from_dir(models)?))
     }
 
+    pub fn from_paths(
+        models: impl AsRef<Path>,
+        providers: impl AsRef<Path>,
+    ) -> Result<Self, RoutedError> {
+        Ok(Self::new(crate::provider::load_catalog(models, providers)?))
+    }
+
     pub fn registry(&self) -> &ModelRegistry {
         &self.registry
     }
 
     /// The models that may answer, best first. A cloud model whose key is not in the
-    /// environment is left out: it is registered and cannot be called.
+    /// environment is left out: it is registered and cannot be called. So is a local
+    /// model whose server the last [`Self::refresh_liveness`] found down.
     pub fn candidates(&self, question: &Question<'_>) -> Result<Vec<ModelId>, RoutedError> {
         let mut request = RoutingRequest::new(
             question.privacy,
             ((question.system.len() + question.user.len()) / 3) as u32,
             question.max_tokens,
         )
-        .requiring(question.role.capability());
+        .requiring(question.role.capability())
+        .min_quality(self.min_quality_tier);
         if question.image.is_some() {
             request = request.requiring(ModelRole::VisionModel.capability());
         }
@@ -151,7 +222,8 @@ impl Routed {
 
     /// The eligible models for `request` that can be called, best first.
     fn callable(&self, request: &RoutingRequest) -> Result<Vec<ModelId>, RoutedError> {
-        let outcome = self.router.route(&self.registry, request);
+        let registry = self.live_registry();
+        let outcome = self.router.route(&registry, request);
         let mut eligible: Vec<_> = outcome
             .considered()
             .iter()
@@ -161,7 +233,7 @@ impl Routed {
         let callable: Vec<ModelId> = eligible
             .into_iter()
             .filter(|candidate| {
-                self.registry
+                registry
                     .get(&candidate.model)
                     .and_then(|descriptor| ProviderEndpoint::for_model(descriptor).ok())
                     .is_some_and(|endpoint| endpoint.is_configured())
@@ -175,6 +247,7 @@ impl Routed {
     }
 
     pub async fn ask(&self, question: &Question<'_>) -> Result<Answered, RoutedError> {
+        self.refresh_liveness().await;
         self.ask_among(self.candidates(question)?, question).await
     }
 
@@ -435,32 +508,68 @@ impl Routed {
         question: &Question<'_>,
         veil: &Veil,
     ) -> Result<PrivateAnswer, RoutedError> {
+        let started = Instant::now();
+        self.refresh_liveness().await;
         match self.disclosure(question, veil)? {
-            Disclosure::Kept { models } => Ok(PrivateAnswer {
-                answered: self.ask_among(models, question).await?,
-                left_the_machine: false,
-                covered: BTreeMap::new(),
-            }),
-            Disclosure::Veiled { models, veiled } => {
-                let system = format!("{}{STAND_INS}", veiled.texts[0]);
-                let outgoing = Question {
-                    role: question.role,
-                    privacy: PrivacyGrade::Public,
-                    system: &system,
-                    user: &veiled.texts[1],
-                    image: None,
-                    max_tokens: question.max_tokens,
-                    timeout: question.timeout,
+            Disclosure::Kept { models } => {
+                let failed = match self.ask_among(models.clone(), question).await {
+                    Ok(answered) => {
+                        return Ok(PrivateAnswer {
+                            answered,
+                            left_the_machine: false,
+                            covered: BTreeMap::new(),
+                        })
+                    }
+                    Err(failed) => failed,
                 };
-                let mut answered = self.ask_among(models, &outgoing).await?;
-                answered.text = veiled.unveil.restore(&answered.text);
-                Ok(PrivateAnswer {
-                    answered,
-                    left_the_machine: true,
-                    covered: veiled.unveil.covered(),
-                })
+                // A server that stopped after its last health answer fails here. Ask the
+                // servers again: when none of this machine's models is up any more, the
+                // question is decided afresh, and may go veiled where its grade allows.
+                if let Some(liveness) = &self.liveness {
+                    for model in models.iter().filter_map(|id| self.registry.get(id)) {
+                        liveness.forget(model);
+                    }
+                }
+                self.refresh_liveness().await;
+                let left = question.timeout.saturating_sub(started.elapsed());
+                match self.disclosure(question, veil) {
+                    Ok(Disclosure::Veiled { models, veiled }) if !left.is_zero() => {
+                        self.ask_veiled(models, veiled, question, left).await
+                    }
+                    _ => Err(failed),
+                }
+            }
+            Disclosure::Veiled { models, veiled } => {
+                self.ask_veiled(models, veiled, question, question.timeout)
+                    .await
             }
         }
+    }
+
+    async fn ask_veiled(
+        &self,
+        models: Vec<ModelId>,
+        veiled: Veiled,
+        question: &Question<'_>,
+        timeout: Duration,
+    ) -> Result<PrivateAnswer, RoutedError> {
+        let system = format!("{}{STAND_INS}", veiled.texts[0]);
+        let outgoing = Question {
+            role: question.role,
+            privacy: PrivacyGrade::Public,
+            system: &system,
+            user: &veiled.texts[1],
+            image: None,
+            max_tokens: question.max_tokens,
+            timeout,
+        };
+        let mut answered = self.ask_among(models, &outgoing).await?;
+        answered.text = veiled.unveil.restore(&answered.text);
+        Ok(PrivateAnswer {
+            answered,
+            left_the_machine: true,
+            covered: veiled.unveil.covered(),
+        })
     }
 
     async fn ask_among(
@@ -468,17 +577,33 @@ impl Routed {
         models: Vec<ModelId>,
         question: &Question<'_>,
     ) -> Result<Answered, RoutedError> {
+        Self::ask_among_with(models, question.timeout, |model, timeout| async move {
+            self.ask_one(&model, question, timeout).await
+        })
+        .await
+    }
+
+    async fn ask_among_with<F, Fut>(
+        models: Vec<ModelId>,
+        timeout: Duration,
+        mut runner: F,
+    ) -> Result<Answered, RoutedError>
+    where
+        F: FnMut(ModelId, Duration) -> Fut,
+        Fut: std::future::Future<Output = Result<Answered, RuntimeError>>,
+    {
         let started = Instant::now();
         let mut failures = Vec::new();
         for model in models {
-            let left = question.timeout.saturating_sub(started.elapsed());
+            let left = timeout.saturating_sub(started.elapsed());
             if left.is_zero() {
                 failures.push((model, "no time left".to_string()));
                 continue;
             }
-            match self.ask_one(&model, question, left).await {
-                Ok(answered) => return Ok(answered),
-                Err(error) => failures.push((model, error.to_string())),
+            match tokio::time::timeout(left, runner(model.clone(), left)).await {
+                Ok(Ok(answered)) => return Ok(answered),
+                Ok(Err(error)) => failures.push((model, error.to_string())),
+                Err(_) => failures.push((model, RuntimeError::DeadlineExceeded.to_string())),
             }
         }
         Err(RoutedError::AllFailed(failures))
@@ -532,24 +657,34 @@ impl Routed {
                     max_tokens: Some(question.max_tokens),
                     temperature: Some(0.2),
                     stream: false,
+                    reply_schema: None,
                 };
                 client.chat(descriptor, question.privacy, &request).await?
             }
         };
-        let text = response
+        Self::answer_from_response(model, response, asked.elapsed().as_secs_f32())
+    }
+
+    fn answer_from_response(
+        model: &ModelId,
+        response: crate::ChatResponse,
+        seconds: f32,
+    ) -> Result<Answered, RuntimeError> {
+        let (text, finish_reason) = response
             .choices
             .into_iter()
             .next()
-            .map(|choice| choice.message.content)
+            .map(|choice| (choice.message.content, choice.finish_reason))
             .unwrap_or_default();
-        if text.trim().is_empty() {
+        if text.trim().is_empty() && finish_reason.as_deref() != Some("refusal") {
             return Err(RuntimeError::EmptyCompletion);
         }
         Ok(Answered {
             model: model.clone(),
             text,
-            seconds: asked.elapsed().as_secs_f32(),
+            seconds,
             completion_tokens: response.usage.map_or(0, |usage| usage.completion_tokens),
+            finish_reason,
         })
     }
 }
@@ -605,4 +740,65 @@ fn kinds(found: &[Kind]) -> String {
     names.sort_unstable();
     names.dedup();
     names.join(", ").to_lowercase()
+}
+
+#[cfg(test)]
+mod refusal_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn native_refusal_terminates_routing_without_contacting_the_next_provider() {
+        let (client, descriptor, observed) = crate::anthropic::tests::http_fixture(
+            r#"{"type":"message","role":"assistant","model":"m","content":[{"type":"text","text":"I cannot help with that."}],"stop_reason":"refusal","usage":{"input_tokens":7,"output_tokens":6}}"#,
+        ).await;
+        let fallback = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let fallback_url = format!("http://{}/v1/", fallback.local_addr().unwrap());
+        let first = descriptor.id.clone();
+        let ids = vec![first.clone(), ModelId::parse("fallback.provider").unwrap()];
+        let request = ChatRequest {
+            model: "m".into(),
+            messages: vec![ChatMessage {
+                role: MessageRole::User,
+                content: "question".into(),
+            }],
+            max_tokens: Some(128),
+            temperature: Some(0.2),
+            stream: false,
+            reply_schema: None,
+        };
+        let answered = Routed::ask_among_with(ids, Duration::from_secs(1), |id, _| {
+            let client = &client;
+            let descriptor = &descriptor;
+            let request = &request;
+            let first = &first;
+            let fallback_url = &fallback_url;
+            async move {
+                if &id == first {
+                    let response = client
+                        .chat(descriptor, PrivacyGrade::Public, request)
+                        .await?;
+                    Routed::answer_from_response(&id, response, 0.0)
+                } else {
+                    let other = InferenceClient::new(ProviderEndpoint::openai_compatible(
+                        fallback_url,
+                        Locality::Local,
+                        None,
+                    )?)?;
+                    other.models().await?;
+                    Err(RuntimeError::EmptyCompletion)
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(answered.finish_reason.as_deref(), Some("refusal"));
+        assert_eq!(answered.text, "I cannot help with that.");
+        assert_eq!(answered.completion_tokens, 6);
+        assert!(observed.await.unwrap().starts_with("POST /v1/messages "));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), fallback.accept())
+                .await
+                .is_err()
+        );
+    }
 }

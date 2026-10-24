@@ -25,16 +25,22 @@ pub enum FeedSource {
     WandaChat,
     /// A document the owner put under Archie's care, via [`crate::vault_bridge`].
     VaultDocument,
+    /// A bounded visual interaction episode receipt, via [`crate::iris_bridge`].
+    IrisEpisode,
+    /// A build, test, patch or review receipt, via [`crate::forge_bridge`].
+    ForgeArtifact,
 }
 
 impl FeedSource {
-    pub const ALL: [FeedSource; 6] = [
+    pub const ALL: [FeedSource; 8] = [
         Self::NetwatchAlert,
         Self::Device,
         Self::WandaMessage,
         Self::WandaNotification,
         Self::WandaChat,
         Self::VaultDocument,
+        Self::IrisEpisode,
+        Self::ForgeArtifact,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -44,6 +50,8 @@ impl FeedSource {
             Self::WandaNotification => "wanda-notification",
             Self::WandaChat => "wanda-chat",
             Self::VaultDocument => "vault-document",
+            Self::IrisEpisode => "iris-episode",
+            Self::ForgeArtifact => "forge-artifact",
         }
     }
 }
@@ -151,8 +159,11 @@ impl FocusProfile {
                         .only(&[Category::Work, Category::Urgency]),
                     FocusRule::new(WandaChat, 0, 30),
                     FocusRule::new(NetwatchAlert, 90, 80),
-                    // The work's own evidence: the brief and its restrictions first.
+                    // The work's own evidence: the brief and its restrictions first,
+                    // followed by Forge receipts and IRIS episodes.
                     FocusRule::new(VaultDocument, 0, 85),
+                    FocusRule::new(ForgeArtifact, 0, 75),
+                    FocusRule::new(IrisEpisode, 0, 65),
                 ],
                 max_items: 24,
             },
@@ -170,6 +181,7 @@ impl FocusProfile {
                     FocusRule::new(WandaChat, 0, 40),
                     FocusRule::new(NetwatchAlert, 90, 50),
                     FocusRule::new(VaultDocument, 0, 45),
+                    FocusRule::new(IrisEpisode, 0, 35),
                 ],
                 max_items: 32,
             },

@@ -1,0 +1,57 @@
+{
+  "retrieved_utc": "2026-10-16T19:46:16.157093+00:00",
+  "scope": "metadata and license only; no corpora, examples or question files saved; hashes are metadata hashes, not dataset hashes",
+  "sources": [
+    {
+      "url": "https://api.github.com/repos/facebookresearch/ToMi/commits/master",
+      "status": 200,
+      "bytes": 7724,
+      "sha256": "d5983fda7680c7fcb298f867fb642ab9eca98d6357c591aea515513821958706",
+      "revision": "dea2bca9b366c41cdab0bd717353cc02453e193e"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/facebookresearch/ToMi/master/README.md",
+      "status": 200,
+      "bytes": 3048,
+      "sha256": "159218ff85b3085475d5b56533944bd7809771ffb82efeace3f05f996cbb6608"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/facebookresearch/ToMi/master/LICENSE",
+      "status": 200,
+      "bytes": 19337,
+      "sha256": "ab7a30e515d6de3e495b0943aecca7397b4815d1afee8026a49463e8e7cc7d9a"
+    },
+    {
+      "url": "https://api.github.com/repos/stanfordnlp/cocoa/commits/master",
+      "status": 200,
+      "bytes": 5569,
+      "sha256": "5b12fbe768b190fee58edad3098de2a8abfd08e36c07853abc122cacaeb2a2b5",
+      "revision": "52fb2d47a28537c7892f146a8972a75bcde4812c"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/stanfordnlp/cocoa/master/LICENSE.md",
+      "status": 200,
+      "bytes": 1069,
+      "sha256": "7732defaad94bcffdcad56e1fae99586f9cae39200d6ab82a9183b6f7119762e"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/stanfordnlp/cocoa/master/craigslistbargain/README.md",
+      "status": 200,
+      "bytes": 7933,
+      "sha256": "22636e2677e88fd293ee79b8c4dc38f92e3689475187eac0b0c7e81474f66d5e"
+    },
+    {
+      "url": "https://huggingface.co/api/datasets/stanfordnlp/craigslist_bargains",
+      "status": 200,
+      "bytes": 2720,
+      "sha256": "628dc9af3872e38339dce8204d2bbe73d9dfc5d9684a29c35fc227e165719034",
+      "revision": "cfb6992c5ca9bad209323ed8e42e0cfc7e4178cf"
+    },
+    {
+      "url": "https://huggingface.co/datasets/stanfordnlp/craigslist_bargains/raw/main/README.md",
+      "status": 200,
+      "bytes": 9526,
+      "sha256": "b6aaf3495b4656bc477d2db05bb96a3e35b04eccb5e2d6fe271595a0557d9733"
+    }
+  ]
+}

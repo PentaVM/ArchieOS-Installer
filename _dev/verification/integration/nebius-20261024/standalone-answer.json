@@ -1,0 +1,40 @@
+{
+  "receipt": {
+    "schema_version": 1,
+    "receipt_id": "19653ef0-1fbc-4db9-95d2-78ac31e82fe9",
+    "checkpoint_id": "inference-checkpoint:3cb33756-ed55-4d1a-945b-52486efca929",
+    "binding": {
+      "schema_version": 1,
+      "domain": "personal/owner",
+      "focus_id": "ai:7644aaa316dbee48ec70a0d941f55d369250a3291abce78266142506f3c9e3bb",
+      "task_id": "0dbb9010-eded-45d8-b8b9-f00694f2c10d",
+      "objective_ref": "vault:personal/owner/objectives/8b8f0e415ccbbee6c1bc8bbc",
+      "runner_id": "api",
+      "provider_id": "nebius-token-factory",
+      "account_id": "deployment:ab93013c2d71fe76243b3f5bf9bcfe17b8ea334cef3778fb2331038e34f9d422"
+    },
+    "session_id": null,
+    "model_id": "nebius.nemotron-3-super",
+    "request_sha256": "1e366286aed1b2c01c12904093987a43aed58929b9e421590a81dd39c33a8db7",
+    "output_sha256": "1c1804e23d87ca8ecc8c7183d1b7180c281ec57f350380939c75e824ac1e50d7",
+    "admitted_evidence_refs": [],
+    "result_ref": {
+      "reference": "vault:personal/owner/inference/19653ef0-1fbc-4db9-95d2-78ac31e82fe9",
+      "account_id": "deployment:ab93013c2d71fe76243b3f5bf9bcfe17b8ea334cef3778fb2331038e34f9d422"
+    },
+    "status": "completed",
+    "error_code": null,
+    "observed_at_ms": 1792828897567,
+    "usage": {
+      "input_tokens": 177,
+      "output_tokens": 409,
+      "duration_ms": 4179
+    }
+  },
+  "text": "\n\n1. **Model** – completes the rendered poster inside the VM; verify that the render finishes without errors and the output file exists in the VM workspace.  \n2. **Cerebra** – packages the poster into a transfer‑ready archive; verify the archive checksum matches the source file and no corruption is detected.  \n3. **Policy** – checks that the archive complies with usage and security rules; verify that the policy check returns “allowed” and logs the authorization.  \n4. **Delivery Bridge** – transmits the archive from the VM to the owner’s Windows PC; verify successful receipt on the PC side (file present and checksum matches).  \n5. **Owner** – confirms receipt and approves the delivered poster; this step requires the owner’s approval.  \n\nStep 5 needs the owner's approval.",
+  "budget": {
+    "generation_token_limit": 1500,
+    "max_output_bytes": 262144,
+    "max_duration_ms": 120000
+  }
+}

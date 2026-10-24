@@ -182,7 +182,7 @@ impl OperatorSession {
     }
     /// Builds the owning adapter for one configured actuable resource, opening
     /// referenced secrets for this one operation only.
-    fn adapter_for(&self, resource_id: &str) -> Result<Box<dyn EdgeAdapter>, EngineError> {
+    async fn adapter_for(&self, resource_id: &str) -> Result<Box<dyn EdgeAdapter>, EngineError> {
         let sentry = &self.core.config.sentry;
         let (route, _) = sentry
             .actuable_route(resource_id)
@@ -253,8 +253,11 @@ impl OperatorSession {
             ),
             "router" => {
                 let binding = sentry.router.as_ref().ok_or(EngineError::Authority)?;
+                let runner: Arc<dyn archie_sentry::adapters::process::CommandRunner> =
+                    Arc::new(ProcessRunner::default());
                 let (config, capabilities) = binding
-                    .to_router_config()
+                    .probe_router_config(Arc::clone(&runner))
+                    .await
                     .map_err(|_| EngineError::Authority)?;
                 Box::new(
                     RouterAdapter::new(
@@ -263,7 +266,7 @@ impl OperatorSession {
                         &binding.resource_id,
                         config,
                         capabilities,
-                        Arc::new(ProcessRunner::default()),
+                        runner,
                     )
                     .map_err(|_| EngineError::Authority)?,
                 )
@@ -377,13 +380,13 @@ impl OperatorSession {
             .map_err(|_| EngineError::Authority)?;
         let lease = decision.lease.ok_or(EngineError::Authority)?;
         let authority = CoreAuthority::from_reviewed_intent(
-            self.core.policy().clone(),
+            self.core.policy(),
             lease,
             principal,
             true,
             digest,
         )?;
-        let mut adapter = self.adapter_for(&intent.resource_id)?;
+        let mut adapter = self.adapter_for(&intent.resource_id).await?;
         let guard = Arc::new(SessionGuard {
             peer,
             connected: self.connected.clone(),
@@ -451,6 +454,7 @@ pub async fn serve_operator_connection(
     use crate::control::{decode, encode, MAX_CONTROL_MESSAGE_BYTES};
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     let peer = KernelOperator::from_stream(&stream, &core.config.sentry.operator_uids).ok();
+    let ai_peer = crate::ai_control::AiOperator::from_stream(&stream);
     let mut session = OperatorSession {
         core,
         peer,
@@ -482,6 +486,25 @@ pub async fn serve_operator_connection(
             continue;
         }
         let response = match decode::<ControlRequest>(&line) {
+            Ok(request) if request.is_ai() => {
+                // EOF or pipelined input cancels this exact inference. Give the
+                // attributed service a bounded chance to persist cancellation;
+                // dropping the future also drops its owned model transport.
+                let (cancel, cancelled) = tokio::sync::watch::channel(false);
+                let operation =
+                    session
+                        .core
+                        .handle_operator_ai(ai_peer.as_ref(), request, cancelled);
+                tokio::pin!(operation);
+                tokio::select! { biased;
+                    _ = reader.fill_buf() => {
+                        let _ = cancel.send(true);
+                        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), operation).await;
+                        return Ok(());
+                    }
+                    response = &mut operation => response,
+                }
+            }
             Ok(request) if request.is_mutating() => {
                 tokio::select! { biased;
                     _ = reader.fill_buf() => { return Ok(()); }

@@ -14,7 +14,9 @@ Item {
         interval:viewport.item ? viewport.item.frameIntervalMs : -1,
         owned:viewport.item ? viewport.item.ownsController : false,
         controllerActive:nativeController ? nativeController.active : false,
-        hasScene:nativeController ? nativeController.loaded : false})
+        hasScene:nativeController ? nativeController.loaded : false,
+        profile:nativeController ? String(nativeController.profile) : "",
+        exposure:nativeController && nativeController.settings ? nativeController.settings.exposure : -1})
     property bool navigationEnabled: Demo.orbNav
     property bool hudVisible: typeof Demo.orbHud === "boolean" ? Demo.orbHud : true
     property bool reducedMotion: Theme.reducedMotion || !Theme.spatial
@@ -42,7 +44,10 @@ Item {
     function applyLook(changed) {
         if (!nativeController) return
         if (changed) { var next=Object.assign({},changedLook); next[changed]=true; changedLook=next }
-        const sourceProfile=String(nativeController.profile).indexOf("polar-")===0
+        // Delivered looks keep their own values until the person changes one by hand: Xavi's
+        // polar profiles and his desktop sphere (holograma), whose grade is its own filter.
+        const profileName=String(nativeController.profile)
+        const sourceProfile=profileName.indexOf("polar-")===0 || profileName.indexOf("holograma")===0
         function wanted(key) { return !sourceProfile || changedLook[key]===true }
         if (wanted("brightness")) nativeController.setSetting("exposure", [1.6, 2.2, 2.5][Demo.orbBrightI])
         if (wanted("activity")) {

@@ -11,6 +11,8 @@ archie-types.workspace = true
 archie-observability.workspace = true
 archie-state.workspace = true
 archie-memory.workspace = true
+archie-model-runtime.workspace = true
+archie-workstation.workspace = true
 archie-orb.workspace = true
 archie-fabric.workspace = true
 archie-registry.workspace = true
@@ -35,6 +37,7 @@ tracing.workspace = true
 libc.workspace = true
 
 [dev-dependencies]
+archie-lan = { path = "../archie-lan" }
 async-trait.workspace = true
 archie-state = { workspace = true, features = ["test-support"] }
 archie-memory.workspace = true

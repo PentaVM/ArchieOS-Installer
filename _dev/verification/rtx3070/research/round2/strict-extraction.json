@@ -1,0 +1,177 @@
+{
+  "format_version": 1,
+  "scope": "real_native_full_row_capture_microbatch_reset",
+  "base_sha256": "3561df7ac7d26a71ffa991ac2db740b10841c3a350aa2676ccd3ff5d428b4e8b",
+  "runtime_commit": "e3de715222b2667c54a267441159a5729f11155e",
+  "shim_sha256": "0c820bd7ea71a4fecb731245520d715e3bf588d927da5357f4011ab3533a5c61",
+  "cases": [
+    {
+      "id": "saludo",
+      "tokens": 10,
+      "paths": [
+        "/home/archie/wanda/round2-strict-reference-20261016-high/cache/55caef86983744c287c3b229339b5c7b/saludo-0",
+        "/home/archie/wanda/round2-strict-reference-20261016-high/cache/55caef86983744c287c3b229339b5c7b/saludo-1",
+        "/home/archie/wanda/round2-strict-reference-20261016-high/cache/55caef86983744c287c3b229339b5c7b/saludo-2"
+      ],
+      "comparisons": {
+        "microbatch": {
+          "prefix.f32": {
+            "relative_rms": 5.0909938344104556e-05,
+            "max_abs": 0.0076007843017578125
+          },
+          "norm.f32": {
+            "relative_rms": 5.938075212582326e-05,
+            "max_abs": 0.0015716552734375
+          },
+          "logits.f32": {
+            "relative_rms": 2.8284880576473036e-05,
+            "max_abs": 0.0009398460388183594
+          },
+          "distribution": {
+            "max_token_kl": 1.568276428056046e-08,
+            "mean_token_kl": 4.634014629327831e-09,
+            "greedy_agreement": 1.0
+          }
+        },
+        "fresh_reset": {
+          "prefix.f32": {
+            "relative_rms": 0.0,
+            "max_abs": 0.0
+          },
+          "norm.f32": {
+            "relative_rms": 0.0,
+            "max_abs": 0.0
+          },
+          "logits.f32": {
+            "relative_rms": 0.0,
+            "max_abs": 0.0
+          },
+          "distribution": {
+            "max_token_kl": 0.0,
+            "mean_token_kl": 0.0,
+            "greedy_agreement": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "plazo",
+      "tokens": 19,
+      "paths": [
+        "/home/archie/wanda/round2-strict-reference-20261016-high/cache/55caef86983744c287c3b229339b5c7b/plazo-0",
+        "/home/archie/wanda/round2-strict-reference-20261016-high/cache/55caef86983744c287c3b229339b5c7b/plazo-1",
+        "/home/archie/wanda/round2-strict-reference-20261016-high/cache/55caef86983744c287c3b229339b5c7b/plazo-2"
+      ],
+      "comparisons": {
+        "microbatch": {
+          "prefix.f32": {
+            "relative_rms": 0.0002807345486877581,
+            "max_abs": 0.024997711181640625
+          },
+          "norm.f32": {
+            "relative_rms": 0.0003112566193596974,
+            "max_abs": 0.008210182189941406
+          },
+          "logits.f32": {
+            "relative_rms": 0.00018480900676019912,
+            "max_abs": 0.005364418029785156
+          },
+          "distribution": {
+            "max_token_kl": 5.432549760379078e-07,
+            "mean_token_kl": 2.6950102746931787e-07,
+            "greedy_agreement": 1.0
+          }
+        },
+        "fresh_reset": {
+          "prefix.f32": {
+            "relative_rms": 0.0,
+            "max_abs": 0.0
+          },
+          "norm.f32": {
+            "relative_rms": 0.0,
+            "max_abs": 0.0
+          },
+          "logits.f32": {
+            "relative_rms": 0.0,
+            "max_abs": 0.0
+          },
+          "distribution": {
+            "max_token_kl": 0.0,
+            "mean_token_kl": 0.0,
+            "greedy_agreement": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "ruido",
+      "tokens": 35,
+      "paths": [
+        "/home/archie/wanda/round2-strict-reference-20261016-high/cache/55caef86983744c287c3b229339b5c7b/ruido-0",
+        "/home/archie/wanda/round2-strict-reference-20261016-high/cache/55caef86983744c287c3b229339b5c7b/ruido-1",
+        "/home/archie/wanda/round2-strict-reference-20261016-high/cache/55caef86983744c287c3b229339b5c7b/ruido-2"
+      ],
+      "comparisons": {
+        "microbatch": {
+          "prefix.f32": {
+            "relative_rms": 1.1742424888809042e-06,
+            "max_abs": 0.000244140625
+          },
+          "norm.f32": {
+            "relative_rms": 1.2103414091305183e-06,
+            "max_abs": 3.337860107421875e-05
+          },
+          "logits.f32": {
+            "relative_rms": 1.0245010565720946e-06,
+            "max_abs": 4.00543212890625e-05
+          },
+          "distribution": {
+            "max_token_kl": 9.990978118820087e-11,
+            "mean_token_kl": 2.976781494440517e-11,
+            "greedy_agreement": 1.0
+          }
+        },
+        "fresh_reset": {
+          "prefix.f32": {
+            "relative_rms": 0.0,
+            "max_abs": 0.0
+          },
+          "norm.f32": {
+            "relative_rms": 0.0,
+            "max_abs": 0.0
+          },
+          "logits.f32": {
+            "relative_rms": 0.0,
+            "max_abs": 0.0
+          },
+          "distribution": {
+            "max_token_kl": 0.0,
+            "mean_token_kl": 0.0,
+            "greedy_agreement": 1.0
+          }
+        }
+      }
+    }
+  ],
+  "native_layout_noise_floor": {
+    "norm_relative_rms": 0.0003112566193596974,
+    "max_token_kl": 5.432549760379078e-07
+  },
+  "precision_profile": "strict-f32",
+  "precision_environment": {
+    "GGML_CUDA_PTQ1_0_MMQ_MAX_BATCH": "0",
+    "GGML_CUDA_CUBLAS_COMPUTE_TYPE": "f32",
+    "NVIDIA_TF32_OVERRIDE": "0"
+  },
+  "runtime_library_sha256": {
+    "libllama.so": "32f0ae4a66ce6fce77fa354fa4f257859d2fc452fb998aaee904bffb6bcc6f98",
+    "libggml-cuda.so": "2443b2ff70a5dd83a2ad17610d318899bd9e58c132f61d67f7345dd70538af41",
+    "libggml-base.so": "dacba17aea048035c7613bb376808e0e09f07ffae81e0184dcb36603f0debb20"
+  },
+  "gates": {
+    "reset_relative_rms": 0.0005,
+    "layout_max_token_kl": 0.001,
+    "revision": "original strict microbatch RMS and KL; no layout-noise substitution"
+  },
+  "full_model_backward": false
+}

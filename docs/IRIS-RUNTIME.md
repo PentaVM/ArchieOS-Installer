@@ -142,7 +142,40 @@ for focused looks even when CPU inference takes longer than that interval.
 is separately bounded to at most5seconds. This is a request limit, not a measured
 throughput or latency guarantee. Both frame endpoints accept at most8MiB.
 
+## Live foci and the GPU owner
+
+`POST /live?focus=<id>&mode=focused|open|focused_open&phrases=a,b&fps=<n>` answers every frame
+of a focus from the CPU without waiting for the model: the frame's damage against the previous
+one, a decision (`reuse`, `track`, `infer`), and the last inference's boxes carried to this frame
+by block matching. When the decision is `infer`, the frame waits in a queue where the newest
+frame of a focus replaces an older one, and a worker reads it with the model; its boxes
+re-anchor the tracker. Every box says `inferred`, `reused`, `tracked` or `lost`, with a track id
+kept across inferences. `POST /live/advice` takes Cortex's `ResourceAdvice`; `GET /live`
+reports the foci and the measured cost of each kind of read. The envelope (`--live-max-fps`,
+`--live-max-priority`) caps whatever a request or advice asks. The decisions themselves live in
+`archie-accel`; `scene.state` is published as an S-LINK (`archie-slink`) and exported to other
+processes with `--slink-dir`.
+
+Several foci read in one pass (`Detector::detect_many`) keep a MoE capacity per image, so each
+gets what it would alone. `--record-expert-usage` and `GET /experts` give per-layer routing
+histograms. Expert residency (only the most used experts on the GPU, the rest at capacity 0)
+exists but is off: it changes results and needs an A/B first.
+
+The text tower runs on the CPU in float32 by default (`--text-device cpu|model`); its phrase
+features can persist on disk (`--phrase-cache <dir>`, owner-only files named by digest), and
+the everyday vocabulary is encoded before the server reports ready. Only the tensors the served
+model asks for leave the release file for the device.
+
+`archie-iris-bench` measures each path (encoders, focused, focused on a cached frame, open,
+four foci, and a simulated camera through the live pipeline) and reports frames answered per
+second and model reads per second separately. `scripts/iris/verify-rtx3070.sh` runs it on the
+RTX 3070 with the parity test on the CPU and on the GPU (`IRIS_DEVICE=cuda`). The optional
+`flash-attn` feature builds flash-attention v2 for the unmasked attentions. None of this has
+been timed on a GPU yet.
+
 ## Not ported yet
 
-- **The mask, keypoint, reading and temporal heads.** Nothing served reads them.
+- **The mask, keypoint, reading and temporal heads.** Nothing served reads them. The reading
+  head (`read_decoder`) is the one the S-LINK text bridge waits for; porting it needs
+  `archie_iris_foundry`'s `ReadDecoder`.
 

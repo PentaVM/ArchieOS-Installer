@@ -496,6 +496,9 @@ ApplicationWindow {
                     // FORGE is a list, not a scene; the GPU rests while it is shown.
                     visible: root.scene !== "forge"
                     camera: root.scene === "orb" ? lumenScene.camera : camera
+                    // The hologram's grade (Xavi's desktop sphere) over the orb's finished frame.
+                    layer.enabled: root.scene === "orb" && !!lumen.look.graded
+                    layer.effect: HologramGrade { look: lumen.look; postProcessing: !!archieBridge.frame.postProcessing }
                     environment: ExtendedSceneEnvironment {
                         backgroundMode: SceneEnvironment.Color
                         clearColor: root.scene === "orb" ? lumen.look.background : "#04070c"
@@ -526,7 +529,7 @@ ApplicationWindow {
                                                 : SceneEnvironment.Medium)
                         // The orb is lit in linear light and tonemapped as the design is:
                         // ACES, with the design's exposure.
-                        tonemapMode: root.scene === "orb" ? SceneEnvironment.TonemapModeFilmic : SceneEnvironment.TonemapModeAces
+                        tonemapMode: root.scene === "orb" && !lumen.look.graded ? SceneEnvironment.TonemapModeFilmic : SceneEnvironment.TonemapModeAces
                         exposure: root.scene === "orb" ? lumen.look.exposure : 1.0
 
                         // Bloom, and only bloom, and only where the image is genuinely
@@ -536,7 +539,7 @@ ApplicationWindow {
                         // meant to avoid. The orb's bloom is the design's: its strength,
                         // radius and threshold are the operator's settings, and it goes off
                         // with the rest of the budget.
-                        glowEnabled: !!archieBridge.frame.postProcessing && (root.scene !== "orb" || lumen.look.bloom)
+                        glowEnabled: !!archieBridge.frame.postProcessing && (root.scene !== "orb" || (lumen.look.bloom && !lumen.look.graded))
                         glowStrength: root.scene === "orb" ? 0.9 + lumen.look.bloomRadius * 0.6 : 0.85
                         glowIntensity: root.scene === "orb" ? lumen.look.bloomStrength * 1.3 : 0.28
                         glowBloom: root.scene === "orb" ? lumen.look.bloomRadius * 0.5 : 0.18

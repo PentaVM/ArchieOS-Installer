@@ -94,7 +94,9 @@ pub struct Runtime {
     models: RwLock<ModelRegistry>,
     scheduler: RwLock<Scheduler>,
     router: Router,
-    policy: PolicyEngine,
+    /// The one live engine. AI dispatch reads it at every admission, dispatch and
+    /// commit, so an emergency pause set here stops work already admitted.
+    policy: Arc<std::sync::RwLock<PolicyEngine>>,
 
     descriptor: RwLock<NodeDescriptor>,
     probe_warnings: Vec<String>,
@@ -419,7 +421,10 @@ impl Runtime {
         // a manifest that does not load is a failure, because a typo that dropped the
         // only local model would later look like private requests being refused for no
         // reason.
-        let models = match ModelRegistry::load_from_dir(paths.models()) {
+        let models = match archie_model_runtime::provider::load_catalog(
+            paths.models(),
+            paths.inference_providers(),
+        ) {
             Ok(registry) => {
                 if registry.is_empty() {
                     report.push(BootStage::skipped(stages::MODELS, "no models installed"));
@@ -462,11 +467,16 @@ impl Runtime {
             reserved_active_slots: config.scheduler.reserved_active_slots,
             pressure: PressureThresholds::default(),
         });
-        let policy = PolicyEngine::new(PolicyConfig {
+        // A pause the owner recorded survives the restart; only the owner lifts it.
+        let emergency_pause = crate::emergency::recorded(&paths);
+        if emergency_pause {
+            warn!(node_id = %node_id, "booting in emergency pause: AI dispatch and mutating leases are refused");
+        }
+        let policy = Arc::new(std::sync::RwLock::new(PolicyEngine::new(PolicyConfig {
             safety_boundary_present: config.policy.safety_boundary_present,
             max_lease_lifetime_ms: config.policy.max_lease_lifetime_ms,
-            emergency_pause: false,
-        });
+            emergency_pause,
+        })));
 
         if report.is_ready() {
             info!(node_id = %node_id, "ARCHIE READY");
@@ -518,8 +528,18 @@ impl Runtime {
         &self.router
     }
 
-    pub fn policy(&self) -> &PolicyEngine {
-        &self.policy
+    /// The engine as it stands now, for one decision. A later pause does not reach a
+    /// copy taken earlier; whatever must stop mid-flight holds [`Self::live_policy`].
+    pub fn policy(&self) -> PolicyEngine {
+        match self.policy.read() {
+            Ok(engine) => engine.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
+    }
+
+    /// The live engine itself, shared with every AI dispatch.
+    pub fn live_policy(&self) -> Arc<std::sync::RwLock<PolicyEngine>> {
+        self.policy.clone()
     }
 
     /// Persist an automatically eligible Archie-agent enrollment.
@@ -695,6 +715,14 @@ impl Runtime {
             .increment(&format!("control.request.{}", request.name()), 1);
 
         match request {
+            ControlRequest::AiInfer { .. }
+            | ControlRequest::AiRecall { .. }
+            | ControlRequest::AiHarness { .. }
+            | ControlRequest::AiPause
+            | ControlRequest::AiResume
+            | ControlRequest::AiStatus => {
+                ControlResponse::error("authenticated local operator session required")
+            }
             ControlRequest::Ping => ControlResponse::Pong {
                 node_id: self.node_id().to_string(),
                 version: ARCHIEOS_VERSION.to_string(),

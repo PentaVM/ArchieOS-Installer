@@ -1,0 +1,29 @@
+{
+  "scope": "pure Python/source fixtures; not hardware or model-quality evidence",
+  "correlation": {
+    "python_sorted_hash": "e0d3e2e31dafa2d216a72cd0fb695fcd85707ff3e4cc033effed0b8ff0930be8",
+    "struct_order_hash_simulated": "95a4af965d4af696537649e0ebc2ae24d5b5507877aa1f63043471a944f12dbc",
+    "python_correlation_hash": "e0d3e2e31dafa2d216a72cd0fb695fcd85707ff3e4cc033effed0b8ff0930be8",
+    "rust_binary_executed": false
+  },
+  "empty_objectives": {
+    "envelope_objectives": [],
+    "accepted_analysis_objective": "obj:model-invented"
+  },
+  "dashboard": {
+    "source_sha256": "9a98299bf25541fdca9ad77963431c13dde92875e5100d4745a6f9dc6a5de49f",
+    "shown": {
+      "name": "fixture-run",
+      "receipt": false,
+      "opt_step": 1,
+      "train_loss": null,
+      "base_loss": null,
+      "dev_loss": null,
+      "choice_acc": 0.90625,
+      "cf_acc": 0.625
+    },
+    "fixture_probe_choice": 0.25,
+    "fixture_probe_cf": 0,
+    "partial_tail_exception": "JSONDecodeError"
+  }
+}

@@ -9,3 +9,7 @@ description = "Pure Rust port of XaviCottier's delivered Lumenfield visual desig
 crate-type = ["rlib", "staticlib"]
 
 [dependencies]
+
+[dev-dependencies]
+# Reads the golden fixtures node computed from the original source (tests only).
+serde_json.workspace = true

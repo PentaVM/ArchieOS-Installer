@@ -1,0 +1,39 @@
+{
+  "timestamp_utc": "2026-10-16T12:38:49.560164+00:00",
+  "cuda_used": false,
+  "scope": "training-only three-row schema preview, not representativeness or corpus admission",
+  "previews": [
+    {
+      "dataset": "allenai/soda",
+      "split": "train",
+      "offset": 0,
+      "requested_rows": 3,
+      "hub_revision_at_preview": "fdc848ab0183208ea7808206c91c724414d0a071",
+      "card_license": [
+        "cc-by-4.0"
+      ],
+      "card": {
+        "url": "https://huggingface.co/datasets/allenai/soda/raw/fdc848ab0183208ea7808206c91c724414d0a071/README.md",
+        "file": "allenai-soda-card.md",
+        "sha256": "e5a7c0a627d64ddcb65c6a40a12065349564094f7362591752b781101fcd420a"
+      },
+      "error": "HTTPError: HTTP Error 502: Bad Gateway"
+    },
+    {
+      "dataset": "google-research-datasets/go_emotions",
+      "split": "train",
+      "offset": 0,
+      "requested_rows": 3,
+      "hub_revision_at_preview": "add492243ff905527e67aeb8b80c082af02207c3",
+      "card_license": [
+        "apache-2.0"
+      ],
+      "card": {
+        "url": "https://huggingface.co/datasets/google-research-datasets/go_emotions/raw/add492243ff905527e67aeb8b80c082af02207c3/README.md",
+        "file": "google-research-datasets-go_emotions-card.md",
+        "sha256": "0a5a9f3a949cce822f6d7453b91433b9fac739187f51ecc665fc5b8a6ec291ba"
+      },
+      "error": "HTTPError: HTTP Error 502: Bad Gateway"
+    }
+  ]
+}

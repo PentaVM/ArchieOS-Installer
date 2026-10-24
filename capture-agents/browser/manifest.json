@@ -6,8 +6,9 @@
   "permissions": ["webNavigation", "storage", "alarms"],
   "host_permissions": ["<all_urls>"],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "wanda-background.js"
   },
+  "content_scripts": [{ "matches": ["https://web.whatsapp.com/*"], "js": ["wanda-content.js"], "run_at": "document_idle" }],
   "action": {
     "default_popup": "popup.html",
     "default_title": "Archie Capture"

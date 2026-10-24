@@ -75,6 +75,7 @@ qt_add_qml_module(archie-display
         qml/OrbHud.qml
         qml/ForgeView.qml
         qml/OrbViewport.qml
+        qml/HologramGrade.qml
 )
 
 # Keep relative prototype/font URLs intact; every operational shell asset is local.
@@ -117,6 +118,8 @@ qt_add_resources(archie-display "archie-native-assets"
         shaders/xavi_surface.frag
         shaders/xavi_ribbon.vert
         shaders/xavi_ribbon.frag
+        shaders/lumen_glow.vert
+        shaders/lumen_glow.frag
         assets/xavi/prism-structure-4k.png
         assets/xavi/prism-surface-4k.png
         ${archie_presets}
@@ -126,6 +129,13 @@ qt_add_resources(archie-display "archie-native-assets"
         apps/archie-lienzo.desktop
         apps/archie-cli.desktop
 )
+
+# The hologram's grade is a 2D pass over the finished 3D view, as Xavi's CSS filter was
+# over his canvas; Qt Quick's ShaderEffect takes it compiled ahead of time.
+find_package(Qt6 6.6 REQUIRED COMPONENTS ShaderTools)
+qt_add_shaders(archie-display "archie-grade-shaders"
+    PREFIX "/archie"
+    FILES shaders/hologram_grade.frag)
 
 target_link_libraries(archie-display PRIVATE
     archie::visual
@@ -169,6 +179,8 @@ if(ARCHIE_NATIVE_BUILD_TESTS)
     set_source_files_properties(tests/invalid-preset.json PROPERTIES QT_RESOURCE_ALIAS "invalid-test.json")
     qt_add_resources(test_native "archie-invalid-test-preset" PREFIX "/archie/presets" BASE "${CMAKE_CURRENT_SOURCE_DIR}"
         FILES tests/invalid-preset.json)
+    # The golden values node computed from the original source (archie-lumen-design).
+    target_compile_definitions(test_native PRIVATE ARCHIE_LUMEN_FIXTURES="${ARCHIE_LUMEN_DESIGN_DIR}/fixtures")
     add_test(NAME native_contracts COMMAND test_native)
     qt_add_executable(test_shell_runtime tests/test_shell_runtime.cpp src/ShellRuntime.cpp src/ShellRuntime.h)
     target_include_directories(test_shell_runtime PRIVATE src)
