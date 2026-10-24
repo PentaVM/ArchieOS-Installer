@@ -1320,6 +1320,143 @@ mod neural_golden {
     }
 
     #[test]
+    fn c_abi_lists_draws_and_rejects_without_unwinding() {
+        use crate::neural::ffi::*;
+        use crate::neural::sphere::{NeuralPoint, NeuralSpark, NeuralVertex};
+        use std::ffi::CString;
+        let root = std::env::temp_dir().join(format!("archie-neural-ffi-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src/ui")).unwrap();
+        std::fs::create_dir_all(root.join(".hidden")).unwrap();
+        for (path, bytes) in [
+            ("src/main.rs", 120),
+            ("src/ui/app.ts", 40),
+            ("README.md", 9),
+            (".hidden/x", 1),
+        ] {
+            std::fs::write(root.join(path), vec![b'x'; bytes]).unwrap();
+        }
+        let path = root.to_string_lossy().into_owned();
+        unsafe {
+            assert!(neural_scan(std::ptr::null(), 0, 100, 10).is_null());
+            assert!(neural_scan(b"/no/such/folder".as_ptr(), 15, 100, 10).is_null());
+            let index = neural_scan(path.as_ptr(), path.len(), 100, 10);
+            assert!(!index.is_null());
+            // ., src, src/ui, README.md, src/main.rs, src/ui/app.ts: hidden entries are not listed.
+            assert_eq!(neural_index_count(index), 6);
+            let h = neural_new(index, 7, false);
+            assert!(!h.is_null());
+            let n = neural_points(h, std::ptr::null_mut(), 0);
+            assert_eq!(n, 6);
+            let mut points = vec![NeuralPoint::default(); n];
+            assert_eq!(
+                neural_points(h, points.as_mut_ptr(), n - 1),
+                0,
+                "a short buffer is refused"
+            );
+            assert_eq!(neural_points(h, points.as_mut_ptr(), n), n);
+            let tree = neural_lines(h, 0, std::ptr::null_mut(), 0);
+            assert_eq!(tree, 5 * 10 * 2);
+            let mut lines = vec![NeuralVertex::default(); tree];
+            assert_eq!(neural_lines(h, 0, lines.as_mut_ptr(), tree), tree);
+            assert_eq!(
+                neural_lines(h, 1, std::ptr::null_mut(), 0),
+                0,
+                "layer 1 shares layer 0"
+            );
+            assert_eq!(neural_lines(h, 99, std::ptr::null_mut(), 0), 0);
+            let mut sparks = vec![NeuralSpark::default(); 350];
+            assert_eq!(neural_sparks(h, sparks.as_mut_ptr(), 350), 350);
+            assert_eq!(neural_decor(0, std::ptr::null_mut(), 0), 1600 * 3);
+            assert_eq!(neural_decor(4, std::ptr::null_mut(), 0), 64 * 6 * 4);
+            assert_eq!(neural_decor(9, std::ptr::null_mut(), 0), 0);
+            let key = CString::new("glow").unwrap();
+            assert!(neural_set_number(h, key.as_ptr(), 2.5));
+            assert!(!neural_set_number(h, key.as_ptr(), f64::NAN));
+            let bad = CString::new("nope").unwrap();
+            assert!(!neural_set_number(h, bad.as_ptr(), 1.0));
+            assert!(!neural_set_number(h, std::ptr::null(), 1.0));
+            let red = CString::new("#AA0011").unwrap();
+            assert!(neural_set_background(h, red.as_ptr()));
+            assert!(neural_set_link(h, 2, 1, f64::NAN));
+            let len = neural_settings_json(h, std::ptr::null_mut(), 0);
+            let mut json = vec![0 as std::ffi::c_char; len + 1];
+            assert_eq!(neural_settings_json(h, json.as_mut_ptr(), len + 1), len);
+            let settings: serde_json::Value =
+                serde_json::from_str(std::ffi::CStr::from_ptr(json.as_ptr()).to_str().unwrap())
+                    .unwrap();
+            assert_eq!(settings["glow"], 2.5);
+            assert_eq!(settings["background"], "#aa0011");
+            assert_eq!(settings["links"]["2"]["on"], true);
+            let id = CString::new("src/main.rs").unwrap();
+            assert!(neural_select(h, id.as_ptr()));
+            let len = neural_selection(h, std::ptr::null(), std::ptr::null_mut(), 0);
+            let mut text = vec![0 as std::ffi::c_char; len + 1];
+            assert_eq!(
+                neural_selection(h, std::ptr::null(), text.as_mut_ptr(), len + 1),
+                len
+            );
+            let text = std::ffi::CStr::from_ptr(text.as_ptr())
+                .to_str()
+                .unwrap()
+                .to_string();
+            assert_eq!(
+                text.lines().take(3).collect::<Vec<_>>(),
+                ["src/main.rs", "MAIN.RS", "120 B"]
+            );
+            let len = neural_labels(h, std::ptr::null_mut(), 0);
+            let mut labels = vec![0 as std::ffi::c_char; len + 1];
+            assert_eq!(neural_labels(h, labels.as_mut_ptr(), len + 1), len);
+            assert!(std::ffi::CStr::from_ptr(labels.as_ptr())
+                .to_str()
+                .unwrap()
+                .contains("\tsrc\tSRC\n"));
+            let mut at = [0.0_f32; 3];
+            assert!(neural_position(h, id.as_ptr(), at.as_mut_ptr()));
+            let origin = [at[0] * 4.0, at[1] * 4.0, at[2] * 4.0];
+            let direction = [at[0] - origin[0], at[1] - origin[1], at[2] - origin[2]];
+            let mut picked = vec![0 as std::ffi::c_char; 64];
+            assert_eq!(
+                neural_pick(
+                    h,
+                    origin.as_ptr(),
+                    direction.as_ptr(),
+                    2.2,
+                    picked.as_mut_ptr(),
+                    64
+                ),
+                11
+            );
+            assert_eq!(
+                std::ffi::CStr::from_ptr(picked.as_ptr()).to_str().unwrap(),
+                "src/main.rs"
+            );
+            neural_grow(h, 1.0);
+            assert!(neural_building(h));
+            for _ in 0..240 {
+                neural_step(h, 1.0 / 60.0);
+            }
+            assert!(!neural_building(h));
+            let mut stats = NeuralStats::default();
+            assert!(neural_stats(h, &mut stats));
+            assert_eq!((stats.visible, stats.born, stats.moving), (6, 6, 0));
+            let mut counts = [0_u32; 7];
+            assert!(neural_link_counts(h, counts.as_mut_ptr()));
+            assert_eq!((counts[0], counts[1]), (2, 3));
+            assert!(!neural_set_index(h, std::ptr::null(), true));
+            assert!(neural_set_index(h, index, false));
+            neural_free(h);
+            neural_index_free(index);
+            // Null handles are inert.
+            neural_step(std::ptr::null_mut(), 0.1);
+            assert_eq!(neural_points(std::ptr::null(), std::ptr::null_mut(), 0), 0);
+            assert!(!neural_select(std::ptr::null_mut(), id.as_ptr()));
+            neural_free(std::ptr::null_mut());
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn picking_selects_the_nearest_node_along_the_ray() {
         let mut s = Sphere::new(&index(), Processes::Off, 7, None, false).unwrap();
         let id = s

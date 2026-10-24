@@ -7,6 +7,7 @@
 //! opened, nothing is written, links are not followed), as `content` does for the content sphere.
 
 pub mod collate;
+pub mod ffi;
 pub mod links;
 pub mod model;
 pub mod motion;
