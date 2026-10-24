@@ -232,7 +232,10 @@ impl VoiceActivity {
             self.quiet_us = 0;
             return false;
         }
-        let voiced = level > (self.floor * self.ratio).max(0.01);
+        // The floor's multiple decides; the fixed minimum only keeps digital silence from
+        // making every breath a voice. At 0.01 a microphone reaching WSLg quietly was never
+        // heard at all, and every pause was measured from the start of the session.
+        let voiced = level > (self.floor * self.ratio).max(0.004);
         if voiced {
             self.loud_us = self.loud_us.saturating_add(micros);
             self.quiet_us = 0;
@@ -302,6 +305,19 @@ mod tests {
             activity.hear(0.001);
         }
         assert_eq!(activity.quiet_ms(), 200);
+    }
+
+    #[test]
+    fn a_quiet_microphone_in_a_quiet_room_is_still_heard() {
+        let mut activity = VoiceActivity::default();
+        for _ in 0..200 {
+            assert!(!activity.hear(0.0005), "a quiet room is not a voice");
+        }
+        let mut heard = false;
+        for _ in 0..8 {
+            heard = activity.hear(0.006);
+        }
+        assert!(heard, "speech at -44 dBFS over a -66 dBFS room is a voice");
     }
 
     #[test]

@@ -28,7 +28,8 @@ use crate::audio::{loudness, AudioError, VoiceActivity};
 #[cfg(feature = "pulse")]
 use crate::audio::{Microphone, Speaker};
 use crate::listen::{
-    after_utterance_within, is_acknowledgement, names_archie, over_archie, Utterance,
+    after_utterance_within, is_acknowledgement, is_silence_marker, is_stop_request, names_archie,
+    over_archie, Utterance, SILENCE_MARKER,
 };
 use crate::nemotron::{NemotronCognitive, TurnSource};
 use crate::voice::Speaks;
@@ -465,6 +466,10 @@ pub fn converse_with_actions<S: TurnSource>(
     let mut overlap_detected = false;
     let mut yielded = false;
     let mut overlap_words = String::new();
+    // Through a speaker: while Archie speaks, and a moment after (the ears finish late),
+    // what they hear is mostly its own voice.
+    let mut echo_until: Option<Instant> = None;
+    let mut was_echo = false;
     let trace = std::env::var_os("ARCHIE_VOICE_TRACE").is_some();
     // Audio goes to the ears a model step at a time: asking after every 20 ms frame made
     // the same recogniser three times slower than the runtime's own benchmark.
@@ -571,15 +576,26 @@ pub fn converse_with_actions<S: TurnSource>(
             if !archie_talking || activity.quiet_ms() >= 300 {
                 overlap_words.clear();
             }
-            // Closed ears while the voice plays through a speaker: otherwise it hears itself.
-            if !archie_talking || setup.headphones {
-                pending.extend_from_slice(&frame);
-                if rehear.is_some() {
-                    utterance.extend_from_slice(&frame);
-                    let keep = if partial.is_empty() { 3 } else { 30 } * rate as usize;
-                    if utterance.len() > keep {
-                        utterance.drain(..utterance.len() - keep);
-                    }
+            // Through a speaker the ears hear Archie's own voice. They stay open, but while it
+            // speaks only its name with a stop word counts ("Archie, para"), which its voice
+            // does not say; the rest it hears then is itself. When it stops, the ears are told
+            // the utterance is over, so the echo they still hold ends there.
+            let echo = archie_talking && !setup.headphones;
+            if echo {
+                echo_until = Some(Instant::now() + Duration::from_millis(1200));
+            } else if was_echo {
+                listening.end_utterance().map_err(|e| e.to_string())?;
+                forced = true;
+                partial.clear();
+            }
+            was_echo = echo;
+            let hearing_echo = echo_until.is_some_and(|until| Instant::now() < until);
+            pending.extend_from_slice(&frame);
+            if !hearing_echo && rehear.is_some() {
+                utterance.extend_from_slice(&frame);
+                let keep = if partial.is_empty() { 3 } else { 30 } * rate as usize;
+                if utterance.len() > keep {
+                    utterance.drain(..utterance.len() - keep);
                 }
             }
             let step = (rate as usize * 160) / 1000;
@@ -603,6 +619,22 @@ pub fn converse_with_actions<S: TurnSource>(
                     );
                 }
                 let text = heard.text.trim().to_string();
+                if hearing_echo {
+                    if heard.is_final && archie_talking && is_stop_request(&text) {
+                        generation.fetch_add(1, Ordering::SeqCst);
+                        let _ = to_voice.send(ToVoice::Hush);
+                        session.cancel(archie_speech::CancelReason::Interrupted);
+                        report(Moment::Interrupted);
+                        if let Some(old) = &turn {
+                            report(old.timing("cancelled", speaking));
+                        }
+                        turn = None;
+                    }
+                    if heard.is_final {
+                        forced = false;
+                    }
+                    continue;
+                }
                 if archie_talking && !text.is_empty() {
                     overlap_words = text.clone();
                 }
@@ -738,11 +770,20 @@ pub fn converse_with_actions<S: TurnSource>(
                 report,
             )?;
             if turn.is_none() && speaking == 0 && partial.is_empty() {
+                // The pause is the shorter of the two measures: since the last loud sound,
+                // and since the ears last added a word. A microphone too quiet for the
+                // loudness measure still has its words heard, and a pause is never longer
+                // than the time since the last of them.
+                let quiet_ms = activity.quiet_ms().min(
+                    audio_ms
+                        .saturating_sub(last_words_ms)
+                        .min(u64::from(u32::MAX)) as u32,
+                );
                 turn = begin_pending(
                     &mut deferred,
                     setup,
                     session,
-                    activity.quiet_ms(),
+                    quiet_ms,
                     last_spoke,
                     &mut turn_number,
                     context,
@@ -903,10 +944,13 @@ fn begin_pending<S: TurnSource>(
         utterance.last_action = Some(decision.action);
     }
     if !matches!(decision.budget, SpeechBudget::Sentence | SpeechBudget::Full) {
-        if quiet_ms >= 300
+        // A finished thought Archie decided to leave alone is let go. One that said too
+        // little stays, and what is said next joins it, so the context builds up until
+        // there is enough to reason over; after half a minute of quiet it is let go too.
+        let finished = quiet_ms >= 300
             && state.speaker_hold.get() < 0.5
-            && state.thought_completion.get() >= 0.5
-        {
+            && state.thought_completion.get() >= 0.5;
+        if (finished && state.context_sufficiency.get() >= 0.4) || quiet_ms >= 30_000 {
             *pending = None;
         }
         return Ok(None);
@@ -989,6 +1033,16 @@ fn advance<S: TurnSource>(
     let capacity = 2usize.saturating_sub(*speaking);
     for event in session.pump_up_to(capacity) {
         match event {
+            // The model chose to say nothing: what it heard was not for it.
+            SessionEvent::Speak(segment) if is_silence_marker(&segment.text) => {
+                report(Moment::Floor {
+                    action: "Silent".into(),
+                    reason:
+                        "the model chose silence: it was not said to Archie, or wants no answer"
+                            .into(),
+                    evidence: vec![format!("the model answered {SILENCE_MARKER}")],
+                });
+            }
             SessionEvent::Speak(segment) => {
                 *speaking += 1;
                 if !answering.first_segment {

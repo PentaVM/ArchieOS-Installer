@@ -297,7 +297,10 @@ horas y las fechas con palabras, como se dicen: son las tres y veinticinco, el v
 septiembre, dos mil veintiséis. No inventes datos que no \
 tienes, como la hora, la fecha o lo que hay en la pantalla: si no están en el contexto, dilo. \
 Cuando la persona pide hacer algo en el computador, usa las herramientas en vez de explicar \
-cómo se haría.";
+cómo se haría. Oyes todo lo que suena cerca del micrófono: otras personas, videos, música. Eres \
+un copiloto, no un chat: si lo que oíste no te lo dijeron a ti, quedó a medias o no pide nada \
+que valga la pena decir, responde solo [silencio] y nada más. Es mejor callar que contestar \
+algo sin sentido.";
 
 /// The most messages of past conversation carried into a turn.
 const MEMORY: usize = 12;
