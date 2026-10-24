@@ -14,6 +14,7 @@
 //! * [`boot`] — the canonical boot sequence and its report.
 //! * [`runtime`] — the booted node.
 //! * [`control`] — the protocol `archie` speaks to `archied`.
+//! * [`emergency`] — the record that keeps Core's emergency pause across a restart.
 
 #![forbid(unsafe_code)]
 
@@ -24,6 +25,7 @@ pub mod config;
 pub mod control;
 pub mod cortex;
 pub mod dispatch;
+pub mod emergency;
 pub mod endpoint;
 pub mod execution;
 pub mod hardware;

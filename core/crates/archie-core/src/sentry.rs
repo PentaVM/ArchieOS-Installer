@@ -228,7 +228,7 @@ impl crate::Runtime {
 
     /// Uses the booted node's state and policy; default policy refuses actuation.
     pub fn sentry_service(&self, registry: Arc<Mutex<Registry>>) -> SentryService {
-        SentryService::new(self.state.clone(), registry, self.policy().clone())
+        SentryService::new(self.state.clone(), registry, self.policy())
     }
 }
 

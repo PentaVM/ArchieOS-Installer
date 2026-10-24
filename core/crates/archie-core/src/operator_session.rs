@@ -380,7 +380,7 @@ impl OperatorSession {
             .map_err(|_| EngineError::Authority)?;
         let lease = decision.lease.ok_or(EngineError::Authority)?;
         let authority = CoreAuthority::from_reviewed_intent(
-            self.core.policy().clone(),
+            self.core.policy(),
             lease,
             principal,
             true,

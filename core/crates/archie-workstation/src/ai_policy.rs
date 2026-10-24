@@ -148,11 +148,23 @@ impl RuntimeAuthority {
     /// this identity; Windows loopback cannot establish it.
     pub fn admit_operator_uid(&self, uid: u32) -> Result<(), String> {
         self.profile()?;
+        self.admit_profile_owner(uid)
+    }
+    /// Ownership of the operator profile alone. Pausing and resuming must reach the
+    /// owner while inference is paused or the profile is disabled, so this checks
+    /// neither; it still refuses a profile another user could have written.
+    pub fn admit_profile_owner(&self, uid: u32) -> Result<(), String> {
+        let metadata = std::fs::symlink_metadata(&self.path)
+            .map_err(|_| "operator inference profile is required")?;
+        if !metadata.is_file() || metadata.len() > 32768 {
+            return Err("invalid inference profile file".into());
+        }
         #[cfg(unix)]
         {
-            use std::os::unix::fs::MetadataExt;
-            let metadata = std::fs::symlink_metadata(&self.path)
-                .map_err(|_| "operator profile unavailable")?;
+            use std::os::unix::fs::{MetadataExt, PermissionsExt};
+            if metadata.permissions().mode() & 0o022 != 0 {
+                return Err("inference profile is writable by another user".into());
+            }
             if metadata.uid() == uid {
                 return Ok(());
             }
@@ -415,5 +427,31 @@ mod tests {
         assert!(policy.dispatch(&mut grant).is_err());
         engine.write().unwrap().set_emergency_pause(false);
         assert!(policy.dispatch(&mut grant).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_owner_is_known_while_paused_or_disabled_and_no_one_else_is() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("inference.toml");
+        let mut profile = RuntimeProfile::for_domain(ContextDomain::personal("owner").unwrap());
+        profile.create(&path).unwrap();
+        let owner = std::fs::metadata(&path).unwrap().uid();
+        let engine = Arc::new(RwLock::new(PolicyEngine::default()));
+        let policy = RuntimeAuthority::new(path.clone(), engine.clone());
+        engine.write().unwrap().set_emergency_pause(true);
+        // Inference is refused, and the owner can still be told apart to resume it.
+        assert!(policy.admit_operator_uid(owner).is_err());
+        assert!(policy.admit_profile_owner(owner).is_ok());
+        assert!(policy.admit_profile_owner(owner.wrapping_add(1)).is_err());
+        engine.write().unwrap().set_emergency_pause(false);
+        profile.enabled = false;
+        std::fs::write(&path, toml::to_string(&profile).unwrap()).unwrap();
+        assert!(policy.admit_operator_uid(owner).is_err());
+        assert!(policy.admit_profile_owner(owner).is_ok());
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666)).unwrap();
+        assert!(policy.admit_profile_owner(owner).is_err());
     }
 }

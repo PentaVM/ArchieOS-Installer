@@ -12,12 +12,9 @@ use archie_workstation::{
     harness::{load_harnesses, HarnessKind},
     harness_runtime::{load_program, run_harness},
 };
-use std::{
-    path::Path,
-    sync::{Arc, RwLock},
-    time::Duration,
-};
+use std::{path::Path, sync::Arc, time::Duration};
 use tokio::sync::watch;
+use tracing::warn;
 
 /// Only this module can construct an AI peer, from a live kernel-authenticated
 /// socket before it is split. Serialized requests cannot mint one.
@@ -61,19 +58,96 @@ impl Runtime {
         }
     }
 
+    /// The operator profile under the live Core engine: what every AI dispatch here
+    /// admits, dispatches and commits against.
+    pub fn ai_authority(&self) -> RuntimeAuthority {
+        RuntimeAuthority::new(
+            self.paths.config_dir.join("inference.toml"),
+            self.live_policy(),
+        )
+    }
+
+    /// Core's emergency pause, set and lifted by the profile's owner. The engine is
+    /// held for the whole change, so a pause and a resume never interleave. A pause
+    /// takes effect before it is recorded or audited; a resume takes effect last, so
+    /// one whose record cannot be removed or whose audit fails leaves the node paused.
+    fn emergency_control(
+        &self,
+        authority: &RuntimeAuthority,
+        peer: &AiOperator,
+        request: &ControlRequest,
+    ) -> Result<ControlResponse, String> {
+        authority.admit_profile_owner(peer.uid)?;
+        let live = self.live_policy();
+        // A poisoned engine still pauses: the stop must not depend on an earlier panic.
+        let mut engine = live.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let audit = |action: &str, explanation: &str| {
+            self.state
+                .append_audit(&archie_observability::AuditEvent::new(
+                    self.node_id(),
+                    action,
+                    format!("human:unix-uid-{}", peer.uid),
+                    "node:ai-dispatch",
+                    archie_observability::AuditOutcome::Allowed,
+                    explanation,
+                ))
+        };
+        match request {
+            ControlRequest::AiPause => {
+                // Stop first: recording and auditing must not delay the pause itself.
+                engine.set_emergency_pause(true);
+                if let Err(error) = crate::emergency::record(&self.paths) {
+                    warn!(%error, "emergency pause is live but not recorded; a restart would lift it");
+                }
+                if audit(
+                    "policy.emergency_pause",
+                    "operator set Core's emergency pause; AI dispatch is refused",
+                )
+                .is_err()
+                {
+                    warn!("emergency pause is live but its audit record failed");
+                }
+                self.metrics.increment("policy.emergency_pause.set", 1);
+            }
+            ControlRequest::AiResume => {
+                crate::emergency::clear(&self.paths)
+                    .map_err(|_| "pause record cannot be removed; the node stays paused")?;
+                if audit(
+                    "policy.emergency_resume",
+                    "operator lifted Core's emergency pause",
+                )
+                .is_err()
+                {
+                    let _ = crate::emergency::record(&self.paths);
+                    return Err("resume cannot be audited; the node stays paused".into());
+                }
+                engine.set_emergency_pause(false);
+                self.metrics.increment("policy.emergency_pause.lifted", 1);
+            }
+            ControlRequest::AiStatus => {}
+            _ => return Err("invalid emergency control".into()),
+        }
+        Ok(ControlResponse::AiPolicy {
+            paused: engine.config().emergency_pause,
+            recorded: crate::emergency::recorded(&self.paths),
+        })
+    }
+
     async fn dispatch_ai(
         &self,
         peer: &AiOperator,
         request: ControlRequest,
         cancel: watch::Receiver<bool>,
     ) -> Result<ControlResponse, String> {
-        // Runtime's engine has immutable configuration outside owned operations.
-        // Snapshot it afresh for each dispatch rather than retaining a separate
-        // authority or constructing a default Policy engine.
-        let authority = RuntimeAuthority::new(
-            self.paths.config_dir.join("inference.toml"),
-            Arc::new(RwLock::new(self.policy().clone())),
-        );
+        // The live Core engine, never a copy: an emergency pause set on another
+        // connection reaches this request's dispatch and its commit.
+        let authority = self.ai_authority();
+        if matches!(
+            request,
+            ControlRequest::AiPause | ControlRequest::AiResume | ControlRequest::AiStatus
+        ) {
+            return self.emergency_control(&authority, peer, &request);
+        }
         authority.admit_operator_uid(peer.uid)?;
         let (profile, _) = authority.profile()?;
         let (domain, runner, duration_ms) = match &request {

@@ -1352,6 +1352,14 @@ pub enum ControlRequest {
         binding: archie_memory::inference::InferenceBinding,
         receipt_id: String,
     },
+    /// Set Core's emergency pause: every AI dispatch is refused from now on, including
+    /// one already admitted, and so is every other mutating lease. Only the operator
+    /// profile's kernel-identified owner may ask, and the pause outlives a restart.
+    AiPause,
+    /// Lift the emergency pause the same owner set.
+    AiResume,
+    /// Whether the emergency pause is set and recorded.
+    AiStatus,
     /// Everything `archie status` shows.
     Status,
     /// The capability/resource graph.
@@ -1430,14 +1438,22 @@ impl ControlRequest {
                 | Self::AiInfer { .. }
                 | Self::AiRecall { .. }
                 | Self::AiHarness { .. }
+                | Self::AiPause
+                | Self::AiResume
         )
     }
 
-    /// These requests can write inference state or disclose admitted Vault text.
+    /// These requests can write inference state, disclose admitted Vault text, or stop
+    /// and resume AI dispatch. All of them need the kernel-identified operator.
     pub fn is_ai(&self) -> bool {
         matches!(
             self,
-            Self::AiInfer { .. } | Self::AiRecall { .. } | Self::AiHarness { .. }
+            Self::AiInfer { .. }
+                | Self::AiRecall { .. }
+                | Self::AiHarness { .. }
+                | Self::AiPause
+                | Self::AiResume
+                | Self::AiStatus
         )
     }
 
@@ -1446,6 +1462,9 @@ impl ControlRequest {
             Self::AiInfer { .. } => "ai-infer",
             Self::AiHarness { .. } => "ai-harness",
             Self::AiRecall { .. } => "ai-recall",
+            Self::AiPause => "ai-pause",
+            Self::AiResume => "ai-resume",
+            Self::AiStatus => "ai-status",
             Self::Status => "status",
             Self::Topology => "topology",
             Self::Modules => "modules",
@@ -1647,6 +1666,13 @@ pub enum ControlResponse {
     },
     AiHarnessResult {
         outcome: Box<archie_workstation::harness_runtime::HarnessRunOutcome>,
+    },
+    /// Core's emergency pause as it stands after the request.
+    AiPolicy {
+        /// Whether the live engine refuses AI dispatch now.
+        paused: bool,
+        /// Whether a pause is recorded beside Core state, so a restart keeps it.
+        recorded: bool,
     },
     Status(Box<StatusView>),
     Topology {

@@ -2316,6 +2316,9 @@ fn render(response: &ControlResponse) -> String {
         }
         ControlResponse::AiResult { outcome } => format!("{}\nreceipt={} status={:?}\n", outcome.text.as_deref().unwrap_or(""), outcome.receipt.receipt_id, outcome.receipt.status),
         ControlResponse::AiHarnessResult { outcome } => format!("Harness2 {}: {} stages; promotion={} (improvement_verified={})\n", outcome.result.status, outcome.receipts.len(), outcome.result.promotion.status, outcome.result.promotion.improvement_verified),
+        ControlResponse::AiPolicy { paused, recorded } => {
+            format!("emergency_pause={paused} recorded={recorded}\n")
+        }
         ControlResponse::Error { message } => format!("error: {message}\n"),
     }
 }
