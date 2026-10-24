@@ -3,7 +3,7 @@
 //! ```text
 //! archie-voice ask "<what the person said>" --grade public
 //!              [--model nvidia/Nemotron-3_5-Lightning] [--budget full|sentence]
-//!              [--language es-CL]
+//!              [--language es-CL] [--endpoint <llama-server url> [--thinking off|on]]
 //!
 //! archie-voice do  "<what the person said>" --grade public
 //!              --socket <stage control socket> --key-file <stage key> --policy <apps.toml>
@@ -165,10 +165,10 @@ fn asking(
     offset: Option<time::UtcOffset>,
     words: bool,
 ) -> Result<Asking, String> {
-    // A reasoning model on this machine (any OpenAI-compatible server on loopback, such as
-    // llama-server) answers instead of Nebius when its address is given. Nothing said then
-    // leaves the machine, and no key is needed. The environment names it too, so the
-    // launcher that starts a conversation need not know.
+    // A reasoning model on this machine (Bonsai on llama-server, on loopback) answers
+    // instead of Nebius when its address is given. Nothing said then leaves the machine,
+    // and no key is needed. The environment names it too, so the launcher that starts a
+    // conversation need not know.
     let set = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
     let local = take(&mut args, "--endpoint").or_else(|| set("ARCHIE_VOICE_ENDPOINT"));
     let timeout = request_timeout(take(&mut args, "--timeout-seconds").as_deref())?;
@@ -176,6 +176,14 @@ fn asking(
         .or_else(|| set("ARCHIE_VOICE_MODEL"))
         .unwrap_or_else(|| "nvidia/Nemotron-3_5-Lightning".into());
     let language = take(&mut args, "--language").unwrap_or_else(|| "es-CL".into());
+    // Whether the local model reasons before it speaks. Off by default: a voice waits for
+    // the first words, and Bonsai's thought comes before them.
+    let thinking = take(&mut args, "--thinking")
+        .or_else(|| set("ARCHIE_VOICE_THINKING"))
+        .unwrap_or_else(|| "off".into());
+    if !matches!(thinking.as_str(), "on" | "off") {
+        return Err(format!("--thinking is on or off, not {thinking}"));
+    }
     let budget = match take(&mut args, "--budget").as_deref() {
         None | Some("full") => SpeechBudget::Full,
         Some("sentence") => SpeechBudget::Sentence,
@@ -219,12 +227,17 @@ fn asking(
         ModelRegistry::new()
     };
     if let Some(url) = &local {
-        let desc = descriptor(&model, "voice", false, PrivacyGrade::Restricted, Some(url))?;
-        let _ = registry.register(desc);
+        let _ = registry.register(local_voice(&model, url, &thinking)?);
     } else if !registry.iter().any(|m| {
         m.display_name == model || m.labels.get("provider-model").is_some_and(|p| p == &model)
     }) {
-        let desc = descriptor(&model, "voice", true, PrivacyGrade::Public, None)?;
+        let desc = descriptor(
+            &model,
+            "voice",
+            ProviderKind::NebiusTokenFactory,
+            PrivacyGrade::Public,
+            None,
+        )?;
         let _ = registry.register(desc);
     }
     // Wanda's private tool context is graded Restricted for the entire local continuation,
@@ -475,10 +488,15 @@ fn connect(
             Some(url) => ProviderEndpoint::nvidia_nim(url, Locality::Local),
         }
         .map_err(|error| error.to_string())?;
+        // The grounding model's local server is a NIM, unlike the voice's llama-server.
         let descriptor = descriptor(
             model,
             "look",
-            cloud,
+            if cloud {
+                ProviderKind::NebiusTokenFactory
+            } else {
+                ProviderKind::NvidiaNim
+            },
             asking.grade,
             flags.ground_endpoint.as_deref(),
         )?;
@@ -1411,15 +1429,30 @@ fn month(month: time::Month) -> &'static str {
     }
 }
 
+/// The voice's model on this machine: a llama.cpp model, so the router asks its server's
+/// /health before each turn, and each request carries the reasoning switch pinned here.
+fn local_voice(model: &str, url: &str, thinking: &str) -> Result<ModelDescriptor, String> {
+    let mut desc = descriptor(
+        model,
+        "voice",
+        ProviderKind::LlamaCpp,
+        PrivacyGrade::Restricted,
+        Some(url),
+    )?;
+    desc.labels.insert("thinking".into(), thinking.into());
+    Ok(desc)
+}
+
 /// A model as the router knows it. In the cloud, with retention nobody has verified, it
 /// may see what was graded public and nothing more, whatever the command line asked for.
 fn descriptor(
     provider_model: &str,
     role: &str,
-    cloud: bool,
+    provider: ProviderKind,
     grade: PrivacyGrade,
     endpoint: Option<&str>,
 ) -> Result<ModelDescriptor, String> {
+    let cloud = provider == ProviderKind::NebiusTokenFactory;
     let mut labels = BTreeMap::new();
     labels.insert("provider-model".to_string(), provider_model.to_string());
     if let Some(url) = endpoint {
@@ -1440,18 +1473,19 @@ fn descriptor(
         id: ModelId::parse(format!("{role}.model-{sanitized}"))
             .map_err(|_| "the model name cannot become an Archie model id".to_string())?,
         display_name: provider_model.to_string(),
-        provider: if cloud {
-            ProviderKind::NebiusTokenFactory
-        } else {
-            ProviderKind::NvidiaNim
-        },
         locality: if cloud {
             Locality::Cloud
         } else {
             Locality::Local
         },
         node: None,
-        context_window: 32_000,
+        // llama-server splits its 65,536-token cache over 4 slots (archie-bonsai.service).
+        context_window: if provider == ProviderKind::LlamaCpp {
+            16_384
+        } else {
+            32_000
+        },
+        provider,
         // A grounding model that reasons before it answers needs room for one box.
         max_output_tokens: if role == "look" { 512 } else { 400 },
         capabilities: vec![
@@ -1518,5 +1552,41 @@ mod timeout_tests {
         for bad in ["0", "901", "-1", "inf", "", "18446744073709551616"] {
             assert!(request_timeout(Some(bad)).is_err(), "accepted {bad:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod local_voice_tests {
+    use super::*;
+    use archie_model_runtime::liveness::Liveness;
+
+    #[test]
+    fn the_local_voice_is_bonsai_on_llama_cpp_with_its_thinking_pinned() {
+        let desc = local_voice("bonsai", "http://127.0.0.1:8081/v1", "off").unwrap();
+        assert_eq!(desc.provider, ProviderKind::LlamaCpp);
+        assert_eq!(desc.locality, Locality::Local);
+        assert!(desc.permits_privacy(PrivacyGrade::Restricted));
+        assert_eq!(desc.labels.get("thinking").map(String::as_str), Some("off"));
+        // The endpoint builds, and the router knows where to ask whether it is up.
+        let endpoint = ProviderEndpoint::for_model(&desc).unwrap();
+        assert_eq!(endpoint.locality(), Locality::Local);
+        assert_eq!(
+            Liveness::health_url(&desc).map(|url| url.to_string()),
+            Some("http://127.0.0.1:8081/health".into())
+        );
+        // A switch the server would not understand is refused before any turn.
+        let bad = local_voice("bonsai", "http://127.0.0.1:8081/v1", "maybe").unwrap();
+        assert!(ProviderEndpoint::for_model(&bad).is_err());
+        // The cloud voice stays Nebius, graded public.
+        let cloud = descriptor(
+            "nvidia/Nemotron-3_5-Lightning",
+            "voice",
+            ProviderKind::NebiusTokenFactory,
+            PrivacyGrade::Internal,
+            None,
+        )
+        .unwrap();
+        assert_eq!(cloud.locality, Locality::Cloud);
+        assert_eq!(cloud.max_privacy_grade, PrivacyGrade::Public);
     }
 }

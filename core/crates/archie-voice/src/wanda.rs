@@ -19,7 +19,7 @@ impl WandaVoiceAccess {
             (ProviderFamily::NvidiaNim, ProviderKind::NvidiaNim)
                 | (
                     ProviderFamily::OpenAiCompatible,
-                    ProviderKind::OpenAiCompatible
+                    ProviderKind::OpenAiCompatible | ProviderKind::LlamaCpp
                 )
         );
         let loopback = endpoint
@@ -54,7 +54,8 @@ impl WandaVoiceAccess {
             };
             let endpoint = match descriptor.provider {
                 ProviderKind::NvidiaNim => ProviderEndpoint::nvidia_nim(url, Locality::Local),
-                ProviderKind::OpenAiCompatible => {
+                // llama-server (Bonsai) speaks the OpenAI wire format.
+                ProviderKind::OpenAiCompatible | ProviderKind::LlamaCpp => {
                     ProviderEndpoint::openai_compatible(url, Locality::Local, None)
                 }
                 _ => return false,
@@ -249,6 +250,20 @@ mod tests {
         registry.register(loopback.clone()).unwrap();
         assert!(
             WandaVoiceAccess::from_registry(&registry, PrivacyGrade::Restricted)
+                .permits_private_context()
+        );
+        // Bonsai on llama-server, as `archie-voice --endpoint` registers it now.
+        let mut bonsai = ModelRegistry::new();
+        bonsai
+            .register(routed(
+                "voice.bonsai",
+                ProviderKind::LlamaCpp,
+                Locality::Local,
+                Some("http://127.0.0.1:8081/v1"),
+            ))
+            .unwrap();
+        assert!(
+            WandaVoiceAccess::from_registry(&bonsai, PrivacyGrade::Restricted)
                 .permits_private_context()
         );
         // The session must be graded Restricted, or the router may leave the machine.
