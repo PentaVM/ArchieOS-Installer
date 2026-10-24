@@ -18,6 +18,7 @@ Rectangle {
     component MenuItem: Rectangle {
         id: mi
         property string label
+        objectName: "bar.menu." + label
         height: 24; radius: 6; width: mt.implicitWidth + 18
         color: bar.menu === label ? Theme.pressed : (mma.containsMouse ? Theme.hover : "transparent")
         Text { id: mt; anchors.centerIn: parent; text: mi.label; color: (bar.menu === mi.label || mma.containsMouse) ? Theme.t1 : Theme.t2; font.family: Theme.font; font.pixelSize: 13 }
@@ -52,16 +53,16 @@ Rectangle {
         // No source is wired for these two yet (GUI-SENTRY-002, GUI-CEREBRA-002): they say so.
         Chip { text: "Cámara y micro"; sub: "sin lectura"; icon: "unknown"; tone: "unk"; anchors.verticalCenter: parent.verticalCenter }
         // Opens the workspace menu (decision 5 of the handoff: the selector lives in this chip).
-        Item { width: dom.width; height: dom.height; anchors.verticalCenter: parent.verticalCenter
+        Item { objectName: "bar.domain"; width: dom.width; height: dom.height; anchors.verticalCenter: parent.verticalCenter
             Chip { id: dom; text: "Dominio"; sub: "sin lectura"; icon: "unknown"; tone: "unk" }
             MouseArea { anchors.fill: parent; onClicked: bar.toggle("workspace") } }
         Item { width: 13; height: 14; anchors.verticalCenter: parent.verticalCenter
             Rectangle { anchors.centerIn: parent; width: 1; height: 14; color: Theme.hair } }
-        IconButton { icon: "search"; active: bar.overlay === "palette"; onClicked: bar.toggle("palette"); anchors.verticalCenter: parent.verticalCenter }
+        IconButton { objectName: "bar.palette"; icon: "search"; active: bar.overlay === "palette"; onClicked: bar.toggle("palette"); anchors.verticalCenter: parent.verticalCenter }
         // Running long jobs from the bridge; "—" when no workspace is configured, never a made-up 0.
-        IconButton { icon: "activity"; count: bar.bridge.jobs.state === "ok" ? String(bar.bridge.runningJobs) : "—"
+        IconButton { objectName: "bar.activity"; icon: "activity"; count: bar.bridge.jobs.state === "ok" ? String(bar.bridge.runningJobs) : "—"
             active: bar.overlay === "activity"; onClicked: bar.toggle("activity"); anchors.verticalCenter: parent.verticalCenter }
-        IconButton { icon: "control"; active: bar.overlay === "control"; onClicked: bar.toggle("control"); anchors.verticalCenter: parent.verticalCenter }
+        IconButton { objectName: "bar.control"; icon: "control"; active: bar.overlay === "control"; onClicked: bar.toggle("control"); anchors.verticalCenter: parent.verticalCenter }
         Text { leftPadding: 8; text: Demo.barClock; color: Theme.t1; font.family: Theme.font; font.pixelSize: 13; font.weight: Font.Medium
             font.features: { "tnum": 1 }; anchors.verticalCenter: parent.verticalCenter }
     }

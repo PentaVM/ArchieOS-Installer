@@ -43,7 +43,7 @@ Panel {
                         if (e.key === Qt.Key_Down) { pal.current = Math.min(pal.rows.length - 1, pal.current + 1); e.accepted = true }
                         else if (e.key === Qt.Key_Up) { pal.current = Math.max(0, pal.current - 1); e.accepted = true }
                         else if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) { pal.run(pal.current); e.accepted = true } } }
-                Text { visible: inp.text === ""; text: "Buscar apps, archivos y acciones"; color: Theme.tdis; font.family: Theme.font; font.pixelSize: 13; anchors.verticalCenter: parent.verticalCenter } } }
+                Text { visible: inp.text === ""; text: "Buscar apps, carpetas y acciones"; color: Theme.tdis; font.family: Theme.font; font.pixelSize: 13; anchors.verticalCenter: parent.verticalCenter } } }
         Kbd { anchors.right: parent.right; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter; label: "esc" } }
 
     Column { id: body; y: sf.height + 4; width: parent.width

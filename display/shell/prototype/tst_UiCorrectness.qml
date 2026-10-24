@@ -68,19 +68,40 @@ Item {
             compare(m.link, "bridge_silent"); compare(m.runningJobs, 0)
             verify(m.jobs.state !== "ok")
         }
-        function test_operational_vault_has_no_fabricated_files_or_undo() {
+        // This folder, as qmltestrunner reads it: real files the test can name.
+        function here() { return String(Qt.resolvedUrl(".")).replace(/\/$/, "") }
+        function test_vault_lists_a_real_folder_and_offers_no_mutation() {
             var v = make(vaultComponent)
-            compare(v.rows.length, 0)
-            v.repeatCopy(); v.cancelCopy(); v.undoCopy()
-            compare(v.canUndo, false)
-            verify(v.qState !== "running" && v.qState !== "done" && v.qState !== "undone")
-        }
-        function test_vault_missing_backend_never_looks_like_current_empty_listing() {
-            var v = make(vaultComponent)
+            v.setFolder(here())
+            var names = []
+            tryVerify(function() {
+                names = []
+                for (var i = 0; i < v.count; i++) names.push(v.entry(i).name)
+                return names.indexOf("VaultWindow.qml") >= 0 }, 5000, "this folder's own files are listed")
+            verify(!v.fileOperationsAvailable); verify(!v.canUndo)
+            compare(typeof v.cancelCopy, "undefined"); compare(typeof v.undoCopy, "undefined")
             var text = visibleText(v)
-            verify(text.indexOf("actualizado hace") < 0)
-            verify(text.indexOf("0 elementos") < 0)
-            v.newTab(); compare(v.cur.path.length,0); compare(v.selected,-1)
+            verify(text.indexOf("Cancelar") < 0 && text.indexOf("Deshacer") < 0)
+        }
+        function test_vault_navigates_up_into_and_back_without_inventing_paths() {
+            var v = make(vaultComponent)
+            var dir = here()
+            v.setFolder(dir)
+            tryVerify(function() { return v.ready && v.count > 0 }, 5000)
+            var leaf = dir.split("/").pop()
+            compare(v.crumbs[v.crumbs.length - 1].label, decodeURIComponent(leaf))
+            verify(v.up())
+            tryVerify(function() { return v.folder === dir.slice(0, dir.lastIndexOf("/")) }, 3000)
+            // The listing changes after the folder does: wait for the entry, not for a status.
+            var at = -1
+            tryVerify(function() {
+                at = -1
+                for (var i = 0; i < v.count; i++) if (v.entry(i).name === leaf) at = i
+                return at >= 0 }, 5000, "the folder just left is listed in its parent")
+            verify(v.openItem(at))
+            compare(v.folder, dir)
+            v.setFolder("file:///"); compare(v.up(), false)
+            v.newTab(); compare(v.tabsModel.length, 2); compare(v.selected, -1)
         }
         function test_hidden_search_capability_cannot_be_activated_by_enter() {
             var s = make(searchComponent); var count = 0
@@ -173,11 +194,12 @@ Item {
             var field = input(s); field.forceActiveFocus(); keyClick(Qt.Key_Return)
             mouseClick(s,100,110); compare(actions.length,2); compare(actions[0],"overlay.activity"); compare(actions[1],"overlay.activity")
         }
-        function test_sample_vault_requires_opt_in_and_never_claims_copy_success() {
-            var v = make(vaultComponent); v.designSamples = true
-            verify(v.rows.length > 0); verify(!v.fileOperationsAvailable)
-            var done = v.qDone; v.repeatCopy(); wait(1200)
-            compare(v.qDone,done); compare(v.qState,"unavailable"); verify(!v.canUndo)
+        function test_vault_places_are_the_menu_and_palette_places() {
+            var v = make(vaultComponent)
+            compare(v.places.length, 6)
+            compare(v.places[0].name, "Inicio"); compare(v.places[5].url, "file:///")
+            verify(v.goPlace(5)); compare(v.folder, "file:///"); compare(v.place, 5)
+            verify(!v.goPlace(6))
         }
     }
 }

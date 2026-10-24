@@ -32,6 +32,23 @@ Item {
     Timer { interval: 1000; repeat: true; running: root.visible; onTriggered: bridgeModel.tick() }
     onOverlayChanged: if (overlay !== "palette" && overlay !== "search") root.forceActiveFocus()
 
+    // Everything a click can change that a person would see, as one JSON string. The UI walk
+    // (archie-display --ui-walk) compares it before and after each click: a control that
+    // changes none of it, and shows no note, does nothing.
+    function uiState() {
+        var hasRuntime = typeof shellRuntime !== "undefined" && shellRuntime !== null
+        return JSON.stringify({
+            overlay: overlay, menu: menuName, note: actionNote, front: Wm.front(), wm: Wm.st,
+            bare: Demo.bare, orbNav: Demo.orbNav, orbShow: Demo.orbShow, orbProfile: Demo.orbProfile,
+            orbLook: [Demo.orbNodesI, Demo.orbGradeI, Demo.orbDust, Demo.orbBrightI, Demo.orbActI, Demo.orbSpin],
+            silent: Demo.silent,
+            theme: [Theme.reducedMotion, Theme.opaque, Theme.motion, Theme.colorMode, Theme.vivid, Theme.blur],
+            vault: { folder: vault.folder, tab: vault.tabIndex, tabs: vault.tabsModel.length, selected: vault.selected,
+                     grid: vault.gridView, sort: vault.sortMode, note: vault.note },
+            forge: { section: forgeWin.section, note: forgeWin.note }, settings: setWin.section,
+            dockMenu: dockMenu.target, ai: hasRuntime ? [shellRuntime.aiPolicy, shellRuntime.aiPolicyBusy] : null
+        })
+    }
     function handleEscape() { overlay = ""; Demo.orbNav = false; root.forceActiveFocus() }
     function toggle(name) { overlay = overlay === name ? "" : name }
     function ingestRecording(line) {
@@ -69,6 +86,8 @@ Item {
         }
         actionNote = ""
         if (id.indexOf("dock.") === 0) { overlay = ""; Wm.dockClick(id.slice(5)); return true }
+        // Vault's places, read only: "go:<index>" opens the window on that folder.
+        if (id.indexOf("go:") === 0) { overlay = ""; Wm.open("vault"); return vault.goPlace(Number(id.slice(3))) }
         if (id.indexOf("window.") === 0) { overlay = ""; Wm.open(id.slice(7)); return true }
         if (id.indexOf("overlay.") === 0) {
             var name = id.slice(8)
@@ -95,6 +114,8 @@ Item {
         case "win.desktop": case "desk.toggle": overlay = ""; Demo.bare = !Demo.bare; break
         case "vault.newTab": overlay = ""; Wm.open("vault"); vault.newTab(); break
         case "vault.closeTab": vault.closeTab(vault.tabIndex); break
+        case "vault.open": overlay = ""; Wm.open("vault"); return vault.openSelected()
+        case "vault.up": overlay = ""; Wm.open("vault"); return vault.up()
         case "vault.sort": vault.toggleSort(); break
         case "vault.list": vault.gridView = false; break
         case "vault.grid": vault.gridView = true; break
@@ -151,27 +172,27 @@ Item {
     // A separate layer keeps arbitrarily many local raises below menus and overlays.
     Item { anchors.fill: parent; z: 100
         WinHost { wid: "vault"; baseX: 88; baseY: vault.gridView ? 92 : 100
-            VaultWindow { id: vault; shown: Wm.isShown("vault"); enterDy: Wm.isMin("vault") ? 160 : 0; enterScale: Wm.isMin("vault") ? 0.8 : 0.96
+            VaultWindow { id: vault; objectName: "win.vault"; shown: Wm.isShown("vault"); enterDy: Wm.isMin("vault") ? 160 : 0; enterScale: Wm.isMin("vault") ? 0.8 : 0.96
                 width: Wm.isMax("vault") ? root.width - 80 : 1060; height: Wm.isMax("vault") ? root.height - 154 : gridView ? 840 : 720
                 onCloseRequested: Wm.close("vault") } }
         WinHost { wid: "stage"; baseX: root.width - 710; baseY: 172
-            StageWindow { shown: Wm.isShown("stage"); enterDy: Wm.isMin("stage") ? 160 : 0; enterScale: Wm.isMin("stage") ? 0.8 : 0.96
+            StageWindow { objectName: "win.stage"; shown: Wm.isShown("stage"); enterDy: Wm.isMin("stage") ? 160 : 0; enterScale: Wm.isMin("stage") ? 0.8 : 0.96
                 width: Wm.isMax("stage") ? root.width - 80 : Math.min(600,root.width-32); height: Wm.isMax("stage") ? root.height - 154 : Math.min(400,Math.max(240,root.height-154)) } }
         WinHost { wid: "forge"; baseX: 460; baseY: 130
-            ForgeWindow { wid: "forge"; bridge: bridgeModel; shown: Wm.isShown("forge"); enterDy: Wm.isMin("forge") ? 160 : 0; enterScale: Wm.isMin("forge") ? 0.8 : 0.96
+            ForgeWindow { id: forgeWin; objectName: "win.forge"; wid: "forge"; bridge: bridgeModel; shown: Wm.isShown("forge"); enterDy: Wm.isMin("forge") ? 160 : 0; enterScale: Wm.isMin("forge") ? 0.8 : 0.96
                 width: Wm.isMax("forge") ? root.width - 80 : Math.min(1000,root.width-32); height: Wm.isMax("forge") ? root.height - 154 : Math.min(600,Math.max(240,root.height-154)) } }
         WinHost { wid: "set"; baseX: 490; baseY: 140
-            SettingsWindow { wid: "set"; bridge: bridgeModel; shown: Wm.isShown("set"); enterDy: Wm.isMin("set") ? 160 : 0; enterScale: Wm.isMin("set") ? 0.8 : 0.96
+            SettingsWindow { id: setWin; objectName: "win.set"; wid: "set"; bridge: bridgeModel; shown: Wm.isShown("set"); enterDy: Wm.isMin("set") ? 160 : 0; enterScale: Wm.isMin("set") ? 0.8 : 0.96
                 width: Wm.isMax("set") ? root.width - 80 : Math.min(940,root.width-32); height: Wm.isMax("set") ? root.height - 154 : Math.min(650,Math.max(240,root.height-154)) } }
         WinHost { wid: "sentry"; baseX: (root.width - 780) / 2; baseY: 110
-            SentryPanel { bridge: bridgeModel; height:Math.min(700,Math.max(240,root.height-154)); shown: Wm.isShown("sentry"); enterDy: Wm.isMin("sentry") ? 160 : 0; enterScale: Wm.isMin("sentry") ? 0.8 : 0.96 } }
+            SentryPanel { objectName: "win.sentry"; bridge: bridgeModel; height:Math.min(700,Math.max(240,root.height-154)); shown: Wm.isShown("sentry"); enterDy: Wm.isMin("sentry") ? 160 : 0; enterScale: Wm.isMin("sentry") ? 0.8 : 0.96 } }
     }
 
-    TopBar { z: 600; width: parent.width; overlay: root.overlay; bridge: bridgeModel; menu: root.overlay === "menu" ? root.menuName : ""
+    TopBar { objectName: "bar"; z: 600; width: parent.width; overlay: root.overlay; bridge: bridgeModel; menu: root.overlay === "menu" ? root.menuName : ""
         app: Wm.frontTitle()
         onMenuClicked: function(n,x) { if (root.overlay === "menu" && root.menuName === n) root.overlay = ""; else { root.menuName = n; menuDrop.x = x; root.overlay = "menu" } }
         onToggle: function(n) { root.toggle(n) } }
-    Dock { id: dock; z: 500; anchors.horizontalCenter: parent.horizontalCenter; y: parent.height - height - 14
+    Dock { id: dock; objectName: "dock"; z: 500; anchors.horizontalCenter: parent.horizontalCenter; y: parent.height - height - 14
         onLaunched: function(id) { root.run(id === "orb" ? "app.orb" : "dock." + id) }
         onMenuRequested: function(id,cx) { dockMenu.target = id; dockMenu.x = Math.max(8, Math.min(root.width - dockMenu.width - 8, dock.x + cx - dockMenu.width / 2)); root.overlay = "dockmenu" } }
     Rectangle { visible: Demo.orbNav; z: 700; anchors.horizontalCenter: parent.horizontalCenter; y: 40; width: navTxt.implicitWidth + 28; height: 30; radius: 15
@@ -181,15 +202,15 @@ Item {
 
     Item { anchors.fill: parent; z: 1000
         MouseArea { anchors.fill: parent; enabled: root.overlay !== ""; onClicked: root.overlay = "" }
-        ControlCenter { bridge: bridgeModel; shown: root.overlay === "control"; enterDy: -8; x: root.width - width - 24; y: 44 }
-        ActivityCenter { bridge: bridgeModel; shown: root.overlay === "activity"; enterDy: -8; x: root.width - width - 24; y: 44 }
-        CommandPalette { actionContext: root.actionContext(); onActivated: function(act) { root.overlay = ""; root.run(act) }; shown: root.overlay === "palette"; enterDy: -8; durIn: Theme.durPalette; durOut: Theme.durPaletteClose; x: (root.width - width) / 2; y: 140 }
-        WindowSwitcher { id: switcher; onChosen: function(k) { root.overlay = ""; if (k !== "") root.run("window." + k) }; shown: root.overlay === "switcher"; enterDy: -8; durIn: Theme.durPalette; durOut: Theme.durPaletteClose; x: (root.width - width) / 2; y: 250 }
-        NotificationCenter { bridge: bridgeModel; shown: root.overlay === "notif"; enterDy: -8; x: root.width - width - 24; y: 44 }
-        DockMenu { id: dockMenu; shown: root.overlay === "dockmenu"; y: dock.y - height - 8; onActivated: root.overlay = "" }
-        InspectorPanel { bridge: bridgeModel; shown: root.overlay === "inspector"; enterDy: -8; x: root.width - width - 24; y: 44 }
-        WorkspaceMenu { onChosen: function(w) { if (w === "orb") root.run("app.orb"); root.overlay = "" }; shown: root.overlay === "workspace"; x: Math.max(8, root.width - width - 24); y: 42 }
-        MenuDropdown { id: menuDrop; actionContext: root.actionContext(); vault: vault; name: root.menuName; shown: root.overlay === "menu"; y: 34; enterDy: -6
+        ControlCenter { objectName: "panel.control"; bridge: bridgeModel; shown: root.overlay === "control"; enterDy: -8; x: root.width - width - 24; y: 44 }
+        ActivityCenter { objectName: "panel.activity"; bridge: bridgeModel; shown: root.overlay === "activity"; enterDy: -8; x: root.width - width - 24; y: 44 }
+        CommandPalette { objectName: "panel.palette"; actionContext: root.actionContext(); onActivated: function(act) { root.overlay = ""; root.run(act) }; shown: root.overlay === "palette"; enterDy: -8; durIn: Theme.durPalette; durOut: Theme.durPaletteClose; x: (root.width - width) / 2; y: 140 }
+        WindowSwitcher { id: switcher; objectName: "panel.switcher"; onChosen: function(k) { root.overlay = ""; if (k !== "") root.run("window." + k) }; shown: root.overlay === "switcher"; enterDy: -8; durIn: Theme.durPalette; durOut: Theme.durPaletteClose; x: (root.width - width) / 2; y: 250 }
+        NotificationCenter { objectName: "panel.notif"; bridge: bridgeModel; shown: root.overlay === "notif"; enterDy: -8; x: root.width - width - 24; y: 44 }
+        DockMenu { id: dockMenu; objectName: "panel.dockmenu"; shown: root.overlay === "dockmenu"; y: dock.y - height - 8; onActivated: root.overlay = "" }
+        InspectorPanel { objectName: "panel.inspector"; bridge: bridgeModel; shown: root.overlay === "inspector"; enterDy: -8; x: root.width - width - 24; y: 44 }
+        WorkspaceMenu { objectName: "panel.workspace"; onChosen: function(w) { if (w === "orb") root.run("app.orb"); root.overlay = "" }; shown: root.overlay === "workspace"; x: Math.max(8, root.width - width - 24); y: 42 }
+        MenuDropdown { id: menuDrop; objectName: "panel.menu"; actionContext: root.actionContext(); vault: vault; name: root.menuName; shown: root.overlay === "menu"; y: 34; enterDy: -6
             onActivated: function(id) { root.overlay = ""; root.run(id) } }
         SearchPanel { objectName: "globalSearch"; bridge: bridgeModel; onActivated: function(act) { root.overlay = ""; root.run(act) }; shown: root.overlay === "search"; x: (root.width - width) / 2; y: 140 }
     }

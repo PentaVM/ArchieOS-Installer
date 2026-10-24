@@ -21,6 +21,7 @@ Panel {
             model: Synthetic.dock
             delegate: Item {
                 id: cell
+                objectName: "dock." + modelData.id
                 width: Theme.dockIcon; height: Theme.dockIcon
                 // Quiet and reduced motion: no scaling, only the highlight below.
                 scale: !Theme.spatial ? 1.0 : (ma.pressed ? 0.96 : (ma.containsMouse ? 1.12 : 1.0))

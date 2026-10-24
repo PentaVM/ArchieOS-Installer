@@ -48,35 +48,49 @@ Panel {
 
         Rectangle { width: parent.width; height: 1; color: Theme.hair; y: 0 }
         Item { width: 1; height: 18 }
-        Chip { design: true; icon: "sample"; text: "Diseño · sin servicio" }
-        Item { width: 1; height: 12 }
-        // quick tiles: no service is connected, so each is dashed and says so. The exception is Silencio:
-        // it only governs this shell's own notifications, so it works, and says it is local.
-        Grid { columns: 2; spacing: 10; width: parent.width
-            Repeater { model: Synthetic.quick
-                delegate: Item { id: tile
-                    readonly property bool live: modelData.name === "Silencio"
-                    readonly property bool on: live && Demo.silent
-                    width: (content.width - 10) / 2; height: 62
-                    Rectangle { visible: tile.live; anchors.fill: parent; radius: Theme.rCard; color: tile.on ? Theme.sel : (tma.containsMouse ? Theme.hover : Theme.raised)
-                        border.width: 1; border.color: tile.on ? Theme.tint(Theme.acc, 0.45) : Theme.hair }
-                    DashedRect { visible: !tile.live; anchors.fill: parent; radius: Theme.rCard; color: Theme.hair }
-                    Column { x: 12; y: 12; spacing: 6
-                        Row { spacing: 8; Icon { name: modelData.icon; size: 20; color: tile.on ? Theme.acc : (tile.live ? Theme.t1 : Theme.t3); anchors.verticalCenter: parent.verticalCenter }
-                            Text { text: modelData.name; color: tile.live ? Theme.t1 : Theme.t2; font.family: Theme.font; font.pixelSize: 13; font.weight: Font.Medium; anchors.verticalCenter: parent.verticalCenter } }
-                        Row { spacing: 5; Icon { name: tile.live ? (tile.on ? "done" : "unknown") : "lock"; size: 12; color: tile.on ? Theme.acc : Theme.t3; anchors.verticalCenter: parent.verticalCenter }
-                            Text { text: tile.live ? (tile.on ? "activado · solo local" : "desactivado · solo local") : "sin servicio conectado"
-                                color: Theme.t3; font.family: Theme.font; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter } } }
-                    MouseArea { id: tma; anchors.fill: parent; hoverEnabled: true; enabled: tile.live; onClicked: Demo.silent = !Demo.silent } } } }
+        // Only what works is offered. Silencio governs this shell's own notifications; Wi-Fi,
+        // Bluetooth and privacy toggles have no service behind them here, so they are not shown.
+        Item { id: silence; objectName: "control.silence"; width: (content.width - 10) / 2; height: 62
+            readonly property bool on: Demo.silent
+            Rectangle { anchors.fill: parent; radius: Theme.rCard; color: silence.on ? Theme.sel : (sma.containsMouse ? Theme.hover : Theme.raised)
+                border.width: 1; border.color: silence.on ? Theme.tint(Theme.acc, 0.45) : Theme.hair }
+            Column { x: 12; y: 12; spacing: 6
+                Row { spacing: 8; Icon { name: "moon"; size: 20; color: silence.on ? Theme.acc : Theme.t1; anchors.verticalCenter: parent.verticalCenter }
+                    Text { text: "Silencio"; color: Theme.t1; font.family: Theme.font; font.pixelSize: 13; font.weight: Font.Medium; anchors.verticalCenter: parent.verticalCenter } }
+                Row { spacing: 5; Icon { name: silence.on ? "done" : "unknown"; size: 12; color: silence.on ? Theme.acc : Theme.t3; anchors.verticalCenter: parent.verticalCenter }
+                    Text { text: silence.on ? "activado · solo local" : "desactivado · solo local"
+                        color: Theme.t3; font.family: Theme.font; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter } } }
+            MouseArea { id: sma; anchors.fill: parent; hoverEnabled: true; onClicked: Demo.silent = !Demo.silent } }
 
-        // Emergency pause: disabled on purpose, no IPC exists yet (GUI-POLICY-002).
+        // Core's emergency pause: refuses every AI dispatch and mutating lease until resumed.
+        // The daemon admits only the owner of the node's inference profile, for both directions.
         Item { width: 1; height: 12 }
-        Item { width: parent.width; height: emg.implicitHeight + 28
-            DashedRect { anchors.fill: parent; radius: Theme.rCard; color: Theme.tint(Theme.warn, 0.45) }
-            Row { id: emg; x: 14; y: 14; spacing: 12
-                Icon { name: "pause"; size: 20; color: Theme.t3 }
-                Column { spacing: 3
-                    Text { text: "Pausa de emergencia de autoridad"; color: Theme.t2; font.family: Theme.font; font.pixelSize: 13; font.weight: Font.Medium }
-                    Text { text: "Deshabilitado: archied no expone este control todavía"; color: Theme.warn; font.family: Theme.font; font.pixelSize: 11 } } } }
+        Item { id: emergency; width: parent.width; height: emg.implicitHeight + 28
+            readonly property bool host: typeof shellRuntime !== "undefined" && shellRuntime !== null
+            readonly property string state: host ? shellRuntime.aiPolicy : "unknown"
+            readonly property bool busy: host && shellRuntime.aiPolicyBusy
+            Component.onCompleted: if (host) shellRuntime.aiPolicyRefresh()
+            Connections { target: cc; function onShownChanged() { if (cc.shown && emergency.host) shellRuntime.aiPolicyRefresh() } }
+            Rectangle { anchors.fill: parent; radius: Theme.rCard
+                color: emergency.state === "paused" ? Theme.tint(Theme.warn, 0.14) : Theme.raised
+                border.width: 1; border.color: emergency.state === "paused" ? Theme.tint(Theme.warn, 0.5) : Theme.hair }
+            Row { id: emg; x: 14; y: 14; width: parent.width - 28; spacing: 12
+                Icon { name: "pause"; size: 20; color: emergency.state === "paused" ? Theme.warn : Theme.t1 }
+                Column { width: parent.width - 32 - pauseBtn.width - 12; spacing: 3
+                    Text { text: "Pausa de emergencia de la IA"; color: Theme.t1; font.family: Theme.font; font.pixelSize: 13; font.weight: Font.Medium }
+                    Text { width: parent.width; wrapMode: Text.Wrap
+                        text: !emergency.host ? "Este host no puede hablar con archied."
+                            : emergency.busy ? "Preguntando a Core…"
+                            : emergency.state === "paused" ? "En pausa: Core rechaza toda inferencia y toda acción."
+                            : emergency.state === "running" ? "En marcha. Pausar detiene ya las inferencias admitidas."
+                            : (shellRuntime.aiPolicyNote || "Sin respuesta de Core.")
+                        color: emergency.state === "paused" ? Theme.warn : Theme.t3; font.family: Theme.font; font.pixelSize: 11 }
+                    Text { visible: emergency.host && emergency.state !== "unknown" && shellRuntime.aiPolicyNote !== ""; width: parent.width; wrapMode: Text.Wrap
+                        text: emergency.host ? shellRuntime.aiPolicyNote : ""; color: Theme.warn; font.family: Theme.font; font.pixelSize: 11 } }
+                Btn { id: pauseBtn; objectName: "control.emergency"; anchors.verticalCenter: parent.verticalCenter
+                    text: emergency.state === "paused" ? "Reanudar" : emergency.state === "running" ? "Pausar" : "Reintentar"
+                    dis: !emergency.host || emergency.busy
+                    onClicked: emergency.state === "paused" ? shellRuntime.aiResume()
+                             : emergency.state === "running" ? shellRuntime.aiPause() : shellRuntime.aiPolicyRefresh() } } }
     }
 }

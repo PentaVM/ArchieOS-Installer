@@ -33,7 +33,7 @@ Item {
         function test_local_window_commands_are_allowed_without_backend_authority() {
             for (var id of ["dock.vault","dock.forge","dock.sentry","dock.stage","dock.set","window.stage","win.close","win.min","win.zoom","win.closeAll","win.minAll","win.showAll","win.desktop"])
                 verify(Rules.allowed(id,{}),id)
-            for (var bad of ["dock.unknown","window.arbitrary","win.execute","file:secret","go:3","vault.undo","overlay.lock"])
+            for (var bad of ["dock.unknown","window.arbitrary","win.execute","file:secret","go:9","vault.undo","overlay.lock"])
                 verify(!Rules.allowed(bad,{}),bad)
             verify(!Rules.allowed("app.stage",{stageLauncher:false}))
         }

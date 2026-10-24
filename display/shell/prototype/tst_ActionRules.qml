@@ -9,9 +9,11 @@ TestCase {
         verify(Rules.allowed("app.sentry",{}))
         verify(Rules.allowed("theme.motion",{}))
     }
-    function test_missing_file_channel_never_mutates() {
-        for (var id of ["vault.cancel","vault.undo","vault.redo","vault.open","file:private.txt","go:2"])
-            verify(!Rules.allowed(id,{fileOperationsAvailable:false}),id)
+    function test_vault_reads_but_never_mutates() {
+        for (var id of ["vault.cancel","vault.undo","vault.redo","vault.delete","vault.move","file:private.txt","go:6","go:-1","go:x"])
+            verify(!Rules.allowed(id,{}),id)
+        for (var ok of ["vault.open","vault.up","vault.newTab","vault.sort","go:0","go:5"])
+            verify(Rules.allowed(ok,{}),ok)
     }
     function test_fake_lock_is_not_a_security_action() {
         verify(!Rules.allowed("overlay.lock",{}))
