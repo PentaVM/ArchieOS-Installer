@@ -39,6 +39,18 @@ Archie's message, and the other half stays for the answer. A pinned model is ask
 role its manifest offers, so `--model local.bonsai-2-9b` reaches the reasoning manifest.
 An unpinned request never drifts onto it.
 
+### Who uses the single path
+
+- `archie ai ask|recall|harness2` and `archie-core`'s own AI control.
+- Wanda, when its configuration has a `[core]` block: each query is an `AiInfer` pinned
+  to the model Cerebra admitted, graded Restricted, with a receipt (`docs/WANDA-CONTEXT.md`).
+- Not the voice's own turns. A voice turn streams and calls tools; `AiInfer` returns one
+  sealed answer and offers no tools, so the voice still asks the router directly
+  (`archie-voice/src/nemotron.rs`). What the voice may do stays under Policy and Stage.
+  Its local model is now a llama.cpp descriptor (`--endpoint`, `--thinking off|on`), so
+  the liveness probe applies to it, and its `wanda_context` tool reaches Wanda, which goes
+  through Core.
+
 ### Operator commands
 
 On a node, `archied` serves these requests (`AiInfer`, `AiRecall`, `AiHarness`). Without a

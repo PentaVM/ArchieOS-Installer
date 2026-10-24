@@ -1,0 +1,32 @@
+2026-10-24T08:02:42.253393Z  INFO node identity loaded node_id=66d97060b5b34da0e20fc0b27f1ef577f322970917f238c68f8ed1be252ff969
+2026-10-24T08:02:42.411267Z  INFO NOTICE: schema "archie_test_h2_bonsai" already exists, skipping
+2026-10-24T08:02:42.411712Z  INFO NOTICE: relation "schema_migrations" already exists, skipping
+2026-10-24T08:02:42.416922Z  INFO NOTICE: relation "control_schema_migrations" already exists, skipping
+2026-10-24T08:02:42.439859Z  INFO ARCHIE READY node_id=66d97060b5b34da0e20fc0b27f1ef577f322970917f238c68f8ed1be252ff969
+ARCHIE OS
+Node identity ........... READY
+Hardware probe .......... READY
+Capability manifest ..... READY
+State store ............. READY
+Fabric .................. DEGRADED
+                          loopback transport: this node discovers no peers
+Fabric membership ....... DEGRADED
+                          this node belongs to no fabric and will not talk to any peer; enrol it with `archie enrol`
+Peers ................... SKIPPED
+                          discovery is continuous; none seen yet
+Resource topology ....... READY
+Modules ................. SKIPPED
+                          none installed
+Cognitive topology ...... SKIPPED
+                          no modules to load
+Data providers .......... SKIPPED
+                          none installed
+Models .................. READY
+Workers ................. SKIPPED
+                          no modules loaded
+
+ARCHIE READY
+2026-10-24T08:02:42.440174Z  INFO control endpoint ready
+2026-10-24T08:02:46.850542Z  INFO received SIGTERM
+2026-10-24T08:02:46.850579Z  INFO shutting down
+2026-10-24T08:02:46.851031Z  INFO stopped
