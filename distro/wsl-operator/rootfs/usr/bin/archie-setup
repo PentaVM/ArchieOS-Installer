@@ -92,7 +92,9 @@ if ! { [ -f "$ASR" ] && printf '%s  %s\n' "$ASR_SHA" "$ASR" | sha256sum --check 
   mv "$ASR.part" "$ASR"
 fi
 
-[ -s "$KEY" ] || [ -n "${NEBIUS_TOKEN_FACTORY_KEY:-}" ] || ask_key
+# ARCHIE_SETUP_NO_KEY: the Windows installer passes the key itself (archie-setup key), or
+# none, when a local model answers.
+[ -s "$KEY" ] || [ -n "${NEBIUS_TOKEN_FACTORY_KEY:-}" ] || [ -n "${ARCHIE_SETUP_NO_KEY:-}" ] || ask_key
 status
 cat <<'EOF'
 Ready.
