@@ -940,7 +940,11 @@ fn llama_effort(descriptor: &ModelDescriptor) -> Result<Option<&'static str>, Ru
     if descriptor.provider != ProviderKind::LlamaCpp {
         return Ok(None);
     }
-    match descriptor.labels.get("reasoning-effort").map(String::as_str) {
+    match descriptor
+        .labels
+        .get("reasoning-effort")
+        .map(String::as_str)
+    {
         None => Ok(None),
         Some("none") => Ok(Some("none")),
         Some("medium") => Ok(Some("medium")),
@@ -1187,28 +1191,50 @@ mod tests {
             let (base_url, observed) = one_response(body).await;
             let mut model = descriptor(ProviderKind::LlamaCpp, Locality::Local);
             model.labels.insert("base-url".into(), base_url.clone());
-            model.labels.insert("provider-model".into(), "bonsai".into());
-            model.labels.insert("reasoning-effort".into(), effort.into());
+            model
+                .labels
+                .insert("provider-model".into(), "bonsai".into());
+            model
+                .labels
+                .insert("reasoning-effort".into(), effort.into());
             let client =
                 InferenceClient::new(ProviderEndpoint::for_model(&model).unwrap()).unwrap();
             let request = ChatRequest {
                 model: "bonsai".into(),
-                messages: vec![ChatMessage { role: MessageRole::User, content: "status".into() }],
+                messages: vec![ChatMessage {
+                    role: MessageRole::User,
+                    content: "status".into(),
+                }],
                 max_tokens: Some(32),
                 temperature: None,
                 stream: false,
                 reply_schema: None,
             };
-            client.chat(&model, PrivacyGrade::Restricted, &request).await.unwrap();
+            client
+                .chat(&model, PrivacyGrade::Restricted, &request)
+                .await
+                .unwrap();
             let request_text = observed.await.unwrap();
-            assert!(request_text.contains(&format!("\"reasoning_effort\":\"{effort}\"")), "{effort}: {request_text}");
+            assert!(
+                request_text.contains(&format!("\"reasoning_effort\":\"{effort}\"")),
+                "{effort}: {request_text}"
+            );
             // Without a thinking label, only an effort that reasons spends half the budget on it.
-            assert_eq!(request_text.contains("\"thinking_budget_tokens\":16"), effort != "none", "{effort}: {request_text}");
-            assert!(!request_text.contains("enable_thinking"), "{effort}: {request_text}");
+            assert_eq!(
+                request_text.contains("\"thinking_budget_tokens\":16"),
+                effort != "none",
+                "{effort}: {request_text}"
+            );
+            assert!(
+                !request_text.contains("enable_thinking"),
+                "{effort}: {request_text}"
+            );
         }
         // "high" answers HTTP 500 on the 27B's template: refused before any request.
         let mut model = descriptor(ProviderKind::LlamaCpp, Locality::Local);
-        model.labels.insert("reasoning-effort".into(), "high".into());
+        model
+            .labels
+            .insert("reasoning-effort".into(), "high".into());
         assert!(ProviderEndpoint::for_model(&model).is_err());
     }
 

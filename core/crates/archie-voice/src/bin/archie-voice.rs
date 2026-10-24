@@ -1573,9 +1573,15 @@ mod local_voice_tests {
         assert_eq!(desc.locality, Locality::Local);
         assert!(desc.permits_privacy(PrivacyGrade::Restricted));
         assert_eq!(desc.labels.get("thinking").map(String::as_str), Some("off"));
-        assert_eq!(desc.labels.get("reasoning-effort").map(String::as_str), Some("none"));
+        assert_eq!(
+            desc.labels.get("reasoning-effort").map(String::as_str),
+            Some("none")
+        );
         let on = local_voice("bonsai", "http://127.0.0.1:8082/v1", "on").unwrap();
-        assert_eq!(on.labels.get("reasoning-effort").map(String::as_str), Some("medium"));
+        assert_eq!(
+            on.labels.get("reasoning-effort").map(String::as_str),
+            Some("medium")
+        );
         // The endpoint builds, and the router knows where to ask whether it is up.
         let endpoint = ProviderEndpoint::for_model(&desc).unwrap();
         assert_eq!(endpoint.locality(), Locality::Local);
