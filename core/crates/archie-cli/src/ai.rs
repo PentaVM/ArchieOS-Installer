@@ -79,6 +79,13 @@ pub enum AiCommand {
         #[arg(long)]
         standalone: bool,
     },
+    /// Core's emergency pause: refuse every AI dispatch now, including one already
+    /// admitted (and every other mutating lease). It holds across a daemon restart.
+    Pause,
+    /// Lift the emergency pause. Only the operator profile's owner may.
+    Resume,
+    /// Whether the emergency pause is set in the daemon and recorded on disk.
+    Status,
     /// Configure pinned Python and worker once. Use private POSIX installed paths.
     ConfigureHarness2 {
         #[arg(long)]
@@ -156,12 +163,16 @@ async fn open(paths: &StatePaths, codex: Option<CodexClient>) -> Result<UnifiedR
         tokio::task::spawn_blocking(move || StateStore::open(database).map_err(|e| e.to_string()))
             .await
             .map_err(|_| "database worker failed")??;
+    // Standalone diagnostics run without the daemon's live engine, so they honour the
+    // pause the daemon recorded: a stopped node is not resumed by going around it.
+    let mut engine = PolicyEngine::default();
+    engine.set_emergency_pause(archie_core::emergency::recorded(paths));
     Ok(UnifiedRuntime {
         storage: Arc::new(InferenceStorage {
             store: Arc::new(store),
             authority: RuntimeAuthority::new(
                 paths.config_dir.join("inference.toml"),
-                Arc::new(RwLock::new(PolicyEngine::default())),
+                Arc::new(RwLock::new(engine)),
             ),
             vault_dir: paths.state_dir.join("inference/vault"),
         }),
@@ -225,6 +236,19 @@ fn budget(
         ("api",_,None)=>Ok(InferenceBudget::StrictTokens),
         ("codex",None,Some(n)) if (1..=65536).contains(&n)=>Ok(InferenceBudget::ManagedByteTime{max_output_bytes:n}),
         _=>Err("API uses token bounds; Codex requires --managed-byte-limit 1..65536 and no --max-tokens".into()),
+    }
+}
+/// One line for the operator, which says when the daemon and its record disagree.
+fn pause_line(paused: bool, recorded: bool) -> &'static str {
+    match (paused, recorded) {
+        (true, true) => "AI dispatch is paused (Core emergency pause, recorded)",
+        (true, false) => {
+            "AI dispatch is paused, but the pause is not recorded: a restart would lift it"
+        }
+        (false, false) => "AI dispatch is running",
+        (false, true) => {
+            "AI dispatch is running, but a pause is still recorded: a restart would pause it"
+        }
     }
 }
 fn print_answer(result: &InferenceOutcome, json: bool) -> Result<(), String> {
@@ -296,6 +320,25 @@ pub async fn run(command: &AiCommand, paths: &StatePaths, json: bool) -> Result<
             )
             .map_err(|_| "cannot encode catalog")?
         ),
+        AiCommand::Pause | AiCommand::Resume | AiCommand::Status => {
+            let request = match command {
+                AiCommand::Pause => ControlRequest::AiPause,
+                AiCommand::Resume => ControlRequest::AiResume,
+                _ => ControlRequest::AiStatus,
+            };
+            let (paused, recorded) = match daemon(paths, &request, false, 10000).await? {
+                Some(ControlResponse::AiPolicy { paused, recorded }) => (paused, recorded),
+                _ => return Err("unexpected Core emergency-pause response".into()),
+            };
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({ "paused": paused, "recorded": recorded })
+                );
+            } else {
+                println!("{}", pause_line(paused, recorded));
+            }
+        }
         AiCommand::ConfigureHarness2 { python, worker } => {
             create_program_config(
                 &paths.state_dir.join("inference/harness2.toml"),
@@ -477,6 +520,27 @@ mod tests {
                 max_output_bytes: 100
             }
         );
+    }
+    #[test]
+    fn pause_commands_parse_and_a_disagreeing_record_is_spoken_aloud() {
+        use clap::Parser;
+        #[derive(Parser)]
+        struct Cli {
+            #[command(subcommand)]
+            ai: AiCommand,
+        }
+        for (word, expected) in [
+            ("pause", "Pause"),
+            ("resume", "Resume"),
+            ("status", "Status"),
+        ] {
+            let parsed = Cli::try_parse_from(["ai", word]).unwrap();
+            assert_eq!(format!("{:?}", parsed.ai), expected);
+        }
+        assert!(Cli::try_parse_from(["ai", "pause", "--standalone"]).is_err());
+        assert!(pause_line(true, false).contains("restart would lift"));
+        assert!(pause_line(false, true).contains("restart would pause"));
+        assert_eq!(pause_line(false, false), "AI dispatch is running");
     }
     #[tokio::test]
     async fn lost_reply_never_falls_back_to_another_writer_or_turn() {
