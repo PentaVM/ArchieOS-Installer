@@ -73,7 +73,19 @@ private slots:
         }
         LumenField field(nullptr, QUrl(QStringLiteral("http://127.0.0.1:9/api/orb/lumen")));
         field.setContentRoot(dir.path());
+        // The `holograma` preset now names the neural sphere; the content source this test covers
+        // is still the renderer's, so its old look is set key by key.
         QVERIFY(field.applyProfile(QStringLiteral("holograma")));
+        QCOMPARE(field.settings().value(QStringLiteral("fieldSource")).toString(), QStringLiteral("neural"));
+        const QVariantMap content{{QStringLiteral("fieldSource"), QStringLiteral("content")}, {QStringLiteral("contentLimit"), 2500},
+            {QStringLiteral("contentFiles"), 30}, {QStringLiteral("linkBudget"), 1100}, {QStringLiteral("linkSegments"), 18},
+            {QStringLiteral("linkOpacity"), 0.16}, {QStringLiteral("holoFrame"), true}, {QStringLiteral("holoOpacity"), 0.4},
+            {QStringLiteral("coreGlow"), 1.2}, {QStringLiteral("nodeSize"), 0.4}, {QStringLiteral("ambient"), false},
+            {QStringLiteral("shell"), false}, {QStringLiteral("rotationSpeed"), 0.3}, {QStringLiteral("gradeHue"), 168},
+            {QStringLiteral("gradeSaturate"), 1.7}, {QStringLiteral("gradeContrast"), 1.15}, {QStringLiteral("gradeBrightness"), 1.05},
+            {QStringLiteral("gradeScanlines"), 0.35}, {QStringLiteral("gradeSplit"), 1.0}, {QStringLiteral("gradeGlow"), 2.0}};
+        for (auto it = content.cbegin(); it != content.cend(); ++it)
+            field.setSetting(it.key(), it.value());
         QCOMPARE(field.settings().value(QStringLiteral("fieldSource")).toString(), QStringLiteral("content"));
         QVERIFY(field.look().value(QStringLiteral("graded")).toBool());
         field.setActive(true);

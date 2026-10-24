@@ -17,6 +17,37 @@ Item {
     property alias field: neural
     property alias sphereScene: scene
     property alias view: view
+    /// The sphere's clock stopped (`archie visual freeze`): the tests' still frame without a restart.
+    property bool frozen: false
+
+    // The display's verbs (DisplayControl checks every argument before these run). Each answers
+    // whether it did something, so a caller never shows a view that did not move.
+    function focusNode(id) {
+        if (id === "") { scene.fit(); return neural.select(".") }
+        if (!neural.select(id)) return false
+        scene.zoom(Math.min(1, (scene.r * 2.2) / scene.distance))
+        return true
+    }
+    function highlightNode(id, on) { return neural.select(on ? id : ".") }
+    function moveCamera(move) {
+        if (move === "home") scene.fit()
+        else if (move === "closer") scene.zoom(0.8)
+        else if (move === "farther") scene.zoom(1 / 0.8)
+        else if (move === "left") scene.orbit(-15, 0)
+        else if (move === "right") scene.orbit(15, 0)
+        else if (move === "up") scene.orbit(0, 10)
+        else if (move === "down") scene.orbit(0, -10)
+        else return false
+        return true
+    }
+    // What a click at (x, y) of this view does: the node under it is selected and opened.
+    function clickAt(x, y) {
+        const near = view.mapTo3DScene(Qt.vector3d(x, y, 0))
+        const far = view.mapTo3DScene(Qt.vector3d(x, y, 1))
+        const direction = Qt.vector3d(far.x - near.x, far.y - near.y, far.z - near.z).normalized()
+        const id = neural.pick(scene.camera.position, direction, 3.0)
+        return id.length > 0 && neural.activate(id)
+    }
 
     NeuralField {
         id: neural
@@ -64,7 +95,7 @@ Item {
             id: scene
             field: neural
             pixelRatio: Screen.devicePixelRatio
-            running: viewport.presented
+            running: viewport.presented && !viewport.frozen
             reducedMotion: viewport.reducedMotion
         }
     }
@@ -94,11 +125,7 @@ Item {
         onDoubleClicked: scene.fit()
         onClicked: function(mouse) {
             if (moved) return
-            const near = view.mapTo3DScene(Qt.vector3d(mouse.x, mouse.y, 0))
-            const far = view.mapTo3DScene(Qt.vector3d(mouse.x, mouse.y, 1))
-            const direction = Qt.vector3d(far.x - near.x, far.y - near.y, far.z - near.z).normalized()
-            const id = neural.pick(scene.camera.position, direction, 3.0)
-            if (id.length > 0) neural.activate(id)
+            viewport.clickAt(mouse.x, mouse.y)
         }
     }
 }

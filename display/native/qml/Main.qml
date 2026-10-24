@@ -39,8 +39,58 @@ ApplicationWindow {
         archieBridge.requestMode(displayControl.modeOf(next))
     }
 
+    // The sphere's clock (`archie visual freeze`), a popup the AI shows, and a pointer marker.
+    property bool frozen: false
+    property string popupText: ""
+    property real pointerX: 0
+    property real pointerY: 0
+
+    // The new verbs: DisplayControl has already checked every argument. A verb that cannot do
+    // anything on the scene on screen does nothing, and the view says so with a popup.
+    function viewVerb(action, args) {
+        const onNeural = root.scene === "orb" && root.neural
+        const onClassic = root.scene === "orb" && !root.neural
+        if (action === "window") {
+            root.visibility = args.state === "fullscreen" ? Window.FullScreen
+                : args.state === "maximized" ? Window.Maximized : Window.Windowed
+        } else if (action === "popup") {
+            root.popupText = args.text
+            popupTimer.interval = Math.round(args.seconds * 1000)
+            popupTimer.restart()
+        } else if (action === "freeze") {
+            root.frozen = args.enabled
+        } else if (action === "pointer") {
+            root.pointerX = args.x
+            root.pointerY = args.y
+            pointerTimer.restart()
+            if (args.click && onNeural) neuralOrb.clickAt(args.x * neuralOrb.width, args.y * neuralOrb.height)
+            else if (args.click && onClassic) {
+                const id = orbHud.pickAt(args.x * orbHud.width, args.y * orbHud.height)
+                if (id.length > 0) lumen.select(id)
+            }
+        } else if (action === "focus") {
+            if (onNeural) neuralOrb.focusNode(args.id)
+            else if (onClassic) { if (args.id === "") lumen.clearSelection(); else lumen.select(args.id) }
+        } else if (action === "highlight") {
+            if (onNeural) neuralOrb.highlightNode(args.id, args.enabled)
+            else if (onClassic) { if (args.enabled) lumen.hover(args.id); else lumen.hover("") }
+        } else if (action === "camera") {
+            if (onNeural) neuralOrb.moveCamera(args.move)
+            else if (onClassic) {
+                if (args.move === "home") lumen.resetProfile()
+                else if (args.move === "closer") lumenScene.approach(0.8)
+                else if (args.move === "farther") lumenScene.approach(1 / 0.8)
+                else if (args.move === "left") lumenScene.yaw -= 15
+                else if (args.move === "right") lumenScene.yaw += 15
+                else if (args.move === "up") lumenScene.pitch = Math.min(80, lumenScene.pitch + 10)
+                else if (args.move === "down") lumenScene.pitch = Math.max(-80, lumenScene.pitch - 10)
+            }
+        }
+    }
+
     Connections {
         target: displayControl
+        function onViewCommand(action, args) { root.viewVerb(action, args) }
         function onCommandReceived(action, value, enabled) {
             if (action === "scene") root.changeScene(value)
             else if (action === "preset" || action === "cinematic") {
@@ -119,7 +169,7 @@ ApplicationWindow {
 
     // Only the scene on screen does work: the orb fetches and steps while it is shown,
     // FORGE watches /proc while it is shown, and neither costs anything otherwise.
-    Binding { target: lumen; property: "active"; value: root.scene === "orb" && archieBridge.presented }
+    Binding { target: lumen; property: "active"; value: root.scene === "orb" && archieBridge.presented && !root.frozen }
     Binding { target: lumen; property: "renderBudget"; value: archieBridge.frame }
     Binding { target: appCatalog; property: "active"; value: root.scene === "forge" && archieBridge.presented }
 
@@ -800,15 +850,54 @@ ApplicationWindow {
                 }
 
                 NeuralViewport {
+                    id: neuralOrb
                     anchors.fill: parent
                     controller: lumen
                     visible: root.scene === "orb" && root.neural
                     presented: visible && archieBridge.presented
+                    frozen: root.frozen
                     hudVisible: root.orbHudVisible
                     reducedMotion: !archieBridge.frame.ambientMotion
                 }
 
+                // The AI's pointer: a ring where it looked or clicked, gone after two seconds.
+                Rectangle {
+                    id: pointerMarker
+                    visible: pointerTimer.running
+                    x: root.pointerX * parent.width - width / 2
+                    y: root.pointerY * parent.height - height / 2
+                    width: 28; height: 28; radius: 14
+                    color: "transparent"
+                    border.color: root.cyan
+                    border.width: 2
+                    Timer { id: pointerTimer; interval: 2000 }
+                }
+
+                // A short message the AI puts on the screen.
+                Rectangle {
+                    visible: popupTimer.running
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.top: parent.top; anchors.topMargin: 24
+                    width: Math.min(parent.width - 48, popupLabel.implicitWidth + 36)
+                    height: popupLabel.implicitHeight + 20
+                    radius: 8
+                    color: "#d9101620"
+                    border.color: root.edge
+                    Text {
+                        id: popupLabel
+                        anchors.centerIn: parent
+                        width: parent.width - 36
+                        text: root.popupText
+                        color: root.ink
+                        wrapMode: Text.Wrap
+                        horizontalAlignment: Text.AlignHCenter
+                        font.pixelSize: 15
+                    }
+                    Timer { id: popupTimer; interval: 4000 }
+                }
+
                 OrbHud {
+                    id: orbHud
                     controller: lumen
                     anchors.fill: parent
                     visible: root.scene === "orb" && !root.neural
