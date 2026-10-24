@@ -12,6 +12,7 @@
 # What you say is recognised on this machine. Which model answers: the one on this
 # machine once its GPU runtime is built (archie-local gpu), and nothing then leaves;
 # otherwise Nemotron on Nebius, which is sent the words of what you ask.
+# Each session is also kept in ~/.archie/talk/sessions/<date>.log, readable only by you.
 set -euo pipefail
 KEY=$HOME/.config/archie/nebius.key
 grade=public
@@ -22,7 +23,7 @@ for option in "$@"; do
     --local) where=local ;;
     --cloud) where=cloud ;;
     --always) export ALWAYS=1 ;;
-    *) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
+    *) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
   esac
 done
 if [ "$where" = auto ]; then
@@ -52,6 +53,8 @@ export PIPER_VOICES=/var/lib/archie/models/piper
 export POLICY=/usr/share/archie/stage/apps.toml
 export HOST_WAYLAND=/mnt/wslg/runtime-dir/wayland-0
 export RUN_DIR=$HOME/.archie/talk
+export SESSION_LOG=$RUN_DIR/sessions/$(date +%F_%H-%M-%S).log
+echo "archie-talk: this conversation is also kept in $SESSION_LOG" >&2
 # Piper's adapter runs under the Python that has Piper; the Stage draws without a GPU,
 # since WSLg shares no buffers with a nested compositor.
 export PATH=/opt/archie/voice-venv/bin:$PATH

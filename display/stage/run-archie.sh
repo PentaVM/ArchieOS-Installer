@@ -22,6 +22,7 @@
 #   RUN_DIR       key, sockets, logs               default: /tmp/archie-run
 #   HEADPHONES=1  keep listening while Archie speaks, so it can be interrupted
 #   ALWAYS=1      answer whatever is heard, named or not (one person alone)
+#   SESSION_LOG   also write the session there, each line with its time
 set -eu
 
 GRADE=${1:-}
@@ -116,6 +117,28 @@ fi
 
 # Two thread pools share this process's cores; spinning ones starve each other.
 # Applications opened by voice inherit the stage's runtime directory and software rendering.
-XDG_RUNTIME_DIR="$RUN_DIR/xdg" OMP_WAIT_POLICY=PASSIVE \
-    QT_QUICK_BACKEND=software LIBGL_ALWAYS_SOFTWARE=1 QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 \
-    "$ARCHIE_VOICE" "$@"
+voice() {
+    XDG_RUNTIME_DIR="$RUN_DIR/xdg" OMP_WAIT_POLICY=PASSIVE \
+        QT_QUICK_BACKEND=software LIBGL_ALWAYS_SOFTWARE=1 QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 \
+        "$ARCHIE_VOICE" "$@"
+}
+[ -n "${SESSION_LOG:-}" ] || { voice "$@"; exit; }
+
+# The session is kept as the window shows it, each line with its wall-clock time: what was
+# heard, what was said, the floor's decisions and the timings. Only the owner can read it.
+mkdir -p "$(dirname "$SESSION_LOG")"
+chmod 700 "$(dirname "$SESSION_LOG")"
+(umask 077 && : >>"$SESSION_LOG")
+{
+    echo "# archie session $(date -Iseconds)"
+    echo "# grade=$GRADE model=${ARCHIE_VOICE_MODEL:-default} endpoint=${ARCHIE_VOICE_ENDPOINT:-nebius} headphones=${HEADPHONES:-0} always=${ALWAYS:-0}"
+} >>"$SESSION_LOG"
+voice "$@" 2>&1 | {
+    # Ctrl+C reaches the voice too; this reader keeps writing until the voice has stopped.
+    trap '' INT TERM
+    while IFS= read -r line; do
+        printf '%s\n' "$line"
+        printf '%s %s\n' "$(date +%T.%3N)" "$line" >>"$SESSION_LOG"
+    done
+}
+echo "# ended $(date -Iseconds)" >>"$SESSION_LOG"
