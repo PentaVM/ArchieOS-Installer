@@ -3,6 +3,7 @@
 #include "LumenField.h"
 #include "DisplayControl.h"
 #include "ShellRuntime.h"
+#include "UiWalk.h"
 
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
@@ -73,6 +74,8 @@ int main(int argc, char *argv[])
     arguments.addOption(QCommandLineOption(QStringLiteral("lens"), QStringLiteral("Initial orb lens: architecture, folders, or entities."), QStringLiteral("name"), QStringLiteral("architecture")));
     arguments.addOption(QCommandLineOption(QStringLiteral("preset"), QStringLiteral("Initial look preset, e.g. holograma (Xavi's desktop sphere)."), QStringLiteral("name")));
     arguments.addOption(QCommandLineOption(QStringLiteral("content-root"), QStringLiteral("Folder the content sphere lists (read-only)."), QStringLiteral("path")));
+    arguments.addOption(QCommandLineOption(QStringLiteral("ui-walk"), QStringLiteral("Shell only: click through the steps in this JSON file and record each click (verification)."), QStringLiteral("steps")));
+    arguments.addOption(QCommandLineOption(QStringLiteral("ui-walk-out"), QStringLiteral("Where --ui-walk writes its screenshots and report.jsonl."), QStringLiteral("dir"), QStringLiteral("ui-walk")));
     arguments.process(app);
     const bool shellMode = arguments.isSet(QStringLiteral("shell"));
     const QString theme=arguments.value(QStringLiteral("theme"));
@@ -128,6 +131,21 @@ int main(int argc, char *argv[])
     if (shellMode) {
         shellRuntime.setRunning(true);
         QObject::connect(&app, &QCoreApplication::aboutToQuit, &shellRuntime, [&shellRuntime] { shellRuntime.setRunning(false); });
+    }
+    if (arguments.isSet(QStringLiteral("ui-walk"))) {
+        if (!window || !shellMode) {
+            qCritical("archie-display: --ui-walk needs --shell");
+            return EXIT_FAILURE;
+        }
+        window->setVisibility(QWindow::Windowed);
+        window->resize(1920, 1080);
+        auto *walk = new UiWalk(window, arguments.value(QStringLiteral("ui-walk")), arguments.value(QStringLiteral("ui-walk-out")), &app);
+        if (!walk->ready()) {
+            qCritical("archie-display: --ui-walk: no steps read, or the report cannot be written");
+            return EXIT_FAILURE;
+        }
+        // The bridge's first frames and the orb's first field arrive in the first seconds.
+        walk->start(8000);
     }
     if (arguments.isSet(QStringLiteral("render-check"))) {
         if (!window) return EXIT_FAILURE;
