@@ -71,6 +71,37 @@ archie --json ai harness2 --domain personal/owner --task-family mail-next-action
 - Repeating a completed run's exact identity resumes it without calling a model. Changed
   input under the same run id is refused.
 
+### Emergency pause
+
+```bash
+archie ai pause     # refuse every AI dispatch now
+archie ai status    # paused? recorded?
+archie ai resume
+```
+
+- These go to `archied` only (`AiPause`, `AiResume`, `AiStatus`). Only the kernel-identified
+  owner of `etc/inference.toml` may send them, as with the other AI requests. A paused or
+  disabled profile still belongs to its owner, so the owner can always resume.
+- The pause is Core's emergency pause on the one Policy engine the daemon shares with every
+  AI dispatch. It stops a request admitted before it at dispatch, and a model answer that
+  arrives during it is never committed or shown. As Core policy, it also refuses every other
+  mutating lease, such as a Sentry actuation, while it holds.
+- It is recorded in `/var/lib/archie/policy/emergency-pause` (`var/lib/policy/` under
+  `--root`) and survives a restart. `--standalone`
+  diagnostics honour the record. A resume removes the record and writes its audit entry
+  before it takes effect. If either fails, the node stays paused.
+
+### A local model whose server is down
+
+A Bonsai manifest marked `ready` says nothing about whether llama-server is up. Before
+routing, the runtime asks each usable local llama.cpp model's server for `/health` (500 ms),
+and keeps the answer for 5 s. A refused connection, a timeout or a 5xx answer (llama-server
+says 503 while it loads) makes that model offline to routing until it answers again. Voice,
+`archie-ask` and `AiInfer` then use the next admissible candidate. That is a veiled cloud
+model when the grade allows it (`sensitive` or below), and a refusal otherwise. A run
+pinned to the dead model is refused, never moved to another model. Cloud models are never
+probed.
+
 ### Measured on the RTX 3070 (2026-10-22)
 
 One complete run on `local.bonsai-2-9b` with reasoning on, through `archie ai harness2
