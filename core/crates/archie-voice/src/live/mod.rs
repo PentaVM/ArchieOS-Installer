@@ -64,7 +64,11 @@ con orb_preset, su cinemática con orb_cinematic y sus capas visuales con orb_ov
 un panel local con shell_panel cuando la persona lo pida. Estos cambios son solo visuales: \
 no cambian inferencia ni permisos y no ejecutan operaciones del sistema. No inventes datos \
 que no tienes. Si lo que oíste es un fragmento sin sentido o solo tu nombre, no lo repitas: \
-pregunta en pocas palabras qué necesita, o quédate callado.";
+pregunta en pocas palabras qué necesita, o quédate callado. Para explorar un lugar usa \
+world_resolve si faltan coordenadas, y world_explore solo con coordenadas, radio en metros \
+y dominio personal o work explícitos. Si falta el dominio, pregúntalo; nunca conviertas \
+trabajo en personal. Una captura aceptada está pendiente: no digas que terminó hasta \
+consultar world_status y observar complete. No captures lugares por actividad de aplicaciones.";
 
 /// A string parameter limited to the names the running display reported. When the display
 /// was not reachable at start-up the names are not known here, so the parameter is free and
@@ -128,6 +132,31 @@ pub fn tools(catalog: Option<&archie_orb::control::Catalog>) -> Vec<ToolDefiniti
             }),
         },
         ToolDefinition {
+            name: "world_explore".into(),
+            description: "Envía una captura geográfica acotada a worldd solo cuando la persona la pide. Requiere latitud, longitud, radio en metros y dominio explícito personal o work; pregunta lo que falte. La respuesta acepta un trabajo pendiente, no certifica finalización. No usa foco ni actividad de aplicaciones.".into(),
+            parameters: json!({
+                "type":"object", "additionalProperties":false,
+                "properties": {
+                    "latitude":{"type":"number","minimum":-90,"maximum":90},
+                    "longitude":{"type":"number","minimum":-180,"maximum":180},
+                    "radius_m":{"type":"number","exclusiveMinimum":0,"maximum":100000},
+                    "domain":{"type":"string","enum":["personal","work"]},
+                    "layers":{"type":"array","items":{"type":"string","enum":["terrain","buildings"]},"minItems":1,"maxItems":2},
+                    "zoom":{"type":"integer","minimum":0,"maximum":22}
+                }, "required":["latitude","longitude","radius_m","domain"]
+            }),
+        },
+        ToolDefinition {
+            name: "world_status".into(),
+            description: "Consulta trabajos y consumo de proveedores del dominio explícito personal o work. Solo un estado complete observado permite afirmar que terminó una captura.".into(),
+            parameters: json!({"type":"object","additionalProperties":false,"properties":{"domain":{"type":"string","enum":["personal","work"]}},"required":["domain"]}),
+        },
+        ToolDefinition {
+            name: "world_resolve".into(),
+            description: "Busca coordenadas candidatas de un nombre de lugar público mediante el proveedor geográfico. Requiere dominio explícito personal o work. No inicia capturas; pide elegir entre resultados ambiguos y definir el radio.".into(),
+            parameters: json!({"type":"object","additionalProperties":false,"properties":{"query":{"type":"string","minLength":1,"maxLength":256},"domain":{"type":"string","enum":["personal","work"]}},"required":["query","domain"]}),
+        },
+        ToolDefinition {
             name: "orb_preset".into(),
             description: "Cambia el aspecto del orbe con uno de los presets del Observatory y abre Orb. field es la vista original (Regiones vivas).".into(),
             parameters: json!({
@@ -165,9 +194,228 @@ pub fn tools(catalog: Option<&archie_orb::control::Catalog>) -> Vec<ToolDefiniti
     ]
 }
 
+/// Parse and validate before reaching the private service. Domain has no default.
+fn world_command(
+    name: &str,
+    raw: &str,
+) -> Result<archie_worldd::exploration::ExploreCommand, String> {
+    use archie_geofabric::exploration::{
+        self, ExplorationDomain, ExplorationLayer, ExplorationRequest,
+    };
+    use archie_worldd::exploration::ExploreCommand;
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Region {
+        latitude: f64,
+        longitude: f64,
+        radius_m: f64,
+        domain: ExplorationDomain,
+        zoom: Option<u8>,
+        layers: Option<Vec<ExplorationLayer>>,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Scope {
+        domain: ExplorationDomain,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Place {
+        query: String,
+        domain: ExplorationDomain,
+    }
+    let invalid =
+        |_| "Faltan argumentos explícitos o hay un dominio o valor no válido.".to_string();
+    match name {
+        "world_explore" => {
+            let region: Region = serde_json::from_str(raw).map_err(invalid)?;
+            let request = ExplorationRequest {
+                latitude: region.latitude,
+                longitude: region.longitude,
+                radius_m: region.radius_m,
+                domain: region.domain,
+                zoom: region.zoom.unwrap_or(14),
+                layers: region
+                    .layers
+                    .unwrap_or_else(|| vec![ExplorationLayer::Terrain]),
+                ..ExplorationRequest::default()
+            };
+            exploration::plan(&request).map_err(|error| error.to_string())?;
+            Ok(ExploreCommand::Explore { request })
+        }
+        "world_status" => {
+            let scope: Scope = serde_json::from_str(raw).map_err(invalid)?;
+            Ok(ExploreCommand::Status {
+                domain: scope.domain,
+            })
+        }
+        "world_resolve" => {
+            let place: Place = serde_json::from_str(raw).map_err(invalid)?;
+            if place.query.trim().is_empty() || place.query.chars().count() > 256 {
+                return Err(
+                    "El lugar debe tener entre uno y doscientos cincuenta y seis caracteres."
+                        .into(),
+                );
+            }
+            Ok(ExploreCommand::Resolve {
+                query: place.query,
+                domain: place.domain,
+            })
+        }
+        _ => Err("Herramienta geográfica desconocida.".into()),
+    }
+}
+
+/// Host-selected session scope; neither field is read from model tool arguments.
+#[derive(Clone)]
+pub struct WorldVoiceScope {
+    pub domain: archie_vault::ContextDomain,
+    pub privacy: archie_types::PrivacyGrade,
+}
+
+fn scoped_world_request(
+    scope: &WorldVoiceScope,
+    command: archie_worldd::exploration::ExploreCommand,
+) -> Result<archie_core::control::ControlRequest, String> {
+    use archie_core::control::ControlRequest;
+    use archie_geofabric::exploration::ExplorationDomain;
+    use archie_worldd::exploration::ExploreCommand;
+    let expected = if scope.domain.is_work() {
+        ExplorationDomain::Work
+    } else {
+        ExplorationDomain::Personal
+    };
+    let requested = match &command {
+        ExploreCommand::Explore { request } | ExploreCommand::Plan { request } => request.domain,
+        ExploreCommand::Resolve { domain, .. } | ExploreCommand::Status { domain } => *domain,
+        _ => return Err("Operación fuera del alcance de esta sesión de voz.".into()),
+    };
+    if requested != expected {
+        return Err(
+            "El dominio pedido no coincide con el dominio explícito de esta sesión.".into(),
+        );
+    }
+    let domain = scope.domain.clone();
+    let privacy = scope.privacy;
+    Ok(match command {
+        ExploreCommand::Explore { request } => ControlRequest::WorldExplore {
+            request,
+            domain,
+            privacy,
+        },
+        ExploreCommand::Plan { request } => ControlRequest::WorldPlan {
+            request,
+            domain,
+            privacy,
+        },
+        ExploreCommand::Resolve { query, .. } => ControlRequest::WorldResolve {
+            query,
+            domain,
+            privacy,
+        },
+        ExploreCommand::Status { .. } => ControlRequest::WorldStatus { domain, privacy },
+        _ => return Err("Operación geográfica no válida.".into()),
+    })
+}
+
+async fn world_tool(scope: Option<&WorldVoiceScope>, name: &str, raw: &str) -> String {
+    let Some(scope) = scope else {
+        return "No envié la operación: inicia esta sesión con --world-domain personal/owner o work/organización/proyecto y un grado explícito. Core debe autorizarla.".into();
+    };
+    let command = match world_command(name, raw) {
+        Ok(command) => command,
+        Err(error) => return format!("No envié la operación geográfica: {error}"),
+    };
+    let request = match scoped_world_request(scope, command) {
+        Ok(request) => request,
+        Err(error) => return format!("No envié la operación geográfica: {error}"),
+    };
+    match archie_core::world_control::send(request).await {
+        Err(error) => format!("Core no confirmó la operación geográfica: {error}. No se reintentó."),
+        Ok(value) if name == "world_explore" => format!(
+            "Captura aceptada con identificador {}. Estado {}. Esto confirma aceptación, no finalización.",
+            value["job"]["id"].as_str().unwrap_or("no informado"),
+            value["job"]["state"].as_str().unwrap_or("pendiente")),
+        Ok(value) if name == "world_resolve" => {
+            let places = value["places"].as_array().map(|places| places.iter().take(5).cloned().collect::<Vec<_>>()).unwrap_or_default();
+            format!("Lugares candidatos, sin captura iniciada: {}. Confirma lugar, radio y dominio antes de explorar.", json!(places))
+        },
+        Ok(value) => {
+            let jobs = value["jobs"].as_array().map(|jobs| jobs.iter().map(|job| json!({
+                "id":job["id"],"state":job["state"],"tiles_done":job["tiles_done"],
+                "tiles_total":job["tiles_total"],"bytes_received":job["bytes_received"],"error":job["error"]
+            })).collect::<Vec<_>>()).unwrap_or_default();
+            format!("Estado observado de worldd, dominio {}: {}.", value.get("context_domain").unwrap_or(&value["domain"]), json!(jobs))
+        },
+    }
+}
+
 #[cfg(test)]
 mod tool_tests {
     use super::*;
+
+    #[test]
+    fn model_domain_cannot_widen_host_domain_or_privacy() {
+        let scope = WorldVoiceScope {
+            domain: archie_vault::ContextDomain::work("org", "project").unwrap(),
+            privacy: archie_types::PrivacyGrade::Restricted,
+        };
+        let personal = world_command("world_status", r#"{"domain":"personal"}"#).unwrap();
+        assert!(scoped_world_request(&scope, personal).is_err());
+        let work = world_command("world_status", r#"{"domain":"work"}"#).unwrap();
+        let archie_core::control::ControlRequest::WorldStatus { domain, privacy } =
+            scoped_world_request(&scope, work).unwrap()
+        else {
+            panic!("status");
+        };
+        assert_eq!(domain.path(), "work/org/project");
+        assert_eq!(privacy, archie_types::PrivacyGrade::Restricted);
+        assert!(world_command(
+            "world_resolve",
+            r#"{"domain":"work","query":"place","privacy":"public"}"#
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn world_tools_require_explicit_domain_and_explore_coordinates() {
+        let definitions = tools(None);
+        for name in ["world_explore", "world_status", "world_resolve"] {
+            let tool = definitions.iter().find(|tool| tool.name == name).unwrap();
+            assert!(tool.parameters["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("domain")));
+            assert_eq!(
+                tool.parameters["properties"]["domain"]["enum"],
+                json!(["personal", "work"])
+            );
+        }
+        assert!(world_command("world_status", r#"{}"#).is_err());
+        assert!(world_command("world_status", r#"{"domain":"corporate"}"#).is_err());
+        assert!(world_command(
+            "world_explore",
+            r#"{"domain":"work","latitude":91,"longitude":0,"radius_m":500}"#
+        )
+        .is_err());
+        assert!(world_command(
+            "world_explore",
+            r#"{"domain":"work","latitude":0,"longitude":0}"#
+        )
+        .is_err());
+        let command = world_command(
+            "world_explore",
+            r#"{"domain":"work","latitude":-33,"longitude":-70,"radius_m":500}"#,
+        )
+        .unwrap();
+        let archie_worldd::exploration::ExploreCommand::Explore { request } = command else {
+            panic!("explore command");
+        };
+        assert_eq!(
+            request.domain,
+            archie_geofabric::exploration::ExplorationDomain::Work
+        );
+    }
 
     #[test]
     fn display_catalog_controls_scene_and_preset_enums_without_duplicate_tools() {
@@ -219,6 +467,7 @@ pub enum Outgoing {
 
 /// Everything a live session shares between the page, the eyes and the conversation.
 pub struct Senses {
+    world_scope: Option<WorldVoiceScope>,
     wanda: crate::wanda::WandaVoice,
     pub scene: Mutex<Scene>,
     /// What IRIS has seen over time, thing by thing.
@@ -270,6 +519,26 @@ impl Senses {
         curiosity_budget: u32,
         access: crate::wanda::WandaVoiceAccess,
     ) -> Arc<Self> {
+        Self::new_with_world(
+            audio,
+            identifier,
+            researcher,
+            voice_rate,
+            curiosity_budget,
+            access,
+            None,
+        )
+    }
+
+    pub fn new_with_world(
+        audio: mpsc::Sender<Vec<f32>>,
+        identifier: Identifier,
+        researcher: Option<Researcher>,
+        voice_rate: u32,
+        curiosity_budget: u32,
+        access: crate::wanda::WandaVoiceAccess,
+        world_scope: Option<WorldVoiceScope>,
+    ) -> Arc<Self> {
         let (out, _) = broadcast::channel(512);
         let persistent = match PersistentMemory::open_default() {
             Ok(memory) => Some(memory),
@@ -279,6 +548,7 @@ impl Senses {
             }
         };
         Arc::new(Self {
+            world_scope,
             wanda: crate::wanda::WandaVoice::from_env(access),
             scene: Mutex::new(Scene::default()),
             memory: Mutex::new(Memory::default()),
@@ -374,6 +644,9 @@ impl Senses {
 
     /// Carries out a live tool; `None` when the tool is not one of them.
     pub async fn handle_tool(&self, name: &str, raw_arguments: &str) -> Option<String> {
+        if matches!(name, "world_explore" | "world_status" | "world_resolve") {
+            return Some(world_tool(self.world_scope.as_ref(), name, raw_arguments).await);
+        }
         if name == "wanda_context" {
             return Some(self.wanda.handle_tool(raw_arguments).await);
         }

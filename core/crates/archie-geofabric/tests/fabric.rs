@@ -8,10 +8,11 @@ use archie_geofabric::{
     TileProvenance, PROVIDERS,
 };
 
-const EVERY_ID: [GeoProviderId; 9] = [
+const EVERY_ID: [GeoProviderId; 10] = [
     GeoProviderId::OpenStreetMap,
     GeoProviderId::MicrosoftBuildingFootprints,
     GeoProviderId::CopernicusDem30,
+    GeoProviderId::AwsTerrainTiles,
     GeoProviderId::ArchiePhotogrammetry,
     GeoProviderId::ArchieGaussianSplat,
     GeoProviderId::CesiumOsmBuildings,

@@ -269,6 +269,7 @@ void Observatory::set_display_present(bool display_present, std::int64_t now_ms)
 }
 
 void Observatory::request_mode(SceneMode mode) {
+    if (mode != m_modes.target()) m_exploration_camera = false;
     if (mode != m_modes.target() && m_camera.manual_navigation()) m_camera.release_focus();
     m_modes.request(mode);
 }
@@ -277,6 +278,24 @@ void Observatory::orbit_globe(float longitude_delta, float latitude_delta, float
     if (m_modes.target() != SceneMode::Watcher || !std::isfinite(longitude_delta) ||
         !std::isfinite(latitude_delta) || !std::isfinite(zoom_steps)) return;
     const CameraPose current = m_camera.pose();
+    if (m_exploration_camera) {
+        const Vec3 offset{current.eye.x-current.target.x,current.eye.y-current.target.y,current.eye.z-current.target.z};
+        const float r=std::sqrt(offset.x*offset.x+offset.y*offset.y+offset.z*offset.z);
+        if (!(r>0)) return;
+        constexpr float deg=180.0F/3.14159265F;
+        const auto dot=[](Vec3 a,Vec3 b){return a.x*b.x+a.y*b.y+a.z*b.z;};
+        const float targetRadius=std::sqrt(dot(current.target,current.target));
+        const Vec3 up{current.target.x/targetRadius,current.target.y/targetRadius,current.target.z/targetRadius};
+        const float horizontal=std::sqrt(up.x*up.x+up.z*up.z);
+        const Vec3 east=horizontal>0.00001F?Vec3{up.z/horizontal,0,-up.x/horizontal}:Vec3{1,0,0};
+        const Vec3 north{up.y*east.z-up.z*east.y,up.z*east.x-up.x*east.z,up.x*east.y-up.y*east.x};
+        const float yaw=std::atan2(dot(offset,east),dot(offset,north))+std::clamp(longitude_delta,-180.0F,180.0F)/deg;
+        const float elevation=std::clamp(std::asin(std::clamp(dot(offset,up)/r,-1.0F,1.0F))*deg+std::clamp(latitude_delta,-180.0F,180.0F),10.0F,89.5F)/deg;
+        const float distance=std::clamp(r*std::exp(-std::clamp(zoom_steps,-10.0F,10.0F)*0.12F),m_policy.layout.globe.radius*10.0F/6371000.0F,m_policy.layout.globe.radius*2.0F);
+        const float vertical=std::sin(elevation)*distance,e=std::sin(yaw)*std::cos(elevation)*distance,n=std::cos(yaw)*std::cos(elevation)*distance;
+        CameraPose next=current;next.eye={current.target.x+up.x*vertical+east.x*e+north.x*n,current.target.y+up.y*vertical+east.y*e+north.y*n,current.target.z+up.z*vertical+east.z*e+north.z*n};
+        m_focused.clear();m_camera.navigate(next);return;
+    }
     const float radius = std::sqrt(current.eye.x * current.eye.x + current.eye.y * current.eye.y + current.eye.z * current.eye.z);
     if (!std::isfinite(radius) || radius <= 0.0F) return;
     constexpr float degrees = 180.0F / 3.14159265F;
@@ -287,6 +306,21 @@ void Observatory::orbit_globe(float longitude_delta, float latitude_delta, float
     sphere.radius=distance;sphere.base_elevation=0.0F;sphere.elevation_per_magnitude=0.0F;
     CameraPose next=current;next.eye=globe_position(GeoPoint{latitude,longitude},0.0F,sphere);next.target=Vec3{};
     m_focused.clear();m_camera.navigate(next);
+}
+
+bool Observatory::frame_globe(double latitude, double longitude, double radius_m, double elevation_m, bool animate) {
+    if (m_modes.target()!=SceneMode::Watcher || !std::isfinite(latitude) || latitude < -90 || latitude > 90 ||
+        !std::isfinite(longitude) || longitude < -180 || longitude > 180 ||
+        !std::isfinite(radius_m) || radius_m<=0 || radius_m>6371000 ||
+        !std::isfinite(elevation_m) || elevation_m < -12000 || elevation_m > 12000) return false;
+    const float scale=m_policy.layout.globe.radius/6371000.0F;
+    GlobePolicy surface{m_policy.layout.globe.radius+static_cast<float>(elevation_m)*scale,0,0};
+    const auto target=globe_position(GeoPoint{latitude,longitude},0,surface);
+    const float standOff=std::max(25.0F*scale,static_cast<float>(radius_m)*scale*3.0F);
+    const auto normal=globe_position(GeoPoint{latitude,longitude},0,GlobePolicy{1,0,0});
+    CameraPose next=m_camera.pose();next.target=target;
+    next.eye={target.x+normal.x*standOff,target.y+normal.y*standOff,target.z+normal.z*standOff};
+    m_focused.clear();m_exploration_camera=true;m_camera.navigate(next,animate,true);return true;
 }
 
 void Observatory::focus(const std::string& node_id) {
@@ -311,10 +345,12 @@ void Observatory::focus(const std::string& node_id) {
         node->spec.location.has_value()
             ? globe_position(*node->spec.location, node->spec.magnitude, m_policy.layout.globe)
             : place(node->slot, depth, node->spec.severity, m_policy.layout);
+    m_exploration_camera=false;
     m_camera.focus(node_id, framing_for(position));
 }
 
 void Observatory::release_focus() {
+    m_exploration_camera=false;
     m_focused.clear();
     m_camera.release_focus();
 }

@@ -48,6 +48,10 @@ qt_add_executable(archie-display
     src/main.cpp
     src/ArchieBridge.cpp
     src/ArchieBridge.h
+    src/ExplorationPreview.cpp
+    src/ExplorationPreview.h
+    src/ExplorationCredential.cpp
+    src/ExplorationCredential.h
     src/MeshGeometry.cpp
     src/MeshGeometry.h
     src/Payload.cpp
@@ -73,6 +77,8 @@ qt_add_qml_module(archie-display
         qml/Main.qml
         qml/LumenScene.qml
         qml/OrbHud.qml
+        qml/WorldHud.qml
+        qml/Exploration.js
         qml/ForgeView.qml
         qml/OrbViewport.qml
         qml/HologramGrade.qml
@@ -161,6 +167,10 @@ target_compile_definitions(archie-display PRIVATE
     QT_NO_URL_CAST_FROM_STRING
 )
 
+if(WIN32)
+    target_link_libraries(archie-display PRIVATE advapi32)
+endif()
+
 install(TARGETS archie-display RUNTIME DESTINATION bin)
 
 option(ARCHIE_NATIVE_BUILD_TESTS "Build native lifecycle and transport tests" OFF)
@@ -186,6 +196,25 @@ if(ARCHIE_NATIVE_BUILD_TESTS)
     target_include_directories(test_shell_runtime PRIVATE src)
     target_link_libraries(test_shell_runtime PRIVATE Qt6::Core Qt6::Test)
     add_test(NAME shell_runtime_contracts COMMAND test_shell_runtime)
+    qt_add_executable(test_exploration_preview tests/test_exploration_preview.cpp src/ExplorationPreview.cpp)
+    target_include_directories(test_exploration_preview PRIVATE src)
+    target_link_libraries(test_exploration_preview PRIVATE archie::visual Qt6::Gui)
+    add_test(NAME exploration_preview_contracts COMMAND test_exploration_preview)
+    qt_add_executable(test_exploration_credential tests/test_exploration_credential.cpp src/ExplorationCredential.cpp)
+    target_include_directories(test_exploration_credential PRIVATE src)
+    target_link_libraries(test_exploration_credential PRIVATE Qt6::Core)
+    if(WIN32)
+        target_link_libraries(test_exploration_credential PRIVATE advapi32)
+    endif()
+    add_test(NAME exploration_credential_contracts COMMAND test_exploration_credential)
+    qt_add_executable(test_world_hud tests/test_world_hud.cpp)
+    target_link_libraries(test_world_hud PRIVATE Qt6::Quick Qt6::QuickControls2)
+    qt_add_resources(test_world_hud "world-hud-shell" PREFIX "/archie/shell" BASE "${CMAKE_CURRENT_SOURCE_DIR}/../shell"
+        FILES ${ARCHIE_SHELL_QML} ${ARCHIE_SHELL_JS} ${ARCHIE_SHELL_FONTS} "${CMAKE_CURRENT_SOURCE_DIR}/../shell/prototype/qmldir")
+    qt_add_resources(test_world_hud "world-hud-component" PREFIX "/world-test" BASE "${CMAKE_CURRENT_SOURCE_DIR}/qml"
+        FILES qml/WorldHud.qml qml/Exploration.js)
+    add_test(NAME world_hud_contracts COMMAND test_world_hud)
+    set_tests_properties(world_hud_contracts PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     qt_add_executable(test_display_control tests/test_display_control.cpp src/DisplayControl.cpp src/DisplayControl.h
         src/LumenField.cpp src/LumenField.h src/LumenGeometry.cpp src/LumenGeometry.h
         src/XaviDesignBridge.cpp src/XaviDesignBridge.h)

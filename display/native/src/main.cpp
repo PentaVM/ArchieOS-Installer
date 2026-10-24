@@ -8,6 +8,8 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQmlComponent>
+#include <QPointer>
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QTimer>
@@ -26,24 +28,30 @@
 class PresentationTracker final : public QObject {
 public:
     PresentationTracker(QQuickWindow *window, ArchieBridge *bridge)
-        : QObject(window), m_window(window), m_bridge(bridge) {
+        : QObject(window), m_bridge(bridge) { trackWindow(window); }
+    void trackWindow(QQuickWindow *window) {
+        m_windows.push_back(window);
         window->installEventFilter(this);
         connect(window, &QWindow::visibilityChanged, this, [this] { update(); });
+        connect(window, &QObject::destroyed, this, [this] { update(); });
         update();
     }
-    bool eventFilter(QObject *object, QEvent *event) override {
-        if (object == m_window && (event->type() == QEvent::Expose || event->type() == QEvent::Show
-            || event->type() == QEvent::Hide || event->type() == QEvent::WindowStateChange)) {
+    bool eventFilter(QObject *, QEvent *event) override {
+        if (event->type() == QEvent::Expose || event->type() == QEvent::Show
+            || event->type() == QEvent::Hide || event->type() == QEvent::WindowStateChange) {
             QTimer::singleShot(0, this, [this] { update(); });
         }
-        return QObject::eventFilter(object, event);
+        return false;
     }
 private:
     void update() {
-        m_bridge->setPresented(m_window->isVisible() && m_window->isExposed()
-                              && m_window->visibility() != QWindow::Minimized);
+        const bool presented=std::any_of(m_windows.cbegin(),m_windows.cend(),[](const auto &window) {
+            return window && window->isVisible() && window->isExposed()
+                && window->visibility()!=QWindow::Minimized;
+        });
+        m_bridge->setPresented(presented);
     }
-    QQuickWindow *m_window;
+    QList<QPointer<QQuickWindow>> m_windows;
     ArchieBridge *m_bridge;
 };
 
@@ -105,7 +113,7 @@ int main(int argc, char *argv[])
     if (engine.rootObjects().isEmpty())
         return EXIT_FAILURE;
     auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().front());
-    if (window) new PresentationTracker(window, &bridge);
+    auto *presentation=window ? new PresentationTracker(window, &bridge) : nullptr;
     if (!shellMode) {
         QString scene = displayControl.sceneNamed(arguments.value(QStringLiteral("scene")));
         if (scene.isEmpty()) {
@@ -125,6 +133,34 @@ int main(int argc, char *argv[])
     } else if (screenNumberOk && screenNumber > 0) {
         qWarning("archie-display: requested screen %d is unavailable; this WSL session exposes %lld screen(s)",
                  screenNumber, static_cast<long long>(screens.size()));
+    }
+    // One listener, two host surfaces: the shell's World command opens the actual native
+    // renderer in this same engine, preserving the shell Theme singleton and all authority.
+    if (shellMode) {
+        QQmlComponent worldComponent(&engine);
+        worldComponent.loadFromModule(QStringLiteral("Archie.Observatory"),QStringLiteral("Main"));
+        auto *object=worldComponent.createWithInitialProperties({
+            {QStringLiteral("scene"),QStringLiteral("world")},
+            {QStringLiteral("worldHost"),true},{QStringLiteral("visible"),false}});
+        auto *worldWindow=qobject_cast<QQuickWindow*>(object);
+        if(worldWindow) {
+            object->setParent(&engine);
+            if(presentation) presentation->trackWindow(worldWindow);
+            displayControl.setWorldAvailable(true);
+            QObject::connect(&displayControl,&DisplayControl::commandReceived,&engine,
+                [worldWindow,&bridge](const QString &action,const QString &value,bool) {
+                    if(action==QStringLiteral("scene") && value==QStringLiteral("world")) {
+                        bridge.enableWorld();bridge.requestMode(QStringLiteral("watcher"));
+                        worldWindow->showFullScreen();worldWindow->raise();worldWindow->requestActivate();
+                    }
+                });
+            if(arguments.value(QStringLiteral("scene"))==QStringLiteral("world")) {
+                bridge.enableWorld();bridge.requestMode(QStringLiteral("watcher"));worldWindow->showFullScreen();
+            }
+        } else {
+            delete object;
+            qWarning("archie-display: native World host unavailable: %s",qPrintable(worldComponent.errorString()));
+        }
     }
     if (!displayControl.start())
         qWarning("archie-display: local visual controls unavailable");

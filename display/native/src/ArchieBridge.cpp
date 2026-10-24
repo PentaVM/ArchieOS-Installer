@@ -1,6 +1,8 @@
 #include "ArchieBridge.h"
 
 #include "Payload.h"
+#include "ExplorationPreview.h"
+#include "ExplorationCredential.h"
 
 #include "archie/osm/building.hpp"
 #include "archie/visual/mesh.hpp"
@@ -29,6 +31,7 @@
 
 namespace {
 constexpr auto snapshotUrl = "http://127.0.0.1:7666/api/snapshot";
+constexpr auto explorationUrl = "http://127.0.0.1:7666/api/exploration";
 constexpr auto worldUrl = "http://127.0.0.1:7666/api/world";
 constexpr auto kernelUrl = "http://127.0.0.1:7666/api/kernel";
 constexpr auto orbUrl = "http://127.0.0.1:7666/api/orb";
@@ -386,6 +389,8 @@ ArchieBridge::ArchieBridge(QObject *parent, bool shellMode)
     m_snapshotTimer.setTimerType(Qt::CoarseTimer);
     connect(&m_snapshotTimer, &QTimer::timeout, this, &ArchieBridge::refreshSnapshot);
 
+    m_explorationTimer.setInterval(1000);
+    connect(&m_explorationTimer, &QTimer::timeout, this, &ArchieBridge::refreshExploration);
     m_worldTimer.setInterval(15000);
     m_worldTimer.setTimerType(Qt::VeryCoarseTimer);
     connect(&m_worldTimer, &QTimer::timeout, this, &ArchieBridge::refreshWorld);
@@ -413,6 +418,7 @@ ArchieBridge::ArchieBridge(QObject *parent, bool shellMode)
     if (!shellMode) {
         m_snapshotTimer.start();
         m_worldTimer.start();
+        m_explorationTimer.start();
         m_orbTimer.start();
         m_clockTimer.start();
     }
@@ -426,6 +432,7 @@ ArchieBridge::ArchieBridge(QObject *parent, bool shellMode)
     if (!shellMode) {
         refreshSnapshot();
         refreshWorld();
+        refreshExploration();
         refreshOrb();
         // World is opt-in: a shell rendering Orb does not fetch its globe assets.
         refreshGeoFabric();
@@ -453,6 +460,28 @@ void ArchieBridge::refreshSnapshot()
 void ArchieBridge::refreshWorld()
 {
     request(Projection::World, QUrl(QString::fromLatin1(worldUrl)));
+}
+
+void ArchieBridge::enableWorld()
+{
+    if (!m_worldTimer.isActive()) {
+        m_worldTimer.start();m_snapshotTimer.start();m_explorationTimer.start();
+        refreshWorld();refreshSnapshot();refreshExploration();refreshGeoFabric();loadBuildings();
+    }
+}
+
+void ArchieBridge::refreshExploration()
+{
+    if (m_explorationPending) return;
+    m_explorationPending=true;
+    request(Projection::Exploration,QUrl(QString::fromLatin1(explorationUrl)));
+}
+
+bool ArchieBridge::frameExploration(double latitude,double longitude,double radiusM,double elevationM,bool animate)
+{
+    const bool accepted=m_observatory.frame_globe(latitude,longitude,radiusM,elevationM,animate);
+    if(accepted)tick();
+    return accepted;
 }
 
 void ArchieBridge::refreshKernel()
@@ -514,6 +543,17 @@ void ArchieBridge::loadBuildings()
 void ArchieBridge::request(Projection projection, const QUrl &url)
 {
     QNetworkRequest request(url);
+    if(projection==Projection::Exploration) {
+        const auto token=explorationProjectionToken(explorationRuntimeDirectory());
+        if(token.isEmpty()) {
+            m_explorationPending=false;
+            m_exploration={{QStringLiteral("source"),QStringLiteral("unavailable")},
+                           {QStringLiteral("error"),QStringLiteral("Private World projection credential unavailable")}};
+            m_explorationMeshes.clear();m_explorationGeometryDigest.clear();emit explorationChanged();return;
+        }
+        request.setRawHeader(QByteArrayLiteral("Authorization"),QByteArrayLiteral("Bearer ")+token);
+        request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,QNetworkRequest::ManualRedirectPolicy);
+    }
     request.setTransferTimeout(1500);
     request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json"));
     request.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::AlwaysNetwork);
@@ -528,9 +568,15 @@ void ArchieBridge::request(Projection projection, const QUrl &url)
         reply->deleteLater();
         if (projection == Projection::Orb)
             m_orbRequestPending = false;
+        if (projection == Projection::Exploration) m_explorationPending=false;
         m_pendingRequests = std::max(0, m_pendingRequests - 1);
         emit busyChanged();
 
+        if (failure != QNetworkReply::NoError && projection==Projection::Exploration) {
+            m_exploration={{QStringLiteral("schema_version"),1},{QStringLiteral("source"),QStringLiteral("unavailable")},
+                           {QStringLiteral("error"),message.left(240)}};
+            m_explorationMeshes.clear();m_explorationGeometryDigest.clear();emit explorationChanged();return;
+        }
         if (failure != QNetworkReply::NoError) {
             fail(message);
             return;
@@ -539,6 +585,11 @@ void ArchieBridge::request(Projection projection, const QUrl &url)
                                            ? maximumOrbProjectionBytes
                                            : maximumProjectionBytes;
         if (body.size() > maximumBytes) {
+            if(projection==Projection::Exploration) {
+                m_exploration={{QStringLiteral("source"),QStringLiteral("unavailable")},
+                               {QStringLiteral("error"),QStringLiteral("Exploration projection exceeded 2 MiB")}};
+                m_explorationMeshes.clear();m_explorationGeometryDigest.clear();emit explorationChanged();return;
+            }
             fail(projection == Projection::Orb
                      ? QStringLiteral("orb projection exceeded the 8 MiB safety limit")
                      : QStringLiteral("projection exceeded the 2 MiB safety limit"));
@@ -553,7 +604,34 @@ void ArchieBridge::accept(Projection projection, const QByteArray &body)
     QJsonParseError parseError;
     const auto document = QJsonDocument::fromJson(body, &parseError);
     if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        if(projection==Projection::Exploration) {
+            m_exploration={{QStringLiteral("source"),QStringLiteral("unavailable")},
+                           {QStringLiteral("error"),QStringLiteral("Invalid exploration JSON")}};
+            m_explorationMeshes.clear();m_explorationGeometryDigest.clear();emit explorationChanged();return;
+        }
         fail(QStringLiteral("invalid typed projection"));
+        return;
+    }
+    if (projection==Projection::Exploration) {
+        const auto object=document.object();
+        const auto source=object.value(QStringLiteral("source")).toString();
+        if(object.value(QStringLiteral("schema_version")).toInt()!=1 ||
+           (source!=QStringLiteral("live")&&source!=QStringLiteral("fixture")&&source!=QStringLiteral("unavailable"))) {
+            m_exploration={{QStringLiteral("source"),QStringLiteral("unavailable")},{QStringLiteral("error"),QStringLiteral("Unsupported exploration schema")}};
+            m_explorationMeshes.clear();m_explorationGeometryDigest.clear();emit explorationChanged();return;
+        }
+        const auto next=object.toVariantMap();
+        // Counters change each poll. Decode geometry only when the actual last AOI changes.
+        const auto jobs=object.value(QStringLiteral("jobs")).toArray();
+        QJsonObject geometry;
+        if(!jobs.isEmpty()) {
+            const auto last=jobs.last().toObject();
+            geometry.insert(QStringLiteral("preview"),last.value(QStringLiteral("preview")));
+            geometry.insert(QStringLiteral("camera"),last.value(QStringLiteral("camera")));
+        }
+        const auto digest=QCryptographicHash::hash(QJsonDocument(geometry).toJson(QJsonDocument::Compact),QCryptographicHash::Sha256);
+        if(digest!=m_explorationGeometryDigest) {m_explorationMeshes=explorationPreviewMeshes(next);m_explorationGeometryDigest=digest;}
+        if(next!=m_exploration) {m_exploration=next;emit explorationChanged();}
         return;
     }
     setConnected(true);
@@ -797,6 +875,7 @@ void ArchieBridge::tick()
              QVector3D(frame.camera.target.x, frame.camera.target.y, frame.camera.target.z))},
         {QStringLiteral("cameraFov"), frame.camera.fov_degrees},
         {QStringLiteral("cameraState"), cameraStateName(frame.camera_state)},
+        {QStringLiteral("explorationCamera"), m_observatory.exploration_camera_active()},
     };
 
     // Only publish a frame that differs from the one already on screen.

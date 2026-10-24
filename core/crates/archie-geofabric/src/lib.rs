@@ -40,6 +40,7 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 
 pub mod catalogue;
+pub mod exploration;
 
 pub use catalogue::{provider, GeoProviderCapabilities, PROVIDERS};
 
@@ -65,6 +66,8 @@ pub enum GeoProviderId {
     OpenStreetMap,
     /// Copernicus GLO-30 elevation.
     CopernicusDem30,
+    /// Public Mapzen/Tileszen terrain GeoTIFFs hosted in AWS Open Data.
+    AwsTerrainTiles,
     /// Photogrammetry from Archie's own drone, phone or robot captures.
     ArchiePhotogrammetry,
     /// Gaussian splats trained from Archie's own captures.

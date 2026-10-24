@@ -4,34 +4,41 @@ import QtQuick.Layouts
 import QtQuick3D
 import QtQuick3D.Helpers
 import Archie.Observatory
+import "qrc:/archie/shell/prototype" as Shell
+import "Exploration.js" as Exploration
 
 ApplicationWindow {
     id: root
     visible: true
     visibility: Window.FullScreen
-    color: "#04060a"
+    color: Shell.Theme.desktop
+    property bool worldHost: false
+    onVisibleChanged: if (worldHost && !visible) archieBridge.requestMode("cerebra")
+    onClosing: function(event) { if(worldHost) { event.accepted=false; hide() } }
     title: "Archie Observatory"
 
-    readonly property color ink: "#e9edf3"
-    readonly property color soft: "#a4acb9"
-    readonly property color dim: "#687080"
-    readonly property color edge: "#1c222c"
+    readonly property color ink: root.scene === "world" ? Shell.Theme.t1 : "#e9edf3"
+    readonly property color soft: root.scene === "world" ? Shell.Theme.t2 : "#a4acb9"
+    readonly property color dim: root.scene === "world" ? Shell.Theme.t3 : "#687080"
+    readonly property color edge: root.scene === "world" ? Shell.Theme.hair : "#1c222c"
     // The corner-bracket frames want more presence than a hairline divider but less
     // than a highlight — bright enough to read as a deliberate frame against the
     // panel fill, dim enough to stay out of the way of anything real on top of it.
     readonly property color frame: "transparent"
-    readonly property color cyan: "#6fe3f5"
-    readonly property color green: "#47d18b"
-    readonly property color amber: "#f0b429"
-    readonly property color red: "#f2626b"
+    readonly property color cyan: root.scene === "world" ? Shell.Theme.info : "#6fe3f5"
+    readonly property color green: root.scene === "world" ? Shell.Theme.ok : "#47d18b"
+    readonly property color amber: root.scene === "world" ? Shell.Theme.warn : "#f0b429"
+    readonly property color red: root.scene === "world" ? Shell.Theme.bad : "#f2626b"
     property string scene: "orb"
     property bool orbHudVisible: true
     property var selection: null
+    readonly property bool localTerrainPreview: root.scene === "world" && Exploration.localTerrainView(archieBridge.frame,archieBridge.explorationMeshes)
 
     // The scenes and the mode each runs in are DisplayControl's; the CLI and the voice ask
     // it for the same list.
     function changeScene(next) {
         if (displayControl.scenes.indexOf(next) < 0) return
+        if (root.worldHost && next !== "world") { root.hide(); return }
         root.scene = next
         root.selection = null
         archieBridge.requestMode(displayControl.modeOf(next))
@@ -92,7 +99,8 @@ ApplicationWindow {
     // them; over a poll interval the sun moves a quarter of a degree, so tying it to the
     // real pulse loses nothing and keeps the one rule the whole display is built on.
     Component.onCompleted: {
-        archieBridge.requestMode(displayControl.modeOf(root.scene))
+        if (!root.worldHost && typeof shellColorMode !== "undefined") Shell.Theme.colorMode = shellColorMode
+        if (!root.worldHost || root.visible) archieBridge.requestMode(displayControl.modeOf(root.scene))
         root.computeSun()
     }
 
@@ -106,6 +114,7 @@ ApplicationWindow {
     Shortcut {
         sequence: "Escape"
         onActivated: {
+            if (root.worldHost) { root.hide(); return }
             root.selection = null
             archieBridge.releaseFocus()
             lumen.clearSelection()
@@ -117,9 +126,9 @@ ApplicationWindow {
 
     // Only the scene on screen does work: the orb fetches and steps while it is shown,
     // FORGE watches /proc while it is shown, and neither costs anything otherwise.
-    Binding { target: lumen; property: "active"; value: root.scene === "orb" && archieBridge.presented }
-    Binding { target: lumen; property: "renderBudget"; value: archieBridge.frame }
-    Binding { target: appCatalog; property: "active"; value: root.scene === "forge" && archieBridge.presented }
+    Binding { when: !root.worldHost || root.visible; target: lumen; property: "active"; value: root.scene === "orb" && archieBridge.presented }
+    Binding { when: !root.worldHost || root.visible; target: lumen; property: "renderBudget"; value: archieBridge.frame }
+    Binding { when: !root.worldHost || root.visible; target: appCatalog; property: "active"; value: root.scene === "forge" && archieBridge.presented }
 
     // A real event (a new snapshot, a changed machine condition) flashes the orb's
     // membrane once. It never loops: nothing moves without something having happened.
@@ -281,7 +290,9 @@ ApplicationWindow {
         return parts.join("  ·  ")
     }
 
+    Rectangle { anchors.fill:parent; color:Shell.Theme.desktop; visible:root.scene === "world" }
     Rectangle {
+        visible:root.scene !== "world"
         anchors.fill: parent
         color: "#04060a"
         gradient: Gradient {
@@ -317,8 +328,8 @@ ApplicationWindow {
             Rectangle {
                 anchors.centerIn: parent
                 width: sceneRow.implicitWidth + 8; height: 38; radius: 19
-                color: "#10141b"
-                border.color: "#1d232d"
+                color: root.scene === "world" ? Shell.Theme.raised : "#10141b"
+                border.color: root.scene === "world" ? Shell.Theme.hair : "#1d232d"
                 Row {
                     id: sceneRow
                     anchors.centerIn: parent
@@ -384,106 +395,13 @@ ApplicationWindow {
             Layout.fillHeight: true
             spacing: 0
 
-            Rectangle {
-                visible: root.scene === "world"
-                Layout.preferredWidth: 292
-                Layout.fillHeight: true
-                color: "#0a0d13"
-                CornerBrackets { legLength: 14; tint: root.frame }
-                ScrollView {
-                    anchors.fill: parent
-                    anchors.margins: 18
-                    clip: true
-                    Column {
-                        width: parent.width
-                        spacing: 14
-                        SectionTitle { text: "NODE" }
-                        Fact { label: "identity"; value: root.status.node_id ? root.status.node_id.substring(0, 18) + "…" : "not reported" }
-                        Fact { label: "profile"; value: root.status.profile || "—" }
-                        Fact { label: "architecture"; value: root.status.architecture || "—" }
-                        Fact { label: "health"; value: root.status.health || "—"; valueColor: root.stateColor(root.status.health) }
-                        Fact { label: "active tasks"; value: String(root.status.active_tasks || 0) }
-
-                        SectionTitle { text: "MACHINE" }
-                        // Read by displayd from /proc and /sys, not from archied. It stays
-                        // true while the daemon is unreachable — which is exactly when an
-                        // operator most needs to know whether the box is thrashing.
-                        Fact {
-                            label: "pressure"
-                            value: root.pressureKnown
-                                   ? ((root.kernel.verdict || "—") + " · " + (root.kernel.worst_resource || "—"))
-                                   : "not measured"
-                            valueColor: root.pressureKnown
-                                        ? root.verdictColor(root.kernel.verdict)
-                                        : root.dim
-                        }
-                        Meter {
-                            known: root.pressureKnown
-                            fraction: root.pressureKnown && root.pressure
-                                      ? root.worstPressureFraction()
-                                      : 0
-                            fill: root.verdictColor(root.kernel.verdict)
-                        }
-                        // The model's tier, and why. It used to be a word this display
-                        // derived from the kernel verdicts on its own — a second reading
-                        // of the same telemetry the governor had already read, free to
-                        // disagree with the tier actually in force.
-                        Fact {
-                            label: "render tier"
-                            value: archieBridge.frame.tier + " · " + archieBridge.frame.tierReason
-                            valueColor: root.budgetReduced() ? root.amber : root.soft
-                        }
-                        Fact {
-                            label: "thermal"
-                            value: root.thermalKnown
-                                   ? ((root.kernel.thermal_state || "—")
-                                      + (root.kernel.hottest_zone ? " · " + root.kernel.hottest_zone : ""))
-                                   : "no zones published"
-                            valueColor: root.thermalKnown
-                                        ? root.thermalColor(root.kernel.thermal_state)
-                                        : root.dim
-                        }
-                        Repeater {
-                            model: root.zones
-                            Column {
-                                width: parent ? parent.width : implicitWidth
-                                spacing: 3
-                                Fact {
-                                    label: modelData.zone_type
-                                    value: modelData.celsius.toFixed(1) + " °C"
-                                }
-                                // Scaled against this zone's own critical trip, never a
-                                // shared axis: 90 °C on a CPU rated to 100 and 90 °C on an
-                                // NVMe rated to 85 are not the same condition.
-                                Meter {
-                                    known: modelData.headroom_fraction !== null
-                                           && modelData.headroom_fraction !== undefined
-                                    fraction: modelData.headroom_fraction || 0
-                                    fill: root.thermalColor(modelData.state)
-                                }
-                            }
-                        }
-
-                        SectionTitle { text: "HARDWARE" }
-                        Fact { label: "CPU"; value: root.status.physical_cores ? root.status.physical_cores + "c / " + root.status.logical_cores + "t" : "—" }
-                        Text { width: parent.width; text: root.status.cpu_model || "no probe"; color: root.dim; wrapMode: Text.Wrap; font.pixelSize: 10 }
-                        Fact {
-                            label: "memory available"
-                            value: root.status.memory_available_bytes !== undefined ? root.gib(root.status.memory_available_bytes) + " / " + root.gib(root.status.memory_total_bytes) : "—"
-                        }
-                        SectionTitle { text: "FABRIC" }
-                        Fact { label: "transport"; value: root.status.fabric_transport || "—" }
-                        Fact { label: "known peers"; value: String(root.status.peers || 0) }
-                        Fact { label: "reachable peers"; value: String(root.status.reachable_peers || 0); valueColor: (root.status.reachable_peers || 0) > 0 ? root.green : root.dim }
-
-                        SectionTitle { text: "WORLD SOURCE" }
-                        Fact { label: "authority"; value: root.provider.authority || "none" }
-                        Fact { label: "dataset"; value: root.provider.dataset || "—" }
-                        Fact { label: "condition"; value: root.provider.condition || "unavailable"; valueColor: root.stateColor(root.provider.condition) }
-                        Fact { label: "records"; value: String(root.observations.length) }
-                        Fact { label: "age"; value: root.provider.data_age_ms !== undefined && root.provider.data_age_ms !== null ? Math.round(root.provider.data_age_ms / 1000) + " s" : "—" }
-                    }
-                }
+            WorldHud {
+                id:worldHud
+                visible:root.scene === "world"
+                Layout.preferredWidth:Math.min(370,root.width*0.36)
+                Layout.fillHeight:true
+                controller:archieBridge
+                worldActive:root.scene === "world" && root.visible
             }
 
             Item {
@@ -501,7 +419,7 @@ ApplicationWindow {
                     layer.effect: HologramGrade { look: lumen.look; postProcessing: !!archieBridge.frame.postProcessing }
                     environment: ExtendedSceneEnvironment {
                         backgroundMode: SceneEnvironment.Color
-                        clearColor: root.scene === "orb" ? lumen.look.background : "#04070c"
+                        clearColor: root.scene === "orb" ? lumen.look.background : Shell.Theme.desktop
                         // The budget is not a caption. Under real memory or CPU pressure
                         // the observatory spends less GPU, because it is the largest
                         // discretionary consumer on a node that has other work to do.
@@ -572,7 +490,7 @@ ApplicationWindow {
                         position: archieBridge.frame.cameraEye
                         eulerRotation: Qt.vector3d(0, 0, 0)
                         fieldOfView: archieBridge.frame.cameraFov
-                        clipNear: 0.1
+                        clipNear: root.scene === "world" ? 0.000003 : 0.1
                         // Far enough to enclose the star sphere at every framing. The old
                         // 400 sat inside the sky, so the whole starfield was clipped away
                         // and the planet hung in a void — the sky was there, just beyond
@@ -580,6 +498,7 @@ ApplicationWindow {
                         clipFar: 1600
                         Component.onCompleted: lookAt(archieBridge.frame.cameraTarget)
                         onPositionChanged: lookAt(archieBridge.frame.cameraTarget)
+                        Connections { target:archieBridge; function onFrameChanged() { camera.lookAt(archieBridge.frame.cameraTarget) } }
                     }
                     // The sun. Its direction is the real one, so the lit hemisphere below
                     // is the hemisphere in daylight now. A directional light points along
@@ -621,6 +540,7 @@ ApplicationWindow {
                         // marker use the same frame. UTC must not rotate it afterward.
 
                         Model {
+                            visible: !root.localTerrainPreview
                             source: "#Sphere"
                             // Geographic placement matches this mesh: Greenwich +Z,
                             // 90 degrees east +X, north +Y. Do not rotate the texture.
@@ -657,7 +577,7 @@ ApplicationWindow {
                         Model {
                             source: "#Sphere"
                             scale: Qt.vector3d(0.407,0.407,0.407)
-                            visible: !root.budgetReduced()
+                            visible: !root.budgetReduced() && !root.localTerrainPreview
                             materials: CustomMaterial {
                                 shadingMode: CustomMaterial.Unshaded
                                 sourceBlend: CustomMaterial.SrcAlpha
@@ -668,6 +588,21 @@ ApplicationWindow {
                                 property vector3d sunDirection: root.sunDirection
                                 vertexShader: "qrc:/archie/shaders/atmosphere.vert"
                                 fragmentShader: "qrc:/archie/shaders/atmosphere.frag"
+                            }
+                        }
+
+                        // Safe decoded preview only: bounded samples/footprints, never local artifact paths.
+                        Repeater3D {
+                            model:archieBridge.explorationMeshes
+                            delegate:Model {
+                                required property var modelData
+                                geometry:MeshGeometry { vertices:modelData.vertices; triangleIndices:modelData.triangleIndices }
+                                materials:PrincipledMaterial {
+                                    baseColor:modelData.kind==="terrain" ? Shell.Theme.t3 : modelData.kind==="buildings" ? Shell.Theme.t2 : Shell.Theme.acc
+                                    lighting:modelData.kind==="terrain" ? PrincipledMaterial.FragmentLighting : PrincipledMaterial.NoLighting
+                                    cullMode:Material.NoCulling
+                                    roughness:1.0
+                                }
                             }
                         }
 
@@ -774,12 +709,13 @@ ApplicationWindow {
                         if (Math.abs(mouse.x-origin.x)+Math.abs(mouse.y-origin.y)>5) moved=true
                         if (moved) {
                             root.selection=null
+                            worldHud.cedeCamera()
                             archieBridge.orbitGlobe(-(mouse.x-previous.x)*0.2,(mouse.y-previous.y)*0.2,0)
                         }
                         previous=Qt.point(mouse.x,mouse.y)
                     }
                     onWheel: function(wheel) {
-                        if (root.scene === "world") { root.selection=null;archieBridge.orbitGlobe(0,0,wheel.angleDelta.y/120);wheel.accepted=true }
+                        if (root.scene === "world") { worldHud.cedeCamera();root.selection=null;archieBridge.orbitGlobe(0,0,wheel.angleDelta.y/120);wheel.accepted=true }
                     }
                     // Picking tells the model, not just the panel. The model owns the
                     // dive onto a node and the way back out, and it lets go of a node the
@@ -787,6 +723,7 @@ ApplicationWindow {
                     // because it does not know the node is gone.
                     onClicked: function(mouse) {
                         if (moved) return
+                        worldHud.cedeCamera()
                         const result = view.pick(mouse.x, mouse.y)
                         const hit = result.objectHit
                         root.selection = hit && hit.payload ? hit.payload : null
@@ -944,7 +881,7 @@ ApplicationWindow {
             }
 
             Rectangle {
-                visible: root.scene === "world"
+                visible: false
                 Layout.preferredWidth: 338
                 Layout.fillHeight: true
                 color: "#0a0d13"
@@ -1115,7 +1052,7 @@ ApplicationWindow {
         }
 
         Rectangle {
-            visible: root.scene === "world"
+            visible: false
             Layout.fillWidth: true
             Layout.preferredHeight: 112
             color: "#0a0d13"

@@ -14,6 +14,7 @@
 #![forbid(unsafe_code)]
 
 pub mod bridge;
+mod exploration;
 pub mod geofabric;
 pub mod http;
 pub mod kernel;
@@ -255,6 +256,30 @@ impl Observatory {
     /// but GET with 405 before a route is chosen.
     pub async fn route(&self, request: Request) -> Response {
         match request.path.as_str() {
+            "/api/exploration" => {
+                if !self.is_fixture()
+                    && !archie_worldd::exploration_projection::authorized(
+                        &archie_worldd::exploration_projection::default_runtime_dir(),
+                        request.authorization.as_deref(),
+                    )
+                {
+                    return Response {
+                        status: 403,
+                        content_type: "text/plain; charset=utf-8",
+                        body: b"private World projection requires read-only authorization\n"
+                            .to_vec(),
+                    };
+                }
+                let view = if self.is_fixture() {
+                    archie_worldd::exploration::ExplorationSnapshot::unavailable("fixture")
+                } else {
+                    exploration::current().await
+                };
+                match serde_json::to_vec(&view) {
+                    Ok(body) => Response::json(body),
+                    Err(_) => Response::not_found(),
+                }
+            }
             "/api/inspector" => {
                 let view = self.current().await.inspector_view();
                 match serde_json::to_vec(&view) {
@@ -398,6 +423,7 @@ mod tests {
                 method: "GET".into(),
                 path: "/api/inspector".into(),
                 query: String::new(),
+                authorization: None,
             })
             .await;
         assert_eq!(response.status, 200, "the inspector projection must exist");
@@ -417,6 +443,7 @@ mod tests {
                 method: "GET".into(),
                 path: "/api/workflows".into(),
                 query: String::new(),
+                authorization: None,
             })
             .await;
         assert_eq!(response.status, 200);
@@ -538,6 +565,7 @@ mod tests {
                 method: "GET".into(),
                 path: "/".into(),
                 query: String::new(),
+                authorization: None,
             })
             .await;
         assert_eq!(response.status, 404);
@@ -551,6 +579,7 @@ mod tests {
                 method: "GET".into(),
                 path: "/api/snapshot".into(),
                 query: String::new(),
+                authorization: None,
             })
             .await;
         assert_eq!(response.status, 200);
@@ -566,6 +595,7 @@ mod tests {
                 method: "GET".into(),
                 path: "/api/world".into(),
                 query: String::new(),
+                authorization: None,
             })
             .await;
         assert_eq!(response.status, 200);
@@ -591,6 +621,7 @@ mod tests {
                 method: "GET".into(),
                 path: "/api/geofabric".into(),
                 query: String::new(),
+                authorization: None,
             })
             .await;
         assert_eq!(response.status, 200);
@@ -694,6 +725,7 @@ mod tests {
                 method: "GET".into(),
                 path: "/healthz".into(),
                 query: String::new(),
+                authorization: None,
             })
             .await;
         let body = String::from_utf8(response.body).unwrap();
@@ -711,6 +743,7 @@ mod tests {
                 method: "GET".into(),
                 path: "/api/notices".into(),
                 query: String::new(),
+                authorization: None,
             })
         };
         // No board yet: live, and honestly empty.
@@ -770,6 +803,7 @@ mod tests {
                 method: "GET".into(),
                 path: "/etc/passwd".into(),
                 query: String::new(),
+                authorization: None,
             })
             .await;
         assert_eq!(response.status, 404);
@@ -802,6 +836,7 @@ mod tests {
                 method: "GET".into(),
                 path: "/api/kernel".into(),
                 query: String::new(),
+                authorization: None,
             })
             .await;
         assert_eq!(response.status, 200);

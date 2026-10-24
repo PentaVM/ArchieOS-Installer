@@ -15,6 +15,8 @@ class ArchieBridge final : public QObject
     Q_OBJECT
     Q_PROPERTY(QVariantMap snapshot READ snapshot NOTIFY snapshotChanged)
     Q_PROPERTY(QVariantMap world READ world NOTIFY worldChanged)
+    Q_PROPERTY(QVariantMap exploration READ exploration NOTIFY explorationChanged)
+    Q_PROPERTY(QVariantList explorationMeshes READ explorationMeshes NOTIFY explorationChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
     Q_PROPERTY(QString error READ error NOTIFY errorChanged)
@@ -64,6 +66,8 @@ public:
 
     QVariantMap snapshot() const { return m_snapshot; }
     QVariantMap world() const { return m_world; }
+    QVariantMap exploration() const { return m_exploration; }
+    QVariantList explorationMeshes() const { return m_explorationMeshes; }
     QVariantList sceneNodes() const { return m_sceneNodes; }
     QVariantList sceneEdges() const { return m_sceneEdges; }
     bool busy() const { return m_pendingRequests > 0; }
@@ -83,6 +87,9 @@ public:
 
     Q_INVOKABLE void refreshSnapshot();
     Q_INVOKABLE void refreshWorld();
+    Q_INVOKABLE void refreshExploration();
+    Q_INVOKABLE void enableWorld();
+    Q_INVOKABLE bool frameExploration(double latitude, double longitude, double radiusM, double elevationM, bool animate);
     Q_INVOKABLE void refreshKernel();
     Q_INVOKABLE void refreshOrb();
     Q_INVOKABLE void refreshGeoFabric();
@@ -109,6 +116,7 @@ public:
 signals:
     void snapshotChanged();
     void worldChanged();
+    void explorationChanged();
     void busyChanged();
     void connectedChanged();
     void errorChanged();
@@ -124,7 +132,7 @@ signals:
     void presentedChanged();
 
 private:
-    enum class Projection { Snapshot, World, Kernel, GeoFabric, Orb };
+    enum class Projection { Snapshot, World, Kernel, GeoFabric, Orb, Exploration };
 
     void request(Projection projection, const QUrl &url);
     void accept(Projection projection, const QByteArray &body);
@@ -142,6 +150,7 @@ private:
     QNetworkAccessManager m_network;
     QTimer m_snapshotTimer;
     QTimer m_worldTimer;
+    QTimer m_explorationTimer;
     QTimer m_kernelTimer;
     QTimer m_orbTimer;
     QTimer m_clockTimer;
@@ -150,6 +159,10 @@ private:
     QTimer m_frameTimer;
     QVariantMap m_snapshot;
     QVariantMap m_world;
+    QVariantMap m_exploration{{QStringLiteral("source"), QStringLiteral("unavailable")}};
+    QVariantList m_explorationMeshes;
+    QByteArray m_explorationGeometryDigest;
+    bool m_explorationPending = false;
     QVariantMap m_kernel;
     QVariantList m_sceneNodes;
     QVariantList m_sceneEdges;

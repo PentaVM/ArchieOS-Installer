@@ -7,8 +7,19 @@
 use archie_types::Timestamp;
 use serde::{Deserialize, Serialize};
 
+pub mod exploration;
+pub mod exploration_projection;
 pub mod lan;
 pub mod layers;
+
+#[cfg(feature = "provider")]
+pub mod exploration_runtime;
+
+#[cfg(feature = "provider")]
+pub mod exploration_control;
+
+#[cfg(feature = "provider")]
+pub mod geo_formats;
 
 #[cfg(feature = "provider")]
 pub mod http;
