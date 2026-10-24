@@ -333,7 +333,7 @@ $installer = {
                 $path = Install-HostModel $entry "$root\models" $log
                 $hostModel = [ordered]@{
                     name = $entry.name; alias = $entry.alias; port = $entry.port; reasoning = $entry.reasoning
-                    path = $path; runtime = $context.plan.runtime; runtime_dir = $runtimeDir; key = (New-HostModelKey)
+                    path = $path; runtime = $context.plan.runtime; runtime_dir = $runtimeDir
                 }
                 $settings.host_model = $hostModel
             }

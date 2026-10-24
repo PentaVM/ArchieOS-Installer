@@ -4,8 +4,9 @@
 # inside it, and NVIDIA's driver is not something anyone else can extend. So the model runs
 # where the GPU is, on Windows, with PrismML's own Windows build of the same llama.cpp
 # ArchieOS runs inside WSL, and the machine reaches it through VirtualBox's private network
-# (10.0.2.2 is Windows, seen from inside). It listens on Windows' loopback only, behind a key
-# only the machine is given. Dot-sourced by the installer and the launcher; needs
+# (10.0.2.2 is Windows, seen from inside). It listens on Windows' loopback only, as the model
+# in WSL does; inside the machine a systemd proxy puts it on the machine's own loopback,
+# where Core accepts a local model. Dot-sourced by the installer and the launcher; needs
 # ArchieOS-Machine.ps1 dot-sourced first.
 
 # Downloads with curl.exe (part of Windows 10 1803 and later): resumable, and fast where
@@ -59,7 +60,7 @@ function Install-HostModel($entry, [string]$modelsDir, [scriptblock]$log) {
 # many layers on the GPU as fit with 512 MB to spare.
 function Get-HostModelArguments($hostModel) {
     $arguments = @('-m', "`"$($hostModel.path)`"", '--host', '127.0.0.1', '--port', $hostModel.port, '--alias', $hostModel.alias,
-        '--jinja', '--api-key', $hostModel.key, '--ctx-size', '16384', '--parallel', '1')
+        '--jinja', '--ctx-size', '16384', '--parallel', '1')
     if ($hostModel.runtime -ne 'cpu') {
         $arguments += @('-ngl', 'auto', '--fit', 'on', '--fit-target', '512', '--flash-attn', 'on', '--cache-type-k', 'q8_0', '--cache-type-v', 'q8_0')
     }
@@ -96,15 +97,9 @@ function Stop-HostModel {
     }
 }
 
-# A key the machine and the server share, so nothing else on this PC can use the model.
-function New-HostModelKey {
-    $bytes = New-Object byte[] 24
-    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
-    return ([BitConverter]::ToString($bytes) -replace '-', '').ToLower()
-}
-
-# The machine: imported from ArchieOS.ova with the resources chosen, the model's address and
-# key in its guest properties (ArchieOS reads them when it starts), its window full screen.
+# The machine: imported from ArchieOS.ova with the resources chosen, the model's name in its
+# guest properties (ArchieOS reads it when it starts and finds the rest in its catalog), its
+# window full screen.
 function New-ArchieVm([string]$ova, [string]$name, [int]$cpus, [int]$memoryGb, [string]$baseFolder, $hostModel, [scriptblock]$log) {
     $vbox = Join-Path $env:ProgramFiles 'Oracle\VirtualBox\VBoxManage.exe'
     & $log "Importando $name en VirtualBox"
@@ -114,10 +109,7 @@ function New-ArchieVm([string]$ova, [string]$name, [int]$cpus, [int]$memoryGb, [
     & $vbox modifyvm $name --nat-localhostreachable1 on --graphicscontroller vmsvga --vram 128 --accelerate3d on `
         --clipboard-mode bidirectional --audio-enabled on --audio-in on --audio-out on 2>&1 | ForEach-Object { & $log "$_" }
     if ($hostModel) {
-        & $vbox guestproperty set $name /ArchieOS/Model/Endpoint "http://10.0.2.2:$($hostModel.port)/v1"
-        & $vbox guestproperty set $name /ArchieOS/Model/Alias $hostModel.alias
-        & $vbox guestproperty set $name /ArchieOS/Model/Name $hostModel.name
-        & $vbox guestproperty set $name /ArchieOS/Model/Key $hostModel.key --flags RDONLYGUEST
+        & $vbox guestproperty set $name /ArchieOS/Model/Name $hostModel.name --flags RDONLYGUEST
     }
     & $vbox setextradata $name GUI/Fullscreen true
     & $vbox setextradata $name GUI/LastCloseAction PowerOff
