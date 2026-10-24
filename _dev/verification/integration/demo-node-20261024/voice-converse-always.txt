@@ -1,0 +1,9 @@
+ears ready in 35 ms (NeMo-Speech.cpp nemo-speech-asr 0.1.0)
+voice (piper) ready in 1 ms, 22050 Hz
+escuchando (es-US, respondo a todo)
+   1385 ms  oí       Qué dirá es hoy.
+   1386 ms  piso     TakeFloor: the floor is free and there is an answer  [it neither names Archie nor answers it; it is a question; 2025 ms of silence, and the recogniser called the turn over; answering everything: --always]
+   1386 ms  timing   voz-1 request +0 ms queue=0
+   2418 ms  timing   voz-1 first_segment +1032 ms queue=1
+   2760 ms  dije     Hoy es sábado veinticuatro de octubre de dos mil veintiséis.  (primer audio 323 ms, 3.8 s)
+   2760 ms  timing   voz-1 complete +1374 ms queue=0

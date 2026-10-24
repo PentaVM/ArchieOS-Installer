@@ -1,0 +1,4 @@
+heard: Hola Archie, ¿me escuchás? Contestame en una sola frase.
+  1477 ms  say   Sí, te escucho.
+  1477 ms  done
+first words after 1477 ms, with bonsai

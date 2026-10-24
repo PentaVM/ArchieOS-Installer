@@ -102,13 +102,88 @@ validó con `speech,live,rvc`.
 No se corrió la suite completa del workspace. Los cambios tocan solo `archie-wanda` y
 `archie-voice`, y `archie-cli` y `archied` compilan con clippy estricto.
 
-## 5. Qué no prueba esto
+## 5. El nodo de demo, con Bonsai real (05:20–05:55)
 
-- Wanda por Core se probó con un servidor HTTP de prueba, no con Bonsai. No había
-  llama-server corriendo, y la GPU no se usó.
-- La voz con el descriptor nuevo no se probó contra un llama-server real ni con
-  micrófono.
-- La configuración de la demo de Wanda (`~/wanda-demo/wanda.toml`) todavía no tiene
-  `[core]`. Los `archied`/`archie` instalados en la distro siguen siendo los del
-  2026-10-15. Los nuevos están solo en el objetivo compartido.
+Levantado en la distro `ArchieOS-Operator-RTX3070-Test`:
+
+| Pieza | Dónde | Estado |
+|---|---|---|
+| Bonsai 2 9B (`wanda-llm.sh gpu`) | llama-server :8081, 4 slots, ~3,4 GB de VRAM | arriba |
+| `archied` release de `claude/unified-0.1` | raíz `/home/archie/archie-node`, PostgreSQL del sistema (:55432), esquema `archie_demo` | arriba, sin clave de Nebius en su entorno |
+| Wanda (`/usr/bin/archie-wanda`) | :8791, `~/wanda-demo/wanda.toml` con `[core]` | arriba |
+| `archie-voice`, `archie`, `archied` | instalados en `/usr/bin` (y `/usr/sbin/archied`) | los del 12 y 15-10 quedan en `/var/backups/archie-20261024/` |
+
+- `/home/archie/archie-node/etc`: `database.json` (mismo servidor y cuenta que
+  `/etc/archie`, esquema propio), `inference.toml` (`personal/owner`, `api`,
+  `restricted`, 64 KiB, 4096 tokens, 120 s) y los manifiestos de Bonsai marcados
+  `ready`. También está Nemotron Super, que sin clave el router no elige.
+- `~/wanda-demo/wanda.toml` (el anterior quedó como `wanda.toml.20261021`):
+  - `models_dir` es el del nodo;
+  - `deep_quality_tier = 55`, porque con 80 una pregunta profunda no encontraba a Bonsai (55);
+  - un productor de prueba `demo-fixture`;
+  - `[core]` con `timeout_seconds = 120`.
+- `/var/lib/archie/models/local/current.gguf` (el modelo que `archie-local up` arranca
+  si :8081 no responde) apuntaba a `Ternary-Bonsai-2-27B` en D:. Ahora apunta al 9B.
+
+### Wanda → Core → Bonsai
+
+Un evento **sintético** (`wanda-event-synthetic.json`: "Ana", persona ficticia, tulipanes
+amarillos) y la pregunta "¿Qué detalle podría tener con Ana esta semana?" (`deep`).
+
+| Intento | Recibo de Core | Bonsai | Resultado de Wanda |
+|---|---|---|---|
+| 1 | `9e86be09…` | 670 → 1450 tokens, 14,9 s | 422 `unverified_advice`: copió `"expires_at_ms":0` del ejemplo de la instrucción |
+| 2 | `e4425ffc…` | 683 → 1307 tokens, 15,8 s | 422: `subject_ids: ["Ana"]`, un nombre del mensaje; el nodo no tiene grafo de personas |
+| 3 | `14fd26ef…` | 700 → 1209 tokens, 11,8 s | **200**, 1 propuesta que cita el evento admitido, con su recibo |
+
+Los textos sellados se recuperaron con `archie ai recall`
+(`_dev/verification/integration/demo-node-20261024/receipts/`). Los dos rechazos los hizo
+el validador de Wanda (`advice.rs`), cuyas reglas no cambiaron. El arreglo fue que la
+instrucción de cada consulta nombre los valores que el validador acepta (`instruction()`
+en `runtime.rs`):
+- el ejemplo lleva `now_ms + 24 h` como caducidad;
+- se nombran los `subject_ids` válidos, o se dice que no hay ninguno.
+
+Pruebas nuevas:
+- `the_example_teaches_an_expiry_the_validator_accepts`;
+- `the_instruction_names_the_only_subject_ids_the_validator_accepts`.
+
+En el intento 3, Bonsai notó que el evento dice "sintético" y propuso verificarlo.
+El experto LNCM (estado 1, checkpoint del 21-10) devolvió además un texto en inglés que
+nombra a un "Hugo" inexistente. Wanda lo marca en `unverified_names`, y `speech_text` no
+lo diría en voz alta. Es la debilidad conocida del checkpoint.
+
+### Voz con Bonsai (thinking off)
+
+- Turno escrito (`archie-voice ask`, grado `internal`): "Sí, te escucho.". Primeras
+  palabras a los **1477 ms**.
+- Turno hablado desde un WAV que dijo Piper ("Archie, ¿qué día es hoy?"):
+  - sin `--always`, el ASR transcribió "Qué dirá es hoy." y perdió el nombre, así que
+    Archie calló;
+  - con `--always`, el ASR oyó lo mismo, Bonsai entendió y dijo "Hoy es sábado
+    veinticuatro de octubre de dos mil veintiséis.". Primer segmento a +1032 ms, primer
+    audio a 323 ms, turno completo en 2,8 s. El WAV quedó en
+    `Desktop/ArchieOS/evidencia-2026-10-24/` (fuera del repo).
+- El GGUF del ASR no trae tokenizer para reforzar "Archie" (lo dice su log). Por eso
+  `archie-talk --always`, que `run-archie.sh` pasa como `ALWAYS=1 → --always`, es una
+  opción explícita y no el comportamiento por defecto. Se aplicó en el repo y en las
+  copias instaladas.
+- `archie-talk --local` arrancó 25 s de verdad: tomó la pantalla, levantó la voz y quedó
+  "escuchando". El Stage registró `authority operator (operator_motion)` cuando se movió el
+  mouse. Terminó sin dejar procesos.
+- `converse`, el modo de `archie-talk`, no ofrece la tool de Wanda; solo `live` la
+  conecta. Hablar por `archie-talk` es hablar con Bonsai.
+
+Lanzadores fuera del repo, en `Desktop/ArchieOS/`:
+- `archie-demo-up.sh` levanta Bonsai, `archied` y Wanda si no están;
+- `hablar-con-archie.bat` lo llama y abre `archie-talk --local --always`.
+
+## 6. Qué no prueba esto
+
+- Nadie habló todavía por un micrófono real. El turno hablado vino de un WAV de Piper;
+  el reconocimiento con la voz del dueño, en su habitación, queda por probar.
+- Wanda respondió una vez sobre un evento sintético. No es una evaluación de calidad, y
+  el nodo no tiene grafo de personas.
+- El nodo de demo corre por `setsid`, no por systemd (`systemd=false` en la distro). Un
+  reinicio de la WSL lo apaga; `archie-demo-up.sh` lo vuelve a levantar.
 - Hermes, Codex y los turnos en Anthropic y OpenAI no se tocaron.

@@ -1,0 +1,36 @@
+{
+  "receipt": {
+    "schema_version": 1,
+    "receipt_id": "9e86be09-3187-4147-82f0-b302a9cb67f5",
+    "checkpoint_id": "inference-checkpoint:4c3fbc65-3586-4eb3-9101-e8f17f2b16b3",
+    "binding": {
+      "schema_version": 1,
+      "domain": "personal/owner",
+      "focus_id": "ai:dfab238551c43701b831a9320d81271aea6c7c1d44109a2187455a5630fb4c5a",
+      "task_id": "f17cca47-b89d-4a4e-b633-e6b21ba57837",
+      "objective_ref": "vault:personal/owner/objectives/2eda0667e1459b3ed25cbf3f",
+      "runner_id": "api",
+      "provider_id": "llama-cpp",
+      "account_id": "deployment:265c57d2fccb381edb86d7c249b58dc8b112dc5d6f37f894cc02b12e96de69f8"
+    },
+    "session_id": null,
+    "model_id": "local.bonsai-2-9b",
+    "request_sha256": "52b54fc69fcc19076b5e62a3f9b4854e181dcfeeb1639d6ff55483ccfd83f80f",
+    "output_sha256": "ea828701ec35683e6b240ee473a27f87e1aa3c4d6a7dc948d7e8dfc700e6da05",
+    "admitted_evidence_refs": [],
+    "result_ref": {
+      "reference": "vault:personal/owner/inference/9e86be09-3187-4147-82f0-b302a9cb67f5",
+      "account_id": "deployment:265c57d2fccb381edb86d7c249b58dc8b112dc5d6f37f894cc02b12e96de69f8"
+    },
+    "status": "completed",
+    "error_code": null,
+    "observed_at_ms": 1792831051628,
+    "usage": {
+      "input_tokens": 670,
+      "output_tokens": 1450,
+      "duration_ms": 14938
+    }
+  },
+  "text": "{\n  \"recommendations\": [\n    {\n      \"id\": \"id-breve\",\n      \"kind\": \"gift\",\n      \"title\": \"Tulipanes\",\n      \"explanation\": \"Mencionado en notificación del 1792831036664: 'encantan los tulipanes amarillos'\",\n      \"suggestion\": \"Ofrecer un regalo de tulipanes amarillos\",\n      \"subject_ids\": [],\n      \"evidence_refs\": [\"vault:personal/owner/wanda/events/e8628a1e68607991d7937af950023203\"],\n      \"standing\": \"inferred\",\n      \"alternatives\": [\n        \"Llegar con un ramo de flores, no especificado\"\n      ],\n      \"expires_at_ms\": 0,\n      \"review_condition\": \"Verificar intención del usuario antes de enviar\"\n    },\n    {\n      \"id\": \"id-breve-2\",\n      \"kind\": \"reflection\",\n      \"title\": \"Fecha\",\n      \"explanation\": \"El mensaje indica 'el viernes es mi cumpleaños'\",\n      \"suggestion\": \"Mencionar el viernes como posible fecha relevante\",\n      \"subject_ids\": [],\n      \"evidence_refs\": [\"vault:personal/owner/wanda/events/e8628a1e68607991d7937af950023203\"],\n      \"standing\": \"inferred\",\n      \"alternatives\": [\n        \"Complementar con un mensaje general sobre el día\"\n      ],\n      \"expires_at_ms\": 0,\n      \"review_condition\": \"Confirmar que el evento no es sintético en producción\"\n    }\n  ]\n}",
+  "budget": null
+}

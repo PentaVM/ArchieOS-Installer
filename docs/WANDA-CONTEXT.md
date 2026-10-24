@@ -72,6 +72,8 @@ de Core con un recibo. La respuesta de `/v1/query` trae ese `receipt`.
   completo: subir `max_prompt_bytes` a 65536.
 - El modelo debe existir con el mismo id en `models_dir` de Wanda y en el catálogo de Core:
   usar el mismo directorio (`/etc/archie/models`).
+- Con Bonsai como único modelo local (tier 55), `deep_quality_tier` debe ser 55 o menos:
+  con el valor por defecto (80) una pregunta profunda no encuentra modelo.
 - La pausa de emergencia (`archie ai pause`) también detiene a Wanda.
 - Sin Core en marcha, Wanda responde `core_unavailable` y no consulta al modelo por fuera.
 - Sin el bloque `[core]`, Wanda llama al modelo local directamente y no queda recibo. Es
