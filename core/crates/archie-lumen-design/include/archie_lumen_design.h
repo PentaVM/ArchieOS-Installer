@@ -10,7 +10,9 @@ extern "C" {
 typedef struct DesignVec3 { float x,y,z; } DesignVec3;
 typedef struct DesignBody { DesignVec3 position,velocity,anchor; uint32_t fixed; } DesignBody;
 typedef struct DesignMotion { float radius,spring,damping,reach,reaction; } DesignMotion;
-// Static null-terminated UTF-8 {schema,defaults,presets:[{id,name,description,settings}]}.
+// Static null-terminated UTF-8 {schema,defaults,profiles:[{id,name,overrides}],legacy,
+// presets:[{id,name,description,settings}]}: profiles are main.js's field/crown/atlas/dense
+// and legacy the "Antes" look, both as overrides of defaults.
 const char *design_presets_json(void);
 // Style IDs: 0 original,1 prism,2 obsidian,3 titanium,4 hologram,5 crystal,
 // 6 circuit,7 photon,8 ceramic. Invalid arguments return 0/false, never unwind.

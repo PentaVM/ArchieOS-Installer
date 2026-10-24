@@ -28,6 +28,15 @@ const QStringList pulses{QStringLiteral("none"), QStringLiteral("soft_packet"),
 }
 
 QVariantMap xaviDefaults() { return catalog().value(QStringLiteral("defaults")).toObject().toVariantMap(); }
+std::optional<QVariantMap> xaviProfile(const QString &name) {
+    for (const auto &p : catalog().value(QStringLiteral("profiles")).toArray()) {
+        const auto o = p.toObject();
+        if (o.value(QStringLiteral("id")).toString() == name)
+            return o.value(QStringLiteral("overrides")).toObject().toVariantMap();
+    }
+    return std::nullopt;
+}
+QVariantMap xaviLegacy() { return catalog().value(QStringLiteral("legacy")).toObject().toVariantMap(); }
 QStringList xaviPresetNames() {
     QStringList out;
     for (const auto &p : catalog().value(QStringLiteral("presets")).toArray())

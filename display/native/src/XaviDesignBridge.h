@@ -10,6 +10,11 @@
 #include <optional>
 
 QVariantMap xaviDefaults();
+// The design's composition profiles (field, crown, atlas, dense) as overrides of the
+// defaults, exactly as main.js PROFILES has them; nullopt for any other name.
+std::optional<QVariantMap> xaviProfile(const QString &name);
+// The "Antes" look (main.js LEGACY_SETTINGS) as overrides of the defaults.
+QVariantMap xaviLegacy();
 QStringList xaviPresetNames();
 std::optional<QVariantMap> xaviPreset(const QString &name);
 QStringList xaviChoices(const QString &key);

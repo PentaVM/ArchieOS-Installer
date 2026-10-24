@@ -5,6 +5,9 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTcpServer>
@@ -88,6 +91,54 @@ private slots:
         field.setActive(false);
         field.applyProfile(QStringLiteral("field"));
         QCOMPARE(field.settings().value(QStringLiteral("fieldSource")).toString(), QStringLiteral("tfog"));
+    }
+    // Every value of the design's composition profiles and its "Antes" look, as node read
+    // them from the original main.js (archie-lumen-design/fixtures/presets.golden.json).
+    void originalProfilesApplyEveryValueOfTheOriginal() {
+        QFile file(QStringLiteral(ARCHIE_LUMEN_FIXTURES "/presets.golden.json"));
+        QVERIFY2(file.open(QIODevice::ReadOnly), qPrintable(file.fileName()));
+        const QJsonObject golden = QJsonDocument::fromJson(file.readAll()).object();
+        const QVariantMap defaults = golden.value(QStringLiteral("defaults")).toObject().toVariantMap();
+        const auto same = [](const QVariant &port, const QVariant &original) {
+            if (original.typeId() == QMetaType::Bool || original.typeId() == QMetaType::QString)
+                return port == original;
+            return port.canConvert<double>() && port.toDouble() == original.toDouble();
+        };
+        // visibleLimit is the OS's density ceiling (12..420, source-port.md), not a look: the
+        // original's 2400 is never applied, so it is checked against that ceiling instead.
+        const auto check = [&](const QString &label, const QVariantMap &port, const QVariantMap &original) {
+            QStringList wrong;
+            const int limit = port.value(QStringLiteral("visibleLimit")).toInt();
+            if (limit < 12 || limit > 420)
+                wrong.push_back(label + QStringLiteral(".visibleLimit: port ") + QString::number(limit)
+                                + QStringLiteral(", outside the OS ceiling 12..420"));
+            for (auto it = original.begin(); it != original.end(); ++it)
+                if (it.key() == QLatin1String("visibleLimit"))
+                    continue;
+                else if (!port.contains(it.key()) || !same(port.value(it.key()), it.value()))
+                    wrong.push_back(label + QLatin1Char('.') + it.key() + QStringLiteral(": port ")
+                                    + port.value(it.key()).toString() + QStringLiteral(", original ")
+                                    + it.value().toString());
+            return wrong;
+        };
+        LumenField field;
+        QStringList wrong;
+        const QJsonArray profiles = golden.value(QStringLiteral("original")).toArray();
+        QCOMPARE(profiles.size(), 4);
+        for (const auto &value : profiles) {
+            const QJsonObject profile = value.toObject();
+            const QString id = profile.value(QStringLiteral("id")).toString();
+            QVERIFY2(field.applyProfile(id), qPrintable(id));
+            QVariantMap expected = defaults;
+            const QVariantMap overrides = profile.value(QStringLiteral("overrides")).toObject().toVariantMap();
+            for (auto it = overrides.begin(); it != overrides.end(); ++it)
+                expected.insert(it.key(), it.value());
+            wrong += check(id, field.settings(), expected);
+        }
+        field.applyProfile(QStringLiteral("field"));
+        field.toggleCompare();
+        wrong += check(QStringLiteral("legacy"), field.settings(), golden.value(QStringLiteral("legacy")).toObject().toVariantMap());
+        QVERIFY2(wrong.isEmpty(), qPrintable(wrong.join(QLatin1Char('\n'))));
     }
     void ribbonGeometryPreservesBothEndpointsAndBounds() {
         LumenGeometry line;

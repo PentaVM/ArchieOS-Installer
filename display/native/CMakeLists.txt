@@ -179,6 +179,8 @@ if(ARCHIE_NATIVE_BUILD_TESTS)
     set_source_files_properties(tests/invalid-preset.json PROPERTIES QT_RESOURCE_ALIAS "invalid-test.json")
     qt_add_resources(test_native "archie-invalid-test-preset" PREFIX "/archie/presets" BASE "${CMAKE_CURRENT_SOURCE_DIR}"
         FILES tests/invalid-preset.json)
+    # The golden values node computed from the original source (archie-lumen-design).
+    target_compile_definitions(test_native PRIVATE ARCHIE_LUMEN_FIXTURES="${ARCHIE_LUMEN_DESIGN_DIR}/fixtures")
     add_test(NAME native_contracts COMMAND test_native)
     qt_add_executable(test_shell_runtime tests/test_shell_runtime.cpp src/ShellRuntime.cpp src/ShellRuntime.h)
     target_include_directories(test_shell_runtime PRIVATE src)

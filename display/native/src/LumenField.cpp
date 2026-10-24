@@ -172,49 +172,6 @@ QVariantMap defaults()
     return s;
 }
 
-QVariantMap profileOverrides(const QString &name)
-{
-    if (name == QLatin1String("crown"))
-        return {{QStringLiteral("categoryPull"), 0.58}, {QStringLiteral("hierarchyPull"), 0.42},
-                {QStringLiteral("radialLayers"), 0.77}, {QStringLiteral("scale"), 1.12},
-                {QStringLiteral("shellOpacity"), 0.055}, {QStringLiteral("ambientCount"), 780},
-                {QStringLiteral("nodeSize"), 1.45}, {QStringLiteral("rotationSpeed"), 0.55},
-                {QStringLiteral("bloomStrength"), 0.47}};
-    if (name == QLatin1String("atlas"))
-        return {{QStringLiteral("categoryPull"), 0.29}, {QStringLiteral("hierarchyPull"), 0.78},
-                {QStringLiteral("radialLayers"), 0.53}, {QStringLiteral("scale"), 1.06},
-                {QStringLiteral("ambientCount"), 180}, {QStringLiteral("shellOpacity"), 0.02},
-                {QStringLiteral("links"), true}, {QStringLiteral("linkBudget"), 320},
-                {QStringLiteral("nodeSize"), 2.0}, {QStringLiteral("bloomStrength"), 0.18}};
-    if (name == QLatin1String("dense"))
-        return {{QStringLiteral("categoryPull"), 0.52}, {QStringLiteral("hierarchyPull"), 0.67},
-                {QStringLiteral("radialLayers"), 0.42}, {QStringLiteral("scale"), 0.82},
-                {QStringLiteral("ambientCount"), 950}, {QStringLiteral("shellOpacity"), 0.05},
-                {QStringLiteral("nodeSize"), 1.55}, {QStringLiteral("bloomStrength"), 0.46}};
-    return {};
-}
-
-/// The earlier V2 look, which the design's "Antes" button shows for comparison.
-QVariantMap legacy()
-{
-    QVariantMap s = defaults();
-    const QVariantMap o{
-        {QStringLiteral("layoutMode"), QStringLiteral("legacy")}, {QStringLiteral("categoryPull"), 0.72},
-        {QStringLiteral("hierarchyPull"), 0.35}, {QStringLiteral("radialLayers"), 0.64},
-        {QStringLiteral("nodeSize"), 1.4}, {QStringLiteral("shellOpacity"), 0.075},
-        {QStringLiteral("ambientCount"), 1400}, {QStringLiteral("ambientSize"), 0.9},
-        {QStringLiteral("ghostOpacity"), 0.42}, {QStringLiteral("metalness"), 0.58},
-        {QStringLiteral("roughness"), 0.31}, {QStringLiteral("emissive"), 0.8},
-        {QStringLiteral("linkOpacity"), 0.09}, {QStringLiteral("linkBudget"), 1200},
-        {QStringLiteral("bloomStrength"), 0.64}, {QStringLiteral("bloomThreshold"), 0.68},
-        {QStringLiteral("ambientLight"), 1.5}, {QStringLiteral("warmLight"), 26000},
-        {QStringLiteral("coolLight"), 21000}, {QStringLiteral("background"), QStringLiteral("#070d13")},
-        {QStringLiteral("guides"), true},
-    };
-    for (auto it = o.begin(); it != o.end(); ++it)
-        s.insert(it.key(), it.value());
-    return s;
-}
 
 struct Range {
     const char *key;
@@ -307,6 +264,41 @@ QVariant validated(const QString &key, const QVariant &current, const QVariant &
         number = std::clamp(number, range.low, range.high);
     }
     return whole ? QVariant(static_cast<int>(std::lround(number))) : QVariant(number);
+}
+
+/// `defaults()` with overrides from the design's catalog, each one checked as a preset
+/// file's would be; nullopt, with the reason, if one is refused.
+std::optional<QVariantMap> withOverrides(const QVariantMap &overrides, QString &reason)
+{
+    QVariantMap s = defaults();
+    for (auto it = overrides.begin(); it != overrides.end(); ++it) {
+        const QVariant next = validated(it.key(), s.value(it.key()), it.value(), Bounds::Strict, reason);
+        if (!next.isValid())
+            return std::nullopt;
+        s.insert(it.key(), next);
+    }
+    return s;
+}
+
+/// The design's composition profiles beyond "field" (crown, atlas, dense): main.js
+/// PROFILES, from the Rust catalog. Empty for any other name.
+std::optional<QVariantMap> originalProfile(const QString &name, QString &reason)
+{
+    const auto overrides = xaviProfile(name);
+    if (!overrides || overrides->isEmpty())
+        return std::nullopt;
+    return withOverrides(*overrides, reason);
+}
+
+/// The earlier V2 look, which the design's "Antes" button shows for comparison
+/// (main.js LEGACY_SETTINGS).
+QVariantMap legacy()
+{
+    QString reason;
+    const auto settings = withOverrides(xaviLegacy(), reason);
+    if (!settings)
+        qWarning("archie-display: the catalog's legacy look is refused: %s", qPrintable(reason));
+    return settings.value_or(defaults());
 }
 
 /// Look presets are the JSON files embedded under :/archie/presets (presets/*.json in the
@@ -739,19 +731,24 @@ QString LumenField::loadProfile(const QString &name)
 
 bool LumenField::applyProfile(const QString &name)
 {
-    const QVariantMap cinematic = profileOverrides(name);
-    if (cinematic.isEmpty()) {
+    QString refused;
+    const std::optional<QVariantMap> original = originalProfile(name, refused);
+    if (!refused.isEmpty()) {
+        qWarning("archie-display: profile %s: %s", qPrintable(name), qPrintable(refused));
+        return false;
+    }
+    if (!original) {
         const QString reason = loadProfile(name);
         if (!reason.isEmpty())
             qWarning("archie-display: %s", qPrintable(reason));
         return reason.isEmpty();
     }
-    // Legacy camera looks remain separate from the file-backed preset catalog.
+    // The design's own composition profiles (the voice's cinematics) stay apart from the
+    // file-backed preset catalog.
     m_saved.clear();
     m_profile = name;
-    m_settings = defaults();
-    for (auto it = cinematic.begin(); it != cinematic.end(); ++it)
-        m_settings.insert(it.key(), it.value());
+    m_settings = *original;
+    m_contentDirty = true;
     updateLook();
     updateCategoryRows();
     rebuildMembrane();
