@@ -39,6 +39,10 @@ pub(crate) fn tool_body(request: &ToolChatRequest) -> Result<Value, RuntimeError
         match message {
             ToolChatMessage::System(text) => system.push(text.as_str()),
             ToolChatMessage::User(text) => messages.push(json!({"role":"user","content":text})),
+            // Not a model that hears: what was said, as text.
+            ToolChatMessage::UserHeard { text, .. } => {
+                messages.push(json!({"role":"user","content":text}))
+            }
             ToolChatMessage::Assistant {
                 content,
                 tool_calls,

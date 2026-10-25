@@ -38,8 +38,21 @@ pub fn read_wav(path: &std::path::Path) -> Result<(Vec<f32>, u32), String> {
     Err(format!("{}: no audio in it", path.display()))
 }
 
+/// Mono float samples as the bytes of a PCM16 WAV, for a model that is sent what it hears.
+pub fn wav_bytes(samples: &[f32], rate: u32) -> Vec<u8> {
+    let pcm: Vec<i16> = samples
+        .iter()
+        .map(|s| (s.clamp(-1.0, 1.0) * 32767.0) as i16)
+        .collect();
+    wav_pcm16(&pcm, rate)
+}
+
 /// Writes mono PCM16 as a WAV file.
 pub fn write_wav(path: &std::path::Path, samples: &[i16], rate: u32) -> std::io::Result<()> {
+    std::fs::write(path, wav_pcm16(samples, rate))
+}
+
+fn wav_pcm16(samples: &[i16], rate: u32) -> Vec<u8> {
     let data = samples.len() * 2;
     let mut out = Vec::with_capacity(44 + data);
     out.extend_from_slice(b"RIFF");
@@ -57,7 +70,7 @@ pub fn write_wav(path: &std::path::Path, samples: &[i16], rate: u32) -> std::io:
     for sample in samples {
         out.extend_from_slice(&sample.to_le_bytes());
     }
-    std::fs::write(path, out)
+    out
 }
 
 #[cfg(test)]

@@ -29,6 +29,7 @@ pub mod addressee;
 pub mod asr;
 pub mod audio;
 pub mod conversation;
+pub mod following;
 pub mod hands;
 pub mod language;
 pub mod listen;

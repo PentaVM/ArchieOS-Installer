@@ -466,6 +466,35 @@ mod private {
         );
     }
 
+    /// The sound of what was said never leaves the machine: veiled for the cloud, a heard
+    /// utterance goes as its covered transcript alone.
+    #[test]
+    fn a_heard_utterance_goes_to_the_cloud_as_text_only() {
+        use archie_model_runtime::routed::ChatDisclosure;
+        use archie_model_runtime::ToolChatMessage as M;
+        let req = chat(vec![
+            M::System("eres archie".into()),
+            M::UserHeard {
+                text: "escríbele a camila@acme.cl".into(),
+                wav: b"RIFF-the-voice".to_vec(),
+            },
+        ]);
+        let Ok(ChatDisclosure::Veiled { request, .. }) = cloud_only().disclose_chat(
+            &req,
+            PrivacyGrade::Sensitive,
+            ModelRole::CognitiveResponse,
+            &Veil::new(),
+        ) else {
+            panic!("expected veiled");
+        };
+        assert!(matches!(&request.messages[1], M::User(text) if !text.contains("camila@acme.cl")));
+        let body = request.body().to_string();
+        assert!(
+            !body.contains("input_audio"),
+            "the voice would have left: {body}"
+        );
+    }
+
     /// A tool definition is the program's text and is not rewritten; one that holds a
     /// sensitive value is not sent at all.
     #[test]

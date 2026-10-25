@@ -1,4 +1,5 @@
-//! Magpie language switching and Spanish phrasing.
+//! Magpie language switching and Spanish phrasing, for every Magpie voice (`converse` and
+//! the live session).
 
 pub use crate::language::spoken_language;
 

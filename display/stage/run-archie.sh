@@ -23,6 +23,9 @@
 #   LISTEN_LANGUAGE  what the recogniser listens for: es-US, en-US or auto  default: es-US
 #                 (auto: either, and Archie answers in the language it was spoken to)
 #   HEADPHONES=1  keep listening while Archie speaks, so it can be interrupted
+#   VOICE_ENGINE  piper (default) or magpie, NVIDIA's Magpie TTS: then TTS_MODEL, CODEC_MODEL,
+#                 TTS_TOKENIZER (the extracted .nemo) and TTS_VOICE (e.g. John) name its files
+#   MODEL_HEARS=1 the reasoning model is sent the sound of each utterance (Nemotron Omni)
 #   ALWAYS=1      answer whatever is heard, named or not (one person alone)
 #   SESSION_LOG   also write the session there, each line with its time
 set -eu
@@ -74,8 +77,16 @@ if [ -z "${PULSE_SERVER:-}" ]; then
     fi
 fi
 [ -n "$ASR_MODEL" ] && [ -f "$ASR_MODEL" ] || { echo "run-archie: no ASR model; run nemo-speech pull nemotron-3.5 or set ASR_MODEL" >&2; exit 1; }
+VOICE_ENGINE=${VOICE_ENGINE:-piper}
+if [ "$VOICE_ENGINE" = magpie ]; then
+    for f in "${TTS_MODEL:-}" "${CODEC_MODEL:-}"; do
+        [ -f "$f" ] || { echo "run-archie: Magpie needs TTS_MODEL and CODEC_MODEL; missing ${f:-a path}" >&2; exit 1; }
+    done
+    [ -d "${TTS_TOKENIZER:-}" ] || { echo "run-archie: Magpie needs TTS_TOKENIZER, its extracted .nemo" >&2; exit 1; }
+else
 [ -f "$PIPER_MODEL" ] || { echo "run-archie: no Spanish Piper model at $PIPER_MODEL; run scripts/models/install-piper-voices.sh" >&2; exit 1; }
-if [ "$PIPER" = "$REPO/scripts/models/piper-json-bridge.py" ]; then
+fi
+if [ "$VOICE_ENGINE" = piper ] && [ "$PIPER" = "$REPO/scripts/models/piper-json-bridge.py" ]; then
     PIPER_PYTHON_BIN=$(command -v "$PIPER_PYTHON" 2>/dev/null || true)
     [ -n "$PIPER_PYTHON_BIN" ] || { echo "run-archie: Python runtime not found: $PIPER_PYTHON" >&2; exit 1; }
     PATH=$(dirname "$PIPER_PYTHON_BIN"):$PATH
@@ -109,14 +120,22 @@ done
 [ -S "$RUN_DIR/xdg/$SOCKET_NAME" ] || { echo "run-archie: the stage did not start; see $RUN_DIR/stage.log" >&2; exit 1; }
 
 set -- converse --grade "$GRADE" --asr-model "$ASR_MODEL" \
-    --voice-engine piper --piper "$PIPER" --piper-model "$PIPER_MODEL" \
     --socket "$RUN_DIR/control.sock" --key-file "$RUN_DIR/key" --policy "$POLICY" \
     --stage-display "$SOCKET_NAME" --app-log "$RUN_DIR/apps.log"
-if [ -f "$PIPER_MODEL_EN" ]; then
-    set -- "$@" --piper-model-en "$PIPER_MODEL_EN"
+if [ "$VOICE_ENGINE" = magpie ]; then
+    # One multilingual voice; each reply is spoken in the language it is written in.
+    set -- "$@" --voice-engine magpie --tts-model "$TTS_MODEL" --codec-model "$CODEC_MODEL" \
+        --tts-tokenizer "$TTS_TOKENIZER" --tts-language "${TTS_LANGUAGE:-es-US}"
+    [ -n "${TTS_VOICE:-}" ] && set -- "$@" --voice "$TTS_VOICE"
 else
-    echo "run-archie: English Piper voice is not installed; using Spanish for every reply" >&2
+    set -- "$@" --voice-engine piper --piper "$PIPER" --piper-model "$PIPER_MODEL"
+    if [ -f "$PIPER_MODEL_EN" ]; then
+        set -- "$@" --piper-model-en "$PIPER_MODEL_EN"
+    else
+        echo "run-archie: English Piper voice is not installed; using Spanish for every reply" >&2
+    fi
 fi
+[ "${MODEL_HEARS:-0}" = 1 ] && set -- "$@" --model-hears
 [ -n "${LISTEN_LANGUAGE:-}" ] && set -- "$@" --listen-language "$LISTEN_LANGUAGE"
 [ "${HEADPHONES:-0}" = 1 ] && set -- "$@" --headphones
 [ "${ALWAYS:-0}" = 1 ] && set -- "$@" --always

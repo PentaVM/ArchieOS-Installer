@@ -283,6 +283,9 @@ pub struct Setup {
     /// Where Sentry's owner notice board (`notices.json`) lives, if the voice should
     /// speak pending unspoken notices when the room is quiet.
     pub notices: Option<PathBuf>,
+    /// The model hears what was said (Nemotron Omni): the sound of each utterance goes to
+    /// it with the transcript.
+    pub model_hears: bool,
 }
 
 impl Default for Setup {
@@ -297,6 +300,7 @@ impl Default for Setup {
             phrases: vec!["Archie".into()],
             phrase_boost: 5.0,
             notices: None,
+            model_hears: false,
         }
     }
 }
@@ -591,7 +595,7 @@ pub fn converse_with_actions<S: TurnSource>(
             was_echo = echo;
             let hearing_echo = echo_until.is_some_and(|until| Instant::now() < until);
             pending.extend_from_slice(&frame);
-            if !hearing_echo && rehear.is_some() {
+            if !hearing_echo && (rehear.is_some() || setup.model_hears) {
                 utterance.extend_from_slice(&frame);
                 let keep = if partial.is_empty() { 3 } else { 30 } * rate as usize;
                 if utterance.len() > keep {
@@ -696,15 +700,32 @@ pub fn converse_with_actions<S: TurnSource>(
                     let previous = deferred.take();
                     let named =
                         named_now || previous.as_ref().is_some_and(|utterance| utterance.named);
+                    // A model that hears gets the sound of the whole thought, as it was joined.
+                    let mut audio = Vec::new();
                     let joined = match previous {
-                        Some(previous) => format!("{} {said}", previous.text),
+                        Some(previous) => {
+                            if setup.model_hears {
+                                audio = previous.audio;
+                            }
+                            format!("{} {said}", previous.text)
+                        }
                         None => said,
                     };
+                    if setup.model_hears {
+                        audio.extend_from_slice(&sound);
+                        // At most the last thirty seconds: what a request may carry.
+                        let keep = 30 * rate as usize;
+                        if audio.len() > keep {
+                            audio.drain(..audio.len() - keep);
+                        }
+                    }
                     if joined.len() <= 16 * 1024 {
                         deferred = Some(PendingUtterance {
                             text: joined,
                             named,
                             last_action: None,
+                            audio,
+                            rate,
                         });
                     } else {
                         report(Moment::Alert(
@@ -888,6 +909,9 @@ struct PendingUtterance {
     text: String,
     named: bool,
     last_action: Option<FloorAction>,
+    /// The sound of it, kept only when the model hears.
+    audio: Vec<f32>,
+    rate: u32,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -930,6 +954,11 @@ fn begin_pending<S: TurnSource>(
     let id = format!("voz-{}", *turn_number + 1);
     let decision = if matches!(decision.budget, SpeechBudget::Sentence | SpeechBudget::Full) {
         session.cognitive_mut().set_context(context());
+        if setup.model_hears {
+            let wav = (!utterance.audio.is_empty())
+                .then(|| crate::wav::wav_bytes(&utterance.audio, utterance.rate));
+            session.cognitive_mut().set_heard_audio(wav);
+        }
         session
             .heard(&id, &utterance.text, &state)
             .map_err(|error| error.to_string())?

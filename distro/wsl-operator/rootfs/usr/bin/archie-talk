@@ -10,6 +10,8 @@
 #                               archie-local use 27b|9b chose
 #   archie-talk --spanish       listens for Spanish only (by default, either language)
 #   archie-talk --cloud         Nemotron on Nebius answers
+#   archie-talk --nemotron      the all-NVIDIA test: Nemotron 3 Nano Omni (served from Windows by
+#                               archie-omni) hears, sees and answers; Magpie speaks
 #   archie-talk --named         only what starts with "Archie" is weighed: for a room with
 #                               other people talking
 #
@@ -28,10 +30,11 @@ for option in "$@"; do
     --headphones) export HEADPHONES=1 ;;
     --local) where=local ;;
     --cloud) where=cloud ;;
+    --nemotron) where=omni ;;
     --always) export ALWAYS=1 ;;
     --named) export ALWAYS=0 ;;
     --spanish) export LISTEN_LANGUAGE=es-US ;;
-    *) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
+    *) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
   esac
 done
 # One voice at a time, decided before anything else is touched: two would hear each
@@ -40,6 +43,17 @@ done
 if pgrep -u "$(id -u)" -f '[a]rchie-voice converse' >/dev/null; then
   echo "archie-talk: Archie's voice is already open" >&2
   exit 0
+fi
+if [ "$where" = omni ]; then
+  archie-omni up
+  export ARCHIE_VOICE_ENDPOINT=http://127.0.0.1:${OMNI_PORT:-8110}/v1 ARCHIE_VOICE_MODEL=nemotron-omni
+  export ARCHIE_VOICE_GUIDE=/usr/share/archie/skills/voice-local/SKILL.md
+  # The model hears each utterance too, and NVIDIA's Magpie speaks for it.
+  export MODEL_HEARS=1 VOICE_ENGINE=magpie TTS_VOICE=${ARCHIE_MAGPIE_VOICE:-John}
+  { read -r TTS_MODEL; read -r CODEC_MODEL; read -r TTS_TOKENIZER; } < <(archie-omni voice)
+  export TTS_MODEL CODEC_MODEL TTS_TOKENIZER
+  grade=internal
+  echo "archie-talk: Nemotron 3 Nano Omni hears and answers on this machine; Magpie ($TTS_VOICE) speaks" >&2
 fi
 if [ "$where" = auto ]; then
   if archie-local ready; then where=local; else where=cloud; fi

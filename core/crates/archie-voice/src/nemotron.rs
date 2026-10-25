@@ -355,6 +355,9 @@ pub struct NemotronCognitive<S: TurnSource> {
     /// The context goes with the utterance it belongs to instead of the instructions, so
     /// that what the model said earlier never reads as newer than what is true now.
     context_with_utterance: bool,
+    /// The sound of the utterance being answered, as a WAV, for a model that hears it
+    /// (Nemotron Omni); sent only with the first step of the turn.
+    heard_audio: Option<Vec<u8>>,
     history: Vec<ToolChatMessage>,
     turn: Option<Turn>,
     last_request: Option<ToolChatRequest>,
@@ -384,6 +387,7 @@ impl<S: TurnSource> NemotronCognitive<S> {
             tools,
             context: None,
             context_with_utterance: false,
+            heard_audio: None,
             history: Vec::new(),
             turn: None,
             last_request: None,
@@ -474,6 +478,12 @@ impl<S: TurnSource> NemotronCognitive<S> {
 
     /// Facts for the next turns that the model cannot know: the time, the date, which
     /// application is in front. Cerebra knows them; the model only guesses.
+    /// The sound of what the person is about to be answered for, or `None`: a model that
+    /// hears gets it beside the transcript, and can tell what the ears got wrong.
+    pub fn set_heard_audio(&mut self, wav: Option<Vec<u8>>) {
+        self.heard_audio = wav;
+    }
+
     pub fn set_context(&mut self, context: impl Into<String>) {
         let context = context.into();
         self.context = (!context.trim().is_empty()).then_some(context);
@@ -556,6 +566,24 @@ impl<S: TurnSource> NemotronCognitive<S> {
         if english {
             if let Some(ToolChatMessage::User(said)) = messages.get_mut(1 + self.history.len()) {
                 said.push_str("\n\n(Answer in English.)");
+            }
+        }
+        // A model that hears gets the sound with the first step only; the steps after it
+        // are about what the tools answered.
+        if let (Some(wav), 1) = (&self.heard_audio, self.chain.len()) {
+            let at = 1 + self.history.len();
+            if let Some(ToolChatMessage::User(said)) = messages.get(at).cloned() {
+                messages[at] = ToolChatMessage::UserHeard {
+                    text: said,
+                    wav: wav.clone(),
+                };
+                if let Some(ToolChatMessage::System(system)) = messages.first_mut() {
+                    system.push_str(
+                        "\n\nAdemás de la transcripción, recibes el audio de lo que dijo la \
+                         persona. Si la transcripción no calza con lo que oyes, cree al audio; \
+                         y fíjate en el tono.",
+                    );
+                }
             }
         }
         ToolChatRequest {
@@ -1027,6 +1055,33 @@ mod tests {
             cognitive.last_request().is_none(),
             "none of that left the machine"
         );
+    }
+
+    #[test]
+    fn a_model_that_hears_gets_the_sound_with_the_first_step_only() {
+        let mut cognitive = adapter(b"data: [DONE]\n\n");
+        cognitive.set_heard_audio(Some(b"RIFF-wav".to_vec()));
+        cognitive
+            .begin(ask("t1", "abre firefox", SpeechBudget::Full))
+            .unwrap();
+        let sent = &cognitive.last_request().unwrap().messages;
+        assert!(sent.iter().any(|m| matches!(m,
+            ToolChatMessage::UserHeard { text, wav } if text == "abre firefox" && wav == b"RIFF-wav")));
+        assert!(
+            matches!(&sent[0], ToolChatMessage::System(text) if text.contains("recibes el audio"))
+        );
+    }
+
+    #[test]
+    fn without_the_sound_the_request_is_text_as_before() {
+        let mut cognitive = adapter(b"data: [DONE]\n\n");
+        cognitive
+            .begin(ask("t1", "abre firefox", SpeechBudget::Full))
+            .unwrap();
+        let sent = &cognitive.last_request().unwrap().messages;
+        assert!(!sent
+            .iter()
+            .any(|m| matches!(m, ToolChatMessage::UserHeard { .. })));
     }
 
     #[test]
