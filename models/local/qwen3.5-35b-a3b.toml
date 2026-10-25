@@ -6,7 +6,7 @@
 #
 # One local model answers at a time (archie-local use ...): the router asks this one only
 # while its server answers /health. Reasoning stays with Bonsai, which has a manifest for it.
-id = "local.qwen3.5-35b-a3b"
+id = "local.qwen-3-5-35b-a3b"
 display_name = "Qwen 3.5 35B-A3B (direct)"
 provider = "llama-cpp"
 locality = "local"

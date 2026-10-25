@@ -169,8 +169,8 @@ one answering at a time (`archie-local use 27b|9b`): Ternary Bonsai 2 27B at
 `127.0.0.1:8082`, as `local.bonsai-2-27b` (reasoning at medium effort, for decisions) and
 `local.bonsai-2-27b-fast` (no reasoning, for short answers), and Ternary Bonsai 2 9B at
 `127.0.0.1:8081`, as `local.bonsai-2-9b` and `local.bonsai-2-9b-fast`. `archie-local` can
-also serve Qwen 3.5 in unsloth's quantizations, answering directly: `local.qwen3.5-2b`,
-`local.qwen3.5-4b`, `local.qwen3.5-9b`, `local.qwen3.5-27b` and `local.qwen3.5-35b-a3b`. The
+also serve Qwen 3.5 in unsloth's quantizations, answering directly: `local.qwen-3-5-2b`,
+`local.qwen-3-5-4b`, `local.qwen-3-5-9b`, `local.qwen-3-5-27b` and `local.qwen-3-5-35b-a3b`. The
 router asks whichever one's server answers. They ship offline; a node whose llama-server serves Bonsai
 marks them ready. `archie-local list` also offers larger open models, for machines with more
 memory: Qwen 3.8 27B, Qwen 3.6 35B-A3B, Gemma 4, gpt-oss 20B and 120B, Nemotron 3.5,
