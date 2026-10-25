@@ -74,7 +74,10 @@ RestrictNamespaces=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes
 SystemCallArchitectures=native
-RestrictAddressFamilies=AF_INET
+# AF_INET for the loopback bridge; AF_NETLINK for udev, without which libinput cannot
+# watch the keyboard and mouse and Qt aborts with "Failed to assign seat"; AF_UNIX for
+# logind and the journal. None of them reaches the network: IPAddress* below does that.
+RestrictAddressFamilies=AF_INET AF_UNIX AF_NETLINK
 # The renderer must never reach the network. Everything it draws comes from the loopback
 # bridge, so a compromised page has nowhere to send anything.
 IPAddressAllow=localhost
