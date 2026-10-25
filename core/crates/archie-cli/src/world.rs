@@ -2,7 +2,7 @@
 use archie_geofabric::exploration::{
     self, ExplorationDomain, ExplorationLayer, ExplorationRequest, ImagerySource,
 };
-use archie_worldd::exploration::ExploreCommand;
+use archie_worldd::{exploration::ExploreCommand, navigation::NavigationRequest};
 use clap::{Args, Subcommand, ValueEnum};
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -90,8 +90,66 @@ impl Region {
     }
 }
 
+#[derive(Debug, Args)]
+pub struct Navigation {
+    #[arg(long, value_enum)]
+    pub domain: Domain,
+    #[arg(long, value_delimiter = ',')]
+    pub imagery_sources: Vec<ImagerySource>,
+    #[arg(long)]
+    pub imagery_date: Option<String>,
+    #[arg(long, default_value_t = 19)]
+    pub max_zoom: u8,
+    #[arg(long, default_value_t = 64)]
+    pub max_visible_tiles: u32,
+    #[arg(long, default_value_t = 1800)]
+    pub max_requests: u32,
+    #[arg(long, default_value_t = 268_435_456)]
+    pub max_bytes: u64,
+    #[arg(long, default_value_t = 3600)]
+    pub duration_seconds: u32,
+    #[arg(long)]
+    pub no_signals: bool,
+}
+impl Navigation {
+    fn request(&self) -> Result<NavigationRequest, String> {
+        let defaults = NavigationRequest::default();
+        let request = NavigationRequest {
+            domain: self.domain.into(),
+            sources: if self.imagery_sources.is_empty() {
+                defaults.sources
+            } else {
+                self.imagery_sources.clone()
+            },
+            imagery_date: self.imagery_date.clone(),
+            max_zoom: self.max_zoom,
+            max_visible_tiles: self.max_visible_tiles,
+            max_requests: self.max_requests,
+            max_bytes: self.max_bytes,
+            duration_seconds: self.duration_seconds,
+            signals: !self.no_signals,
+        };
+        request.validate()?;
+        Ok(request)
+    }
+}
+
 #[derive(Debug, Subcommand)]
 pub enum WorldCommand {
+    /// Authorize bounded whole-Earth imagery streaming as the viewport moves.
+    Navigate(Navigation),
+    /// Read metadata for one navigation session.
+    NavigationStatus {
+        id: String,
+        #[arg(long, value_enum)]
+        domain: Domain,
+    },
+    /// Stop one bounded navigation session.
+    NavigationStop {
+        id: String,
+        #[arg(long, value_enum)]
+        domain: Domain,
+    },
     /// Plan the explicit circle; downloads no provider data.
     Plan(Region),
     /// Submit a bounded capture; acceptance does not mean completion.
@@ -126,6 +184,25 @@ pub enum WorldCommand {
 impl WorldCommand {
     fn command(&self) -> Result<ExploreCommand, String> {
         Ok(match self {
+            Self::Navigate(navigation) => ExploreCommand::Navigate {
+                request: navigation.request()?,
+            },
+            Self::NavigationStatus { id, domain } | Self::NavigationStop { id, domain } => {
+                if id.len() != 32 || !id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                    return Err("invalid navigation session id".into());
+                }
+                if matches!(self, Self::NavigationStatus { .. }) {
+                    ExploreCommand::NavigationStatus {
+                        id: id.clone(),
+                        domain: (*domain).into(),
+                    }
+                } else {
+                    ExploreCommand::NavigationStop {
+                        id: id.clone(),
+                        domain: (*domain).into(),
+                    }
+                }
+            }
             Self::Plan(region) => ExploreCommand::Plan {
                 request: region.request()?,
             },
@@ -201,6 +278,56 @@ mod tests {
     struct TestCli {
         #[command(subcommand)]
         command: WorldCommand,
+    }
+
+    #[test]
+    fn navigation_is_typed_bounded_and_requires_explicit_domain() {
+        assert!(TestCli::try_parse_from(["world", "navigate"]).is_err());
+        let cli = TestCli::try_parse_from([
+            "world",
+            "navigate",
+            "--domain",
+            "work",
+            "--imagery-sources",
+            "google-satellite,blue-marble",
+            "--max-requests",
+            "80",
+            "--max-visible-tiles",
+            "24",
+            "--duration-seconds",
+            "600",
+        ])
+        .unwrap();
+        let value = serde_json::to_value(cli.command.command().unwrap()).unwrap();
+        assert_eq!(value["action"], "navigate");
+        assert_eq!(value["request"]["domain"], "work");
+        assert_eq!(value["request"]["max_requests"], 80);
+        assert_eq!(value["request"]["max_visible_tiles"], 24);
+        assert_eq!(value["request"]["duration_seconds"], 600);
+        assert_eq!(
+            value["request"]["sources"],
+            serde_json::json!(["google_satellite", "blue_marble"])
+        );
+        let cli =
+            TestCli::try_parse_from(["world", "navigate", "--domain", "personal", "--no-signals"])
+                .unwrap();
+        let value = serde_json::to_value(cli.command.command().unwrap()).unwrap();
+        assert_eq!(value["request"]["signals"], false);
+        let cli = TestCli::try_parse_from([
+            "world",
+            "navigate",
+            "--domain",
+            "personal",
+            "--duration-seconds",
+            "3601",
+        ])
+        .unwrap();
+        assert!(cli.command.command().is_err());
+        for command in ["navigation-status", "navigation-stop"] {
+            let cli = TestCli::try_parse_from(["world", command, "../escape", "--domain", "work"])
+                .unwrap();
+            assert!(cli.command.command().is_err());
+        }
     }
 
     #[test]

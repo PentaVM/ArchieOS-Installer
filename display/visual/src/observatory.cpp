@@ -278,33 +278,29 @@ void Observatory::orbit_globe(float longitude_delta, float latitude_delta, float
     if (m_modes.target() != SceneMode::Watcher || !std::isfinite(longitude_delta) ||
         !std::isfinite(latitude_delta) || !std::isfinite(zoom_steps)) return;
     const CameraPose current = m_camera.pose();
-    if (m_exploration_camera) {
-        const Vec3 offset{current.eye.x-current.target.x,current.eye.y-current.target.y,current.eye.z-current.target.z};
-        const float r=std::sqrt(offset.x*offset.x+offset.y*offset.y+offset.z*offset.z);
-        if (!(r>0)) return;
-        constexpr float deg=180.0F/3.14159265F;
-        const auto dot=[](Vec3 a,Vec3 b){return a.x*b.x+a.y*b.y+a.z*b.z;};
-        const float targetRadius=std::sqrt(dot(current.target,current.target));
-        const Vec3 up{current.target.x/targetRadius,current.target.y/targetRadius,current.target.z/targetRadius};
-        const float horizontal=std::sqrt(up.x*up.x+up.z*up.z);
-        const Vec3 east=horizontal>0.00001F?Vec3{up.z/horizontal,0,-up.x/horizontal}:Vec3{1,0,0};
-        const Vec3 north{up.y*east.z-up.z*east.y,up.z*east.x-up.x*east.z,up.x*east.y-up.y*east.x};
-        const float yaw=std::atan2(dot(offset,east),dot(offset,north))+std::clamp(longitude_delta,-180.0F,180.0F)/deg;
-        const float elevation=std::clamp(std::asin(std::clamp(dot(offset,up)/r,-1.0F,1.0F))*deg+std::clamp(latitude_delta,-180.0F,180.0F),10.0F,89.5F)/deg;
-        const float distance=std::clamp(r*std::exp(-std::clamp(zoom_steps,-10.0F,10.0F)*0.12F),m_policy.layout.globe.radius*10.0F/6371000.0F,m_policy.layout.globe.radius*2.0F);
-        const float vertical=std::sin(elevation)*distance,e=std::sin(yaw)*std::cos(elevation)*distance,n=std::cos(yaw)*std::cos(elevation)*distance;
-        CameraPose next=current;next.eye={current.target.x+up.x*vertical+east.x*e+north.x*n,current.target.y+up.y*vertical+east.y*e+north.y*n,current.target.z+up.z*vertical+east.z*e+north.z*n};
-        m_focused.clear();m_camera.navigate(next);return;
-    }
-    const float radius = std::sqrt(current.eye.x * current.eye.x + current.eye.y * current.eye.y + current.eye.z * current.eye.z);
-    if (!std::isfinite(radius) || radius <= 0.0F) return;
-    constexpr float degrees = 180.0F / 3.14159265F;
-    const float longitude = std::atan2(current.eye.x,current.eye.z) * degrees + std::clamp(longitude_delta,-180.0F,180.0F);
-    const float latitude = std::clamp(std::asin(std::clamp(current.eye.y/radius,-1.0F,1.0F))*degrees + std::clamp(latitude_delta,-180.0F,180.0F),-85.0F,85.0F);
-    const float distance = std::clamp(radius * std::exp(-std::clamp(zoom_steps,-10.0F,10.0F)*0.12F),m_policy.layout.globe.radius*1.15F,m_policy.layout.globe.radius*8.0F);
-    GlobePolicy sphere = m_policy.layout.globe;
-    sphere.radius=distance;sphere.base_elevation=0.0F;sphere.elevation_per_magnitude=0.0F;
-    CameraPose next=current;next.eye=globe_position(GeoPoint{latitude,longitude},0.0F,sphere);next.target=Vec3{};
+    // Geographic pan and altitude zoom are one continuous navigation model. A
+    // close camera moves its ground target; it never becomes trapped orbiting
+    // the last captured AOI. Double intermediates keep metre-scale input useful.
+    const double earth=m_policy.layout.globe.radius;
+    const auto norm=[](Vec3 p){return std::sqrt(double(p.x)*p.x+double(p.y)*p.y+double(p.z)*p.z);};
+    const double eyeRadius=norm(current.eye),targetRadius=norm(current.target);
+    if(!std::isfinite(eyeRadius)||eyeRadius<=0) return;
+    constexpr double degrees=180.0/3.14159265358979323846;
+    const double ground=m_exploration_camera&&targetRadius>earth*0.99 ? targetRadius : earth;
+    const double altitude=std::max(10.0*earth/6371008.8,eyeRadius-ground);
+    const double speed=std::clamp(altitude/earth,0.000001,1.0);
+    const double oldLatitude=std::asin(std::clamp(double(current.eye.y)/eyeRadius,-1.0,1.0))*degrees;
+    const double longitude=std::atan2(current.eye.x,current.eye.z)*degrees+
+        std::clamp(double(longitude_delta),-180.0,180.0)*speed/std::max(0.04,std::cos(oldLatitude/degrees));
+    const double latitude=std::clamp(oldLatitude+std::clamp(double(latitude_delta),-180.0,180.0)*speed,-89.0,89.0);
+    const double nextAltitude=std::clamp(altitude*std::exp(-std::clamp(double(zoom_steps),-10.0,10.0)*0.20),10.0*earth/6371008.8,earth*7.0);
+    const auto normal=globe_position({latitude,longitude},0,GlobePolicy{1,0,0});
+    CameraPose next=current;
+    next.eye={float(normal.x*(ground+nextAltitude)),float(normal.y*(ground+nextAltitude)),float(normal.z*(ground+nextAltitude))};
+    // Distant framing looks at Earth's centre. Below one radius a surface
+    // target improves the local near plane and keeps geographic pan intuitive.
+    next.target=nextAltitude<earth ? Vec3{float(normal.x*ground),float(normal.y*ground),float(normal.z*ground)} : Vec3{};
+    m_exploration_camera=nextAltitude<earth;
     m_focused.clear();m_camera.navigate(next);
 }
 

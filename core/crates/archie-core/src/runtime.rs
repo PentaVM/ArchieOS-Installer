@@ -715,7 +715,10 @@ impl Runtime {
             .increment(&format!("control.request.{}", request.name()), 1);
 
         match request {
-            ControlRequest::WorldPlan { .. }
+            ControlRequest::WorldNavigate { .. }
+            | ControlRequest::WorldNavigationStatus { .. }
+            | ControlRequest::WorldNavigationStop { .. }
+            | ControlRequest::WorldPlan { .. }
             | ControlRequest::WorldJob { .. }
             | ControlRequest::WorldExplore { .. }
             | ControlRequest::WorldResolve { .. }

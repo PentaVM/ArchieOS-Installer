@@ -8,6 +8,54 @@ Xavi/PentaVM shell theme. Aleph source/port provenance is in
 
 ## Local owner session
 
+### Continuous globe navigation
+
+World opens at the whole Earth. Dragging changes geographic position; the wheel
+changes altitude continuously. The native camera sends its current viewport to
+Rust, which selects visible quadtree tiles and loads coarse coverage before fine
+detail. Existing coverage remains while children arrive. No capture/AOI job or
+model call is created per movement. Mercator wraps at the date line; the existing
+global Earth supplies the polar caps.
+
+Authorize one bounded session in the owner runtime:
+
+```sh
+archie world navigate --domain personal --json
+archie world navigation-status SESSION_ID --domain personal --json
+archie world navigation-stop SESSION_ID --domain personal --json
+```
+
+Defaults are 1 hour, 1800 HTTP requests, 256 MiB received application payload,
+64 visible leaves and maximum zoom 19, further capped by the selected source.
+`--no-signals`, `--imagery-sources`, `--imagery-date`, `--max-visible-tiles`,
+`--max-zoom`, `--max-requests`, `--max-bytes` and `--duration-seconds` narrow this
+admission. Closing the standalone launcher stops its daemons. An independently
+hosted session continues until explicit stop, expiry or budget exhaustion.
+
+The private `navigation.json` capability permits typed camera/source changes
+and tile delivery only. It differs from owner control and read-only projection
+credentials. Core/voice admission retains exact personal/work context bindings,
+Policy/profile checks and leases. Model-facing acknowledgements contain metadata,
+never this capability or imagery. Viewer restarts use newer generations; obsolete
+camera downloads are canceled. Client cache inventories prevent repeated transfers
+and downloads of tiles the viewer already owns.
+
+Daemon imagery RAM holds at most 192 tiles / 32 MiB compressed data; native RAM
+holds at most 256 tiles / 128 MiB decoded data. Geometry has a separate 64 MiB
+cache. These bounds cover their named caches, not total process/GPU memory.
+Google remains RAM-only through the shared fetcher; NASA may use the existing
+bounded open-data disk cache. Local navigation/capture provider caps are shared:
+Google 180 requests/minute and NASA GIBS 120/minute, each with four in flight.
+These are local policy, not published provider quotas. Provider Retry-After,
+local-window waits, usage and remaining session budgets appear in the HUD.
+
+Global USGS/EONET observations accompany the globe. Near the ground, bounded
+local observations also include adsb.lol aircraft. Markers use real coordinates,
+reported altitude where present, timestamps and source properties. Missing
+contacts, source failures and unavailable Core metrics remain explicit.
+
+### Explicit area captures
+
 Exploration is explicitly enabled. The stock isolated `DynamicUser` world-feed
 service remains unchanged; it is not an exploration deployment recipe. Core,
 worldd and displayd need an intentionally configured owner session/private runtime
@@ -49,8 +97,9 @@ automatic cross-identity credential sharing is installed by this feature.
 The existing `live` voice mode accepts `--world-domain personal/owner` or a full
 `work/organization/project` scope. This trusted host setting and the existing
 session privacy grade accompany proposals to Core. The model cannot widen them.
-The tools are `world_plan`, `world_explore`, `world_resolve`, `world_status`,
-`world_pause`, `world_resume` and `world_cancel`. Controls require a specific
+The tools include `world_navigate`, `world_navigation_status`,
+`world_navigation_stop`, `world_plan`, `world_explore`, `world_resolve`,
+`world_status`, `world_pause`, `world_resume` and `world_cancel`. Controls require a specific
 32-hex-digit job ID already bound by Core to that exact context. Pause/cancel
 use local write authority; resume reads the owned stored request, derives its
 fixed provider hosts and obtains new network authority. It cannot select a
@@ -111,7 +160,7 @@ is not enabled. On-screen source credits remain visible. Automated render-check
 and UI-walk exports refuse selected proprietary imagery; use a NASA source for
 saved examples. External provider access can change independently of this code.
 
-No source gets more than 16 preview tiles; the selected sources share 32 tiles
+For explicit AOI captures, no source gets more than 16 preview tiles; the selected sources share 32 tiles
 and a 384 KiB encoded-pixel budget. Actual zoom/dimensions and preview omissions
 are reported. Original open images remain available under the capture budget.
 The UI drapes imagery to the terrain triangle surface with correct Mercator UVs.
@@ -146,16 +195,18 @@ For an isolated owner-session demo, `ARCHIE_WORLDD_PORT=17667` makes displayd's
 exploration proxy use that numeric loopback port; native `--displayd-port 17666`
 and `--control-port 17668` avoid the installed OS ports. Both processes need the
 same private `ARCHIE_WORLD_RUNTIME_DIR`. The reproducible helper is
-`_dev/verification/world-open-data/live_demo.py`; it preserves logs/captures and
-redacts pixel bytes from saved JSON. It starts only its own demo daemons.
+`_dev/verification/world-globe/globe_demo.py`; it saves startup metadata and logs,
+starts with zero AOI captures, and starts only its own demo daemons. The older
+`world-open-data/live_demo.py` remains an explicit area-capture verification tool.
 `scripts/world/Start-WorldDemo.ps1` opens that standalone development demo in WSL
 using the compiled CLI/daemons and a native executable installed at
 `/home/archie/.local/share/archie-world-demo/archie-display` (override with
 `-NativeBinary`). It creates a separate retained run directory and closes its
 own daemons when the window closes. It does not replace the installed OS startup.
-The desktop demo initially selects Google's online RAM preview; use
+The desktop demo initially selects Google's online RAM globe; use
 `-ImagerySource sentinel2` or the themed source selector for NASA. The Python
-helper defaults to NASA for reproducible non-proprietary capture checks.
+helper also defaults to Google; pass `--source blue_marble` for reproducible
+non-proprietary capture checks.
 
 ## Truth and supported scope
 
@@ -178,4 +229,6 @@ helper defaults to NASA for reproducible non-proprietary capture checks.
 - Tests, real network smoke and limitations are recorded in
   [`_dev/WORLD-GEOFABRIC-RUST-2026-10-24.md`](../_dev/WORLD-GEOFABRIC-RUST-2026-10-24.md).
   The extension is recorded in `_dev/WORLD-OPEN-DATA-2026-10-24.md`.
+  Continuous navigation and real mouse-input checks are recorded in
+  `_dev/WORLD-GLOBE-STREAMING-2026-10-25.md`.
   Headless tests do not verify GPU behavior, live voice hardware or packaged deployment.

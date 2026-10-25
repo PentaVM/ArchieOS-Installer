@@ -99,9 +99,19 @@ impl RateLedger {
         }
     }
     pub fn snapshot(&self, id: &str) -> ProviderUsage {
+        let local_wait = self
+            .window_start_ms
+            .map(|start| start.saturating_add(60_000))
+            .filter(|until| self.window_requests >= self.requests_per_minute && *until > now_ms());
+        let retry = self
+            .retry_at_ms
+            .filter(|until| *until > now_ms())
+            .into_iter()
+            .chain(local_wait)
+            .max();
         ProviderUsage {
             id: id.into(),
-            state: if self.retry_at_ms.is_some_and(|t| t > now_ms()) {
+            state: if retry.is_some() {
                 "waiting_rate_limit"
             } else if self.in_flight > 0 {
                 "fetching"
@@ -115,7 +125,7 @@ impl RateLedger {
             max_in_flight: self.max_in_flight,
             in_flight: self.in_flight,
             remaining_requests: self.remaining_requests,
-            retry_at_ms: self.retry_at_ms,
+            retry_at_ms: retry,
             quota_source: if self.remaining_requests.is_some() {
                 "provider"
             } else {
@@ -178,6 +188,7 @@ impl Drop for RequestPermit {
 }
 #[derive(Clone)]
 pub struct ExplorationService {
+    pub(crate) navigation: Arc<Mutex<crate::navigation_runtime::NavigationState>>,
     config: ExplorationConfig,
     client: reqwest::Client,
     state: Arc<Mutex<State>>,
@@ -197,8 +208,8 @@ fn default_rates() -> BTreeMap<String, RateLedger> {
         ("aws_terrain_tiles".into(), RateLedger::new(120, 4)),
         ("openstreetmap".into(), RateLedger::new(6, 1)),
         ("photon".into(), RateLedger::new(30, 1)),
-        ("google_satellite".into(), RateLedger::new(60, 2)),
-        ("nasa_gibs".into(), RateLedger::new(60, 2)),
+        ("google_satellite".into(), RateLedger::new(180, 4)),
+        ("nasa_gibs".into(), RateLedger::new(120, 4)),
         ("usgs_earthquakes".into(), RateLedger::new(12, 1)),
         ("nasa_eonet".into(), RateLedger::new(6, 1)),
         ("adsb_lol".into(), RateLedger::new(12, 1)),
@@ -304,6 +315,9 @@ impl ExplorationService {
             rates.entry(id).or_insert(rate);
         }
         Ok(Self {
+            navigation: Arc::new(Mutex::new(
+                crate::navigation_runtime::NavigationState::default(),
+            )),
             config,
             client: reqwest::Client::builder()
                 .user_agent("ArchieOS/0.1 (+https://github.com/PentaVM/ArchieOS-Nvidia)")
@@ -388,6 +402,20 @@ impl ExplorationService {
         } else {
             Err("domain differs from this world daemon".into())
         }
+    }
+    pub(crate) fn check_navigation_domain(&self, domain: ExplorationDomain) -> Result<(), String> {
+        self.check_domain(domain)
+    }
+    pub(crate) async fn navigation_provider_usage(&self, provider: &str) -> Option<ProviderUsage> {
+        self.state
+            .lock()
+            .await
+            .rates
+            .get(provider)
+            .map(|rate| rate.snapshot(provider))
+    }
+    pub(crate) fn navigation_cached_time(&self, url: &str) -> Option<i64> {
+        self.cached_retrieval_time(url)
     }
     fn checked_plan(
         &self,
@@ -515,6 +543,13 @@ impl ExplorationService {
                 // Kept below as separate action classification before borrowing the job.
                 let _ = (id, domain);
                 Err("job control must use execute".into())
+            }
+            ExploreCommand::Navigate { request } => self.start_navigation(request).await,
+            ExploreCommand::NavigationStatus { id, domain } => {
+                self.navigation_status(&id, domain, false).await
+            }
+            ExploreCommand::NavigationStop { id, domain } => {
+                self.navigation_status(&id, domain, true).await
             }
         }
     }
@@ -659,6 +694,44 @@ impl ExplorationService {
         budget: u64,
         cache_ttl: Option<Duration>,
     ) -> Result<(Vec<u8>, bool), String> {
+        self.fetch_metered(id, provider, url, budget, cache_ttl, None)
+            .await
+    }
+    pub(crate) async fn fetch_navigation(
+        &self,
+        provider: &str,
+        url: &str,
+        budget: u64,
+        cache_ttl: Option<Duration>,
+        meter: &crate::navigation_runtime::NavigationMeter,
+    ) -> Result<(Vec<u8>, bool), String> {
+        self.fetch_metered(None, provider, url, budget, cache_ttl, Some(meter))
+            .await
+    }
+    async fn fetch_stopped(
+        &self,
+        id: Option<&str>,
+        meter: Option<&crate::navigation_runtime::NavigationMeter>,
+    ) {
+        if let Some(meter) = meter {
+            tokio::select! {_=self.stopped(id)=>{},_=meter.stopped()=>{}}
+        } else {
+            self.stopped(id).await;
+        }
+    }
+    #[allow(clippy::too_many_arguments)]
+    async fn fetch_metered(
+        &self,
+        id: Option<&str>,
+        provider: &str,
+        url: &str,
+        budget: u64,
+        cache_ttl: Option<Duration>,
+        meter: Option<&crate::navigation_runtime::NavigationMeter>,
+    ) -> Result<(Vec<u8>, bool), String> {
+        if let Some(meter) = meter {
+            meter.active()?;
+        }
         // Provider policy is authoritative even if a caller requests a cache.
         let cache_ttl = if provider == "google_satellite" {
             None
@@ -677,7 +750,7 @@ impl ExplorationService {
                 lock
             }
         };
-        let _same_resource = tokio::select! {guard=key_lock.lock_owned()=>guard,_=self.stopped(id)=>return Err("capture explicitly stopped".into())};
+        let _same_resource = tokio::select! {guard=key_lock.lock_owned()=>guard,_=self.fetch_stopped(id,meter)=>return Err("world request explicitly stopped or expired".into())};
         let cache = self.root().join("cache").join(hash);
         if let Some(ttl) = cache_ttl {
             if let Ok(metadata) = std::fs::metadata(&cache) {
@@ -702,6 +775,9 @@ impl ExplorationService {
         }
         for attempt in 0..4 {
             loop {
+                if let Some(meter) = meter {
+                    meter.active()?;
+                }
                 if let Some(id) = id {
                     self.active(id).await?;
                 }
@@ -713,6 +789,15 @@ impl ExplorationService {
                         .ok_or("unknown provider")?
                         .admit(now_ms());
                     if decision == Admission::Ready {
+                        if let Some(meter) = meter {
+                            if let Err(error) = meter.reserve_request() {
+                                let rate = state.rates.get_mut(provider).unwrap();
+                                rate.window_requests = rate.window_requests.saturating_sub(1);
+                                rate.requests_sent = rate.requests_sent.saturating_sub(1);
+                                rate.in_flight = rate.in_flight.saturating_sub(1);
+                                return Err(error);
+                            }
+                        }
                         if let Err(error) = self.save_rates(&state) {
                             state.rates.get_mut(provider).unwrap().finish(0, None, None);
                             return Err(error);
@@ -744,7 +829,7 @@ impl ExplorationService {
             let outcome = async {
                 let mut response=tokio::select! {
                     response=self.client.get(url).send()=>response.map_err(|_|"provider request failed".to_string())?,
-                    _=self.stopped(id)=>return Err("capture explicitly stopped".into()),
+                    _=self.fetch_stopped(id,meter)=>return Err("world request explicitly stopped or expired".into()),
                 };
                 let status = response.status();
                 let remaining = ["ratelimit-remaining", "x-ratelimit-remaining"]
@@ -780,9 +865,10 @@ impl ExplorationService {
                 loop {
                     let chunk=tokio::select!{
                         chunk=response.chunk()=>chunk.map_err(|_|"provider stream failed".to_string())?,
-                        _=self.stopped(id)=>return Err("capture explicitly stopped".into()),
+                        _=self.fetch_stopped(id,meter)=>return Err("world request explicitly stopped or expired".into()),
                     };
                     let Some(chunk)=chunk else {break;};
+                    let navigation_budget=if let Some(meter)=meter{meter.charge_bytes(chunk.len() as u64)}else{Ok(())};
                     if let Some(id) = id {
                         self.active(id).await?;
                     }
@@ -804,6 +890,7 @@ impl ExplorationService {
                         }
                         self.save_rates(&state)?;
                     }
+                    navigation_budget?;
                     if bytes.len().saturating_add(chunk.len()) as u64 > limit {
                         return Err("capture byte budget exceeded".into());
                     }

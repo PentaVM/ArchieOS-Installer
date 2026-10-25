@@ -5,6 +5,17 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ExploreCommand {
+    Navigate {
+        request: crate::navigation::NavigationRequest,
+    },
+    NavigationStatus {
+        id: String,
+        domain: ExplorationDomain,
+    },
+    NavigationStop {
+        id: String,
+        domain: ExplorationDomain,
+    },
     Plan {
         request: ExplorationRequest,
     },

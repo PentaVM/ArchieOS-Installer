@@ -10,23 +10,26 @@ Shell.Panel {
     id: hud
     required property var controller
     property bool worldActive: false
+    property var stream: null
     property var seenJobs: []
+    property bool seededJobs: false
+    property bool jobsReady: false
     property string cameraOwner: "Vista libre"
     property string cameraJob: ""
     property bool cameraAutomatic: false
     property var elevationPlans: []
     property bool inspectorOpen: false
     property string selectedPointId: ""
-    readonly property var selectedPoint:(controller.worldPoints || []).find(function(point){return point.id===hud.selectedPointId}) || null
-    readonly property var imageSources:controller.imagerySources || []
-    readonly property var signalSources:controller.signalSources || []
-    readonly property var activeImage:imageSources.find(function(source){return source.source_id===hud.controller.selectedImagery}) || null
+    readonly property var selectedPoint:((stream ? stream.worldPoints || [] : []).concat(controller.worldPoints || [])).find(function(point){return point.id===hud.selectedPointId}) || null
+    readonly property var imageSources:stream ? stream.sources : controller.imagerySources || []
+    readonly property var signalSources:stream ? stream.status.signal_sources || [] : controller.signalSources || []
+    readonly property var activeImage:imageSources.find(function(source){return source.source_id===(hud.stream ? hud.stream.sourceId : hud.controller.selectedImagery)}) || null
     readonly property string imageryCaption:activeImage ? (activeImage.label || activeImage.source_id)+" · "+(activeImage.attribution || "Atribución no publicada")+" · Fecha: "+(activeImage.imagery_date || "no publicada")+" · Recuperada: "+(Exploration.known(activeImage.retrieved_at_ms)?new Date(activeImage.retrieved_at_ms).toLocaleString():"sin lectura")+" · Estado: "+(activeImage.state || "sin lectura")+(activeImage.mode==="online_preview_only"?" · Vista experimental en línea, no dato abierto":" · Compuesto fechado, no imagen en vivo") : "NASA Blue Marble · contexto global incluido · sin teselas de imagen disponibles"
     readonly property var pointProperties:selectedPoint && selectedPoint.properties ? Object.keys(selectedPoint.properties).slice(0,24).map(function(key){return {key:key,value:typeof hud.selectedPoint.properties[key]==="object"?JSON.stringify(hud.selectedPoint.properties[key]):String(hud.selectedPoint.properties[key])}}) : []
     readonly property var projection: controller.exploration || ({source:"unavailable"})
     readonly property var jobs: projection.jobs || []
     readonly property var selectedJob:Exploration.selectedJob(hud.projection)
-    readonly property var providers: projection.providers || []
+    readonly property var providers: (projection.providers || []).filter(function(provider){return !hud.stream || provider.requests_sent>0 || provider.in_flight>0 || provider.id===(hud.stream.sourceId==="google_satellite"?"google_satellite":"nasa_gibs")})
     readonly property var snapshot: controller.snapshot || ({})
     readonly property var status: snapshot.status || ({})
     readonly property var kernel: controller.kernel || ({})
@@ -43,21 +46,23 @@ Shell.Panel {
         cameraAutomatic=true;cameraOwner=elevation===null ? "AOI · datum provisional" : "AOI · elevación de la fuente";cameraJob=job.id
         return true
     }
+    // Seed saved history without moving the planet. A new admitted voice/CLI
+    // exploration retains the existing cinematic handoff; ordinary polls do not.
     function observeJobs() {
-        if(!worldActive || projection.source==="unavailable") return
-        var fresh=Exploration.newJobs(jobs,seenJobs)
-        // Explicit capture selection persists across polls and new worker jobs.
-        if(typeof projection.selected_job_id!=="undefined" || controller.selectedExplorationJob) return
-        if(fresh.length>0) { applyCamera(fresh[fresh.length-1]);return }
-        if(!cameraAutomatic || elevationPlans.indexOf(cameraJob)>=0) return
-        // One terrain-ready correction is allowed only while this job still owns the camera.
-        var job=jobs.find(function(entry) { return entry.id===hud.cameraJob })
-        if(job && Exploration.cameraElevation(job)!==null) applyCamera(job)
+        if(!jobsReady || !controller) return
+        var current=controller.exploration || {}
+        if(current.source!=="live") return
+        var fresh=Exploration.newJobs(current.jobs || [],seenJobs)
+        if(!seededJobs) {seededJobs=true;return}
+        if(worldActive && !controller.selectedExplorationJob && fresh.length) applyCamera(fresh[fresh.length-1])
+        else if(worldActive && cameraAutomatic && elevationPlans.indexOf(cameraJob)<0) {
+            var currentJob=(current.jobs || []).find(function(job){return job.id===hud.cameraJob})
+            if(currentJob && Exploration.cameraElevation(currentJob)!==null) applyCamera(currentJob)
+        }
     }
-    Connections { target:hud.controller; function onExplorationChanged() { hud.observeJobs() } }
-    // Visibility/focus never restart a consumed plan or change downloads; a first measured elevation may refine automatic framing.
-    onWorldActiveChanged: if(worldActive) observeJobs()
-    Component.onCompleted: observeJobs()
+    Component.onCompleted: {jobsReady=true;observeJobs()}
+    onWorldActiveChanged: observeJobs()
+    Connections {target:hud.controller;function onExplorationChanged(){hud.observeJobs()}}
     ScrollView {
         anchors.fill:parent; anchors.margins:16
         clip:true; contentWidth:availableWidth
@@ -69,10 +74,18 @@ Shell.Panel {
                 Shell.SourceChip { projection:hud.projection; small:true }
             }
             Label {textFormat:Text.PlainText; text:"Exploración · GeoFabric / Aleph"; color:Shell.Theme.t2; font.family:Shell.Theme.font }
-            Label {textFormat:Text.PlainText; Layout.fillWidth:true; wrapMode:Text.Wrap; text:"La voz y la CLI inician trabajos. Mover la cámara solo cambia esta vista."; color:Shell.Theme.t3; font.family:Shell.Theme.font; font.pixelSize:11 }
+            Label {textFormat:Text.PlainText; Layout.fillWidth:true; wrapMode:Text.Wrap; text:"Arrastra para recorrer el planeta. La rueda acerca hasta el suelo. Las teselas siguen la cámara; la voz y la CLI conservan los trabajos."; color:Shell.Theme.t3; font.family:Shell.Theme.font; font.pixelSize:11 }
             Info { label:"Cámara"; value:hud.cameraOwner }
-            Info {label:"Área mostrada";value:hud.selectedJob ? hud.selectedJob.id : "Captura seleccionada no disponible"}
-            Label {textFormat:Text.PlainText;Layout.fillWidth:true;wrapMode:Text.Wrap;text:"Huecos de imagen: terreno neutro, sin píxeles de satélite.";color:Shell.Theme.t3;font.family:Shell.Theme.font;font.pixelSize:10}
+            Info {visible:!!hud.stream;label:"Globo continuo";value:hud.stream ? hud.stream.status.state || "Conectando" : ""}
+            Info {visible:!!hud.stream;label:"Detalle deseado / listo";value:hud.stream ? String(hud.stream.status.desired_count || 0)+" / "+String(hud.stream.status.loaded_count || 0) : ""}
+            Info {visible:!!hud.stream;label:"Base / cola";value:hud.stream ? String(hud.stream.status.fallback_count || 0)+" / "+String(hud.stream.status.pending_count || 0) : ""}
+            Info {visible:!!hud.stream;label:"LOD visible";value:hud.stream ? String(hud.stream.status.min_zoom || 0)+" / "+String(hud.stream.status.max_zoom || 0) : ""}
+            Info {visible:!!hud.stream;label:"HTTP de sesión";value:hud.stream ? Exploration.count((hud.stream.status.usage || {}).requests_sent)+" / "+Exploration.count((hud.stream.status.usage || {}).max_requests) : ""}
+            Info {visible:!!hud.stream;label:"Descarga / presupuesto";value:hud.stream ? Exploration.bytes((hud.stream.status.usage || {}).bytes_received)+" / "+Exploration.bytes((hud.stream.status.usage || {}).max_bytes) : ""}
+            Label {visible:!!hud.stream && !!hud.stream.status.error;textFormat:Text.PlainText;Layout.fillWidth:true;wrapMode:Text.Wrap;text:hud.stream ? hud.stream.status.error || "" : "";color:Shell.Theme.warn;font.family:Shell.Theme.font;font.pixelSize:11}
+
+            Info {label:"Captura consultada";value:hud.selectedJob ? hud.selectedJob.id : "Captura seleccionada no disponible"}
+            Label {textFormat:Text.PlainText;Layout.fillWidth:true;wrapMode:Text.Wrap;text:"NASA Blue Marble mantiene el contexto y los polos mientras llega el detalle.";color:Shell.Theme.t3;font.family:Shell.Theme.font;font.pixelSize:10}
             Button {
                 id:latestArea;visible:!!hud.controller.selectedExplorationJob;Layout.fillWidth:true;text:"Última área";font.family:Shell.Theme.font;font.pixelSize:12
                 contentItem:Text {textFormat:Text.PlainText;text:latestArea.text;font:latestArea.font;color:Shell.Theme.t1;horizontalAlignment:Text.AlignHCenter;verticalAlignment:Text.AlignVCenter}
@@ -93,25 +106,25 @@ Shell.Panel {
                 palette.highlight:Shell.Theme.sel;palette.highlightedText:Shell.Theme.t1
                 contentItem:Text {textFormat:Text.PlainText;text:imageryPicker.displayText || "Aún sin imágenes";color:imageryPicker.enabled?Shell.Theme.t1:Shell.Theme.t3;font:imageryPicker.font;verticalAlignment:Text.AlignVCenter;leftPadding:10;rightPadding:30;elide:Text.ElideRight}
                 background:Rectangle {color:Shell.Theme.hover;radius:Shell.Theme.rCard;border.color:Shell.Theme.hair;implicitHeight:34}
-                currentIndex:hud.imageSources.findIndex(function(source){return source.source_id===hud.controller.selectedImagery})
-                onActivated:hud.controller.selectedImagery=currentValue
+                currentIndex:hud.imageSources.findIndex(function(source){return source.source_id===(hud.stream ? hud.stream.sourceId : hud.controller.selectedImagery)})
+                onActivated: { if(hud.stream) hud.stream.sourceId=currentValue;else hud.controller.selectedImagery=currentValue }
             }
             Repeater {
-                model:hud.imageSources
+                model:hud.stream ? (hud.activeImage ? [hud.activeImage] : []) : hud.imageSources
                 delegate:ColumnLayout {
                     id:imageSource;required property var modelData;Layout.fillWidth:true;spacing:3
                     Info {label:imageSource.modelData.label || imageSource.modelData.source_id;value:imageSource.modelData.state || "Sin lectura"}
                     Text {textFormat:Text.PlainText;Layout.fillWidth:true;wrapMode:Text.Wrap;text:(imageSource.modelData.imagery_date || "Sin fecha de imagen")+" · "+(imageSource.modelData.mode==="online_preview_only"?"Vista experimental en línea":"Datos abiertos")+(imageSource.modelData.requested_date?" · solicitada "+imageSource.modelData.requested_date:"");font.family:Shell.Theme.font;font.pixelSize:10;color:Shell.Theme.t3}
-                    Info {label:"Resolución de fuente / vista";value:(Exploration.known(imageSource.modelData.source_resolution_m)?imageSource.modelData.source_resolution_m+" m":"sin lectura")+" / "+(Exploration.known(imageSource.modelData.preview_resolution_m)?imageSource.modelData.preview_resolution_m+" m":"sin lectura")}
+                    Info {label:hud.stream ? "Detalle cargado (aprox.)" : "Resolución fuente / vista";value:hud.stream ? (Exploration.known(imageSource.modelData.preview_resolution_m)?"~"+Number(imageSource.modelData.preview_resolution_m).toFixed(1)+" m/píxel":"Pendiente") : (Exploration.known(imageSource.modelData.source_resolution_m)?Number(imageSource.modelData.source_resolution_m).toFixed(1)+" m":"sin lectura")+" / "+(Exploration.known(imageSource.modelData.preview_resolution_m)?Number(imageSource.modelData.preview_resolution_m).toFixed(1)+" m":"sin lectura")}
                     Text {textFormat:Text.PlainText;visible:!!text;Layout.fillWidth:true;wrapMode:Text.Wrap;text:imageSource.modelData.error || imageSource.modelData.renderer_error || "";font.family:Shell.Theme.font;font.pixelSize:10;color:Shell.Theme.warn}
                 }
             }
             Text {textFormat:Text.PlainText;text:"Señales observadas";color:Shell.Theme.t1;font.family:Shell.Theme.disp;font.pixelSize:14}
             Repeater {model:hud.signalSources;delegate:Info {id:signalSource;required property var modelData;label:signalSource.modelData.label || signalSource.modelData.id;value:Exploration.signalSummary(signalSource.modelData)}}
             Info {
-                visible:!!hud.selectedJob && !!hud.selectedJob.preview && !!hud.selectedJob.preview.signals
+                visible:hud.stream ? !!hud.stream.status.signals : !!hud.selectedJob && !!hud.selectedJob.preview && !!hud.selectedJob.preview.signals
                 label:"Cobertura de señales"
-                value:Exploration.signalSummary(hud.selectedJob && hud.selectedJob.preview && hud.selectedJob.preview.signals || {})
+                value:Exploration.signalSummary(hud.stream ? hud.stream.status.signals || {} : hud.selectedJob && hud.selectedJob.preview && hud.selectedJob.preview.signals || {})
             }
             Label {textFormat:Text.PlainText;visible:hud.signalSources.length===0;text:"No se ha publicado ninguna fuente de señales para esta área.";Layout.fillWidth:true;wrapMode:Text.Wrap;font.family:Shell.Theme.font;color:Shell.Theme.t3;font.pixelSize:11}
             Label {objectName:"selectedPointExpired";textFormat:Text.PlainText;visible:!!hud.selectedPointId && !hud.selectedPoint;text:"Punto seleccionado sin lectura en esta captura.";Layout.fillWidth:true;wrapMode:Text.Wrap;font.family:Shell.Theme.font;color:Shell.Theme.warn;font.pixelSize:11}

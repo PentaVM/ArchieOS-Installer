@@ -13,6 +13,9 @@ pub mod exploration_projection;
 pub mod imagery;
 pub mod lan;
 pub mod layers;
+pub mod navigation;
+#[cfg(feature = "provider")]
+pub mod navigation_runtime;
 #[cfg(feature = "provider")]
 pub mod world_signals;
 

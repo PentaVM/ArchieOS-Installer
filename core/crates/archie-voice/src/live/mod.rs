@@ -68,7 +68,11 @@ pregunta en pocas palabras qué necesita, o quédate callado. Para explorar un l
 world_resolve si faltan coordenadas, y world_explore solo con coordenadas, radio en metros \
 y dominio personal o work explícitos. Si falta el dominio, pregúntalo; nunca conviertas \
 trabajo en personal. Una captura aceptada está pendiente: no digas que terminó hasta \
-consultar world_status y observar complete. No captures lugares por actividad de aplicaciones.";
+consultar world_status y observar complete. Para navegar por toda la Tierra usa world_navigate; \
+las teselas siguen los movimientos y el zoom del visor dentro de los límites autorizados. \
+world_navigation_status consulta esa sesión y world_navigation_stop la detiene. El dominio y \
+la privacidad de navegación los fija la sesión de voz, nunca los propongas como argumentos. \
+No captures lugares por actividad de aplicaciones.";
 
 /// A string parameter limited to the names the running display reported. When the display
 /// was not reachable at start-up the names are not known here, so the parameter is free and
@@ -216,10 +220,35 @@ pub fn tools(catalog: Option<&archie_orb::control::Catalog>) -> Vec<ToolDefiniti
                 "required":["id","domain"]}),
         });
     }
+    definitions.push(ToolDefinition {
+        name: "world_navigate".into(),
+        description: "Autoriza una sesión acotada de navegación de toda la Tierra solicitada por la persona. El visor obtiene teselas automáticamente al mover o ampliar el mapa. El dominio y privacidad vienen de esta sesión; aceptación no acredita calidad ni disponibilidad de proveedores.".into(),
+        parameters: json!({"type":"object","additionalProperties":false,"properties":{
+            "sources":{"type":"array","items":{"type":"string","enum":["google_satellite","blue_marble","sentinel2","landsat","natural_color","infrared","night_lights","thermal"]},"minItems":1,"maxItems":8},
+            "imagery_date":{"type":"string","pattern":"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+            "max_zoom":{"type":"integer","minimum":0,"maximum":19},
+            "max_visible_tiles":{"type":"integer","minimum":1,"maximum":96},
+            "max_requests":{"type":"integer","minimum":1,"maximum":10000},
+            "max_bytes":{"type":"integer","minimum":1024,"maximum":1073741824},
+            "duration_seconds":{"type":"integer","minimum":1,"maximum":3600},
+            "signals":{"type":"boolean"}
+        },"required":[]}),
+    });
+    for (name, description) in [
+        ("world_navigation_status", "Consulta metadatos de una sesión de navegación propia por su identificador. El alcance viene de esta sesión de voz."),
+        ("world_navigation_stop", "Detiene una sesión de navegación propia por su identificador. El alcance viene de esta sesión de voz."),
+    ] {
+        definitions.push(ToolDefinition {
+            name: name.into(), description: description.into(),
+            parameters: json!({"type":"object","additionalProperties":false,
+                "properties":{"id":{"type":"string","pattern":"^[0-9a-fA-F]{32}$"}},"required":["id"]}),
+        });
+    }
     definitions
 }
 
-/// Parse and validate before reaching the private service. Domain has no default.
+/// Parse strict tool arguments before dispatch. Capture scopes are explicit;
+/// navigation scope is supplied only by the host-selected WorldVoiceScope.
 fn world_command(
     name: &str,
     raw: &str,
@@ -259,9 +288,61 @@ fn world_command(
         id: String,
         domain: ExplorationDomain,
     }
+    #[derive(serde::Deserialize, Default)]
+    #[serde(deny_unknown_fields)]
+    struct Navigation {
+        sources: Option<Vec<exploration::ImagerySource>>,
+        imagery_date: Option<String>,
+        max_zoom: Option<u8>,
+        max_visible_tiles: Option<u32>,
+        max_requests: Option<u32>,
+        max_bytes: Option<u64>,
+        duration_seconds: Option<u32>,
+        signals: Option<bool>,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct NavigationId {
+        id: String,
+    }
     let invalid =
         |_| "Faltan argumentos explícitos o hay un dominio o valor no válido.".to_string();
     match name {
+        "world_navigate" => {
+            let args: Navigation = serde_json::from_str(raw).map_err(invalid)?;
+            let defaults = archie_worldd::navigation::NavigationRequest::default();
+            let request = archie_worldd::navigation::NavigationRequest {
+                sources: args.sources.unwrap_or(defaults.sources),
+                imagery_date: args.imagery_date,
+                max_zoom: args.max_zoom.unwrap_or(defaults.max_zoom),
+                max_visible_tiles: args.max_visible_tiles.unwrap_or(defaults.max_visible_tiles),
+                max_requests: args.max_requests.unwrap_or(defaults.max_requests),
+                max_bytes: args.max_bytes.unwrap_or(defaults.max_bytes),
+                duration_seconds: args.duration_seconds.unwrap_or(defaults.duration_seconds),
+                signals: args.signals.unwrap_or(defaults.signals),
+                // This placeholder is replaced only from WorldVoiceScope below.
+                domain: ExplorationDomain::Personal,
+            };
+            request.validate()?;
+            Ok(ExploreCommand::Navigate { request })
+        }
+        "world_navigation_status" | "world_navigation_stop" => {
+            let args: NavigationId = serde_json::from_str(raw).map_err(invalid)?;
+            if args.id.len() != 32 || !args.id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return Err("Identificador de navegación no válido.".into());
+            }
+            Ok(if name == "world_navigation_status" {
+                ExploreCommand::NavigationStatus {
+                    id: args.id,
+                    domain: ExplorationDomain::Personal,
+                }
+            } else {
+                ExploreCommand::NavigationStop {
+                    id: args.id,
+                    domain: ExplorationDomain::Personal,
+                }
+            })
+        }
         "world_explore" | "world_plan" => {
             let region: Region = serde_json::from_str(raw).map_err(invalid)?;
             let request = ExplorationRequest {
@@ -338,7 +419,7 @@ pub struct WorldVoiceScope {
 
 fn scoped_world_request(
     scope: &WorldVoiceScope,
-    command: archie_worldd::exploration::ExploreCommand,
+    mut command: archie_worldd::exploration::ExploreCommand,
 ) -> Result<archie_core::control::ControlRequest, String> {
     use archie_core::control::{ControlRequest, WorldJobAction};
     use archie_geofabric::exploration::ExplorationDomain;
@@ -348,7 +429,18 @@ fn scoped_world_request(
     } else {
         ExplorationDomain::Personal
     };
+    // New navigation tools have no model-supplied scope fields. Bind their
+    // geographic DTO solely to the complete host-selected context.
+    match &mut command {
+        ExploreCommand::Navigate { request } => request.domain = expected,
+        ExploreCommand::NavigationStatus { domain, .. }
+        | ExploreCommand::NavigationStop { domain, .. } => *domain = expected,
+        _ => {}
+    }
     let requested = match &command {
+        ExploreCommand::Navigate { request } => request.domain,
+        ExploreCommand::NavigationStatus { domain, .. }
+        | ExploreCommand::NavigationStop { domain, .. } => *domain,
         ExploreCommand::Explore { request } | ExploreCommand::Plan { request } => request.domain,
         ExploreCommand::Resolve { domain, .. } | ExploreCommand::Status { domain } => *domain,
         ExploreCommand::Pause { domain, .. }
@@ -363,6 +455,21 @@ fn scoped_world_request(
     let domain = scope.domain.clone();
     let privacy = scope.privacy;
     Ok(match command {
+        ExploreCommand::Navigate { request } => ControlRequest::WorldNavigate {
+            request,
+            domain,
+            privacy,
+        },
+        ExploreCommand::NavigationStatus { id, .. } => ControlRequest::WorldNavigationStatus {
+            id,
+            domain,
+            privacy,
+        },
+        ExploreCommand::NavigationStop { id, .. } => ControlRequest::WorldNavigationStop {
+            id,
+            domain,
+            privacy,
+        },
         ExploreCommand::Explore { request } => ControlRequest::WorldExplore {
             request,
             domain,
@@ -414,6 +521,11 @@ async fn world_tool(scope: Option<&WorldVoiceScope>, name: &str, raw: &str) -> S
     };
     match archie_core::world_control::send(request).await {
         Err(error) => format!("Core no confirmó la operación geográfica: {error}. No se reintentó."),
+        Ok(value) if matches!(name, "world_navigate" | "world_navigation_status" | "world_navigation_stop") => format!(
+            "Navegación {}. Estado {}. Solicitudes observadas {}. Bytes observados {}.",
+            value["navigation"]["id"].as_str().unwrap_or("sin identificador"),
+            value["navigation"]["state"].as_str().unwrap_or("desconocido"),
+            value["navigation"]["requests_sent"], value["navigation"]["bytes_received"]),
         Ok(value) if matches!(name, "world_explore" | "world_pause" | "world_resume" | "world_cancel") => format!(
             "Captura aceptada con identificador {}. Estado {}. Esto confirma aceptación, no finalización.",
             value["job"]["id"].as_str().unwrap_or("no informado"),
@@ -436,7 +548,73 @@ async fn world_tool(scope: Option<&WorldVoiceScope>, name: &str, raw: &str) -> S
 
 #[cfg(test)]
 mod tool_tests {
+    #[test]
+    fn navigation_tools_use_only_the_host_scope_and_reject_injected_authority() {
+        use archie_core::control::ControlRequest;
+        let scope = super::WorldVoiceScope {
+            domain: archie_vault::ContextDomain::work("org", "project").unwrap(),
+            privacy: archie_types::PrivacyGrade::Public,
+        };
+        for (name, raw) in [
+            ("world_navigate", "{}".to_string()),
+            (
+                "world_navigation_status",
+                format!(r#"{{"id":"{}"}}"#, "a".repeat(32)),
+            ),
+            (
+                "world_navigation_stop",
+                format!(r#"{{"id":"{}"}}"#, "a".repeat(32)),
+            ),
+        ] {
+            let command = super::world_command(name, &raw).unwrap();
+            let request = super::scoped_world_request(&scope, command).unwrap();
+            let value = serde_json::to_value(&request).unwrap();
+            assert_eq!(value["domain"], "work/org/project");
+            assert_eq!(value["privacy"], "public");
+            assert!(request.is_world());
+            for field in ["domain", "privacy", "endpoint", "token"] {
+                let mut injected: serde_json::Value = serde_json::from_str(&raw).unwrap();
+                injected[field] = serde_json::json!("personal");
+                assert!(super::world_command(name, &injected.to_string()).is_err());
+            }
+            assert!(matches!(
+                request,
+                ControlRequest::WorldNavigate { .. }
+                    | ControlRequest::WorldNavigationStatus { .. }
+                    | ControlRequest::WorldNavigationStop { .. }
+            ));
+        }
+        assert!(super::world_command("world_navigation_stop", r#"{"id":"../escape"}"#).is_err());
+    }
+
     use super::*;
+
+    #[test]
+    fn navigation_tool_schemas_expose_limits_but_no_model_scope_or_endpoint() {
+        let definitions = super::tools(None);
+        for name in [
+            "world_navigate",
+            "world_navigation_status",
+            "world_navigation_stop",
+        ] {
+            let definition = definitions
+                .iter()
+                .find(|definition| definition.name == name)
+                .unwrap();
+            assert_eq!(definition.parameters["additionalProperties"], false);
+            for field in ["domain", "privacy", "token", "endpoint"] {
+                assert!(definition.parameters["properties"].get(field).is_none());
+            }
+        }
+        for raw in [
+            r#"{"max_requests":0}"#,
+            r#"{"duration_seconds":3601}"#,
+            r#"{"sources":["unknown"]}"#,
+            r#"{"signals":"true"}"#,
+        ] {
+            assert!(super::world_command("world_navigate", raw).is_err());
+        }
+    }
 
     #[test]
     fn world_plan_and_job_controls_are_strict_and_keep_host_scope() {
@@ -834,6 +1012,9 @@ impl Senses {
                 | "world_pause"
                 | "world_resume"
                 | "world_cancel"
+                | "world_navigate"
+                | "world_navigation_status"
+                | "world_navigation_stop"
         ) {
             return Some(world_tool(self.world_scope.as_ref(), name, raw_arguments).await);
         }

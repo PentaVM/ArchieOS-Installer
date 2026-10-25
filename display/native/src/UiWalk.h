@@ -28,6 +28,7 @@
 #include <QKeyEvent>
 #include <QKeySequence>
 #include <QMouseEvent>
+#include <QWheelEvent>
 #include <QPointer>
 #include <QQuickItem>
 #include <QQuickWindow>
@@ -248,6 +249,29 @@ private:
         if (step.contains(QStringLiteral("label"))) {
             log({{QStringLiteral("kind"), QStringLiteral("label")}, {QStringLiteral("text"), step.value(QStringLiteral("label"))}});
             later(0); return;
+        }
+        if (step.contains(QStringLiteral("state"))) {
+            log({{QStringLiteral("kind"),QStringLiteral("state")},{QStringLiteral("label"),step.value(QStringLiteral("state"))},
+                 {QStringLiteral("state"),QJsonDocument::fromJson(state().toUtf8()).object()}});
+            later(0);return;
+        }
+        if(step.contains(QStringLiteral("wheel")) || step.contains(QStringLiteral("drag"))){
+            const QPointF point(m_window->width()*step.value(QStringLiteral("x")).toDouble(0.65),m_window->height()*step.value(QStringLiteral("y")).toDouble(0.5));
+            const auto before=state();
+            if(step.contains(QStringLiteral("wheel"))){
+                const int ticks=std::clamp(step.value(QStringLiteral("wheel")).toInt(),-10,10);
+                QWheelEvent event(point,m_window->mapToGlobal(point),QPoint(),QPoint(0,ticks*120),Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);
+                QGuiApplication::sendEvent(m_window,&event);
+            }else{
+                const auto delta=step.value(QStringLiteral("drag")).toArray();
+                const QPointF finish=point+QPointF(delta.at(0).toDouble(),delta.at(1).toDouble());
+                QMouseEvent press(QEvent::MouseButtonPress,point,m_window->mapToGlobal(point),Qt::LeftButton,Qt::LeftButton,Qt::NoModifier);
+                QMouseEvent move(QEvent::MouseMove,finish,m_window->mapToGlobal(finish),Qt::NoButton,Qt::LeftButton,Qt::NoModifier);
+                QMouseEvent release(QEvent::MouseButtonRelease,finish,m_window->mapToGlobal(finish),Qt::LeftButton,Qt::NoButton,Qt::NoModifier);
+                QGuiApplication::sendEvent(m_window,&press);QGuiApplication::sendEvent(m_window,&move);QGuiApplication::sendEvent(m_window,&release);
+            }
+            QTimer::singleShot(settle,this,[this,before,step]{const auto after=state();const auto changed=changedKeys(before,after);log({{QStringLiteral("kind"),step.contains(QStringLiteral("wheel"))?QStringLiteral("wheel"):QStringLiteral("drag")},{QStringLiteral("changed"),QJsonArray::fromStringList(changed)},{QStringLiteral("state"),QJsonDocument::fromJson(after.toUtf8()).object()}});++m_index;next();});
+            return;
         }
         if (step.contains(QStringLiteral("shot"))) {
             log({{QStringLiteral("kind"), QStringLiteral("shot")}, {QStringLiteral("shot"), save(grab(), step.value(QStringLiteral("shot")).toString())},

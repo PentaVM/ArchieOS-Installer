@@ -3,6 +3,8 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QDateTime>
+#include <QRegularExpression>
 #include <algorithm>
 #ifdef Q_OS_UNIX
 #include <fcntl.h>
@@ -86,4 +88,18 @@ QByteArray explorationProjectionToken(const QString &runtimeDirectory) {
     const auto token=object.value(QStringLiteral("token")).toString().toLatin1();
     if(token.size()!=64 || !std::all_of(token.begin(),token.end(),[](char c){return (c>='0'&&c<='9')||(c>='a'&&c<='f')||(c>='A'&&c<='F');})) return {};
     return token;
+}
+
+QVariantMap worldNavigationSession(const QString &runtimeDirectory) {
+    const auto bytes=privateCredentialBytes(QDir(runtimeDirectory).filePath(QStringLiteral("navigation.json")));
+    const auto document=QJsonDocument::fromJson(bytes);
+    if(!document.isObject())return {};
+    const auto object=document.object();
+    auto hex=[](const QString &text,int length){return text.size()==length&&std::all_of(text.begin(),text.end(),[](QChar c){return (c.unicode()>='0'&&c.unicode()<='9')||(c.unicode()>='a'&&c.unicode()<='f')||(c.unicode()>='A'&&c.unicode()<='F');});};
+    const auto address=object.value(QStringLiteral("address")).toString();
+    const auto match=QRegularExpression(QStringLiteral("^127\\.0\\.0\\.1:([0-9]{1,5})$")).match(address);
+    if(object.size()!=6||object.value(QStringLiteral("schema_version")).toInt()!=1||!match.hasMatch()||match.captured(1).toUInt()==0||match.captured(1).toUInt()>65535||
+       !hex(object.value(QStringLiteral("token")).toString(),64)||!hex(object.value(QStringLiteral("session_id")).toString(),32)||
+       (object.value(QStringLiteral("domain"))!=QStringLiteral("personal")&&object.value(QStringLiteral("domain"))!=QStringLiteral("work"))||object.value(QStringLiteral("expires_at_ms")).toDouble()<=QDateTime::currentMSecsSinceEpoch())return {};
+    return object.toVariantMap();
 }

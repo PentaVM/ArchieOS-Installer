@@ -33,13 +33,21 @@ ApplicationWindow {
     property bool orbHudVisible: true
     property bool worldHudVisible: true
     property var selection: null
+    readonly property bool streamedWorld: globeStream.meshes.length>0
     readonly property bool localTerrainPreview: root.scene === "world" && Exploration.localTerrainView(archieBridge.frame,archieBridge.explorationMeshes)
     readonly property bool texturedTerrain: (archieBridge.imageryMeshes || []).some(function(mesh) {return mesh.source_id===archieBridge.selectedImagery && mesh.replacesTerrain===true})
     function uiState() {
         const job=Exploration.selectedJob(archieBridge.exploration || {})
-        return JSON.stringify({scene:root.scene,selectedArea:job ? job.id : "",selectedPoint:worldHud.selectedPointId,selectedImagery:archieBridge.selectedImagery,cameraOwner:worldHud.cameraOwner})
+        return JSON.stringify({scene:root.scene,selectedArea:job ? job.id : "",selectedPoint:worldHud.selectedPointId,selectedImagery:globeStream.sourceId,cameraOwner:worldHud.cameraOwner,stream:globeStream.status,eye:archieBridge.frame.cameraEye,target:archieBridge.frame.cameraTarget})
     }
 
+    function updateNavigation() {
+        if(root.scene!=="world" || !archieBridge.frame.cameraEye || !archieBridge.frame.cameraTarget) return
+        globeStream.setViewport(archieBridge.frame.cameraEye,archieBridge.frame.cameraTarget,
+                                Math.round(view.width),Math.round(view.height),archieBridge.frame.cameraFov)
+    }
+    onSceneChanged: Qt.callLater(root.updateNavigation)
+    Connections {target:archieBridge;function onFrameChanged() {root.updateNavigation()} }
     // The scenes and the mode each runs in are DisplayControl's; the CLI and the voice ask
     // it for the same list.
     function changeScene(next) {
@@ -235,11 +243,8 @@ ApplicationWindow {
         const distance = Math.sqrt(eye.x * eye.x + eye.y * eye.y + eye.z * eye.z)
         if (!(distance > 0)) return 4
         const globeRadius = 20.0  // GlobePolicy default; see the globe Model's own comment
-        const nearest = globeRadius * 1.15
-        const farthest = globeRadius * 8.0
-        const clamped = Math.max(nearest, Math.min(farthest, distance))
-        const t = Math.log(clamped / nearest) / Math.log(farthest / nearest)
-        return Math.round(20 - t * 16)
+        const altitude=Math.max(10, (distance-globeRadius)*6371008.8/globeRadius)
+        return Math.max(0,Math.min(20,Math.round(Math.log2(40075016/altitude))))
     }
 
     // Which of GeoFabric's named bands is closest to a LOD value. Nearest by absolute
@@ -407,6 +412,7 @@ ApplicationWindow {
                 Layout.preferredWidth:Math.min(370,root.width*0.36)
                 Layout.fillHeight:true
                 controller:archieBridge
+                stream:globeStream
                 worldActive:root.scene === "world" && root.visible
             }
 
@@ -416,6 +422,8 @@ ApplicationWindow {
 
                 View3D {
                     id: view
+                    onWidthChanged: Qt.callLater(root.updateNavigation)
+                    onHeightChanged: Qt.callLater(root.updateNavigation)
                     anchors.fill: parent
                     // FORGE is a list, not a scene; the GPU rests while it is shown.
                     visible: root.scene !== "forge"
@@ -455,7 +463,7 @@ ApplicationWindow {
                         // ACES, with the design's exposure.
                         // Dated map pixels use the sRGB transfer function without
                         // cinematic contrast; global globe/orb keep their own look.
-                        tonemapMode: root.localTerrainPreview ? SceneEnvironment.TonemapModeLinear : root.scene === "orb" && !lumen.look.graded ? SceneEnvironment.TonemapModeFilmic : SceneEnvironment.TonemapModeAces
+                        tonemapMode: root.scene === "world" || root.localTerrainPreview ? SceneEnvironment.TonemapModeLinear : root.scene === "orb" && !lumen.look.graded ? SceneEnvironment.TonemapModeFilmic : SceneEnvironment.TonemapModeAces
                         exposure: root.scene === "orb" ? lumen.look.exposure : 1.0
 
                         // Bloom, and only bloom, and only where the image is genuinely
@@ -477,7 +485,7 @@ ApplicationWindow {
                         // A whisper of a vignette. Not a filter — it keeps the eye on the
                         // planet by letting the corners fall a little into the dark the
                         // stars already live in.
-                        vignetteEnabled: !root.localTerrainPreview
+                        vignetteEnabled: root.scene !== "world" && !root.localTerrainPreview
                         vignetteStrength: 0.35
 
                         // Break up the gradients in the atmosphere and the dark sky so
@@ -550,11 +558,11 @@ ApplicationWindow {
                         // marker use the same frame. UTC must not rotate it afterward.
 
                         Model {
-                            visible: !root.localTerrainPreview
+                            visible: !root.localTerrainPreview || root.streamedWorld
                             source: "#Sphere"
                             // Geographic placement matches this mesh: Greenwich +Z,
                             // 90 degrees east +X, north +Y. Do not rotate the texture.
-                            scale: Qt.vector3d(0.4, 0.4, 0.4)   // radius 20, the model's GlobePolicy default
+                            scale: Qt.vector3d(0.3999996, 0.3999996, 0.3999996)   // radius 20, the model's GlobePolicy default
                             materials: PrincipledMaterial {
                                 baseColorMap: Texture {
                                     id: earthTexture
@@ -601,6 +609,17 @@ ApplicationWindow {
                             }
                         }
 
+                        // Camera-driven quadtree patches share Earth's exact frame.
+                        // Each patch has a local origin so street vertices retain precision.
+                        Repeater3D {
+                            model:globeStream.tileModel
+                            delegate:Model {
+                                required property var meshData
+                                position:meshData.origin
+                                geometry:MeshGeometry {vertices:meshData.vertices;triangleIndices:meshData.triangleIndices;hasUv:true}
+                                materials:WorldImageryMaterial {textureSource:meshData.textureSource;terrainColor:Shell.Theme.t3}
+                            }
+                        }
                         // Safe decoded preview only: bounded samples/footprints, never local artifact paths.
                         Repeater3D {
                             model:archieBridge.explorationMeshes
@@ -621,7 +640,7 @@ ApplicationWindow {
                             model:archieBridge.imageryMeshes
                             delegate:Model {
                                 required property var modelData
-                                visible:modelData.source_id===archieBridge.selectedImagery
+                                visible:!root.streamedWorld && modelData.source_id===archieBridge.selectedImagery
                                 geometry:MeshGeometry {vertices:modelData.vertices;triangleIndices:modelData.triangleIndices;hasUv:true}
                                 materials:modelData.kind==="terrain" ? uncoveredMaterial : imageryMaterial
                                 PrincipledMaterial {id:uncoveredMaterial;baseColor:Shell.Theme.t3;roughness:1.0;cullMode:Material.NoCulling}
@@ -747,6 +766,7 @@ ApplicationWindow {
                 WorldBeacons {
                     id:worldBeacons;anchors.fill:parent;visible:root.scene === "world"
                     controller:archieBridge;view:view;selectedId:worldHud.selectedPointId
+                    points:globeStream.worldPoints.concat((archieBridge.worldPoints || []).filter(function(point){return point.kind==="aoi"}))
                     onChosen:function(point) {
                         worldHud.cedeCamera();worldHud.selectedPointId=point.id;root.worldHudVisible=true;root.selection=null
                         if(point.kind==="aoi" && point.job && Exploration.validCamera(point.job.camera) && archieBridge.selectExplorationJob(point.job.id)) {
@@ -854,7 +874,7 @@ ApplicationWindow {
                         SectionTitle { text: "CONTROL BOUNDARY" }
                         Text {
                             width: parent.width
-                            text: "Native read-only projection. This process has no Archie keys, no control socket and no Internet access."
+                            text: "Proyecciones de lectura y cámara con sesión limitada del propietario. La voz y Core conservan la autoridad; el daemon obtiene las fuentes."
                             color: root.dim; font.pixelSize: 10; wrapMode: Text.Wrap
                         }
 
@@ -863,16 +883,12 @@ ApplicationWindow {
                             width: parent.width
                             spacing: 12
 
-                        // What GeoFabric's provider-selection logic would choose, at a
-                        // handful of named scales. Fetched once from `archied` on
-                        // startup — the plan cannot change while it runs — and reported
-                        // for exactly what it is: the fabric is real and tested, tile
-                        // streaming into this renderer is not built yet, and the panel
-                        // says both rather than one texture quietly implying the other.
+                        // Provider catalog context. Actual camera-driven selection,
+                        // downloads and coverage are reported by the streaming HUD.
                         SectionTitle { text: "GEOFABRIC · PROVIDER SELECTION" }
                         Text {
                             width: parent.width
-                            text: "Selection only — the globe above still draws a fixed texture. This is what a future streamed layer would choose."
+                            text: "Cobertura y fuentes del catálogo GeoFabric. El globo solicita el detalle según la cámara."
                             color: root.dim; font.pixelSize: 9; wrapMode: Text.Wrap
                         }
                         Repeater {

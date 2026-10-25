@@ -57,6 +57,33 @@ fn admit_command(
     }
     let mut hosts = Vec::new();
     match command {
+        ExploreCommand::Navigate { request } => {
+            if request.domain != geo_domain(domain) {
+                return Err("navigation domain differs from admitted context domain".into());
+            }
+            request.validate()?;
+            for source in &request.sources {
+                let host = if *source == exploration::ImagerySource::GoogleSatellite {
+                    "mt1.google.com"
+                } else {
+                    "gibs.earthdata.nasa.gov"
+                };
+                if !hosts.contains(&host) {
+                    hosts.push(host);
+                }
+            }
+            if request.signals {
+                hosts.extend(["earthquake.usgs.gov", "eonet.gsfc.nasa.gov", "api.adsb.lol"]);
+            }
+        }
+        ExploreCommand::NavigationStatus {
+            id,
+            domain: requested,
+        }
+        | ExploreCommand::NavigationStop {
+            id,
+            domain: requested,
+        } if *requested == geo_domain(domain) && valid_job_id(id) => {}
         ExploreCommand::Plan { request } | ExploreCommand::Explore { request } => {
             if request.domain != geo_domain(domain) {
                 return Err("geographic domain differs from admitted context domain".into());
@@ -179,7 +206,9 @@ fn capabilities(
             constraints: Constraints::with_actions([if hosts.is_empty() {
                 if matches!(
                     command,
-                    ExploreCommand::Pause { .. } | ExploreCommand::Cancel { .. }
+                    ExploreCommand::Pause { .. }
+                        | ExploreCommand::Cancel { .. }
+                        | ExploreCommand::NavigationStop { .. }
                 ) {
                     Action::Write
                 } else {
@@ -348,6 +377,17 @@ fn compact_model_reply(value: &mut serde_json::Value) {
     use serde_json::{json, Value};
     match value {
         Value::Object(fields) => {
+            // Credentials are local transport authority, never model observations.
+            for field in [
+                "token",
+                "navigation_token",
+                "viewport_token",
+                "capability",
+                "descriptor",
+                "navigation_descriptor",
+            ] {
+                fields.remove(field);
+            }
             if fields.remove("data_base64").is_some() {
                 fields.insert("pixels_omitted".into(), json!(true));
             }
@@ -421,6 +461,51 @@ fn compact_model_reply(value: &mut serde_json::Value) {
     }
 }
 
+fn navigation_reply_id<'a>(
+    value: &'a serde_json::Value,
+    domain: &ContextDomain,
+    expected_id: Option<&str>,
+) -> Result<&'a str, String> {
+    let navigation = &value["navigation"];
+    let id = navigation["id"]
+        .as_str()
+        .ok_or("navigation acknowledgement omitted session id")?;
+    if !valid_job_id(id)
+        || navigation["domain"] != serde_json::json!(geo_domain(domain))
+        || expected_id.is_some_and(|expected| expected != id)
+    {
+        return Err("navigation acknowledgement identity or domain mismatch".into());
+    }
+    Ok(id)
+}
+
+fn compact_navigation_reply(value: &mut serde_json::Value) {
+    if let Some(fields) = value["navigation"].as_object_mut() {
+        fields.retain(|key, _| {
+            [
+                "id",
+                "domain",
+                "state",
+                "request",
+                "created_at_ms",
+                "updated_at_ms",
+                "expires_at_ms",
+                "requests_sent",
+                "bytes_received",
+                "cache_hits",
+                "tiles_ready",
+                "tiles_pending",
+                "error",
+                "stopped_at_ms",
+            ]
+            .contains(&key.as_str())
+        });
+    }
+    if let Some(fields) = value.as_object_mut() {
+        fields.retain(|key, _| key == "navigation" || key == "context_domain");
+    }
+}
+
 fn scoped_status(
     value: &mut serde_json::Value,
     domain: &ContextDomain,
@@ -447,20 +532,33 @@ fn scoped_status(
     value["context_domain"] = serde_json::json!(domain);
 }
 
-async fn cancel_accepted(value: &serde_json::Value, domain: &ContextDomain) -> bool {
-    let Some(id) = value["job"]["id"].as_str() else {
-        return false;
-    };
-    if id.len() != 32 || !id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return false;
+fn rollback_command(value: &serde_json::Value, domain: &ContextDomain) -> Option<ExploreCommand> {
+    if value.get("navigation").is_some() {
+        // Even a malformed response domain must not strand an accepted session:
+        // rollback uses the originally admitted geographic domain and valid ID.
+        let id = value["navigation"]["id"].as_str()?;
+        return valid_job_id(id).then(|| ExploreCommand::NavigationStop {
+            id: id.into(),
+            domain: geo_domain(domain),
+        });
     }
-    let cancel = ExploreCommand::Cancel {
+    let id = value["job"]["id"].as_str()?;
+    valid_job_id(id).then(|| ExploreCommand::Cancel {
         id: id.into(),
         domain: geo_domain(domain),
+    })
+}
+
+async fn cancel_accepted(value: &serde_json::Value, domain: &ContextDomain) -> bool {
+    let Some(cancel) = rollback_command(value, domain) else {
+        return false;
     };
+    let navigation = matches!(cancel, ExploreCommand::NavigationStop { .. });
     matches!(tokio::time::timeout(std::time::Duration::from_secs(3),
         archie_worldd::exploration_control::send(cancel)).await,
-        Ok(Ok(reply)) if reply["job"]["state"] == "cancelled")
+        Ok(Ok(reply)) if if navigation {
+            matches!(reply["navigation"]["state"].as_str(), Some("stopped" | "expired"))
+        } else { reply["job"]["state"] == "cancelled" })
 }
 
 impl Runtime {
@@ -580,6 +678,41 @@ impl Runtime {
         request: ControlRequest,
     ) -> Result<serde_json::Value, String> {
         let (domain, privacy, command) = match request {
+            ControlRequest::WorldNavigate {
+                request,
+                domain,
+                privacy,
+            } => (domain, privacy, ExploreCommand::Navigate { request }),
+            ControlRequest::WorldNavigationStatus {
+                id,
+                domain,
+                privacy,
+            } => {
+                let requested = geo_domain(&domain);
+                (
+                    domain,
+                    privacy,
+                    ExploreCommand::NavigationStatus {
+                        id,
+                        domain: requested,
+                    },
+                )
+            }
+            ControlRequest::WorldNavigationStop {
+                id,
+                domain,
+                privacy,
+            } => {
+                let requested = geo_domain(&domain);
+                (
+                    domain,
+                    privacy,
+                    ExploreCommand::NavigationStop {
+                        id,
+                        domain: requested,
+                    },
+                )
+            }
             ControlRequest::WorldJob {
                 action,
                 id,
@@ -643,7 +776,9 @@ impl Runtime {
         let (profile, revision) = authority.profile()?;
         let binding_dir = self.paths.state_dir.join("world-context-bindings");
         let managed_id = match &command {
-            ExploreCommand::Pause { id, .. }
+            ExploreCommand::NavigationStatus { id, .. }
+            | ExploreCommand::NavigationStop { id, .. }
+            | ExploreCommand::Pause { id, .. }
             | ExploreCommand::Resume { id, .. }
             | ExploreCommand::Cancel { id, .. } => Some(id),
             _ => None,
@@ -703,9 +838,16 @@ impl Runtime {
         }
         let status = matches!(command, ExploreCommand::Status { .. });
         let explore = matches!(command, ExploreCommand::Explore { .. });
-        let starts_capture = explore || matches!(command, ExploreCommand::Resume { .. });
+        let navigate = matches!(command, ExploreCommand::Navigate { .. });
+        let navigation = navigate
+            || matches!(
+                command,
+                ExploreCommand::NavigationStatus { .. } | ExploreCommand::NavigationStop { .. }
+            );
+        let starts_capture =
+            explore || navigate || matches!(command, ExploreCommand::Resume { .. });
         // Verify ledger access before accepting a background job.
-        if explore && bindings(&binding_dir, None)?.len() >= 512 {
+        if (explore || navigate) && bindings(&binding_dir, None)?.len() >= 512 {
             return Err("world binding history limit reached".into());
         }
         let now = Timestamp::now();
@@ -758,14 +900,27 @@ impl Runtime {
             if starts_capture {
                 let stopped = cancel_accepted(&value, &domain).await;
                 return Err(format!(
-                    "{error}; accepted capture cancellation {}",
+                    "{error}; accepted world operation stop {}",
                     if stopped { "confirmed" } else { "unconfirmed" }
                 ));
             }
             return Err(error);
         }
-        if explore {
-            let id = value["job"]["id"]
+        if navigation {
+            if let Err(error) = navigation_reply_id(&value, &domain, managed_id.map(String::as_str))
+            {
+                if navigate {
+                    let stopped = cancel_accepted(&value, &domain).await;
+                    return Err(format!(
+                        "{error}; accepted navigation stop {}",
+                        if stopped { "confirmed" } else { "unconfirmed" }
+                    ));
+                }
+                return Err(error);
+            }
+        }
+        if explore || navigate {
+            let id = value[if navigate { "navigation" } else { "job" }]["id"]
                 .as_str()
                 .ok_or("world acceptance omitted job id")?;
             if let Err(error) = bindings(&binding_dir, Some((id, &domain))) {
@@ -773,15 +928,19 @@ impl Runtime {
                 // durable. Do not leave a live job hidden behind a failed response.
                 return if cancel_accepted(&value, &domain).await {
                     Err(format!(
-                        "accepted capture cancelled because its Core binding failed: {error}"
+                        "accepted world operation stopped because its Core binding failed: {error}"
                     ))
                 } else {
-                    Err(format!("capture {id} was accepted but Core binding failed ({error}); cancellation is unconfirmed; inspect it with the local owner CLI"))
+                    Err(format!("world operation {id} was accepted but Core binding failed ({error}); stop is unconfirmed; inspect it with the local owner CLI"))
                 };
             }
         }
         if status {
             scoped_status(&mut value, &domain, &bindings(&binding_dir, None)?);
+        }
+        if navigation {
+            compact_navigation_reply(&mut value);
+            value["context_domain"] = serde_json::json!(domain);
         }
         compact_model_reply(&mut value);
         if serde_json::to_vec(&value)
@@ -830,6 +989,144 @@ mod tests {
 
     fn scope() -> ContextDomain {
         ContextDomain::personal("owner").unwrap()
+    }
+
+    #[test]
+    fn navigation_admission_uses_only_typed_sources_and_public_signal_hosts() {
+        use archie_worldd::navigation::NavigationRequest;
+        let work = ContextDomain::work("org", "a").unwrap();
+        let profile = RuntimeProfile::for_domain(work.clone());
+        let mut request = NavigationRequest {
+            domain: ExplorationDomain::Work,
+            sources: vec![exploration::ImagerySource::GoogleSatellite],
+            signals: false,
+            ..Default::default()
+        };
+        let command = ExploreCommand::Navigate {
+            request: request.clone(),
+        };
+        assert_eq!(
+            admit_command(&profile, &work, PrivacyGrade::Public, &command).unwrap(),
+            vec!["mt1.google.com"]
+        );
+        assert!(admit_command(&profile, &work, PrivacyGrade::Internal, &command).is_err());
+        request.signals = true;
+        request.sources = vec![exploration::ImagerySource::BlueMarble];
+        let command = ExploreCommand::Navigate { request };
+        assert_eq!(
+            admit_command(&profile, &work, PrivacyGrade::Public, &command).unwrap(),
+            vec![
+                "gibs.earthdata.nasa.gov",
+                "earthquake.usgs.gov",
+                "eonet.gsfc.nasa.gov",
+                "api.adsb.lol"
+            ]
+        );
+        let other = ContextDomain::work("org", "b").unwrap();
+        assert!(admit_command(&profile, &other, PrivacyGrade::Public, &command).is_err());
+        let id = "a".repeat(32);
+        let ledger = [(id.clone(), work.clone())].into();
+        assert!(require_job_binding(&id, &work, &ledger).is_ok());
+        assert!(require_job_binding(&id, &other, &ledger).is_err());
+        let reads = capabilities(
+            1000,
+            &work,
+            PrivacyGrade::Public,
+            &ExploreCommand::NavigationStatus {
+                id: id.clone(),
+                domain: ExplorationDomain::Work,
+            },
+            &[],
+        )
+        .unwrap();
+        assert!(reads[0].constraints.actions.contains(&Action::Read));
+        let stops = capabilities(
+            1000,
+            &work,
+            PrivacyGrade::Public,
+            &ExploreCommand::NavigationStop {
+                id,
+                domain: ExplorationDomain::Work,
+            },
+            &[],
+        )
+        .unwrap();
+        assert!(stops[0].constraints.actions.contains(&Action::Write));
+    }
+
+    #[test]
+    fn navigation_reply_identity_cannot_substitute_another_project_or_session() {
+        let id = "a".repeat(32);
+        let work = ContextDomain::work("org", "a").unwrap();
+        let value = serde_json::json!({"navigation":{"id":id,"domain":"work","state":"active"}});
+        assert!(navigation_reply_id(&value, &work, Some(&id)).is_ok());
+        assert!(navigation_reply_id(&value, &work, Some(&"b".repeat(32))).is_err());
+        assert!(navigation_reply_id(&value, &scope(), Some(&id)).is_err());
+        let absent = serde_json::json!({"navigation":{"id":"../escape","domain":"work"}});
+        assert!(navigation_reply_id(&absent, &work, None).is_err());
+    }
+
+    #[test]
+    fn rejected_navigation_acknowledgement_rolls_back_the_admitted_session() {
+        let id = "a".repeat(32);
+        let domain = ContextDomain::work("org", "a").unwrap();
+        let value =
+            serde_json::json!({"navigation":{"id":id,"domain":"personal","token":"ignored"}});
+        let ExploreCommand::NavigationStop {
+            id: stopped,
+            domain: stopped_domain,
+        } = rollback_command(&value, &domain).unwrap()
+        else {
+            panic!("navigation stop")
+        };
+        assert_eq!(stopped, id);
+        assert_eq!(stopped_domain, ExplorationDomain::Work);
+        assert!(
+            rollback_command(&serde_json::json!({"navigation":{"id":"../bad"}}), &domain).is_none()
+        );
+        let mut value = serde_json::json!({"navigation":{"id":id,"domain":"work","state":"active", "request":{"sources":["blue_marble"]},
+            "viewport":{"data_base64":"PIXELS"},"secret":"SECRET"},"providers":["FOREIGN"]});
+        compact_navigation_reply(&mut value);
+        assert_eq!(value["navigation"]["id"], id);
+        assert!(!value.to_string().contains("PIXELS"));
+        assert!(!value.to_string().contains("SECRET"));
+        assert!(value.get("providers").is_none());
+    }
+
+    #[test]
+    fn navigation_policy_lease_expires_before_start_dispatch() {
+        let command = ExploreCommand::Navigate {
+            request: Default::default(),
+        };
+        let request = capabilities(
+            1000,
+            &scope(),
+            PrivacyGrade::Public,
+            &command,
+            &["mt1.google.com"],
+        )
+        .unwrap()
+        .remove(0);
+        let mut lease = PolicyEngine::default().decide(&request).lease.unwrap();
+        lease.constraints.expires_at = Some(Timestamp::from_millis(0));
+        let Scope::OneOperation { operation: id } = request.scope else {
+            panic!("one operation")
+        };
+        assert!(lease
+            .authorises_one_operation(&operation(&request), id, Timestamp::now())
+            .is_err());
+    }
+
+    #[test]
+    fn model_navigation_reply_removes_credentials_descriptors_and_pixels() {
+        let mut value = serde_json::json!({"navigation":{"id":"a".repeat(32),
+            "state":"active","token":"NAV_SECRET","navigation_token":"NAV_SECRET",
+            "descriptor":{"url":"SECRET_ENDPOINT"},"navigation_descriptor":{"token":"NAV_SECRET"},
+            "preview":{"data_base64":"PIXELS"}}});
+        compact_model_reply(&mut value);
+        assert!(!value.to_string().contains("SECRET"));
+        assert!(!value.to_string().contains("PIXELS"));
+        assert_eq!(value["navigation"]["state"], "active");
     }
 
     #[test]

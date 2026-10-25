@@ -41,6 +41,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod catalogue;
 pub mod exploration;
+pub mod globe;
 
 pub use catalogue::{provider, GeoProviderCapabilities, PROVIDERS};
 

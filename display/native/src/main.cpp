@@ -4,6 +4,7 @@
 #include "DisplayControl.h"
 #include "ShellRuntime.h"
 #include "WorldImageProvider.h"
+#include "GlobeStreamBridge.h"
 #include "UiWalk.h"
 
 #include <QGuiApplication>
@@ -100,7 +101,9 @@ int main(int argc, char *argv[])
     const auto controlPort=arguments.value(QStringLiteral("control-port")).toUInt(&controlValid);
     if(!portValid||projectionPort==0||projectionPort>65535||!controlValid||controlPort>65535){qCritical("archie-display: invalid loopback port");return EXIT_FAILURE;}
     ArchieBridge bridge(nullptr, shellMode,static_cast<quint16>(projectionPort));
-    const auto captureAllowed=[&bridge] {
+    GlobeStreamBridge globeStream;
+    const auto captureAllowed=[&bridge,&globeStream] {
+        if(globeStream.sourceId()==QStringLiteral("google_satellite"))return false;
         for(const auto &entry:bridge.imagerySources()) {
             const auto source=entry.toMap();
             if(source.value(QStringLiteral("source_id")).toString()==bridge.selectedImagery() &&
@@ -109,12 +112,14 @@ int main(int argc, char *argv[])
         return true;
     };
     bridge.setPresented(false);
-    if(arguments.isSet(QStringLiteral("imagery-source")))bridge.setSelectedImagery(arguments.value(QStringLiteral("imagery-source")));
+    if(arguments.isSet(QStringLiteral("imagery-source"))){bridge.setSelectedImagery(arguments.value(QStringLiteral("imagery-source")));globeStream.setSourceId(arguments.value(QStringLiteral("imagery-source")));}
     displayControl.setShellMode(shellMode);
     ShellRuntime shellRuntime(arguments.value(QStringLiteral("shell-bridge")),
         arguments.value(QStringLiteral("lan-file")), arguments.value(QStringLiteral("workspaces-root")));
     QQmlApplicationEngine engine;
     auto *worldImages=new WorldImageProvider;engine.addImageProvider(QStringLiteral("world"),worldImages);bridge.setWorldImageProvider(worldImages);
+    auto *globeImages=new WorldImageProvider;engine.addImageProvider(QStringLiteral("globe"),globeImages);globeStream.setImageProvider(globeImages);
+    engine.rootContext()->setContextProperty(QStringLiteral("globeStream"), &globeStream);
     engine.rootContext()->setContextProperty(QStringLiteral("archieBridge"), &bridge);
     engine.rootContext()->setContextProperty(QStringLiteral("lumen"), &lumen);
     engine.rootContext()->setContextProperty(QStringLiteral("appCatalog"), &appCatalog);

@@ -213,6 +213,18 @@ mod tests {
     }
 
     #[test]
+    fn navigation_wire_accepts_only_typed_bounded_request_fields() {
+        let token = "a".repeat(64);
+        let request =
+            serde_json::to_value(crate::navigation::NavigationRequest::default()).unwrap();
+        let mut envelope =
+            serde_json::json!({"token":token,"command":{"action":"navigate","request":request}});
+        assert!(authenticate(&serde_json::to_vec(&envelope).unwrap(), &token).is_ok());
+        envelope["command"]["request"]["endpoint"] = serde_json::json!("https://example.com");
+        assert!(authenticate(&serde_json::to_vec(&envelope).unwrap(), &token).is_err());
+    }
+
+    #[test]
     fn unknown_nested_request_fields_are_refused() {
         let token = "a".repeat(64);
         let mut request =
@@ -322,7 +334,7 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{watch, Semaphore};
 
-const REQUEST_LIMIT: usize = 16 * 1024;
+const REQUEST_LIMIT: usize = 32 * 1024;
 const REPLY_LIMIT: usize = 8 * 1024 * 1024;
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(85);
 
@@ -390,7 +402,18 @@ fn authenticate(bytes: &[u8], expected: &str) -> Result<ExploreCommand, String> 
     // The reusable geography DTO accepts metadata; the command wire is stricter.
     let raw: Value = serde_json::from_slice(bytes).map_err(|_| "invalid world command")?;
     if let Some(request) = raw["command"].get("request") {
-        let known = [
+        let navigation_fields = [
+            "domain",
+            "sources",
+            "imagery_date",
+            "max_zoom",
+            "max_visible_tiles",
+            "max_requests",
+            "max_bytes",
+            "duration_seconds",
+            "signals",
+        ];
+        let exploration_fields = [
             "latitude",
             "longitude",
             "radius_m",
@@ -404,6 +427,11 @@ fn authenticate(bytes: &[u8], expected: &str) -> Result<ExploreCommand, String> 
             "signal_updates",
             "signal_interval_seconds",
         ];
+        let known: &[&str] = if raw["command"]["action"] == "navigate" {
+            &navigation_fields
+        } else {
+            &exploration_fields
+        };
         if request
             .as_object()
             .is_none_or(|fields| fields.keys().any(|key| !known.contains(&key.as_str())))
@@ -433,6 +461,11 @@ async fn serve(mut stream: TcpStream, service: ExplorationService, token: Arc<St
         let bytes = tokio::time::timeout(Duration::from_secs(3), frame(&mut stream, REQUEST_LIMIT))
             .await
             .map_err(|_| "world command read timed out")??;
+        // The viewport capability is distinct and cannot invoke owner commands.
+        let raw: Value = serde_json::from_slice(&bytes).map_err(|_| "invalid world command")?;
+        if raw.get("session_id").is_some() {
+            return service.navigation_message(&bytes).await;
+        }
         let command = authenticate(&bytes, &token)?;
         tokio::time::timeout(COMMAND_TIMEOUT, service.execute(command))
             .await
@@ -501,6 +534,9 @@ pub async fn run(
         token: token.clone(),
     };
     let descriptor_path = runtime_dir.join("control.json");
+    service
+        .configure_navigation(runtime_dir.clone(), descriptor.address.clone())
+        .await?;
     reject_symlink(&descriptor_path)?;
     // Windows cannot rename over an existing destination; the held instance lock
     // guarantees stale descriptor removal cannot affect another running daemon.
@@ -533,6 +569,7 @@ pub async fn run(
         }
     };
     clients.abort_all();
+    service.shutdown_navigation().await;
     while clients.join_next().await.is_some() {}
     let _ = std::fs::remove_file(descriptor_path);
     drop(lock);

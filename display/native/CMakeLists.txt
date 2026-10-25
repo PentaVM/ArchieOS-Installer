@@ -52,6 +52,10 @@ qt_add_executable(archie-display
     src/ExplorationPreview.h
     src/ExplorationCredential.cpp
     src/ExplorationCredential.h
+    src/GlobeStreamBridge.cpp
+    src/GlobeStreamBridge.h
+    src/GlobeTiles.cpp
+    src/GlobeTiles.h
     src/WorldVisuals.cpp
     src/WorldVisuals.h
     src/WorldImageProvider.h
@@ -205,6 +209,15 @@ if(ARCHIE_NATIVE_BUILD_TESTS)
     target_include_directories(test_exploration_preview PRIVATE src)
     target_link_libraries(test_exploration_preview PRIVATE archie::visual Qt6::Gui)
     add_test(NAME exploration_preview_contracts COMMAND test_exploration_preview)
+    qt_add_executable(test_globe_stream tests/test_globe_stream.cpp src/GlobeStreamBridge.cpp src/GlobeStreamBridge.h src/GlobeTiles.cpp src/ExplorationCredential.cpp)
+    target_include_directories(test_globe_stream PRIVATE src)
+    target_link_libraries(test_globe_stream PRIVATE Qt6::Gui Qt6::Network Qt6::Quick Qt6::Test)
+    add_test(NAME globe_stream_contracts COMMAND test_globe_stream)
+    set_tests_properties(globe_stream_contracts PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    qt_add_executable(test_globe_tiles tests/test_globe_tiles.cpp src/GlobeTiles.cpp)
+    target_include_directories(test_globe_tiles PRIVATE src)
+    target_link_libraries(test_globe_tiles PRIVATE Qt6::Gui)
+    add_test(NAME globe_tiles_contracts COMMAND test_globe_tiles)
     qt_add_executable(test_world_visuals tests/test_world_visuals.cpp src/WorldVisuals.cpp)
     target_include_directories(test_world_visuals PRIVATE src)
     target_link_libraries(test_world_visuals PRIVATE archie::visual Qt6::Gui)

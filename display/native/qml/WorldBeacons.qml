@@ -8,10 +8,11 @@ Item {
     id: beacons
     required property var controller
     required property var view
+    property var points:controller.worldPoints || []
     property string selectedId: ""
     signal chosen(var point)
     Repeater {
-        model: beacons.controller.worldPoints || []
+        model: beacons.points
         delegate: Item {
             id: marker
             required property var modelData

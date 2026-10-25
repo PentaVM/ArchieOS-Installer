@@ -1344,6 +1344,22 @@ pub enum WorldJobAction {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "request", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ControlRequest {
+    WorldNavigate {
+        #[serde(rename = "request_body")]
+        request: archie_worldd::navigation::NavigationRequest,
+        domain: archie_vault::ContextDomain,
+        privacy: archie_types::PrivacyGrade,
+    },
+    WorldNavigationStatus {
+        id: String,
+        domain: archie_vault::ContextDomain,
+        privacy: archie_types::PrivacyGrade,
+    },
+    WorldNavigationStop {
+        id: String,
+        domain: archie_vault::ContextDomain,
+        privacy: archie_types::PrivacyGrade,
+    },
     WorldJob {
         action: WorldJobAction,
         id: String,
@@ -1469,6 +1485,8 @@ impl ControlRequest {
         matches!(
             self,
             Self::SentryPrepare { .. }
+                | Self::WorldNavigate { .. }
+                | Self::WorldNavigationStop { .. }
                 | Self::WorldExplore { .. }
                 | Self::WorldResolve { .. }
                 | Self::WorldJob { .. }
@@ -1500,7 +1518,10 @@ impl ControlRequest {
     pub fn is_world(&self) -> bool {
         matches!(
             self,
-            Self::WorldPlan { .. }
+            Self::WorldNavigate { .. }
+                | Self::WorldNavigationStatus { .. }
+                | Self::WorldNavigationStop { .. }
+                | Self::WorldPlan { .. }
                 | Self::WorldJob { .. }
                 | Self::WorldExplore { .. }
                 | Self::WorldResolve { .. }
@@ -1510,6 +1531,9 @@ impl ControlRequest {
 
     pub fn name(&self) -> &'static str {
         match self {
+            Self::WorldNavigate { .. } => "world-navigate",
+            Self::WorldNavigationStatus { .. } => "world-navigation-status",
+            Self::WorldNavigationStop { .. } => "world-navigation-stop",
             Self::WorldJob { .. } => "world-job",
             Self::WorldPlan { .. } => "world-plan",
             Self::WorldExplore { .. } => "world-explore",

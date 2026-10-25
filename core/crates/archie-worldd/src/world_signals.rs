@@ -125,6 +125,39 @@ pub fn requests(latitude: f64, longitude: f64, radius_m: f64) -> Vec<SignalReque
     .collect()
 }
 
+/// Fixed, bounded public event feeds for globe-scale display. Aircraft feeds
+/// remain local because receiver queries require an explicit bounded area.
+pub fn global_requests() -> Vec<SignalRequest> {
+    [
+        (
+            "usgs_earthquakes",
+            "USGS · last 24 hours",
+            "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson".to_owned(),
+            60,
+        ),
+        (
+            "nasa_eonet",
+            "NASA EONET · reported natural events",
+            format!("https://eonet.gsfc.nasa.gov/api/v3/events?status=open&days=30&limit={EONET_RESPONSE_LIMIT}"),
+            600,
+        ),
+    ]
+    .into_iter()
+    .map(|(provider, label, url, ttl_seconds)| SignalRequest {
+        provider: provider.into(),
+        label: label.into(),
+        url,
+        ttl_seconds,
+    })
+    .collect()
+}
+
+/// Decode global natural events with the same validation, deduplication and
+/// caps as local observations, without an AOI filter. Performs no I/O.
+pub fn decode_global(provider: &str, bytes: &[u8]) -> Result<SignalBatch, String> {
+    decode_at(provider, bytes, None, now_ms()?)
+}
+
 pub fn decode(
     provider: &str,
     bytes: &[u8],
@@ -132,28 +165,29 @@ pub fn decode(
     lon: f64,
     radius_m: f64,
 ) -> Result<SignalBatch, String> {
+    decode_at(provider, bytes, Some((lat, lon, radius_m)), now_ms()?)
+}
+
+fn now_ms() -> Result<i64, String> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|_| "system time unavailable")?;
-    decode_at(
-        provider,
-        bytes,
-        lat,
-        lon,
-        radius_m,
-        i64::try_from(now.as_millis()).map_err(|_| "system time out of range")?,
-    )
+    i64::try_from(now.as_millis()).map_err(|_| "system time out of range".into())
 }
 
 fn decode_at(
     provider: &str,
     bytes: &[u8],
-    lat: f64,
-    lon: f64,
-    radius_m: f64,
+    area: Option<(f64, f64, f64)>,
     now: i64,
 ) -> Result<SignalBatch, String> {
-    if !valid_aoi(lat, lon, radius_m) || now < 0 || bytes.len() > MAX_INPUT_BYTES {
+    if area.is_none() && !matches!(provider, "usgs_earthquakes" | "nasa_eonet") {
+        return Err("global signals support only USGS earthquakes and NASA EONET; aircraft require a bounded local area".into());
+    }
+    if area.is_some_and(|(lat, lon, radius)| !valid_aoi(lat, lon, radius))
+        || now < 0
+        || bytes.len() > MAX_INPUT_BYTES
+    {
         return Err("invalid signal area, clock or response size".into());
     }
     let root: Value = serde_json::from_slice(bytes).map_err(|_| "invalid signal JSON")?;
@@ -191,7 +225,9 @@ fn decode_at(
         let Some(point) = candidate else {
             continue;
         };
-        if !in_area(point.latitude, point.longitude, lat, lon, radius_m) {
+        if area.is_some_and(|(lat, lon, radius)| {
+            !in_area(point.latitude, point.longitude, lat, lon, radius)
+        }) {
             continue;
         }
         match unique.entry(point.id.clone()) {
@@ -520,9 +556,7 @@ mod tests {
         decode_at(
             provider,
             &serde_json::to_vec(&value).unwrap(),
-            lat,
-            lon,
-            radius,
+            Some((lat, lon, radius)),
             NOW,
         )
         .unwrap()
@@ -674,9 +708,7 @@ mod tests {
         assert!(decode_at(
             "adsb_lol",
             br#"{"now":1700000005001,"ac":[]}"#,
-            0.,
-            0.,
-            1000.,
+            Some((0., 0., 1000.)),
             NOW
         )
         .is_err());
@@ -732,9 +764,15 @@ mod tests {
             ("adsb_lol", b"{\"ac\":[]}"),
             ("usgs_earthquakes", b"{bad"),
         ] {
-            assert!(decode_at(provider, bytes, 0., 0., 1000., NOW).is_err());
+            assert!(decode_at(provider, bytes, Some((0., 0., 1000.)), NOW).is_err());
         }
-        assert!(decode_at("nasa_eonet", br#"{"events":[]}"#, f64::NAN, 0., 1000., NOW).is_err());
+        assert!(decode_at(
+            "nasa_eonet",
+            br#"{"events":[]}"#,
+            Some((f64::NAN, 0., 1000.)),
+            NOW
+        )
+        .is_err());
         assert!(requests(0., 0., 0.).is_empty());
     }
 
@@ -768,5 +806,125 @@ mod tests {
         );
         assert_eq!((batch.points.len(), batch.rejected), (1, 2));
         assert_eq!(batch.points[0].observed_at_ms, None);
+    }
+
+    #[test]
+    fn globe_requests_are_fixed_global_bounded_natural_event_feeds() {
+        let list = global_requests();
+        assert_eq!(list.len(), 2);
+        assert_eq!(
+            (list[0].provider.as_str(), list[0].ttl_seconds),
+            ("usgs_earthquakes", 60)
+        );
+        assert_eq!(
+            list[0].url,
+            "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson"
+        );
+        assert_eq!(
+            (list[1].provider.as_str(), list[1].ttl_seconds),
+            ("nasa_eonet", 600)
+        );
+        assert_eq!(
+            list[1].url,
+            "https://eonet.gsfc.nasa.gov/api/v3/events?status=open&days=30&limit=200"
+        );
+    }
+
+    #[test]
+    fn globe_keeps_continents_and_both_sides_of_seam_but_rejects_invalid_quakes() {
+        let input = json!({"type":"FeatureCollection","features":[
+            quake("chile",-70.66,-33.45,Value::Null),
+            quake("japan",139.69,35.68,Value::Null),
+            quake("seam_west",-179.99,0.,Value::Null),
+            quake("seam_east",179.99,0.,Value::Null),
+            quake("chile",-70.66,-33.45,Value::Null),
+            quake("invalid_lat",0.,91.,Value::Null),
+            quake("invalid_lon",181.,0.,Value::Null),
+            quake("stale",0.,0.,json!(0)),
+            quake("future",0.,0.,json!(i64::MAX))
+        ]});
+        let batch =
+            decode_global("usgs_earthquakes", &serde_json::to_vec(&input).unwrap()).unwrap();
+        assert_eq!(
+            (
+                batch.seen,
+                batch.matched_total,
+                batch.rejected,
+                batch.omitted_points
+            ),
+            (9, 4, 5, 0)
+        );
+        let ids: Vec<_> = batch.points.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec![
+                "usgs_earthquakes:chile",
+                "usgs_earthquakes:japan",
+                "usgs_earthquakes:seam_east",
+                "usgs_earthquakes:seam_west"
+            ]
+        );
+        assert!(!batch.total_is_lower_bound);
+        assert!(batch.points.iter().all(|p| p.observed_at_ms.is_none()));
+    }
+
+    #[test]
+    fn globe_eonet_provider_limit_and_output_omissions_remain_explicit() {
+        let events:Vec<_>=(0..200).map(|i|json!({"id":format!("EONET_{i}"),"geometry":[{"type":"Point","coordinates":[if i%2==0 {179.99} else {-179.99},if i%3==0 {35.} else {-33.}]}]})).collect();
+        let batch = decode_global(
+            "nasa_eonet",
+            &serde_json::to_vec(&json!({"events":events})).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                batch.seen,
+                batch.matched_total,
+                batch.points.len(),
+                batch.omitted_points,
+                batch.rejected
+            ),
+            (200, 200, 128, 72, 0)
+        );
+        assert!(batch.total_is_lower_bound && batch.truncated);
+        assert!(batch.points.iter().any(|p| p.longitude < 0.));
+        assert!(batch.points.iter().any(|p| p.longitude > 0.));
+    }
+
+    #[test]
+    fn globe_refuses_aircraft_unknown_and_oversized_feeds() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        assert!(decode_global(
+            "adsb_lol",
+            &serde_json::to_vec(&json!({"now":now,"ac":[]})).unwrap()
+        )
+        .is_err());
+        assert!(decode_global("other", b"{}").is_err());
+        assert!(decode_global("nasa_eonet", &vec![b' '; 2 * 1024 * 1024 + 1]).is_err());
+    }
+
+    #[test]
+    fn globe_retains_input_scan_ceiling_and_discloses_incomplete_total() {
+        let features: Vec<_> = (0..4097)
+            .map(|i| quake(&format!("q{i}"), 139., 35., Value::Null))
+            .collect();
+        let batch = decode_global(
+            "usgs_earthquakes",
+            &serde_json::to_vec(&json!({"type":"FeatureCollection","features":features})).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                batch.seen,
+                batch.matched_total,
+                batch.points.len(),
+                batch.omitted_points
+            ),
+            (4097, 4096, 128, 3968)
+        );
+        assert!(batch.total_is_lower_bound && batch.truncated);
     }
 }
