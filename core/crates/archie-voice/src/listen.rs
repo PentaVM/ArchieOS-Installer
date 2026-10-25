@@ -173,6 +173,14 @@ const ASKING: &[&str] = &[
     "are",
     "do",
     "does",
+    "mira",
+    "lee",
+    "revisa",
+    "calcula",
+    "traduce",
+    "resume",
+    "compara",
+    "cuenta",
     "open",
     "show",
     "tell",
@@ -180,6 +188,9 @@ const ASKING: &[&str] = &[
     "explain",
     "please",
     "help",
+    "look",
+    "read",
+    "check",
     "hello",
     "hi",
     "hey",
@@ -192,14 +203,12 @@ pub fn asks_something(text: &str) -> bool {
     if trimmed.ends_with('?') || trimmed.contains('¿') || names_archie(text) {
         return true;
     }
+    // Within its first words: "no, dime la hora", "oye, ¿y cómo…", "bueno, abre el correo"
+    // open with a word that only leads into what is asked.
     let plain = plain(text);
-    let mut words = plain.split(' ');
-    // "por qué" and "¿y cómo…?" open with a word that only leads into the question.
-    let first = words.next().unwrap_or("");
-    let second = words.next().unwrap_or("");
-    ASKING.contains(&first)
-        || (matches!(first, "y" | "and" | "por" | "oye" | "archie") && ASKING.contains(&second))
-        || (first == "por" && second == "que")
+    let words: Vec<&str> = plain.split(' ').take(3).collect();
+    words.iter().any(|word| ASKING.contains(word))
+        || words.windows(2).any(|pair| pair == ["por", "que"])
 }
 
 /// How much there is to reason over. A question carries what it needs; a statement does
@@ -264,6 +273,9 @@ pub struct Utterance {
     pub final_by_recogniser: bool,
     /// How long it has been quiet since the last word.
     pub silence_ms: u32,
+    /// The streaming ears heard Archie's name, even if a second hearing left it out of
+    /// `text`: being called by name is being asked.
+    pub named: bool,
 }
 
 /// The floor after an utterance, with nobody speaking.
@@ -332,7 +344,7 @@ pub fn after_utterance_with(
     // The floor is given when the thought is complete, not at the first breath: a question
     // or an order after a short pause, a statement after a long one. A reply to what Archie
     // just said counts as asked: it completes Archie's own question.
-    let asks = asks_something(&heard.text) || replying;
+    let asks = asks_something(&heard.text) || replying || heard.named;
     let pause = if asks {
         ASKED_PAUSE_MS
     } else {
@@ -415,6 +427,7 @@ mod tests {
             text: text.into(),
             final_by_recogniser: true,
             silence_ms: 700,
+            named: false,
         }
     }
 
@@ -516,6 +529,7 @@ mod tests {
                     text: text.into(),
                     final_by_recogniser: true,
                     silence_ms,
+                    named: false,
                 },
                 None,
             )
@@ -547,6 +561,7 @@ mod tests {
                 text: "bueno, eh".into(),
                 final_by_recogniser: true,
                 silence_ms: 2500,
+                named: false,
             },
             None,
         );
@@ -594,6 +609,7 @@ mod tests {
             text: "Archie, abre el formulario y".into(),
             final_by_recogniser: false,
             silence_ms: 450,
+            named: false,
         };
         assert_eq!(
             FloorPolicy::default()

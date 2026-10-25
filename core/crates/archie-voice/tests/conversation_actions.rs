@@ -181,14 +181,15 @@ fn correction_with_ears(
     let completed = completed_tool.clone();
     let (input, audio) = mpsc::channel();
     input.send(vec![0.1; 2560]).unwrap();
-    input.send(vec![0.0; 6400]).unwrap();
+    // A second of quiet: a question has the floor after 700 ms (listen::ASKED_PAUSE_MS).
+    input.send(vec![0.0; 16000]).unwrap();
     let next_audio = input.clone();
     let mut actions = AsyncActions::new(
         runtime.handle().clone(),
         Duration::from_secs(1),
         move |_| {
             next_audio.send(vec![0.2; 2560]).unwrap();
-            next_audio.send(vec![0.0; 6400]).unwrap();
+            next_audio.send(vec![0.0; 16000]).unwrap();
             let completed = completed.clone();
             async move {
                 tokio::time::sleep(Duration::from_millis(800)).await;
@@ -409,7 +410,8 @@ fn run_one<S: TurnSource>(
     .unwrap();
     let (input, audio) = mpsc::channel();
     input.send(vec![0.1; 2560]).unwrap();
-    input.send(vec![0.0; 6400]).unwrap();
+    // A second of quiet: a question has the floor after 700 ms (listen::ASKED_PAUSE_MS).
+    input.send(vec![0.0; 16000]).unwrap();
     drop(input);
     let stop = Arc::new(AtomicBool::new(false));
     let watchdog_stop = stop.clone();
