@@ -61,6 +61,41 @@ local observations also include adsb.lol aircraft. Markers use real coordinates,
 reported altitude where present, timestamps and source properties. Missing
 contacts, source failures and unavailable Core metrics remain explicit.
 
+### Textured city and street geometry
+
+With Google Satellite selected, newly admitted navigation enables
+`photogrammetry` by default. Below 250 km altitude, Rust selects visible Earth
+Web octree nodes by the actual camera, progressively downloads original JPEG
+textures and indexed 3D surfaces, and replaces ready parent octants. A bounded
+ancestor chain preserves coverage as detail arrives; obsolete camera requests
+are canceled. This is Aleph's textured mesh protocol ported to Rust, not an
+extrusion of raster imagery or OSM footprints. The undocumented public endpoint
+uses no API key/billing account. Official billed Google 3D Tiles stays disabled.
+
+Near the ground the camera tilts progressively to show building height. Hold the
+right mouse button and drag vertically to adjust tilt; left drag pans and the
+wheel zooms. Clicking a surface preserves the camera. Geometry appears only
+where the provider supplies it; elsewhere satellite context remains with an
+explicit coverage state. NASA spectral sources remain their labelled raster
+products, not synthetic photographic buildings.
+
+Use `--no-photogrammetry` on `world navigate`, or `photogrammetry:false` in the
+voice tool, for raster-only navigation. Older serialized requests default false,
+so an existing admission is never silently widened. Core adds `kh.google.com`
+only when this flag and Google imagery are both admitted. Private viewer
+messages include a separate bounded mesh inventory; model replies strip mesh,
+texture and raw-protobuf fields. Google 3D capture/export is refused.
+
+Earth Web source data is volatile: at most 48 raw nodes / 32 MiB, 64 MiB encoded
+packets and 16 MiB metadata, plus temporary decode/transfer buffers. Active
+packet groups are additionally bounded by decoded image/geometry cost. Native
+3D caching is separately capped at 64 meshes / 128 MiB decoded data; original
+rectangular JPEGs up to 4096×4096 are dimension-checked before allocation. The
+shared `google_earth` local policy is 180 requests/minute, four maximum in flight,
+with Retry-After handling and the same admitted session byte/request budgets.
+Foreground apps never control this scheduling. Source quality, dates and
+coverage remain external; no certified height/accuracy is implied.
+
 ### Explicit area captures
 
 Exploration is explicitly enabled. The stock isolated `DynamicUser` world-feed
@@ -227,8 +262,8 @@ non-proprietary capture checks.
   building bases use a labeled 0 m preview assumption. Vertical datum is unverified.
 - Pure planning handles the antimeridian, but capture/export currently asks for
   two non-wrapping areas before any requests. Polar Mercator regions are refused.
-- Multipolygon/hole buildings, Google Street View/Earth mesh extraction and
-  photogrammetry are not advertised as implemented. Existing
+- Multipolygon/hole buildings, Google Street View and offline exports of
+  Google photogrammetry are not advertised as implemented. Existing
   GeoFabric storage/analysis restrictions are preserved.
 - HUD effective TPS is the latest measured Core `AiInfer` output-token count over
   its full execution time, not generation-only throughput or all voice traffic.

@@ -54,6 +54,8 @@ qt_add_executable(archie-display
     src/ExplorationCredential.h
     src/GlobeStreamBridge.cpp
     src/GlobeStreamBridge.h
+    src/EarthMeshes.cpp
+    src/EarthMeshes.h
     src/GlobeTiles.cpp
     src/GlobeTiles.h
     src/WorldVisuals.cpp
@@ -209,7 +211,7 @@ if(ARCHIE_NATIVE_BUILD_TESTS)
     target_include_directories(test_exploration_preview PRIVATE src)
     target_link_libraries(test_exploration_preview PRIVATE archie::visual Qt6::Gui)
     add_test(NAME exploration_preview_contracts COMMAND test_exploration_preview)
-    qt_add_executable(test_globe_stream tests/test_globe_stream.cpp src/GlobeStreamBridge.cpp src/GlobeStreamBridge.h src/GlobeTiles.cpp src/ExplorationCredential.cpp)
+    qt_add_executable(test_globe_stream tests/test_globe_stream.cpp src/GlobeStreamBridge.cpp src/GlobeStreamBridge.h src/GlobeTiles.cpp src/EarthMeshes.cpp src/ExplorationCredential.cpp)
     target_include_directories(test_globe_stream PRIVATE src)
     target_link_libraries(test_globe_stream PRIVATE Qt6::Gui Qt6::Network Qt6::Quick Qt6::Test)
     add_test(NAME globe_stream_contracts COMMAND test_globe_stream)
@@ -218,11 +220,16 @@ if(ARCHIE_NATIVE_BUILD_TESTS)
     target_include_directories(test_globe_tiles PRIVATE src)
     target_link_libraries(test_globe_tiles PRIVATE Qt6::Gui)
     add_test(NAME globe_tiles_contracts COMMAND test_globe_tiles)
+    qt_add_executable(test_earth_meshes tests/test_earth_meshes.cpp src/EarthMeshes.cpp)
+    target_include_directories(test_earth_meshes PRIVATE src)
+    target_link_libraries(test_earth_meshes PRIVATE Qt6::Gui)
+    target_compile_definitions(test_earth_meshes PRIVATE QT_NO_CAST_FROM_ASCII)
+    add_test(NAME earth_mesh_contracts COMMAND test_earth_meshes)
     qt_add_executable(test_world_visuals tests/test_world_visuals.cpp src/WorldVisuals.cpp)
     target_include_directories(test_world_visuals PRIVATE src)
     target_link_libraries(test_world_visuals PRIVATE archie::visual Qt6::Gui)
     add_test(NAME world_visual_contracts COMMAND test_world_visuals)
-    qt_add_executable(test_world_texture tests/test_world_texture.cpp src/MeshGeometry.cpp src/MeshGeometry.h)
+    qt_add_executable(test_world_texture tests/test_world_texture.cpp src/MeshGeometry.cpp src/MeshGeometry.h src/EarthMeshes.cpp)
     target_include_directories(test_world_texture PRIVATE src)
     target_link_libraries(test_world_texture PRIVATE Qt6::Quick Qt6::Quick3D Qt6::Test)
     qt_add_resources(test_world_texture "world-texture-material" PREFIX "/world-texture" BASE "${CMAKE_CURRENT_SOURCE_DIR}/qml"

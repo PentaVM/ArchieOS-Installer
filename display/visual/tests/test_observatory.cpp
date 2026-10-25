@@ -2183,6 +2183,12 @@ void manual_globe_navigation_stays_bounded_and_can_return_home() {
     const float r=std::sqrt(close.eye.x*close.eye.x+close.eye.y*close.eye.y+close.eye.z*close.eye.z);
     CHECK(r>20.0F && r<20.001F);CHECK(std::fabs(close.eye.y/r)<0.9999F);
     const auto beforePan=close;
+    model.tilt_globe(20);
+    const auto tilted=model.tick(2210).camera;
+    CHECK(!(tilted.eye==close.eye));CHECK(tilted.target==close.target);
+    const auto norm=[](Vec3 p){return std::sqrt(p.x*p.x+p.y*p.y+p.z*p.z);};
+    CHECK(norm(tilted.eye)>20.0F);
+    model.tilt_globe(std::nanf(""));CHECK(model.tick(2220).camera.eye==tilted.eye);
     model.orbit_globe(40,-20,0);
     const auto panned=model.tick(2250).camera;
     CHECK(!(panned.target==beforePan.target));

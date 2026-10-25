@@ -24,6 +24,8 @@ use std::{
 const CACHE_BYTES: usize = 32 * 1024 * 1024;
 const CACHE_TILES: usize = 192;
 const FRAME_BYTES: usize = 4 * 1024 * 1024;
+#[path = "earth_runtime.rs"]
+mod earth_stream;
 
 pub(crate) struct NavigationMeter {
     pub requests: AtomicU64,
@@ -113,10 +115,14 @@ enum NavigationCommand {
         viewport: GlobeViewport,
         #[serde(default)]
         known_keys: Vec<String>,
+        #[serde(default)]
+        known_mesh_keys: Vec<String>,
     },
     Status {
         #[serde(default)]
         known_keys: Vec<String>,
+        #[serde(default)]
+        known_mesh_keys: Vec<String>,
     },
 }
 struct CachedTile {
@@ -149,6 +155,7 @@ struct Session {
     signals_in_flight: bool,
     min_zoom: u8,
     max_zoom: u8,
+    earth: earth_stream::EarthState,
 }
 #[derive(Default)]
 pub(crate) struct NavigationState {
@@ -268,6 +275,7 @@ impl ExplorationService {
             signals_in_flight: false,
             min_zoom: 0,
             max_zoom: 0,
+            earth: earth_stream::EarthState::default(),
         };
         let path = runtime.join("navigation.json");
         if path.exists() {
@@ -297,6 +305,7 @@ impl ExplorationService {
             session.meter.cancelled.store(true, Ordering::Relaxed);
             session.cache.clear();
             session.points.clear();
+            session.earth.clear();
         }
         let result = json!({"navigation":metadata(session)});
         if stop {
@@ -315,7 +324,7 @@ impl ExplorationService {
             serde_json::from_slice(bytes).map_err(|_| "invalid navigation intent")?;
         let inventory = match &envelope.command {
             NavigationCommand::Viewport { known_keys, .. }
-            | NavigationCommand::Status { known_keys } => known_keys,
+            | NavigationCommand::Status { known_keys, .. } => known_keys,
         };
         if inventory.len() > 256
             || inventory
@@ -323,6 +332,21 @@ impl ExplorationService {
                 .any(|v| v.len() > 96 || !v.is_ascii() || v.chars().any(char::is_control))
         {
             return Err("navigation cache inventory exceeds its bound".into());
+        }
+        let mesh_inventory = match &envelope.command {
+            NavigationCommand::Viewport {
+                known_mesh_keys, ..
+            }
+            | NavigationCommand::Status {
+                known_mesh_keys, ..
+            } => known_mesh_keys,
+        };
+        if mesh_inventory.len() > 64
+            || mesh_inventory
+                .iter()
+                .any(|k| k.len() > 96 || !k.is_ascii() || k.chars().any(char::is_control))
+        {
+            return Err("3D mesh inventory exceeds its bound".into());
         }
         let known = {
             let mut state = self.navigation.lock().await;
@@ -334,12 +358,14 @@ impl ExplorationService {
             if matches!(session_state(session), "expired" | "stopped") {
                 return Err("navigation capability expired or stopped".into());
             }
+            session.earth.inventory(mesh_inventory);
             let known = match envelope.command {
                 NavigationCommand::Viewport {
                     generation,
                     source,
                     viewport,
                     known_keys,
+                    ..
                 } => {
                     if generation == 0
                         || generation > 9_007_199_254_740_991
@@ -378,7 +404,7 @@ impl ExplorationService {
                     }
                     known_keys
                 }
-                NavigationCommand::Status { known_keys } => known_keys,
+                NavigationCommand::Status { known_keys, .. } => known_keys,
             };
             if known.len() > 256
                 || known
@@ -392,6 +418,7 @@ impl ExplorationService {
             known
         };
         self.pump_navigation().await;
+        self.pump_earth().await;
         self.navigation_frame(&known, &envelope.session_id, &envelope.token)
             .await
     }
@@ -477,16 +504,18 @@ impl ExplorationService {
                 })
                 .count()
                 + s.in_flight.len();
+            let (earth, meshes, more_meshes) = s.earth.frame(FRAME_BYTES.saturating_sub(bytes));
             (
-                json!({"session_id":s.id,"generation":s.generation,"source_id":source.id,"state":session_state(s),"desired_tiles":s.desired,"tiles":tiles,"pending_tiles":pending,"min_zoom":s.min_zoom,"max_zoom":s.max_zoom,
+                json!({"earth":earth,"meshes":meshes,"session_id":s.id,"generation":s.generation,"source_id":source.id,"state":session_state(s),"desired_tiles":s.desired,"tiles":tiles,"pending_tiles":pending,"min_zoom":s.min_zoom,"max_zoom":s.max_zoom,
                 "source":{"source_id":source.id,"label":source.label,"attribution":source.attribution,"mode":if source.online_only{"online_preview_only"}else{"open_data"},"imagery_date":if source.online_only{Value::Null}else if source.daily{json!(s.date)}else{json!("static")},"retrieved_at_ms":retrieved,"state":session_state(s),"source_resolution_m":resolution,"preview_resolution_m":resolution,"native_max_zoom":source.max_zoom},
                 "usage":{"requests_sent":s.meter.requests.load(Ordering::Relaxed),"bytes_received":s.meter.bytes.load(Ordering::Relaxed),"max_requests":s.request.max_requests,"max_bytes":s.request.max_bytes,"expires_at_ms":s.meter.expires,"cache_tiles":s.cache.len(),"cache_bytes":s.cache.values().map(|v|v.bytes).sum::<usize>()},
-                "errors":s.errors.values().take(8).cloned().collect::<Vec<_>>(),"points":s.points,"signal_sources":s.signal_sources,"signals":signal_counts(&s.points,&s.signal_sources),"more_tiles":more_tiles}),
+                "errors":s.errors.values().take(8).cloned().collect::<Vec<_>>(),"points":s.points,"signal_sources":s.signal_sources,"signals":signal_counts(&s.points,&s.signal_sources),"more_tiles":more_tiles||more_meshes}),
                 provider,
             )
         };
         let usage: Option<ProviderUsage> = self.navigation_provider_usage(provider).await;
         frame["provider"] = json!(usage);
+        frame["earth"]["provider"] = json!(self.navigation_provider_usage("google_earth").await);
         if frame["state"] == "loading" && frame["provider"]["state"] == "waiting_rate_limit" {
             frame["state"] = json!("rate_limited");
         }
@@ -649,6 +678,7 @@ impl ExplorationService {
         if let Some(s) = state.session.as_mut() {
             s.meter.cancelled.store(true, Ordering::Relaxed);
             s.cache.clear();
+            s.earth.clear();
         }
         if let Some((directory, _)) = &state.endpoint {
             let path = directory.join("navigation.json");

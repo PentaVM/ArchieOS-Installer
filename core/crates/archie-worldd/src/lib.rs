@@ -7,6 +7,8 @@
 use archie_types::Timestamp;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "provider")]
+pub mod earth;
 pub mod exploration;
 pub mod exploration_projection;
 #[cfg(feature = "provider")]

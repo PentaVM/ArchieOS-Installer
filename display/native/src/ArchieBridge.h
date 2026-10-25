@@ -130,6 +130,7 @@ public:
     Q_INVOKABLE void focusNode(const QString &id);
     Q_INVOKABLE void releaseFocus();
     Q_INVOKABLE void orbitGlobe(float longitudeDelta, float latitudeDelta, float zoomSteps);
+    Q_INVOKABLE void tiltGlobe(float deltaDegrees);
 
 signals:
     void snapshotChanged();

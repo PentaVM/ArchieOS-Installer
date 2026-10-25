@@ -71,6 +71,10 @@ fn admit_command(
                 if !hosts.contains(&host) {
                     hosts.push(host);
                 }
+                if *source == exploration::ImagerySource::GoogleSatellite && request.photogrammetry
+                {
+                    hosts.push("kh.google.com");
+                }
             }
             if request.signals {
                 hosts.extend(["earthquake.usgs.gov", "eonet.gsfc.nasa.gov", "api.adsb.lol"]);
@@ -385,6 +389,15 @@ fn compact_model_reply(value: &mut serde_json::Value) {
                 "capability",
                 "descriptor",
                 "navigation_descriptor",
+                // Private viewer transport never becomes a model observation.
+                "meshes",
+                "vertices",
+                "indices",
+                "vertices_base64",
+                "indices_base64",
+                "texture_base64",
+                "raw_proto",
+                "protobuf_base64",
             ] {
                 fields.remove(field);
             }
@@ -500,6 +513,26 @@ fn compact_navigation_reply(value: &mut serde_json::Value) {
             ]
             .contains(&key.as_str())
         });
+        if let Some(request) = fields
+            .get_mut("request")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            request.retain(|key, _| {
+                [
+                    "domain",
+                    "sources",
+                    "imagery_date",
+                    "max_zoom",
+                    "max_visible_tiles",
+                    "max_requests",
+                    "max_bytes",
+                    "duration_seconds",
+                    "signals",
+                    "photogrammetry",
+                ]
+                .contains(&key.as_str())
+            });
+        }
     }
     if let Some(fields) = value.as_object_mut() {
         fields.retain(|key, _| key == "navigation" || key == "context_domain");
@@ -1007,9 +1040,32 @@ mod tests {
         };
         assert_eq!(
             admit_command(&profile, &work, PrivacyGrade::Public, &command).unwrap(),
-            vec!["mt1.google.com"]
+            vec!["mt1.google.com", "kh.google.com"]
         );
         assert!(admit_command(&profile, &work, PrivacyGrade::Internal, &command).is_err());
+        let mut raster_only = serde_json::to_value(&request).unwrap();
+        raster_only["photogrammetry"] = serde_json::json!(false);
+        let raster_only = ExploreCommand::Navigate {
+            request: serde_json::from_value(raster_only).unwrap(),
+        };
+        assert_eq!(
+            admit_command(&profile, &work, PrivacyGrade::Public, &raster_only).unwrap(),
+            vec!["mt1.google.com"]
+        );
+        let hosts = admit_command(&profile, &work, PrivacyGrade::Public, &command).unwrap();
+        let leases = capabilities(1000, &work, PrivacyGrade::Public, &command, &hosts).unwrap();
+        assert_eq!(leases.len(), 2);
+        assert!(leases.iter().any(|lease| matches!(&lease.resource,
+            Resource::Network { host, port: 443 } if host == "kh.google.com")));
+        let raster_leases = capabilities(
+            1000,
+            &work,
+            PrivacyGrade::Public,
+            &raster_only,
+            &["mt1.google.com"],
+        )
+        .unwrap();
+        assert_ne!(leases[0].scope, raster_leases[0].scope);
         request.signals = true;
         request.sources = vec![exploration::ImagerySource::BlueMarble];
         let command = ExploreCommand::Navigate { request };
@@ -1127,6 +1183,42 @@ mod tests {
         assert!(!value.to_string().contains("SECRET"));
         assert!(!value.to_string().contains("PIXELS"));
         assert_eq!(value["navigation"]["state"], "active");
+    }
+
+    #[test]
+    fn model_navigation_reply_keeps_admission_flag_but_strips_earth_buffers() {
+        let mut value = serde_json::json!({"navigation":{
+            "id":"a".repeat(32),"state":"active","request":{"photogrammetry":true,
+            "meshes":[{"vertices_base64":"GEOMETRY"}],"raw_proto":"PROTO"},
+            "earth":{"meshes":[{"vertices_base64":"GEOMETRY","indices_base64":"INDICES",
+            "texture_base64":"TEXTURE","vertices":[[1,2,3]],"indices":[0,1,2]}],
+            "raw_proto":"PROTO","protobuf_base64":"PROTO"}}});
+        compact_navigation_reply(&mut value);
+        compact_model_reply(&mut value);
+        assert_eq!(value["navigation"]["request"]["photogrammetry"], true);
+        let encoded = value.to_string();
+        for excluded in [
+            "GEOMETRY", "INDICES", "TEXTURE", "PROTO", "meshes", "vertices",
+        ] {
+            assert!(
+                !encoded.contains(excluded),
+                "model reply retained {excluded}"
+            );
+        }
+        let mut raw = serde_json::json!({"earth":{"meshes":[{"vertices_base64":"GEOMETRY",
+            "indices_base64":"INDICES","texture_base64":"TEXTURE"}],"raw_proto":"PROTO"},
+            "nested":{"vertices_base64":"GEOMETRY","indices_base64":"INDICES","texture_base64":"TEXTURE",
+            "protobuf_base64":"PROTO","vertices":[[1,2,3]],"indices":[0,1,2]}});
+        compact_model_reply(&mut raw);
+        let encoded = raw.to_string();
+        for excluded in [
+            "GEOMETRY", "INDICES", "TEXTURE", "PROTO", "meshes", "vertices",
+        ] {
+            assert!(
+                !encoded.contains(excluded),
+                "model reply retained {excluded}"
+            );
+        }
     }
 
     #[test]

@@ -74,12 +74,17 @@ Shell.Panel {
                 Shell.SourceChip { projection:hud.projection; small:true }
             }
             Label {textFormat:Text.PlainText; text:"Exploración · GeoFabric / Aleph"; color:Shell.Theme.t2; font.family:Shell.Theme.font }
-            Label {textFormat:Text.PlainText; Layout.fillWidth:true; wrapMode:Text.Wrap; text:"Arrastra para recorrer el planeta. La rueda acerca hasta el suelo. Las teselas siguen la cámara; la voz y la CLI conservan los trabajos."; color:Shell.Theme.t3; font.family:Shell.Theme.font; font.pixelSize:11 }
+            Label {textFormat:Text.PlainText; Layout.fillWidth:true; wrapMode:Text.Wrap; text:"Arrastra para recorrer el planeta. La rueda acerca hasta el suelo; arrastra con el botón derecho para inclinar la cámara. Las superficies 3D siguen la cámara donde existe cobertura."; color:Shell.Theme.t3; font.family:Shell.Theme.font; font.pixelSize:11 }
             Info { label:"Cámara"; value:hud.cameraOwner }
             Info {visible:!!hud.stream;label:"Globo continuo";value:hud.stream ? hud.stream.status.state || "Conectando" : ""}
             Info {visible:!!hud.stream;label:"Detalle deseado / listo";value:hud.stream ? String(hud.stream.status.desired_count || 0)+" / "+String(hud.stream.status.loaded_count || 0) : ""}
             Info {visible:!!hud.stream;label:"Base / cola";value:hud.stream ? String(hud.stream.status.fallback_count || 0)+" / "+String(hud.stream.status.pending_count || 0) : ""}
             Info {visible:!!hud.stream;label:"LOD visible";value:hud.stream ? String(hud.stream.status.min_zoom || 0)+" / "+String(hud.stream.status.max_zoom || 0) : ""}
+            Info {visible:!!hud.stream && hud.stream.sourceId==="google_satellite";label:"Fotogrametría 3D";value:hud.stream ? (hud.stream.status.earth || {}).state || "Esperando cobertura 3D" : ""}
+            Info {visible:!!hud.stream && hud.stream.sourceId==="google_satellite";label:"Mallas / triángulos";value:hud.stream ? String(hud.stream.status.earth_loaded_count || 0)+" / "+String(hud.stream.status.earth_triangle_count || 0) : ""}
+            Label {visible:!!hud.stream && !!(hud.stream.status.earth || {}).error;textFormat:Text.PlainText;Layout.fillWidth:true;wrapMode:Text.Wrap;text:hud.stream ? (hud.stream.status.earth || {}).error || "" : "";color:Shell.Theme.warn;font.family:Shell.Theme.font;font.pixelSize:11}
+            Label {visible:!!hud.stream && hud.stream.sourceId==="google_satellite";text:"Botón derecho + arrastrar: inclinar la vista 3D";Layout.fillWidth:true;wrapMode:Text.Wrap;color:Shell.Theme.t3;font.family:Shell.Theme.font;font.pixelSize:10}
+            Label {visible:!!hud.stream && hud.stream.sourceId==="google_satellite";textFormat:Text.PlainText;Layout.fillWidth:true;wrapMode:Text.Wrap;text:hud.stream ? (hud.stream.status.earth || {}).attribution || "Google · vista experimental en memoria · sin captura ni exportación" : "";color:Shell.Theme.t3;font.family:Shell.Theme.font;font.pixelSize:10}
             Info {visible:!!hud.stream;label:"HTTP de sesión";value:hud.stream ? Exploration.count((hud.stream.status.usage || {}).requests_sent)+" / "+Exploration.count((hud.stream.status.usage || {}).max_requests) : ""}
             Info {visible:!!hud.stream;label:"Descarga / presupuesto";value:hud.stream ? Exploration.bytes((hud.stream.status.usage || {}).bytes_received)+" / "+Exploration.bytes((hud.stream.status.usage || {}).max_bytes) : ""}
             Label {visible:!!hud.stream && !!hud.stream.status.error;textFormat:Text.PlainText;Layout.fillWidth:true;wrapMode:Text.Wrap;text:hud.stream ? hud.stream.status.error || "" : "";color:Shell.Theme.warn;font.family:Shell.Theme.font;font.pixelSize:11}

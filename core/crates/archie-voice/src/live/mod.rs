@@ -231,7 +231,8 @@ pub fn tools(catalog: Option<&archie_orb::control::Catalog>) -> Vec<ToolDefiniti
             "max_requests":{"type":"integer","minimum":1,"maximum":10000},
             "max_bytes":{"type":"integer","minimum":1024,"maximum":1073741824},
             "duration_seconds":{"type":"integer","minimum":1,"maximum":3600},
-            "signals":{"type":"boolean"}
+            "signals":{"type":"boolean"},
+            "photogrammetry":{"type":"boolean","description":"Habilita mallas 3D de Earth Web solo para vista previa en RAM cuando se selecciona Google Satellite; sin análisis ni persistencia."}
         },"required":[]}),
     });
     for (name, description) in [
@@ -299,6 +300,7 @@ fn world_command(
         max_bytes: Option<u64>,
         duration_seconds: Option<u32>,
         signals: Option<bool>,
+        photogrammetry: Option<bool>,
     }
     #[derive(serde::Deserialize)]
     #[serde(deny_unknown_fields)]
@@ -320,6 +322,7 @@ fn world_command(
                 max_bytes: args.max_bytes.unwrap_or(defaults.max_bytes),
                 duration_seconds: args.duration_seconds.unwrap_or(defaults.duration_seconds),
                 signals: args.signals.unwrap_or(defaults.signals),
+                photogrammetry: args.photogrammetry.unwrap_or(defaults.photogrammetry),
                 // This placeholder is replaced only from WorldVoiceScope below.
                 domain: ExplorationDomain::Personal,
             };
@@ -548,6 +551,34 @@ async fn world_tool(scope: Option<&WorldVoiceScope>, name: &str, raw: &str) -> S
 
 #[cfg(test)]
 mod tool_tests {
+    #[test]
+    fn photogrammetry_tool_toggle_is_optional_typed_and_cannot_add_authority() {
+        for (raw, expected) in [
+            ("{}", true),
+            (r#"{"photogrammetry":true}"#, true),
+            (r#"{"photogrammetry":false}"#, false),
+        ] {
+            let command = super::world_command("world_navigate", raw).unwrap();
+            let value = serde_json::to_value(command).unwrap();
+            assert_eq!(value["request"]["photogrammetry"], expected);
+        }
+        for raw in [
+            r#"{"photogrammetry":"true"}"#,
+            r#"{"photogrammetry":true,"host":"kh.google.com"}"#,
+            r#"{"photogrammetry":true,"domain":"work"}"#,
+            r#"{"photogrammetry":true,"provider":"google_photorealistic"}"#,
+        ] {
+            assert!(super::world_command("world_navigate", raw).is_err());
+        }
+        let definition = super::tools(None)
+            .into_iter()
+            .find(|definition| definition.name == "world_navigate")
+            .unwrap();
+        assert_eq!(
+            definition.parameters["properties"]["photogrammetry"]["type"],
+            "boolean"
+        );
+    }
     #[test]
     fn navigation_tools_use_only_the_host_scope_and_reject_injected_authority() {
         use archie_core::control::ControlRequest;

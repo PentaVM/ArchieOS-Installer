@@ -103,7 +103,7 @@ int main(int argc, char *argv[])
     ArchieBridge bridge(nullptr, shellMode,static_cast<quint16>(projectionPort));
     GlobeStreamBridge globeStream;
     const auto captureAllowed=[&bridge,&globeStream] {
-        if(globeStream.sourceId()==QStringLiteral("google_satellite"))return false;
+        if(globeStream.sourceId()==QStringLiteral("google_satellite")||globeStream.proprietaryActive())return false;
         for(const auto &entry:bridge.imagerySources()) {
             const auto source=entry.toMap();
             if(source.value(QStringLiteral("source_id")).toString()==bridge.selectedImagery() &&

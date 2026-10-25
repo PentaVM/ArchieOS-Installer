@@ -33,12 +33,14 @@ ApplicationWindow {
     property bool orbHudVisible: true
     property bool worldHudVisible: true
     property var selection: null
-    readonly property bool streamedWorld: globeStream.meshes.length>0
+    readonly property bool streamedWorld: globeStream.meshes.length>0 || globeStream.proprietaryActive
     readonly property bool localTerrainPreview: root.scene === "world" && Exploration.localTerrainView(archieBridge.frame,archieBridge.explorationMeshes)
     readonly property bool texturedTerrain: (archieBridge.imageryMeshes || []).some(function(mesh) {return mesh.source_id===archieBridge.selectedImagery && mesh.replacesTerrain===true})
     function uiState() {
         const job=Exploration.selectedJob(archieBridge.exploration || {})
-        return JSON.stringify({scene:root.scene,selectedArea:job ? job.id : "",selectedPoint:worldHud.selectedPointId,selectedImagery:globeStream.sourceId,cameraOwner:worldHud.cameraOwner,stream:globeStream.status,eye:archieBridge.frame.cameraEye,target:archieBridge.frame.cameraTarget})
+        const stats=view.renderStats
+        if (stats.extendedDataCollectionEnabled !== undefined) stats.extendedDataCollectionEnabled=true
+        return JSON.stringify({scene:root.scene,selectedArea:job ? job.id : "",selectedPoint:worldHud.selectedPointId,selectedImagery:globeStream.sourceId,cameraOwner:worldHud.cameraOwner,stream:globeStream.status,eye:archieBridge.frame.cameraEye,target:archieBridge.frame.cameraTarget,render:{fps:stats.fps,graphics_api:stats.graphicsApiName,draw_calls:stats.drawCallCount,draw_vertices:stats.drawVertexCount}})
     }
 
     function updateNavigation() {
@@ -502,6 +504,7 @@ ApplicationWindow {
                     // appointment. They disagree at exactly the interesting moment, when
                     // a mode change arrives during a transition.
                     PerspectiveCamera {
+                        frustumCullingEnabled:root.scene==="world"
                         id: camera
                         position: archieBridge.frame.cameraEye
                         eulerRotation: Qt.vector3d(0, 0, 0)
@@ -612,8 +615,22 @@ ApplicationWindow {
                         // Camera-driven quadtree patches share Earth's exact frame.
                         // Each patch has a local origin so street vertices retain precision.
                         Repeater3D {
+                            id:earthRepeater
+                            model:globeStream.earthModel
+                            delegate:Model {
+                                pickable:true
+                                property bool photogrammetryMesh:true
+                                required property var meshData
+                                position:meshData.origin
+                                geometry:MeshGeometry {vertices:meshData.vertices;triangleIndices:meshData.triangleIndices;hasUv:true}
+                                materials:WorldImageryMaterial {textureSource:meshData.textureSource;terrainColor:Shell.Theme.t3}
+                            }
+                        }
+                        Repeater3D {
                             model:globeStream.tileModel
                             delegate:Model {
+                                pickable:true
+                                property bool rasterTile:true
                                 required property var meshData
                                 position:meshData.origin
                                 geometry:MeshGeometry {vertices:meshData.vertices;triangleIndices:meshData.triangleIndices;hasUv:true}
@@ -714,6 +731,7 @@ ApplicationWindow {
                 MouseArea {
                     // The globe's hands. The orb has its own (OrbHud) and FORGE is a list.
                     enabled: root.scene === "world"
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
                     anchors.fill: parent
                     property point previous
                     property point origin
@@ -725,7 +743,8 @@ ApplicationWindow {
                         if (moved) {
                             root.selection=null
                             worldHud.cedeCamera()
-                            archieBridge.orbitGlobe(-(mouse.x-previous.x)*0.2,(mouse.y-previous.y)*0.2,0)
+                            if (pressedButtons & Qt.RightButton) archieBridge.tiltGlobe((mouse.y-previous.y)*0.3)
+                            else archieBridge.orbitGlobe(-(mouse.x-previous.x)*0.2,(mouse.y-previous.y)*0.2,0)
                         }
                         previous=Qt.point(mouse.x,mouse.y)
                     }
@@ -737,14 +756,14 @@ ApplicationWindow {
                     // graph has forgotten — which a selection held only here cannot do,
                     // because it does not know the node is gone.
                     onClicked: function(mouse) {
-                        if (moved) return
+                        if (moved || mouse.button!==Qt.LeftButton) return
                         worldHud.cedeCamera()
                         const result = view.pick(mouse.x, mouse.y)
                         const hit = result.objectHit
                         root.selection = hit && hit.payload ? hit.payload : null
                         if (hit && hit.nodeId)
                             archieBridge.focusNode(hit.nodeId)
-                        else
+                        else if (!(hit && (hit.photogrammetryMesh===true || hit.rasterTile===true)))
                             archieBridge.releaseFocus()
                     }
                 }

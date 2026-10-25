@@ -1,5 +1,7 @@
 #include "MeshGeometry.h"
 #include "WorldImageProvider.h"
+#include "EarthMeshes.h"
+#include <QBuffer>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -98,5 +100,38 @@ int main(int argc,char **argv) {
     const auto detail=ground.pixelColor(ground.width()/2,ground.height()/2-25);
     qInfo()<<"149m ground texture pixel"<<detail;
     check(detail.red()>160&&detail.red()>3*detail.blue(),"actual perspective rendering retains detail 149m above the globe");
+    groundWindow->close();
+    // Synthetic original JPEG + native local 3D wall. Its nonzero radial
+    // height must remain visible from an inclined Earth-centred camera.
+    QImage wallImage(256,256,QImage::Format_RGB32);wallImage.fill(Qt::red);QByteArray jpeg;QBuffer jpegBuffer(&jpeg);jpegBuffer.open(QIODevice::WriteOnly);wallImage.save(&jpegBuffer,"JPEG");
+    const float wall[]={-.0002F,0,0,0,-1,0,0,1, .0002F,0,0,0,-1,0,1,1, -.0002F,0,.0003F,0,-1,0,0,0, .0002F,0,.0003F,0,-1,0,1,0};
+    const quint32 wallIndices[]={0,1,2,2,1,3};
+    const auto wallKey=QStringLiteral("earth:synthetic-wall");
+    EarthMeshes earth;earth.ingest({QVariantMap{{QStringLiteral("key"),wallKey},{QStringLiteral("origin"),QVariantList{0,0,20}},{QStringLiteral("vertex_count"),4},{QStringLiteral("triangle_count"),2},{QStringLiteral("vertices_base64"),QString::fromLatin1(QByteArray(reinterpret_cast<const char*>(wall),sizeof(wall)).toBase64())},{QStringLiteral("indices_base64"),QString::fromLatin1(QByteArray(reinterpret_cast<const char*>(wallIndices),sizeof(wallIndices)).toBase64())},{QStringLiteral("texture_base64"),QString::fromLatin1(jpeg.toBase64())}}},{wallKey});
+    check(earth.meshes().size()==1,"bounded photogrammetry decoder accepts synthetic raised wall");
+    auto *earthProvider=new WorldImageProvider;earthProvider->replace(earth.images());engine.addImageProvider(QStringLiteral("globe"),earthProvider);
+    engine.rootContext()->setContextProperty(QStringLiteral("earthMesh"),earth.meshes().first());
+    engine.loadData(R"(
+        import QtQuick
+        import QtQuick3D
+        import WorldTest
+        import "qrc:/world-texture"
+        Window {
+            width:256;height:256;visible:true
+            View3D {
+                anchors.fill:parent;camera:inclined
+                environment:SceneEnvironment {backgroundMode:SceneEnvironment.Color;clearColor:"black";tonemapMode:SceneEnvironment.TonemapModeLinear}
+                PerspectiveCamera {id:inclined;y:-.001;z:20.001;fieldOfView:45;clipNear:.000001;clipFar:1;Component.onCompleted:lookAt(Qt.vector3d(0,0,20.00015))}
+                Model {
+                    position:earthMesh.origin
+                    geometry:MeshGeometry {vertices:earthMesh.vertices;triangleIndices:earthMesh.triangleIndices;hasUv:true}
+                    materials:WorldImageryMaterial {textureSource:earthMesh.textureSource;terrainColor:"#00ff00"}
+                }
+            }
+        }
+    )");
+    auto *earthWindow=qobject_cast<QQuickWindow*>(engine.rootObjects().last());check(earthWindow&&earthWindow!=groundWindow&&QTest::qWaitForWindowExposed(earthWindow),"inclined 3D mesh render surface exposed");QTest::qWait(500);
+    const auto raised=earthWindow->grabWindow();int redPixels=0;for(int y=0;y<raised.height();++y)for(int x=0;x<raised.width();++x){const auto color=raised.pixelColor(x,y);if(color.red()>160&&color.green()<40&&color.blue()<40)++redPixels;}
+    check(redPixels>1000,"original JPEG covers nonzero-height mesh under inclined camera; flattened wall would have zero area");
     qInfo("World image-provider texture render contract passed");
 }

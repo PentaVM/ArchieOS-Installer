@@ -36,6 +36,7 @@ files = [p for p in (run / 'cache').rglob('*') if p.is_file()]
 assert not any(hashlib.sha256(p.read_bytes()).digest() in pixel_hashes for p in files)
 result = dict(run=str(run), native_control='responsive', startup_aoi_jobs=0,
               owner_renewal_enabled=summary.get('renew_navigation', False),
+              photogrammetry_admitted=summary['navigation']['request'].get('photogrammetry', False),
               source=frame['source_id'], state=frame['state'],
               min_zoom=frame['min_zoom'], max_zoom=frame['max_zoom'],
               pending_tiles=frame['pending_tiles'], usage=frame['usage'],

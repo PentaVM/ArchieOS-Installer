@@ -984,3 +984,9 @@ void ArchieBridge::orbitGlobe(float longitudeDelta, float latitudeDelta, float z
     m_observatory.orbit_globe(longitudeDelta, latitudeDelta, zoomSteps);
     tick();
 }
+
+void ArchieBridge::tiltGlobe(float deltaDegrees)
+{
+    m_observatory.tilt_globe(deltaDegrees);
+    tick();
+}

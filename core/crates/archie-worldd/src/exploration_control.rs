@@ -412,6 +412,7 @@ fn authenticate(bytes: &[u8], expected: &str) -> Result<ExploreCommand, String> 
             "max_bytes",
             "duration_seconds",
             "signals",
+            "photogrammetry",
         ];
         let exploration_fields = [
             "latitude",

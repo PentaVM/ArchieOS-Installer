@@ -20,10 +20,16 @@ NASA GIBS imagery and bounded USGS/EONET/adsb.lol observations. Existing C++ loc
 PBF import remains unchanged. Google satellite uses an experimental public tile
 endpoint for an attributed RAM-only online preview: no disk cache, manifests,
 pixel exports or model-facing pixels. Google imagery is proprietary, not open
-data. Street View/Google Earth reverse-engineered mesh downloads remain disabled;
-the existing GeoFabric storage and analysis restrictions still apply. This is
-not a claim of full Aleph provider or file-format parity. Exported GLB contains
-terrain/buildings, not photogrammetry. See `docs/WORLD-EXPLORATION.md` for source
+data. Aleph's `src/mesh.py` protocol/decoder is now ported to Rust `earth.rs`
+and `earth_runtime.rs` for continuous Earth Web textured meshes in navigation.
+The fixed public `kh.google.com/rt/earth/` transport needs no API key or billing
+account; it remains experimental proprietary online viewing. Mesh, metadata and
+original rectangular JPEG buffers stay in bounded RAM, behind explicit
+photogrammetry admission and the shared HTTP/session budgets. They never enter
+disk caches, model input, captures or exports. The billed official Map Tiles API
+and its provider permissions remain unchanged. Street View captures remain
+disabled. This is not full Aleph provider/file-format parity. Exported GLB still
+contains open terrain/buildings only. See `docs/WORLD-EXPLORATION.md` for source
 selection, dates, budgets and limitations.
 
 Data attribution is separate from the MIT code license. OSM requires contributor

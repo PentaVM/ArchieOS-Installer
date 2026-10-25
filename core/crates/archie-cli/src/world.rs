@@ -110,6 +110,9 @@ pub struct Navigation {
     pub duration_seconds: u32,
     #[arg(long)]
     pub no_signals: bool,
+    /// Disable preview-only Earth Web textured meshes for this session.
+    #[arg(long)]
+    pub no_photogrammetry: bool,
 }
 impl Navigation {
     fn request(&self) -> Result<NavigationRequest, String> {
@@ -128,6 +131,7 @@ impl Navigation {
             max_bytes: self.max_bytes,
             duration_seconds: self.duration_seconds,
             signals: !self.no_signals,
+            photogrammetry: !self.no_photogrammetry,
         };
         request.validate()?;
         Ok(request)
@@ -278,6 +282,17 @@ mod tests {
     struct TestCli {
         #[command(subcommand)]
         command: WorldCommand,
+    }
+
+    #[test]
+    fn photogrammetry_is_new_navigation_default_and_can_be_disabled() {
+        for (extra, expected) in [(vec![], true), (vec!["--no-photogrammetry"], false)] {
+            let mut args = vec!["world", "navigate", "--domain", "personal"];
+            args.extend(extra);
+            let cli = TestCli::try_parse_from(args).unwrap();
+            let value = serde_json::to_value(cli.command.command().unwrap()).unwrap();
+            assert_eq!(value["request"]["photogrammetry"], expected);
+        }
     }
 
     #[test]

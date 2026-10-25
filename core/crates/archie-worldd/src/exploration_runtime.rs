@@ -209,6 +209,7 @@ fn default_rates() -> BTreeMap<String, RateLedger> {
         ("openstreetmap".into(), RateLedger::new(6, 1)),
         ("photon".into(), RateLedger::new(30, 1)),
         ("google_satellite".into(), RateLedger::new(180, 4)),
+        ("google_earth".into(), RateLedger::new(180, 4)),
         ("nasa_gibs".into(), RateLedger::new(120, 4)),
         ("usgs_earthquakes".into(), RateLedger::new(12, 1)),
         ("nasa_eonet".into(), RateLedger::new(6, 1)),
@@ -733,7 +734,7 @@ impl ExplorationService {
             meter.active()?;
         }
         // Provider policy is authoritative even if a caller requests a cache.
-        let cache_ttl = if provider == "google_satellite" {
+        let cache_ttl = if matches!(provider, "google_satellite" | "google_earth") {
             None
         } else {
             cache_ttl
@@ -1794,6 +1795,14 @@ fn merge_terrain(
 
 fn validate_payload(provider: &str, bytes: &[u8]) -> Result<(), String> {
     match provider {
+        "google_earth" => {
+            if bytes.is_empty()
+                || bytes.len() > 8 * 1024 * 1024
+                || matches!(bytes.first(), Some(b'<' | b'{'))
+            {
+                return Err("invalid bounded Earth protocol response".into());
+            }
+        }
         "aws_terrain_tiles" => {
             geo_formats::decode_terrain_tiff(
                 bytes,

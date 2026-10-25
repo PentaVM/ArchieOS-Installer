@@ -14,6 +14,10 @@ pub struct NavigationRequest {
     pub max_bytes: u64,
     pub duration_seconds: u32,
     pub signals: bool,
+    /// Public Earth Web textured meshes are admitted only for preview in RAM.
+    /// Existing serialized sessions cannot acquire this additional provider.
+    #[serde(default)]
+    pub photogrammetry: bool,
 }
 
 impl Default for NavigationRequest {
@@ -37,6 +41,7 @@ impl Default for NavigationRequest {
             max_bytes: 256 * 1024 * 1024,
             duration_seconds: 3600,
             signals: true,
+            photogrammetry: true,
         }
     }
 }
@@ -69,6 +74,21 @@ impl NavigationRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn photogrammetry_requires_new_admission_for_legacy_serialized_requests() {
+        let mut value = serde_json::to_value(NavigationRequest::default()).unwrap();
+        assert_eq!(value["photogrammetry"], true);
+        value.as_object_mut().unwrap().remove("photogrammetry");
+        let legacy: NavigationRequest = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(
+            serde_json::to_value(legacy).unwrap()["photogrammetry"],
+            false
+        );
+        value["photogrammetry"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<NavigationRequest>(value.clone()).is_ok());
+        value["photogrammetry"] = serde_json::json!("true");
+        assert!(serde_json::from_value::<NavigationRequest>(value).is_err());
+    }
     #[test]
     fn navigation_limits_are_explicit_typed_and_bounded() {
         let mut request = NavigationRequest::default();
