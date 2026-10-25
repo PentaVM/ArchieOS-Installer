@@ -70,7 +70,11 @@ function worldNearClip(frame) {
     if(!frame || !frame.cameraEye || !frame.cameraTarget) return 0.01;
     var eye=frame.cameraEye,target=frame.cameraTarget;
     var distance=Math.hypot(eye.x-target.x,eye.y-target.y,eye.z-target.z);
-    return Number.isFinite(distance) ? Math.max(0.0000001,distance*0.05) : 0.01;
+    var altitude=Math.max(0,Math.hypot(eye.x,eye.y,eye.z)-20);
+    // A globe camera looks at Earth's centre. Its target distance stays near
+    // one Earth radius even metres above the ground; clipping must use altitude.
+    return Number.isFinite(distance) && Number.isFinite(altitude)
+        ? Math.max(0.0000001,Math.min(distance,altitude)*0.05) : 0.01;
 }
 
 function inference(snapshot) {

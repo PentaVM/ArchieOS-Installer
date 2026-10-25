@@ -226,7 +226,7 @@ if(ARCHIE_NATIVE_BUILD_TESTS)
     target_include_directories(test_world_texture PRIVATE src)
     target_link_libraries(test_world_texture PRIVATE Qt6::Quick Qt6::Quick3D Qt6::Test)
     qt_add_resources(test_world_texture "world-texture-material" PREFIX "/world-texture" BASE "${CMAKE_CURRENT_SOURCE_DIR}/qml"
-        FILES qml/WorldImageryMaterial.qml)
+        FILES qml/WorldImageryMaterial.qml qml/Exploration.js)
     add_test(NAME world_texture_contracts COMMAND test_world_texture)
     qt_add_executable(test_exploration_credential tests/test_exploration_credential.cpp src/ExplorationCredential.cpp)
     target_include_directories(test_exploration_credential PRIVATE src)

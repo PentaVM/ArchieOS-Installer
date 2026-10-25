@@ -137,3 +137,63 @@ packet-level traffic cap. Focus/input in other apps never controls downloads.
 GitHub CI on preceding head `d2e132f` did not start due to account payments/spend
 limit (run 40176773472). That external execution restriction is separate from
 the successful local checks; no billing configuration was changed.
+
+## Zoom follow-up — 2026-10-25
+
+The user reported that zoom did not show detail. Rechecked the live desktop run
+instead of treating the earlier loaded-tile counters as visual proof. Two
+independent causes were found:
+
+1. At 18:23 UTC, the desktop session had expired at 15:26 UTC. Its capability
+   correctly refused more downloads while the viewer retained old coarse tiles.
+   The old launcher admitted only one hour and never renewed it. Re-admission
+   through the owner CLI restored downloads in that existing window.
+2. `worldNearClip` used 5% of the distance to the camera target. For globe
+   navigation that target is Earth's centre: at 149 m altitude the near plane
+   was approximately 318 km away, clipping the ground despite loaded LOD-19
+   imagery. This affects altitudes below roughly 335 km. It now uses the lesser
+   of target distance and altitude above the existing radius-20 Earth, with the
+   existing positive floor. AOI and below-sea viewing remain supported.
+
+Evidence before fixing:
+
+- `logs/zoom-nearclip-red.log`: surface fails the numeric near-plane constraint
+  at 10 m. Regression covers 10 m through 24,000 km, along all three axes.
+- `logs/zoom-ground-render-red.log`: an actual Qt perspective camera 149 m above
+  the globe renders a black pixel where the production image material should be.
+  This uses synthetic labelled colour imagery, not Google pixels or a mock
+  declaration that rendering worked.
+- `logs/zoom-lifetime-red.log`: the launcher had no renewal lifecycle.
+
+After fixing:
+
+- JS camera/projection contracts pass. All **10 native CTests pass**, including
+  the actual perspective ground render using production `Exploration.js`,
+  material, image provider and geometry. Its red image detail is visible now.
+- **5 launcher lifecycle tests pass**. An opted-in owner desktop launcher only
+  renews its verified expired admission, preserving budgets per hour and the
+  pinned NASA date. It never renews early, overrides explicit stop/replacement,
+  or treats a control error as permission. Core/voice/ordinary CLI keep bounded
+  authority; the renderer gains no renewal capability.
+- `launcher-lifetime.json`: actual CLI, daemon and native viewer with 5-second
+  admissions renewed after expiry with an identical request/date. Explicit stop
+  survived the next expiry boundary without closing the viewer. Only that
+  fixture's processes were closed.
+- `zoom-google-metadata.json`: fresh actual wheel/drag run after the camera fix
+  reaches 148.94 m, LOD 19, 12 leaves ready / zero pending; pan changes coverage
+  to 16 leaves ready / zero pending, HTTP count **89 → 108**. Saved metadata only.
+  Google pixels still stay out of disk/model/export paths. This network proof
+  supplements the actual perspective render regression; counters alone had
+  missed the clipping bug previously.
+- Rebuilt and installed the native executable, restarted only the previous
+  standalone World window, and opened the actual desktop shortcut. New run
+  `run-1792953322977` enables owner renewal. `zoom-desktop-startup.json` records
+  responsive native control, Google ready, no pending tiles, original 256×256
+  pixels, and sampled pixel hashes absent from disk cache.
+
+Current standalone executable SHA256:
+`4b5ce61f8e0f4caf2670217d2c37510c24a238c8d87c89b2d989fa97c8fa8d58`.
+
+No Rust/Policy/lease or provider-limit changes were needed. Other app focus does
+not affect downloads or owner renewal. Tests and rendering remain WSLg/software
+evidence, not a claim of RTX acceleration or complete OS deployment.

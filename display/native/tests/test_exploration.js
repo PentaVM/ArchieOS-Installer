@@ -36,9 +36,18 @@ assert.equal(api.localTerrainView(closeFrame,[{kind:'terrain'}]),true); // Globa
 assert.equal(api.localTerrainView({...closeFrame,explorationCamera:false},[{kind:'terrain'}]),false);
 assert.equal(api.localTerrainView(closeFrame,[{kind:'aoi'}]),false);
 assert.equal(api.localTerrainView({...closeFrame,cameraEye:{x:0,y:0,z:60}},[{kind:'terrain'}]),false);
-assert.ok(Math.abs(api.worldNearClip(closeFrame)-0.001)<1e-12);
+assert.ok(Math.abs(api.worldNearClip(closeFrame)-0.0005)<1e-12);
 assert.equal(api.worldNearClip({cameraEye:{x:0,y:0,z:20},cameraTarget:{x:0,y:0,z:20}}),0.0000001);
 assert.equal(api.worldNearClip({}),0.01);
+for (const altitudeM of [10, 149, 1000, 100000, 1200000, 24000000]) {
+    const altitude=altitudeM*20/6371008.8;
+    for (const axis of ['x','y','z']) {
+        const eye={x:0,y:0,z:0}; eye[axis]=20+altitude;
+        const near=api.worldNearClip({cameraEye:eye,cameraTarget:{x:0,y:0,z:0}});
+        assert.ok(near>0 && near<altitude*0.1,
+            `globe surface at ${altitudeM}m must be beyond the near plane on ${axis}; got ${near}`);
+    }
+}
 assert.equal(api.inference({}).tps,'Sin fuente medida publicada');
 assert.equal(api.inference({metrics:{gauges:{'inference.last.effective_output_tps_available':0,'inference.last.effective_output_tokens_per_second_x1000':-1}}}).tps,'Sin fuente medida publicada');
 assert.equal(api.inference({metrics:{gauges:{'inference.last.effective_output_tps_available':1,'inference.last.effective_output_tokens_per_second_x1000':12345}}}).tps,'12.35 tok/s');

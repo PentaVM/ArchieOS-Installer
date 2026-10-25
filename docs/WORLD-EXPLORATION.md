@@ -32,6 +32,13 @@ Defaults are 1 hour, 1800 HTTP requests, 256 MiB received application payload,
 admission. Closing the standalone launcher stops its daemons. An independently
 hosted session continues until explicit stop, expiry or budget exhaustion.
 
+The desktop shortcut opts its owner launcher into `--renew-navigation`: while
+that window remains open, an expired admission is replaced with another bounded
+hour using the same request and pinned NASA date. Budgets therefore apply per
+hour; they are never reset early. Explicit stop, a replaced session or failed
+owner verification disables renewal. Core/voice/CLI sessions retain their
+explicit expiry; the renderer cannot renew authority. App focus has no effect.
+
 The private `navigation.json` capability permits typed camera/source changes
 and tile delivery only. It differs from owner control and read-only projection
 credentials. Core/voice admission retains exact personal/work context bindings,

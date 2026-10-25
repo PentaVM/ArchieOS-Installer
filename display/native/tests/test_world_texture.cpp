@@ -60,5 +60,43 @@ int main(int argc,char **argv) {
     const auto gray=frame.pixelColor(frame.width()/2-12,frame.height()/2);
     qInfo()<<"neutral terrain/gray pixels"<<missing<<gray;
     check(std::abs(gray.red()-128)<10&&std::abs(gray.green()-128)<10&&std::abs(gray.blue()-128)<10,"imagery midtones retain source color without cinematic tone mapping");
+    window->close();
+    // A real Earth-centred perspective camera must see nearby imagery too.
+    // The old near plane used distance to Earth's centre and clipped away
+    // the entire ground at street altitude despite successful tile delivery.
+    const float groundVertices[]={
+        -.00015F,.00015F,20, 0,0,1, 0,0, -.00015F,-.00015F,20, 0,0,1, 0,1, .00015F,.00015F,20, 0,0,1, 1,0,
+        .00015F,.00015F,20, 0,0,1, 1,0, -.00015F,-.00015F,20, 0,0,1, 0,1, .00015F,-.00015F,20, 0,0,1, 1,1};
+    engine.rootContext()->setContextProperty(QStringLiteral("groundVertices"),QByteArray(reinterpret_cast<const char*>(groundVertices),sizeof(groundVertices)));
+    engine.loadData(R"(
+        import QtQuick
+        import QtQuick3D
+        import WorldTest
+        import "qrc:/world-texture"
+        import "qrc:/world-texture/Exploration.js" as Exploration
+        Window {
+            width:256;height:256;visible:true
+            View3D {
+                anchors.fill:parent
+                camera:groundCamera
+                environment:SceneEnvironment {backgroundMode:SceneEnvironment.Color;clearColor:"black";tonemapMode:SceneEnvironment.TonemapModeLinear}
+                PerspectiveCamera {
+                    id:groundCamera; z:20+149*20/6371008.8;fieldOfView:45;clipFar:1600
+                    clipNear:Exploration.worldNearClip({cameraEye:{x:0,y:0,z:z},cameraTarget:{x:0,y:0,z:0}})
+                }
+                Model {
+                    geometry:MeshGeometry {vertices:groundVertices;triangleIndices:tileIndices;hasUv:true}
+                    materials:WorldImageryMaterial {textureSource:"image://world/orientation";terrainColor:"#00ff00"}
+                }
+            }
+        }
+    )");
+    auto *groundWindow=qobject_cast<QQuickWindow*>(engine.rootObjects().last());
+    check(groundWindow&&groundWindow!=window&&QTest::qWaitForWindowExposed(groundWindow),"street-altitude perspective fixture is exposed");
+    QTest::qWait(500);
+    const auto ground=groundWindow->grabWindow();
+    const auto detail=ground.pixelColor(ground.width()/2,ground.height()/2-25);
+    qInfo()<<"149m ground texture pixel"<<detail;
+    check(detail.red()>160&&detail.red()>3*detail.blue(),"actual perspective rendering retains detail 149m above the globe");
     qInfo("World image-provider texture render contract passed");
 }
