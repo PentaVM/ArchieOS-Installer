@@ -72,7 +72,27 @@ const TERRAIN: &[GeoDataClass] = &[GeoDataClass::Terrain];
 const BUILDINGS: &[GeoDataClass] = &[GeoDataClass::SemanticBuildings];
 const MESH: &[GeoDataClass] = &[GeoDataClass::PhotorealMesh];
 
-pub const PROVIDERS: [GeoProviderCapabilities; 10] = [
+pub const PROVIDERS: [GeoProviderCapabilities; 11] = [
+    GeoProviderCapabilities {
+        id: GeoProviderId::NasaGibs,
+        authority: "NASA EOSDIS Global Imagery Browse Services",
+        product: "Open satellite raster visualizations: MODIS, VIIRS and HLS Landsat/Sentinel",
+        coverage: CoverageClass::Global,
+        data_classes: &[GeoDataClass::Imagery],
+        photorealistic: true,
+        semantic_entities: false,
+        machine_analysis_allowed: true,
+        offline_allowed: true,
+        self_hostable: true,
+        supports_3d_tiles: false,
+        supports_gaussian_splats: false,
+        useful_lod: (0, 12),
+        preference: 10,
+        cost: Cost::FreeAndOpen,
+        license: "Public NASA/EOSDIS visualizations with source-specific NASA, USGS Landsat and Copernicus Sentinel credits; native resolution, date and coverage depend on the selected product",
+        attribution: "NASA EOSDIS GIBS; HLS Landsat courtesy USGS; HLS Sentinel contains modified Copernicus Sentinel data",
+        verified_on: "2026-10-24",
+    },
     GeoProviderCapabilities {
         id: GeoProviderId::AwsTerrainTiles,
         authority: "Mapzen / Tilezen, hosted by AWS Open Data",

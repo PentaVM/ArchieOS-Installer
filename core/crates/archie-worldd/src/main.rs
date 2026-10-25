@@ -160,32 +160,16 @@ async fn main() -> std::process::ExitCode {
                 let exploration_runtime = exploration_runtime.clone();
                 Box::pin(async move {
                     match request.path.as_str() {
-                        "/v1/exploration" => {
-                            if exploration.is_some()
-                                && !archie_worldd::exploration_projection::authorized(
-                                    &exploration_runtime,
-                                    request.authorization.as_deref(),
-                                )
-                            {
-                                return http::Response::error(
-                                    403,
-                                    b"private World projection requires its read-only credential\n",
-                                );
-                            }
-                            let view = match exploration {
-                                Some(service) => service.snapshot().await,
-                                None => {
-                                    archie_worldd::exploration::ExplorationSnapshot::unavailable(
-                                        "disabled",
-                                    )
-                                }
-                            };
-                            match serde_json::to_vec(&view) {
-                                Ok(body) => http::Response::json(body),
-                                Err(_) => {
-                                    http::Response::error(500, b"cannot encode exploration\n")
-                                }
-                            }
+                        path if path == "/v1/exploration"
+                            || path.starts_with("/v1/exploration/jobs/") =>
+                        {
+                            exploration_response(
+                                exploration.as_ref(),
+                                &exploration_runtime,
+                                request.authorization.as_deref(),
+                                path,
+                            )
+                            .await
                         }
                         "/v1/world" => match serde_json::to_vec(&service.current().await) {
                             Ok(body) => http::Response::json(body),
@@ -215,6 +199,45 @@ async fn main() -> std::process::ExitCode {
         std::process::ExitCode::FAILURE
     } else {
         std::process::ExitCode::SUCCESS
+    }
+}
+
+async fn exploration_response(
+    service: Option<&ExplorationService>,
+    runtime: &std::path::Path,
+    authorization: Option<&str>,
+    path: &str,
+) -> http::Response {
+    let selected = if path == "/v1/exploration" {
+        None
+    } else if let Some(id) = path
+        .strip_prefix("/v1/exploration/jobs/")
+        .filter(|id| id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit()))
+    {
+        Some(id)
+    } else {
+        return http::Response::error(404, b"not found\n");
+    };
+    if service.is_some()
+        && !archie_worldd::exploration_projection::authorized(runtime, authorization)
+    {
+        return http::Response::error(
+            403,
+            b"private World projection requires its read-only credential\n",
+        );
+    }
+    let view = match (service, selected) {
+        (Some(service), Some(id)) => match service.snapshot_for(id).await {
+            Some(view) => view,
+            None => return http::Response::error(404, b"capture not found\n"),
+        },
+        (Some(service), None) => service.snapshot().await,
+        (None, Some(_)) => return http::Response::error(404, b"capture not found\n"),
+        (None, None) => archie_worldd::exploration::ExplorationSnapshot::unavailable("disabled"),
+    };
+    match serde_json::to_vec(&view) {
+        Ok(body) => http::Response::json(body),
+        Err(_) => http::Response::error(500, b"cannot encode exploration\n"),
     }
 }
 
@@ -252,6 +275,74 @@ async fn wait_for_shutdown() {
         return;
     };
     tokio::select! { _ = term.recv() => {}, _ = tokio::signal::ctrl_c() => {} }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn selected_projection_transport_requires_auth_and_remains_get_only() {
+        let root = std::env::temp_dir().join(format!(
+            "archie-selected-route-{:032x}",
+            rand::random::<u128>()
+        ));
+        let runtime = root.join("runtime");
+        archie_worldd::exploration_runtime::private_directory(&runtime).unwrap();
+        archie_worldd::exploration_projection::ensure(&runtime).unwrap();
+        let token = archie_worldd::exploration_projection::read_token(&runtime).unwrap();
+        let service = ExplorationService::new(ExplorationConfig {
+            cache_dir: root.join("cache"),
+            domain: archie_geofabric::exploration::ExplorationDomain::Personal,
+        })
+        .unwrap();
+        let listener = http::bind("127.0.0.1:0".parse().unwrap()).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (stop, shutdown) = watch::channel(false);
+        let projected = service.clone();
+        let server = tokio::spawn(http::serve(
+            listener,
+            move |request| {
+                let service = projected.clone();
+                let runtime = runtime.clone();
+                Box::pin(async move {
+                    exploration_response(
+                        Some(&service),
+                        &runtime,
+                        request.authorization.as_deref(),
+                        &request.path,
+                    )
+                    .await
+                })
+            },
+            shutdown,
+        ));
+        let path = format!("/v1/exploration/jobs/{}", "a".repeat(32));
+        for (method, authorization, status) in [
+            ("GET", String::new(), 403),
+            ("GET", format!("Authorization: Bearer {token}\r\n"), 404),
+            ("POST", format!("Authorization: Bearer {token}\r\n"), 405),
+        ] {
+            let mut socket = tokio::net::TcpStream::connect(address).await.unwrap();
+            socket.write_all(format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\n{authorization}Connection: close\r\n\r\n").as_bytes()).await.unwrap();
+            let mut response = String::new();
+            socket.read_to_string(&mut response).await.unwrap();
+            assert!(
+                response.starts_with(&format!("HTTP/1.1 {status} ")),
+                "{response}"
+            );
+        }
+        stop.send(true).unwrap();
+        server.await.unwrap();
+        assert!(service
+            .snapshot()
+            .await
+            .providers
+            .iter()
+            .all(|provider| provider.requests_sent == 0));
+        assert!(!root.join("runtime/control.json").exists());
+    }
 }
 
 #[cfg(not(unix))]

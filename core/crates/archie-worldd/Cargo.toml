@@ -29,6 +29,7 @@ provider = [
     "dep:tiff",
     "dep:earcutr",
     "dep:httpdate",
+    "dep:base64", "dep:png", "dep:jpeg-decoder", "dep:time",
 ]
 
 [dependencies]
@@ -47,6 +48,10 @@ fs2 = { workspace = true, optional = true }
 tiff = { version = "0.10", optional = true }
 earcutr = { version = "0.4", optional = true }
 httpdate = { version = "1", optional = true }
+base64 = { workspace = true, optional = true }
+png = { workspace = true, optional = true }
+jpeg-decoder = { workspace = true, optional = true }
+time = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }

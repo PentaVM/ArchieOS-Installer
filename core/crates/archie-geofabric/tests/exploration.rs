@@ -3,6 +3,49 @@ use archie_geofabric::exploration::{
 };
 use std::collections::BTreeSet;
 
+#[test]
+fn imagery_sources_dates_and_signal_refresh_are_typed_and_bounded() {
+    use archie_geofabric::exploration::ImagerySource;
+    let mut request = ExplorationRequest {
+        layers: vec![ExplorationLayer::Imagery, ExplorationLayer::Signals],
+        imagery_sources: vec![ImagerySource::GoogleSatellite, ImagerySource::BlueMarble],
+        imagery_date: Some("2024-02-29".into()),
+        signal_updates: 60,
+        signal_interval_seconds: 60,
+        ..Default::default()
+    };
+    assert!(plan(&request).is_ok());
+    for date in ["2023-02-29", "2026-13-01", "2026-01-32", "../escape"] {
+        request.imagery_date = Some(date.into());
+        assert!(plan(&request).is_err());
+    }
+    request.imagery_date = None;
+    request.signal_updates = 61;
+    assert!(plan(&request).is_err());
+    request.signal_updates = 1;
+    request.signal_interval_seconds = 59;
+    assert!(plan(&request).is_err());
+    request.signal_interval_seconds = 3601;
+    assert!(plan(&request).is_err());
+}
+
+#[test]
+fn older_requests_receive_conservative_imagery_and_refresh_defaults() {
+    let mut raw = serde_json::to_value(ExplorationRequest::default()).unwrap();
+    for name in [
+        "imagery_sources",
+        "imagery_date",
+        "signal_updates",
+        "signal_interval_seconds",
+    ] {
+        raw.as_object_mut().unwrap().remove(name);
+    }
+    let request: ExplorationRequest = serde_json::from_value(raw).unwrap();
+    assert!(request.imagery_sources.is_empty());
+    assert_eq!(request.signal_updates, 1);
+    assert_eq!(request.signal_interval_seconds, 60);
+}
+
 fn at(latitude: f64, longitude: f64) -> ExplorationRequest {
     ExplorationRequest {
         latitude,

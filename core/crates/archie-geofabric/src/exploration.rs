@@ -46,6 +46,7 @@ pub enum ExplorationLayer {
     Terrain,
     Buildings,
     Imagery,
+    Signals,
     StreetView,
     Mesh,
 }
@@ -55,6 +56,78 @@ pub enum ExplorationLayer {
 pub enum ExplorationDomain {
     Personal,
     Work,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImagerySource {
+    GoogleSatellite,
+    BlueMarble,
+    Sentinel2,
+    Landsat,
+    NaturalColor,
+    Infrared,
+    NightLights,
+    Thermal,
+}
+impl std::str::FromStr for ImagerySource {
+    type Err = String;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Ok(match value.replace('-', "_").as_str() {
+            "google_satellite" => Self::GoogleSatellite,
+            "blue_marble" => Self::BlueMarble,
+            "sentinel2" => Self::Sentinel2,
+            "landsat" => Self::Landsat,
+            "natural_color" => Self::NaturalColor,
+            "infrared" => Self::Infrared,
+            "night_lights" => Self::NightLights,
+            "thermal" => Self::Thermal,
+            _ => return Err("unknown imagery source".into()),
+        })
+    }
+}
+fn default_signal_updates() -> u32 {
+    1
+}
+fn default_signal_interval() -> u32 {
+    60
+}
+
+pub fn valid_imagery_date(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 10
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || bytes
+            .iter()
+            .enumerate()
+            .any(|(i, b)| i != 4 && i != 7 && !b.is_ascii_digit())
+    {
+        return false;
+    }
+    let Ok(year) = value[..4].parse::<u32>() else {
+        return false;
+    };
+    let Ok(month) = value[5..7].parse::<u32>() else {
+        return false;
+    };
+    let Ok(day) = value[8..].parse::<u32>() else {
+        return false;
+    };
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days = match month {
+        2 => {
+            if leap {
+                29
+            } else {
+                28
+            }
+        }
+        4 | 6 | 9 | 11 => 30,
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        _ => 0,
+    };
+    (1900..=2100).contains(&year) && day > 0 && day <= days
 }
 
 /// An explicit geographic request. No caller activity can enlarge this region.
@@ -74,6 +147,15 @@ pub struct ExplorationRequest {
     /// Transport's hard response-byte budget, at most [`MAX_BYTES`].
     /// Geometry cannot predict payload sizes; callers must enforce this during I/O.
     pub max_bytes: u64,
+    /// Empty selects experimental volatile Google plus open Blue Marble.
+    #[serde(default)]
+    pub imagery_sources: Vec<ImagerySource>,
+    #[serde(default)]
+    pub imagery_date: Option<String>,
+    #[serde(default = "default_signal_updates")]
+    pub signal_updates: u32,
+    #[serde(default = "default_signal_interval")]
+    pub signal_interval_seconds: u32,
 }
 
 impl Default for ExplorationRequest {
@@ -87,6 +169,10 @@ impl Default for ExplorationRequest {
             domain: ExplorationDomain::Personal,
             max_tiles: 256,
             max_bytes: 64 * 1024 * 1024,
+            imagery_sources: vec![],
+            imagery_date: None,
+            signal_updates: default_signal_updates(),
+            signal_interval_seconds: default_signal_interval(),
         }
     }
 }
@@ -231,6 +317,28 @@ pub fn plan(request: &ExplorationRequest) -> Result<ExplorationPlan, Exploration
 
 fn validate(request: &ExplorationRequest) -> Result<(), ExplorationError> {
     let invalid = |field, reason| ExplorationError::InvalidRequest { field, reason };
+    if request.imagery_sources.len() > 8 {
+        return Err(invalid("imagery_sources", "at most eight typed sources"));
+    }
+    if request
+        .imagery_date
+        .as_deref()
+        .is_some_and(|date| !valid_imagery_date(date))
+    {
+        return Err(invalid(
+            "imagery_date",
+            "must be a valid YYYY-MM-DD civil date",
+        ));
+    }
+    if !(1..=60).contains(&request.signal_updates) {
+        return Err(invalid("signal_updates", "must be between 1 and 60"));
+    }
+    if !(60..=3600).contains(&request.signal_interval_seconds) {
+        return Err(invalid(
+            "signal_interval_seconds",
+            "must be between 60 and 3600",
+        ));
+    }
     if !request.latitude.is_finite() || !(-90.0..=90.0).contains(&request.latitude) {
         return Err(invalid(
             "latitude",

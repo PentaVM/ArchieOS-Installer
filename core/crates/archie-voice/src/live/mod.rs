@@ -141,7 +141,11 @@ pub fn tools(catalog: Option<&archie_orb::control::Catalog>) -> Vec<ToolDefiniti
                     "longitude":{"type":"number","minimum":-180,"maximum":180},
                     "radius_m":{"type":"number","exclusiveMinimum":0,"maximum":100000},
                     "domain":{"type":"string","enum":["personal","work"]},
-                    "layers":{"type":"array","items":{"type":"string","enum":["terrain","buildings"]},"minItems":1,"maxItems":2},
+                    "layers":{"type":"array","items":{"type":"string","enum":["terrain","buildings","imagery","signals"]},"minItems":1,"maxItems":4},
+                    "imagery_sources":{"type":"array","items":{"type":"string","enum":["google_satellite","blue_marble","sentinel2","landsat","natural_color","infrared","night_lights","thermal"]},"maxItems":8},
+                    "imagery_date":{"type":"string","pattern":"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+                    "signal_updates":{"type":"integer","minimum":1,"maximum":60},
+                    "signal_interval_seconds":{"type":"integer","minimum":60,"maximum":3600},
                     "zoom":{"type":"integer","minimum":0,"maximum":22}
                 }, "required":["latitude","longitude","radius_m","domain"]
             }),
@@ -233,6 +237,10 @@ fn world_command(
         domain: ExplorationDomain,
         zoom: Option<u8>,
         layers: Option<Vec<ExplorationLayer>>,
+        imagery_sources: Option<Vec<exploration::ImagerySource>>,
+        imagery_date: Option<String>,
+        signal_updates: Option<u32>,
+        signal_interval_seconds: Option<u32>,
     }
     #[derive(serde::Deserialize)]
     #[serde(deny_unknown_fields)]
@@ -265,6 +273,10 @@ fn world_command(
                 layers: region
                     .layers
                     .unwrap_or_else(|| vec![ExplorationLayer::Terrain]),
+                imagery_sources: region.imagery_sources.unwrap_or_default(),
+                imagery_date: region.imagery_date,
+                signal_updates: region.signal_updates.unwrap_or(1),
+                signal_interval_seconds: region.signal_interval_seconds.unwrap_or(60),
                 ..ExplorationRequest::default()
             };
             exploration::plan(&request).map_err(|error| error.to_string())?;
@@ -550,6 +562,39 @@ mod tool_tests {
         assert_eq!(
             request.domain,
             archie_geofabric::exploration::ExplorationDomain::Work
+        );
+    }
+
+    #[test]
+    fn voice_imagery_and_refresh_options_are_typed_and_strict() {
+        let args = json!({"domain":"work","latitude":0,"longitude":0,"radius_m":500,
+            "layers":["imagery","signals"],"imagery_sources":["google_satellite","blue_marble"],
+            "imagery_date":"2024-02-29","signal_updates":2,"signal_interval_seconds":120});
+        let archie_worldd::exploration::ExploreCommand::Explore { request } =
+            world_command("world_explore", &args.to_string()).unwrap()
+        else {
+            panic!("explore")
+        };
+        assert_eq!(request.signal_updates, 2);
+        assert_eq!(request.signal_interval_seconds, 120);
+        assert_eq!(request.imagery_sources.len(), 2);
+        for (field, value) in [
+            ("endpoint", json!("https://evil.invalid")),
+            ("signal_updates", json!(61)),
+            ("imagery_date", json!("2023-02-29")),
+        ] {
+            let mut invalid = args.clone();
+            invalid[field] = value;
+            assert!(world_command("world_explore", &invalid.to_string()).is_err());
+        }
+        let definitions = tools(None);
+        let tool = definitions
+            .iter()
+            .find(|tool| tool.name == "world_explore")
+            .unwrap();
+        assert_eq!(
+            tool.parameters["properties"]["signal_updates"]["maximum"],
+            60
         );
     }
 

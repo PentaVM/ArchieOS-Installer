@@ -9,8 +9,12 @@ use serde::{Deserialize, Serialize};
 
 pub mod exploration;
 pub mod exploration_projection;
+#[cfg(feature = "provider")]
+pub mod imagery;
 pub mod lan;
 pub mod layers;
+#[cfg(feature = "provider")]
+pub mod world_signals;
 
 #[cfg(feature = "provider")]
 pub mod exploration_runtime;

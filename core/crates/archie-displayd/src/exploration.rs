@@ -3,23 +3,50 @@ use archie_worldd::exploration::ExplorationSnapshot;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub async fn current() -> ExplorationSnapshot {
-    tokio::time::timeout(std::time::Duration::from_millis(1500), fetch())
+    tokio::time::timeout(std::time::Duration::from_millis(1500), fetch(None))
         .await
         .ok()
         .and_then(Result::ok)
         .unwrap_or_else(|| ExplorationSnapshot::unavailable("unavailable"))
 }
 
-async fn fetch() -> Result<ExplorationSnapshot, ()> {
+pub fn valid_job_id(id: &str) -> bool {
+    id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+pub async fn selected(id: &str) -> Option<ExplorationSnapshot> {
+    if !valid_job_id(id) {
+        return None;
+    }
+    tokio::time::timeout(std::time::Duration::from_millis(1500), fetch(Some(id)))
+        .await
+        .ok()?
+        .ok()
+}
+
+async fn fetch(selected: Option<&str>) -> Result<ExplorationSnapshot, ()> {
     let token = archie_worldd::exploration_projection::read_token(
         &archie_worldd::exploration_projection::default_runtime_dir(),
     )
     .map_err(|_| ())?;
-    let mut stream = tokio::net::TcpStream::connect("127.0.0.1:7667")
+    let port = match std::env::var("ARCHIE_WORLDD_PORT") {
+        Ok(value) => value.parse::<u16>().map_err(|_| ())?,
+        Err(std::env::VarError::NotPresent) => 7667,
+        Err(_) => return Err(()),
+    };
+    if port == 0 {
+        return Err(());
+    }
+    let mut stream = tokio::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port))
         .await
         .map_err(|_| ())?;
+    let path = match selected {
+        Some(id) if valid_job_id(id) => format!("/v1/exploration/jobs/{id}"),
+        Some(_) => return Err(()),
+        None => "/v1/exploration".into(),
+    };
     stream
-        .write_all(format!("GET /v1/exploration HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n").as_bytes())
+        .write_all(format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n").as_bytes())
         .await
         .map_err(|_| ())?;
     let mut bytes = Vec::new();
@@ -38,6 +65,9 @@ async fn fetch() -> Result<ExplorationSnapshot, ()> {
     }
     let view: ExplorationSnapshot = serde_json::from_slice(&bytes[split + 4..]).map_err(|_| ())?;
     validate(&view)?;
+    if view.selected_job_id.as_deref() != selected {
+        return Err(());
+    }
     Ok(view)
 }
 
@@ -48,6 +78,17 @@ fn validate(view: &ExplorationSnapshot) -> Result<(), ()> {
         || view.providers.len() > 16
     {
         return Err(());
+    }
+    if let Some(id) = view.selected_job_id.as_deref() {
+        if !valid_job_id(id)
+            || !view.jobs.iter().any(|job| job.id == id)
+            || view
+                .jobs
+                .iter()
+                .any(|job| job.id != id && job.preview.is_some())
+        {
+            return Err(());
+        }
     }
     for job in &view.jobs {
         if job.domain != view.domain
@@ -60,6 +101,9 @@ fn validate(view: &ExplorationSnapshot) -> Result<(), ()> {
             return Err(());
         }
         if let Some(p) = &job.preview {
+            if !p.is_object() {
+                return Err(());
+            }
             let terrain = &p["terrain"];
             if !terrain.is_null() {
                 let w = terrain["width"].as_u64().ok_or(())?;
@@ -73,13 +117,15 @@ fn validate(view: &ExplorationSnapshot) -> Result<(), ()> {
                     return Err(());
                 }
             }
-            let buildings = p["buildings"].as_array().ok_or(())?;
-            if buildings.len() > 128
-                || buildings
-                    .iter()
-                    .any(|b| b["ring"].as_array().is_none_or(|ring| ring.len() > 2048))
-            {
-                return Err(());
+            if let Some(buildings) = p.get("buildings") {
+                let buildings = buildings.as_array().ok_or(())?;
+                if buildings.len() > 128
+                    || buildings
+                        .iter()
+                        .any(|b| b["ring"].as_array().is_none_or(|ring| ring.len() > 2048))
+                {
+                    return Err(());
+                }
             }
         }
     }
@@ -95,5 +141,29 @@ mod tests {
         assert!(validate(&v).is_ok());
         v.schema_version = 2;
         assert!(validate(&v).is_err());
+    }
+
+    #[test]
+    fn selected_projection_accepts_imagery_only_and_never_substitutes_another_preview() {
+        let request = archie_geofabric::exploration::ExplorationRequest::default();
+        let plan = archie_geofabric::exploration::plan(&request).unwrap();
+        let first = "1".repeat(32);
+        let second = "2".repeat(32);
+        let job = serde_json::json!({"id":first,"domain":"personal","state":"complete","request":request,
+            "camera":plan.camera,"plan":plan,"tiles_total":0,"tiles_done":0,"bytes_received":0,"cache_hits":0,
+            "error":null,"artifacts":[],"preview":{"imagery":[]},"created_at_ms":1,"updated_at_ms":1});
+        let mut view = ExplorationSnapshot::unavailable("live");
+        view.jobs.push(serde_json::from_value(job).unwrap());
+        let mut latest = view.jobs[0].clone();
+        latest.id = second;
+        latest.preview = None;
+        view.jobs.push(latest);
+        view.selected_job_id = Some(first);
+        assert!(validate(&view).is_ok());
+        view.jobs[1].preview = Some(serde_json::json!({"imagery":[]}));
+        assert!(validate(&view).is_err());
+        view.jobs[1].preview = None;
+        view.selected_job_id = Some("3".repeat(32));
+        assert!(validate(&view).is_err());
     }
 }

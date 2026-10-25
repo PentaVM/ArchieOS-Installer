@@ -256,6 +256,35 @@ impl Observatory {
     /// but GET with 405 before a route is chosen.
     pub async fn route(&self, request: Request) -> Response {
         match request.path.as_str() {
+            path if path.starts_with("/api/exploration/jobs/") => {
+                let Some(id) = path
+                    .strip_prefix("/api/exploration/jobs/")
+                    .filter(|id| exploration::valid_job_id(id))
+                else {
+                    return Response::not_found();
+                };
+                if !archie_worldd::exploration_projection::authorized(
+                    &archie_worldd::exploration_projection::default_runtime_dir(),
+                    request.authorization.as_deref(),
+                ) {
+                    return Response {
+                        status: 403,
+                        content_type: "text/plain; charset=utf-8",
+                        body: b"private World projection requires read-only authorization\n"
+                            .to_vec(),
+                    };
+                }
+                if self.is_fixture() {
+                    return Response::not_found();
+                }
+                let Some(view) = exploration::selected(id).await else {
+                    return Response::not_found();
+                };
+                match serde_json::to_vec(&view) {
+                    Ok(body) => Response::json(body),
+                    Err(_) => Response::not_found(),
+                }
+            }
             "/api/exploration" => {
                 if !self.is_fixture()
                     && !archie_worldd::exploration_projection::authorized(
@@ -414,6 +443,31 @@ mod tests {
     use super::*;
     use archie_types::Timestamp;
     use std::collections::BTreeMap;
+
+    #[tokio::test]
+    async fn selected_exploration_still_requires_its_read_only_credential() {
+        let root =
+            std::env::temp_dir().join(format!("archie-selection-auth-{}", std::process::id()));
+        let observatory = Observatory::live_without_world(StatePaths::rooted(&root));
+        let response = observatory
+            .route(Request {
+                method: "GET".into(),
+                path: format!("/api/exploration/jobs/{}", "a".repeat(32)),
+                query: String::new(),
+                authorization: None,
+            })
+            .await;
+        assert_eq!(response.status, 403);
+        let malformed = observatory
+            .route(Request {
+                method: "GET".into(),
+                path: "/api/exploration/jobs/../manifest.json".into(),
+                query: String::new(),
+                authorization: None,
+            })
+            .await;
+        assert_eq!(malformed.status, 404);
+    }
 
     #[tokio::test]
     async fn inspector_is_cached_read_only_and_fixture_marked() {

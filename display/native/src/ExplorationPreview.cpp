@@ -1,4 +1,5 @@
 #include "ExplorationPreview.h"
+#include "ExplorationSelection.h"
 #include "archie/visual/geo.hpp"
 #include <QVector3D>
 #include <cmath>
@@ -36,9 +37,10 @@ struct Mesh {
 QVariantList explorationPreviewMeshes(const QVariantMap &projection) {
     QVariantList result;
     const auto jobs=projection.value(QStringLiteral("jobs")).toList();
-    // The most recent AOI is the one framed; other jobs remain visible in the HUD.
+    // A read-only selected capture wins; no selector follows the newest AOI.
     if (jobs.isEmpty()) return result;
-    const auto job=jobs.last().toMap();
+    const auto job=selectedExplorationJob(projection);
+    if(job.isEmpty())return result;
     const auto camera=job.value(QStringLiteral("camera")).toMap();
     const auto preview=job.value(QStringLiteral("preview")).toMap();
     const auto bounds=preview.value(QStringLiteral("bounds")).toMap();

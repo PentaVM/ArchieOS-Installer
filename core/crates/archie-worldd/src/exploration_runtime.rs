@@ -197,6 +197,11 @@ fn default_rates() -> BTreeMap<String, RateLedger> {
         ("aws_terrain_tiles".into(), RateLedger::new(120, 4)),
         ("openstreetmap".into(), RateLedger::new(6, 1)),
         ("photon".into(), RateLedger::new(30, 1)),
+        ("google_satellite".into(), RateLedger::new(60, 2)),
+        ("nasa_gibs".into(), RateLedger::new(60, 2)),
+        ("usgs_earthquakes".into(), RateLedger::new(12, 1)),
+        ("nasa_eonet".into(), RateLedger::new(6, 1)),
+        ("adsb_lol".into(), RateLedger::new(12, 1)),
     ]
     .into()
 }
@@ -323,7 +328,9 @@ impl ExplorationService {
     fn save_job(&self, job: &ExplorationJob) -> Result<(), String> {
         let dir = self.root().join(format!("job-{}", job.id));
         private_directory(&dir)?;
-        let bytes = serde_json::to_vec(job).map_err(|e| e.to_string())?;
+        let mut persisted = serde_json::to_value(job).map_err(|e| e.to_string())?;
+        crate::imagery::strip_online_pixels(&mut persisted);
+        let bytes = serde_json::to_vec(&persisted).map_err(|e| e.to_string())?;
         if bytes.len() >= 2 * 1024 * 1024 {
             return Err("capture manifest exceeds its 2MiB bound".into());
         }
@@ -337,15 +344,30 @@ impl ExplorationService {
     }
     pub async fn snapshot(&self) -> ExplorationSnapshot {
         let state = self.state.lock().await;
+        self.project_snapshot(&state, None)
+    }
+    /// Select an existing in-memory capture without scheduling or reading sources.
+    pub async fn snapshot_for(&self, id: &str) -> Option<ExplorationSnapshot> {
+        if !valid_id(id) {
+            return None;
+        }
+        let state = self.state.lock().await;
+        if !state.jobs.iter().any(|job| job.id == id) {
+            return None;
+        }
+        Some(self.project_snapshot(&state, Some(id)))
+    }
+    fn project_snapshot(&self, state: &State, selected: Option<&str>) -> ExplorationSnapshot {
         let mut jobs = state.jobs.clone();
-        let last = jobs.len().saturating_sub(1);
-        for (index, job) in jobs.iter_mut().enumerate() {
+        let shown = selected.or_else(|| state.jobs.last().map(|job| job.id.as_str()));
+        for job in &mut jobs {
+            let keep_preview = shown == Some(job.id.as_str());
             job.projection_truncated = !job.plan.tiles.is_empty()
                 || job.artifacts.len() > 16
-                || index != last && job.preview.is_some();
+                || !keep_preview && job.preview.is_some();
             job.plan.tiles.clear();
             job.artifacts.truncate(16);
-            if index != last {
+            if !keep_preview {
                 job.preview = None;
             }
         }
@@ -355,6 +377,7 @@ impl ExplorationService {
             generated_at_ms: now_ms(),
             domain: self.config.domain,
             jobs,
+            selected_job_id: selected.map(str::to_owned),
             providers: state.rates.iter().map(|(id, r)| r.snapshot(id)).collect(),
             error: None,
         }
@@ -381,9 +404,17 @@ impl ExplorationService {
         for layer in &request.layers {
             if !matches!(
                 layer,
-                ExplorationLayer::Terrain | ExplorationLayer::Buildings
+                ExplorationLayer::Terrain
+                    | ExplorationLayer::Buildings
+                    | ExplorationLayer::Imagery
+                    | ExplorationLayer::Signals
             ) {
-                return Err(format!("{layer:?}: source capture/storage not permitted by configured GeoFabric providers; imagery, Street View and Google meshes require a compatible licensed adapter"));
+                return Err(format!(
+                    "{layer:?}: source capture/storage requires a compatible licensed adapter"
+                ));
+            }
+            if matches!(layer, ExplorationLayer::Imagery | ExplorationLayer::Signals) {
+                continue;
             }
             let source = match layer {
                 ExplorationLayer::Terrain => archie_geofabric::GeoProviderId::AwsTerrainTiles,
@@ -398,6 +429,16 @@ impl ExplorationService {
         plan.estimated_requests = plan.tiles.len() as u64
             * u64::from(request.layers.contains(&ExplorationLayer::Terrain))
             + u64::from(request.layers.contains(&ExplorationLayer::Buildings));
+        if request.layers.contains(&ExplorationLayer::Imagery) {
+            let date = crate::imagery::effective_date(request.imagery_date.as_deref(), now_ms())?;
+            for source in crate::imagery::selected_sources(request) {
+                plan.estimated_requests +=
+                    crate::imagery::source_tiles(request, source, &date)?.len() as u64;
+            }
+        }
+        if request.layers.contains(&ExplorationLayer::Signals) {
+            plan.estimated_requests += u64::from(request.signal_updates) * 3;
+        }
         Ok(plan)
     }
     async fn command(&self, command: ExploreCommand) -> Result<Value, String> {
@@ -431,9 +472,15 @@ impl ExplorationService {
                 {
                     return Err("four exploration jobs already active".into());
                 }
-                let total = plan.tiles.len() as u64
-                    * u64::from(request.layers.contains(&ExplorationLayer::Terrain))
-                    + u64::from(request.layers.contains(&ExplorationLayer::Buildings));
+                let total = plan.estimated_requests;
+                let pinned_imagery_date = if request.layers.contains(&ExplorationLayer::Imagery) {
+                    Some(crate::imagery::effective_date(
+                        request.imagery_date.as_deref(),
+                        now_ms(),
+                    )?)
+                } else {
+                    None
+                };
                 let job = ExplorationJob {
                     id: format!("{:032x}", rand::random::<u128>()),
                     domain: request.domain,
@@ -444,6 +491,8 @@ impl ExplorationService {
                     tiles_done: 0,
                     bytes_received: 0,
                     stored_bytes: 0,
+                    signal_updates_done: 0,
+                    pinned_imagery_date,
                     cache_hits: 0,
                     error: None,
                     artifacts: vec![],
@@ -592,6 +641,30 @@ impl ExplorationService {
         url: &str,
         budget: u64,
     ) -> Result<(Vec<u8>, bool), String> {
+        self.fetch_policy(
+            id,
+            provider,
+            url,
+            budget,
+            Some(Duration::from_secs(7 * 86400)),
+        )
+        .await
+    }
+    /// None forbids all disk reads/writes for this response, including cache replay.
+    async fn fetch_policy(
+        &self,
+        id: Option<&str>,
+        provider: &str,
+        url: &str,
+        budget: u64,
+        cache_ttl: Option<Duration>,
+    ) -> Result<(Vec<u8>, bool), String> {
+        // Provider policy is authoritative even if a caller requests a cache.
+        let cache_ttl = if provider == "google_satellite" {
+            None
+        } else {
+            cache_ttl
+        };
         let hash = format!("{:x}", Sha256::digest(url.as_bytes()));
         let key_lock = {
             let mut locks = self.cache_locks.lock().await;
@@ -606,20 +679,22 @@ impl ExplorationService {
         };
         let _same_resource = tokio::select! {guard=key_lock.lock_owned()=>guard,_=self.stopped(id)=>return Err("capture explicitly stopped".into())};
         let cache = self.root().join("cache").join(hash);
-        if let Ok(metadata) = std::fs::metadata(&cache) {
-            if metadata.is_file()
-                && metadata.len() <= MAX_RESPONSE
-                && metadata
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.elapsed().ok())
-                    .is_some_and(|age| age < Duration::from_secs(7 * 86400))
-            {
-                if let Ok(bytes) = std::fs::read(&cache) {
-                    return Ok((bytes, true));
+        if let Some(ttl) = cache_ttl {
+            if let Ok(metadata) = std::fs::metadata(&cache) {
+                if metadata.is_file()
+                    && metadata.len() <= MAX_RESPONSE
+                    && metadata
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.elapsed().ok())
+                        .is_some_and(|age| age < ttl)
+                {
+                    if let Ok(bytes) = std::fs::read(&cache) {
+                        return Ok((bytes, true));
+                    }
+                    // Another resource's bounded-cache eviction may race metadata.
+                    // An evicted object is a miss, not a failed capture.
                 }
-                // Another resource's bounded-cache eviction may race metadata.
-                // An evicted object is a miss, not a failed capture.
             }
         }
         if budget == 0 {
@@ -758,9 +833,11 @@ impl ExplorationService {
                 }
                 Ok((bytes, _, _, false)) => {
                     validate_payload(provider, &bytes)?;
-                    let _writer = self.cache_writer.lock().await;
-                    trim_cache(cache.parent().unwrap(), bytes.len() as u64, MAX_CACHE_BYTES)?;
-                    atomic_write(&cache, &bytes)?;
+                    if cache_ttl.is_some() {
+                        let _writer = self.cache_writer.lock().await;
+                        trim_cache(cache.parent().unwrap(), bytes.len() as u64, MAX_CACHE_BYTES)?;
+                        atomic_write(&cache, &bytes)?;
+                    }
                     return Ok((bytes, false));
                 }
                 Err(e) => return Err(e),
@@ -788,6 +865,480 @@ impl ExplorationService {
         Ok(json!({"places":places,"cache_hit":cached}))
     }
     async fn run(&self, id: &str) -> Result<(), String> {
+        self.mark(id, JobState::Running).await?;
+        let job = self
+            .state
+            .lock()
+            .await
+            .jobs
+            .iter()
+            .find(|job| job.id == id)
+            .cloned()
+            .ok_or("unknown job")?;
+        let mut errors = Vec::new();
+        if job.request.layers.iter().any(|layer| {
+            matches!(
+                layer,
+                ExplorationLayer::Terrain | ExplorationLayer::Buildings
+            )
+        }) {
+            if let Err(error) = self.run_geometry(id).await {
+                self.active(id).await?;
+                if fatal_budget(&error) {
+                    return Err(error);
+                }
+                errors.push(format!("geometry: {error}"));
+                self.merge_preview(id, "geometry_error", json!(error))
+                    .await?;
+            }
+        }
+        if job.request.layers.contains(&ExplorationLayer::Imagery) {
+            errors.extend(self.capture_imagery(id, &job).await?);
+        }
+        if job.request.layers.contains(&ExplorationLayer::Signals) {
+            errors.extend(self.capture_signals(id, &job).await?);
+        }
+        {
+            let mut state = self.state.lock().await;
+            let job = state
+                .jobs
+                .iter_mut()
+                .find(|job| job.id == id)
+                .ok_or("unknown job")?;
+            job.error = if errors.is_empty() {
+                None
+            } else {
+                Some(errors.join("; ").chars().take(2000).collect())
+            };
+            self.save_job(job)?;
+        }
+        self.mark(id, JobState::Complete).await
+    }
+
+    async fn merge_preview(&self, id: &str, key: &str, value: Value) -> Result<(), String> {
+        self.active(id).await?;
+        let mut state = self.state.lock().await;
+        let job = state
+            .jobs
+            .iter_mut()
+            .find(|job| job.id == id)
+            .ok_or("unknown job")?;
+        let preview = job.preview.get_or_insert_with(
+            || json!({"bounds":job.plan.bounds,"row_projection":"web_mercator"}),
+        );
+        preview[key] = value;
+        job.updated_at_ms = now_ms();
+        self.save_job(job)
+    }
+
+    async fn progress_unit(&self, id: &str) -> Result<(), String> {
+        let mut state = self.state.lock().await;
+        let job = state
+            .jobs
+            .iter_mut()
+            .find(|job| job.id == id)
+            .ok_or("unknown job")?;
+        job.tiles_done = job.tiles_done.saturating_add(1).min(job.tiles_total);
+        self.save_job(job)
+    }
+
+    async fn capture_imagery(&self, id: &str, job: &ExplorationJob) -> Result<Vec<String>, String> {
+        let date = job
+            .pinned_imagery_date
+            .clone()
+            .unwrap_or(crate::imagery::effective_date(
+                job.request.imagery_date.as_deref(),
+                job.created_at_ms,
+            )?);
+        let sources = crate::imagery::selected_sources(&job.request);
+        let mut remaining_inline = crate::imagery::INLINE_BUDGET;
+        let mut remaining_tiles = sources.iter().try_fold(0usize, |count, source| {
+            crate::imagery::source_tiles(&job.request, *source, &date)
+                .map(|tiles| count + tiles.len())
+        })?;
+        let mut entries = Vec::new();
+        let mut errors = Vec::new();
+        for source in sources {
+            self.active(id).await?;
+            let spec = crate::imagery::spec(source);
+            let requests = crate::imagery::source_tiles(&job.request, source, &date)?;
+            let mut entry = json!({"source_id":spec.id,"label":spec.label,"attribution":spec.attribution,
+                "imagery_date":if spec.daily {json!(date)} else if spec.online_only {Value::Null} else {json!("static")},
+                "requested_date":job.request.imagery_date,"date_selection":if job.request.imagery_date.is_some(){"requested"}else{"UTC_minus_three_days_default"},
+                "date_applied":spec.daily,"retrieved_at_ms":Value::Null,
+                "mode":if spec.online_only{"online_preview_only"}else{"open_data"},"state":"loading","error":Value::Null,"tiles":[]});
+            let mut tiles = Vec::new();
+            let mut source_errors = Vec::new();
+            for request in requests {
+                self.active(id).await?;
+                let budget = self.remaining(id).await?;
+                if budget == 0 {
+                    return Err("capture network byte budget exhausted".into());
+                }
+                let filename = format!(
+                    "imagery-{}-{}-{}-{}-{}.{}",
+                    spec.id,
+                    if spec.daily { date.as_str() } else { "static" },
+                    request.tile.zoom,
+                    request.tile.x,
+                    request.tile.y,
+                    spec.extension
+                );
+                let result = if spec.online_only {
+                    self.fetch_policy(Some(id), "google_satellite", &request.url, budget, None)
+                        .await
+                } else {
+                    self.source_bytes(id, &filename, "nasa_gibs", &request.url)
+                        .await
+                };
+                match result {
+                    Ok((bytes, cached)) => {
+                        let retrieved = if cached {
+                            self.cached_retrieval_time(&request.url)
+                        } else {
+                            Some(now_ms())
+                        };
+                        entry["retrieved_at_ms"] = json!(retrieved);
+                        if spec.online_only {
+                            self.progress_unit(id).await?;
+                        } else {
+                            self.artifact(
+                                id,
+                                "imagery",
+                                if spec.extension == "png" {
+                                    "png"
+                                } else {
+                                    "jpeg"
+                                },
+                                &filename,
+                                &bytes,
+                                spec.attribution,
+                                cached,
+                            )
+                            .await?;
+                        }
+                        // Keep native encoding when space permits, reserving enough
+                        // for small previews of tiles still needed for AOI coverage.
+                        let reserved = remaining_tiles.saturating_sub(1) * 24 * 1024;
+                        let available = remaining_inline.saturating_sub(reserved);
+                        let tile_budget = if bytes.len().div_ceil(3) * 4 <= available {
+                            available
+                        } else {
+                            remaining_inline / remaining_tiles.max(1)
+                        };
+                        match crate::imagery::encode_preview(&bytes, tile_budget) {
+                            Ok(preview) => {
+                                remaining_inline =
+                                    remaining_inline.saturating_sub(preview.data_base64.len());
+                                let span = (request.bounds.east - request.bounds.west)
+                                    .abs()
+                                    .to_radians()
+                                    * 6_371_008.8
+                                    * job.request.latitude.to_radians().cos();
+                                tiles.push(json!({"bounds":request.bounds,"mime":preview.mime,"data_base64":preview.data_base64,
+                                    "width":preview.width,"height":preview.height,"zoom":request.tile.zoom,
+                                    "source_resolution_m":span/f64::from(preview.source_width),"preview_resolution_m":span/f64::from(preview.width)}));
+                            }
+                            Err(error) => source_errors.push(error),
+                        }
+                    }
+                    Err(error) => {
+                        self.active(id).await?;
+                        if fatal_budget(&error) {
+                            return Err(error);
+                        }
+                        source_errors.push(error);
+                    }
+                }
+                remaining_tiles = remaining_tiles.saturating_sub(1);
+                entry["tiles"] = json!(tiles);
+                entries.retain(|old: &Value| old["source_id"] != spec.id);
+                let mut partial = entry.clone();
+                partial["state"] = json!("loading");
+                entries.push(partial);
+                self.merge_preview(id, "imagery", json!(entries)).await?;
+            }
+            let state = if source_errors.is_empty() {
+                "ready"
+            } else if !tiles.is_empty() {
+                "partial"
+            } else if source_errors
+                .iter()
+                .all(|error| error.contains("404") || error.contains("no-data"))
+            {
+                "no_data"
+            } else if source_errors
+                .iter()
+                .all(|error| error.contains("inline byte cap"))
+            {
+                "preview_omitted"
+            } else {
+                "error"
+            };
+            entry["state"] = json!(state);
+            entry["tiles"] = json!(tiles);
+            if !source_errors.is_empty() {
+                let error = source_errors.join("; ");
+                entry["error"] = json!(error);
+                errors.push(format!("{}: {}", spec.id, error));
+            }
+            entries.retain(|old: &Value| old["source_id"] != spec.id);
+            entries.push(entry);
+            self.merge_preview(id, "imagery", json!(entries)).await?;
+        }
+        Ok(errors)
+    }
+
+    fn cached_retrieval_time(&self, url: &str) -> Option<i64> {
+        let hash = format!("{:x}", Sha256::digest(url.as_bytes()));
+        let modified = std::fs::metadata(self.root().join("cache").join(hash))
+            .ok()?
+            .modified()
+            .ok()?;
+        i64::try_from(
+            modified
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()?
+                .as_millis(),
+        )
+        .ok()
+    }
+
+    async fn capture_signals(
+        &self,
+        id: &str,
+        initial: &ExplorationJob,
+    ) -> Result<Vec<String>, String> {
+        let mut errors = Vec::new();
+        loop {
+            self.active(id).await?;
+            let job = self
+                .state
+                .lock()
+                .await
+                .jobs
+                .iter()
+                .find(|job| job.id == id)
+                .cloned()
+                .ok_or("unknown job")?;
+            if job.signal_updates_done >= job.request.signal_updates {
+                break;
+            }
+            let previous = job
+                .preview
+                .as_ref()
+                .and_then(|preview| preview.get("signals"))
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            if let Some(until) = previous["next_update_at_ms"]
+                .as_i64()
+                .filter(|until| *until > now_ms())
+            {
+                tokio::select! {_=tokio::time::sleep(Duration::from_millis((until-now_ms()).max(1)as u64))=>{},_=self.stopped(Some(id))=>return Err("capture explicitly stopped".into())}
+            }
+            errors.clear();
+            let requests = crate::world_signals::requests(
+                initial.request.latitude,
+                initial.request.longitude,
+                initial.request.radius_m,
+            );
+            let mut sources = Vec::new();
+            let mut groups: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+            for request in &requests {
+                let old = previous["points"]
+                    .as_array()
+                    .map(|points| {
+                        points
+                            .iter()
+                            .filter(|point| point["source_id"] == request.provider)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                groups.insert(request.provider.clone(), old);
+            }
+            for request in requests {
+                self.active(id).await?;
+                let budget = self.remaining(id).await?;
+                if budget == 0 {
+                    return Err("capture network byte budget exhausted".into());
+                }
+                let old = previous["sources"]
+                    .as_array()
+                    .and_then(|sources| {
+                        sources
+                            .iter()
+                            .find(|source| source["id"] == request.provider)
+                    })
+                    .cloned();
+                let mut source=old.clone().unwrap_or_else(||json!({"id":request.provider,"label":request.label,"retrieved_at_ms":Value::Null,"seen":0,"rejected":0,"truncated":false}));
+                let had_success = old
+                    .as_ref()
+                    .is_some_and(|source| source["retrieved_at_ms"].as_i64().is_some());
+                let result = self
+                    .fetch_policy(
+                        Some(id),
+                        &request.provider,
+                        &request.url,
+                        budget,
+                        Some(Duration::from_secs(request.ttl_seconds)),
+                    )
+                    .await;
+                match result {
+                    Ok((bytes, cached)) => match crate::world_signals::decode(
+                        &request.provider,
+                        &bytes,
+                        initial.request.latitude,
+                        initial.request.longitude,
+                        initial.request.radius_m,
+                    ) {
+                        Ok(batch) => {
+                            let filename = format!(
+                                "signals-{}-{}.json",
+                                job.signal_updates_done + 1,
+                                request.provider
+                            );
+                            self.artifact(
+                                id,
+                                "signals",
+                                "json",
+                                &filename,
+                                &bytes,
+                                &request.label,
+                                cached,
+                            )
+                            .await?;
+                            groups.insert(
+                                request.provider.clone(),
+                                batch
+                                    .points
+                                    .iter()
+                                    .filter_map(|point| serde_json::to_value(point).ok())
+                                    .collect(),
+                            );
+                            source["state"] = json!(if cached {
+                                "cached"
+                            } else if batch.points.is_empty() {
+                                "no_data"
+                            } else {
+                                "ready"
+                            });
+                            source["error"] = Value::Null;
+                            source["retrieved_at_ms"] = json!(if cached {
+                                self.cached_retrieval_time(&request.url)
+                            } else {
+                                Some(now_ms())
+                            });
+                            source["seen"] = json!(batch.seen);
+                            source["rejected"] = json!(batch.rejected);
+                            source["truncated"] = json!(batch.truncated);
+                            source["matched_total"] = json!(batch.matched_total);
+                            source["omitted_points"] = json!(batch.omitted_points);
+                            source["total_is_lower_bound"] = json!(batch.total_is_lower_bound);
+                        }
+                        Err(error) => {
+                            source["state"] = json!(if had_success { "stale" } else { "error" });
+                            source["error"] = json!(error);
+                            errors.push(format!("{}: {}", request.provider, error));
+                        }
+                    },
+                    Err(error) => {
+                        self.active(id).await?;
+                        if fatal_budget(&error) {
+                            return Err(error);
+                        }
+                        source["state"] = json!(if had_success { "stale" } else { "error" });
+                        source["error"] = json!(error);
+                        errors.push(format!("{}: {}", request.provider, error));
+                    }
+                }
+                sources.push(source);
+            }
+            let mut points = Vec::new();
+            let maximum = groups.values().map(Vec::len).max().unwrap_or(0);
+            'points: for index in 0..maximum {
+                for group in groups.values() {
+                    if let Some(point) = group.get(index) {
+                        points.push(point.clone());
+                        if points.len() == 128 {
+                            break 'points;
+                        }
+                    }
+                }
+            }
+            let offered = groups.values().map(Vec::len).sum::<usize>();
+            let mut truncated =
+                offered > points.len() || sources.iter().any(|source| source["truncated"] == true);
+            while serde_json::to_vec(&points)
+                .map_err(|e| e.to_string())?
+                .len()
+                > 128 * 1024
+            {
+                points.pop();
+                truncated = true;
+            }
+            let mut points_total = 0u64;
+            let mut total_is_lower_bound = false;
+            for source in &sources {
+                match source["matched_total"].as_u64() {
+                    Some(total) => points_total = points_total.saturating_add(total),
+                    None => {
+                        let retained = source["id"]
+                            .as_str()
+                            .and_then(|id| groups.get(id))
+                            .map_or(0, Vec::len);
+                        points_total = points_total.saturating_add(retained as u64);
+                        total_is_lower_bound = true;
+                    }
+                }
+                total_is_lower_bound |= source["total_is_lower_bound"].as_bool().unwrap_or(true);
+            }
+            let omitted = points_total.saturating_sub(points.len() as u64);
+            truncated |= omitted > 0;
+            let seen = sources
+                .iter()
+                .filter_map(|source| source["seen"].as_u64())
+                .sum::<u64>();
+            let rejected = sources
+                .iter()
+                .filter_map(|source| source["rejected"].as_u64())
+                .sum::<u64>();
+            let done = job.signal_updates_done + 1;
+            let next = if done < job.request.signal_updates {
+                Some(now_ms() + i64::from(job.request.signal_interval_seconds) * 1000)
+            } else {
+                None
+            };
+            {
+                let mut state = self.state.lock().await;
+                let job = state
+                    .jobs
+                    .iter_mut()
+                    .find(|job| job.id == id)
+                    .ok_or("unknown job")?;
+                if matches!(
+                    job.state,
+                    JobState::Paused | JobState::Cancelled | JobState::Complete
+                ) {
+                    return Err("capture explicitly stopped".into());
+                }
+                // One checkpoint binds the last-good view to its completed cycle.
+                // A restart must not replay a cycle whose view was already saved.
+                let preview = job.preview.get_or_insert_with(
+                    || json!({"bounds":job.plan.bounds,"row_projection":"web_mercator"}),
+                );
+                preview["signals"] = json!({"sources":sources,"points":points,"seen":seen,"rejected":rejected,"truncated":truncated,
+                    "points_total":points_total,"omitted_points":omitted,"total_is_lower_bound":total_is_lower_bound,
+                    "updates_done":done,"updates_total":job.request.signal_updates,"next_update_at_ms":next});
+                job.signal_updates_done = done;
+                job.updated_at_ms = now_ms();
+                self.save_job(job)?;
+            }
+        }
+        Ok(errors)
+    }
+
+    async fn run_geometry(&self, id: &str) -> Result<(), String> {
         self.mark(id, JobState::Running).await?;
         let job = self
             .state
@@ -891,7 +1442,7 @@ impl ExplorationService {
             Err(error) if error == "no triangulatable geometry for GLB" => {}
             Err(error) => return Err(error),
         }
-        self.mark(id, JobState::Complete).await
+        Ok(())
     }
     async fn remaining(&self, id: &str) -> Result<u64, String> {
         let state = self.state.lock().await;
@@ -959,9 +1510,12 @@ impl ExplorationService {
             })
             .take(128)
             .collect::<Vec<_>>();
-        job.preview = Some(
-            json!({"bounds":bounds,"terrain":terrain,"buildings":shown,"omitted_buildings":buildings.len()-shown.len(),"row_projection":"web_mercator"}),
-        );
+        let view = job.preview.get_or_insert_with(|| json!({}));
+        view["bounds"] = json!(bounds);
+        view["terrain"] = json!(terrain);
+        view["buildings"] = json!(shown);
+        view["omitted_buildings"] = json!(buildings.len() - shown.len());
+        view["row_projection"] = json!("web_mercator");
         job.camera.elevation_m = terrain
             .and_then(|t| t.elevations_m.iter().flatten().copied().reduce(f32::max))
             .map(f64::from);
@@ -1046,6 +1600,9 @@ impl ExplorationService {
 }
 fn valid_id(id: &str) -> bool {
     id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit())
+}
+fn fatal_budget(error: &str) -> bool {
+    error.contains("byte budget") || error.contains("explicitly stopped")
 }
 fn trim_cache(directory: &Path, incoming: u64, capacity: u64) -> Result<(), String> {
     if incoming > capacity {
@@ -1167,6 +1724,15 @@ fn validate_payload(provider: &str, bytes: &[u8]) -> Result<(), String> {
                 serde_json::from_slice(bytes).map_err(|_| "invalid geocoder JSON")?;
             if value["features"].as_array().is_none_or(|a| a.len() > 50) {
                 return Err("invalid geocoder features".into());
+            }
+        }
+        "google_satellite" | "nasa_gibs" => {
+            crate::imagery::encode_preview(bytes, usize::MAX)?;
+        }
+        "usgs_earthquakes" | "nasa_eonet" | "adsb_lol" => {
+            let value: Value = serde_json::from_slice(bytes).map_err(|_| "invalid signals JSON")?;
+            if !value.is_object() {
+                return Err("invalid signals response object".into());
             }
         }
         _ => return Err("unknown provider".into()),
@@ -1412,6 +1978,8 @@ mod tests {
             tiles_done: 0,
             bytes_received: 0,
             stored_bytes: 0,
+            signal_updates_done: 0,
+            pinned_imagery_date: None,
             cache_hits: 0,
             error: None,
             artifacts: vec![],
@@ -1421,6 +1989,374 @@ mod tests {
             plan,
             projection_truncated: false,
         }
+    }
+    #[tokio::test]
+    async fn selecting_an_older_job_only_projects_its_own_preview_without_fetching() {
+        let service = service();
+        let mut older = seed(&service);
+        older.preview = Some(json!({"bounds":older.plan.bounds,"buildings":[],"capture":"older"}));
+        let mut latest = older.clone();
+        latest.id = "2".repeat(32);
+        latest.preview.as_mut().unwrap()["capture"] = json!("latest");
+        service.state.lock().await.jobs = vec![older.clone(), latest.clone()];
+        let selected = service.snapshot_for(&older.id).await.unwrap();
+        assert_eq!(selected.selected_job_id.as_deref(), Some(older.id.as_str()));
+        assert_eq!(
+            selected
+                .jobs
+                .iter()
+                .map(|job| job.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![older.id.as_str(), latest.id.as_str()]
+        );
+        assert_eq!(
+            selected.jobs[0].preview.as_ref().unwrap()["capture"],
+            "older"
+        );
+        assert!(selected.jobs[1].preview.is_none());
+        assert!(selected
+            .providers
+            .iter()
+            .all(|provider| provider.requests_sent == 0));
+        assert!(service.state.lock().await.workers.is_empty());
+        let normal = service.snapshot().await;
+        assert!(normal.selected_job_id.is_none());
+        assert!(normal.jobs[0].preview.is_none());
+        assert_eq!(
+            normal.jobs[1].preview.as_ref().unwrap()["capture"],
+            "latest"
+        );
+        assert!(service.snapshot_for(&"3".repeat(32)).await.is_none());
+        assert!(service.snapshot_for("../manifest.json").await.is_none());
+        assert!(service
+            .snapshot_for(&format!("{}/extra", older.id))
+            .await
+            .is_none());
+    }
+
+    #[test]
+    fn imagery_and_signals_are_admitted_and_counted_without_licensing_geometry() {
+        let service = service();
+        let request = exploration::ExplorationRequest {
+            layers: vec![ExplorationLayer::Imagery, ExplorationLayer::Signals],
+            signal_updates: 2,
+            ..Default::default()
+        };
+        let plan = service.checked_plan(&request).unwrap();
+        assert!(plan.estimated_requests >= 8);
+        assert!(service
+            .checked_plan(&exploration::ExplorationRequest {
+                layers: vec![ExplorationLayer::StreetView],
+                ..request
+            })
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn google_preview_is_visible_in_ram_but_never_manifest_pixels() {
+        let service = service();
+        let mut job = seed(&service);
+        job.preview = Some(json!({"imagery":[
+            {"source_id":"google_satellite","mode":"online_preview_only","tiles":[{"data_base64":"VOLATILE_SECRET"}]},
+            {"source_id":"blue_marble","mode":"open_data","tiles":[{"data_base64":"OPEN_SOURCE"}]}
+        ]}));
+        service.save_job(&job).unwrap();
+        service.state.lock().await.jobs.push(job.clone());
+        assert!(serde_json::to_string(&service.snapshot().await)
+            .unwrap()
+            .contains("VOLATILE_SECRET"));
+        let saved = std::fs::read_to_string(
+            service
+                .root()
+                .join(format!("job-{}", job.id))
+                .join("manifest.json"),
+        )
+        .unwrap();
+        assert!(!saved.contains("VOLATILE_SECRET"));
+        assert!(saved.contains("OPEN_SOURCE"));
+    }
+
+    #[tokio::test]
+    async fn volatile_fetch_never_reads_or_writes_the_disk_cache() {
+        let service = service();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/tile", listener.local_addr().unwrap());
+        let hash = format!("{:x}", Sha256::digest(url.as_bytes()));
+        let cache = service.root().join("cache").join(hash);
+        // A seeded file must be ignored by volatile policy.
+        atomic_write(&cache, b"DO_NOT_REPLAY").unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 2048];
+            assert!(socket.read(&mut request).await.unwrap() > 0);
+            let bytes = br#"{"features":[]}"#;
+            socket
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        bytes.len()
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            socket.write_all(bytes).await.unwrap();
+        });
+        let (bytes, cached) = service
+            .fetch_policy(None, "photon", &url, 1024, None)
+            .await
+            .unwrap();
+        server.await.unwrap();
+        assert!(!cached);
+        assert_eq!(bytes, br#"{"features":[]}"#);
+        assert_eq!(std::fs::read(cache).unwrap(), b"DO_NOT_REPLAY");
+        assert_eq!(
+            service
+                .snapshot()
+                .await
+                .providers
+                .iter()
+                .find(|p| p.id == "photon")
+                .unwrap()
+                .requests_sent,
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn google_provider_cannot_be_opted_into_persistent_cache() {
+        let service = service();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/tile", listener.local_addr().unwrap());
+        let cache = service
+            .root()
+            .join("cache")
+            .join(format!("{:x}", Sha256::digest(url.as_bytes())));
+        atomic_write(&cache, b"DO_NOT_REPLAY").unwrap();
+        let mut tile = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut tile, 1, 1);
+            encoder.set_color(png::ColorType::Rgb);
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(&[10, 20, 30])
+                .unwrap();
+        }
+        let expected = tile.clone();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 2048];
+            assert!(socket.read(&mut request).await.unwrap() > 0);
+            socket
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        tile.len()
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            socket.write_all(&tile).await.unwrap();
+        });
+        let (bytes, cached) = service
+            .fetch_policy(
+                None,
+                "google_satellite",
+                &url,
+                1024,
+                Some(Duration::from_secs(86400)),
+            )
+            .await
+            .unwrap();
+        // Assert before awaiting the server: a wrong cache replay never sends a request.
+        assert!(!cached);
+        assert_eq!(bytes, expected);
+        server.await.unwrap();
+        assert_eq!(std::fs::read(cache).unwrap(), b"DO_NOT_REPLAY");
+    }
+
+    #[tokio::test]
+    async fn a_signal_error_without_any_success_does_not_claim_last_good_data() {
+        let service = service();
+        let mut job = seed(&service);
+        job.state = JobState::Running;
+        job.request.layers = vec![ExplorationLayer::Signals];
+        let requests = crate::world_signals::requests(
+            job.request.latitude,
+            job.request.longitude,
+            job.request.radius_m,
+        );
+        assert_eq!(requests.len(), 3);
+        let sources: Vec<_> = requests.iter().map(|request| {
+            let hash = format!("{:x}",Sha256::digest(request.url.as_bytes()));
+            atomic_write(&service.root().join("cache").join(hash),b"{}").unwrap();
+            json!({"id":request.provider,"label":request.label,"state":"error","retrieved_at_ms":Value::Null})
+        }).collect();
+        job.preview = Some(json!({"signals":{"sources":sources,"points":[]}}));
+        service.save_job(&job).unwrap();
+        service.state.lock().await.jobs.push(job.clone());
+        let errors = service.capture_signals(&job.id, &job).await.unwrap();
+        assert_eq!(errors.len(), 3);
+        let snapshot = service.snapshot().await;
+        let signals = &snapshot.jobs[0].preview.as_ref().unwrap()["signals"];
+        assert!(signals["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|source| source["state"] == "error"));
+        assert_eq!(snapshot.jobs[0].signal_updates_done, 1);
+    }
+
+    #[tokio::test]
+    async fn a_signal_failure_preserves_last_good_points_and_their_retrieval_time() {
+        let service = service();
+        let mut job = seed(&service);
+        job.state = JobState::Running;
+        job.request.layers = vec![ExplorationLayer::Signals];
+        let requests = crate::world_signals::requests(
+            job.request.latitude,
+            job.request.longitude,
+            job.request.radius_m,
+        );
+        for request in &requests {
+            let data = match request.provider.as_str() {
+                "usgs_earthquakes" => json!({"type":"FeatureCollection","features":(0..140).map(|n|
+                    json!({"type":"Feature","id":format!("quake-{n}"),"properties":{"place":"Test observation","mag":2,"time":now_ms()-1000},
+                        "geometry":{"type":"Point","coordinates":[0,0,1]}})).collect::<Vec<_>>()}),
+                "nasa_eonet" => json!({"events":[]}),
+                _ => json!({"now":now_ms(),"ac":[]}),
+            };
+            let hash = format!("{:x}", Sha256::digest(request.url.as_bytes()));
+            atomic_write(
+                &service.root().join("cache").join(hash),
+                &serde_json::to_vec(&data).unwrap(),
+            )
+            .unwrap();
+        }
+        service.save_job(&job).unwrap();
+        service.state.lock().await.jobs.push(job.clone());
+        service.capture_signals(&job.id, &job).await.unwrap();
+        let fresh = service.snapshot().await;
+        let fresh_signals = &fresh.jobs[0].preview.as_ref().unwrap()["signals"];
+        assert_eq!(fresh_signals["points"].as_array().unwrap().len(), 128);
+        assert_eq!(fresh_signals["points_total"], 140);
+        assert_eq!(fresh_signals["omitted_points"], 12);
+        assert_eq!(fresh_signals["rejected"], 0);
+        assert_eq!(fresh_signals["total_is_lower_bound"], false);
+        let retrieved: Vec<_> = fresh_signals["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|source| source["retrieved_at_ms"].clone())
+            .collect();
+        for request in &requests {
+            let hash = format!("{:x}", Sha256::digest(request.url.as_bytes()));
+            atomic_write(&service.root().join("cache").join(hash), b"{}").unwrap();
+        }
+        {
+            let mut state = service.state.lock().await;
+            let current = &mut state.jobs[0];
+            current.request.signal_updates = 2;
+            current.preview.as_mut().unwrap()["signals"]["next_update_at_ms"] = Value::Null;
+            job = current.clone();
+        }
+        service.capture_signals(&job.id, &job).await.unwrap();
+        let snapshot = service.snapshot().await;
+        let signals = &snapshot.jobs[0].preview.as_ref().unwrap()["signals"];
+        assert_eq!(signals["points"], fresh_signals["points"]);
+        assert_eq!(signals["points_total"], 140);
+        assert_eq!(signals["omitted_points"], 12);
+        assert_eq!(signals["total_is_lower_bound"], false);
+        for (index, source) in signals["sources"].as_array().unwrap().iter().enumerate() {
+            assert_eq!(source["state"], "stale");
+            assert_eq!(source["retrieved_at_ms"], retrieved[index]);
+        }
+        let restarted = ExplorationService::new(service.config.clone()).unwrap();
+        assert_eq!(restarted.snapshot().await.jobs[0].signal_updates_done, 2);
+    }
+    #[tokio::test]
+    async fn a_waiting_signal_refresh_pauses_and_resumes_its_persisted_schedule() {
+        let service = service();
+        let mut job = seed(&service);
+        job.request.layers = vec![ExplorationLayer::Signals];
+        job.request.signal_updates = 2;
+        job.signal_updates_done = 1;
+        let next = now_ms() + 3_600_000;
+        job.preview = Some(
+            json!({"signals":{"sources":[],"points":[],"updates_done":1,"next_update_at_ms":next}}),
+        );
+        service.save_job(&job).unwrap();
+        service.state.lock().await.jobs.push(job.clone());
+        service
+            .execute(ExploreCommand::Resume {
+                id: job.id.clone(),
+                domain: job.domain,
+            })
+            .await
+            .unwrap();
+        for _ in 0..100 {
+            if service.state.lock().await.workers.contains(&job.id) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        service
+            .execute(ExploreCommand::Pause {
+                id: job.id.clone(),
+                domain: job.domain,
+            })
+            .await
+            .unwrap();
+        for _ in 0..100 {
+            if !service.state.lock().await.workers.contains(&job.id) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert!(!service.state.lock().await.workers.contains(&job.id));
+        let restarted = ExplorationService::new(service.config.clone()).unwrap();
+        let view = restarted.snapshot().await;
+        assert_eq!(view.jobs[0].state, JobState::Paused);
+        assert_eq!(view.jobs[0].signal_updates_done, 1);
+        assert_eq!(
+            view.jobs[0].preview.as_ref().unwrap()["signals"]["next_update_at_ms"],
+            next
+        );
+        restarted
+            .execute(ExploreCommand::Resume {
+                id: job.id.clone(),
+                domain: job.domain,
+            })
+            .await
+            .unwrap();
+        for _ in 0..100 {
+            if restarted.state.lock().await.workers.contains(&job.id) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        restarted
+            .execute(ExploreCommand::Cancel {
+                id: job.id.clone(),
+                domain: job.domain,
+            })
+            .await
+            .unwrap();
+        for _ in 0..100 {
+            if !restarted.state.lock().await.workers.contains(&job.id) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let view = restarted.snapshot().await;
+        assert_eq!(view.jobs[0].state, JobState::Cancelled);
+        assert_eq!(view.jobs[0].signal_updates_done, 1);
+        assert!(view
+            .providers
+            .iter()
+            .all(|provider| provider.requests_sent == 0));
     }
     #[tokio::test]
     async fn history_projection_and_manifest_remain_bounded_without_silently_hiding_current_counts()

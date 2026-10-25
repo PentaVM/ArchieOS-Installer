@@ -64,5 +64,10 @@ int main(int argc,char **argv) {
             check(std::fabs((radius-20.0)*6371000.0/20.0-1001.0)<1.0,"building ground sampling uses Mercator row inverse index");
         }
     }
+    auto selected=projection(polarPreview);auto selectedJobs=selected.value(QStringLiteral("jobs")).toList();auto newer=selectedJobs.first().toMap();newer[QStringLiteral("id")]=QStringLiteral("newer");newer[QStringLiteral("preview")]=QVariantMap{};selectedJobs.append(newer);selected[QStringLiteral("jobs")]=selectedJobs;
+    selected[QStringLiteral("selected_job_id")]=QStringLiteral("test");
+    check(kindCount(explorationPreviewMeshes(selected),QStringLiteral("terrain"))==1,"selected older AOI uses its own recorded terrain instead of latest job");
+    selected[QStringLiteral("selected_job_id")]=QStringLiteral("missing");check(explorationPreviewMeshes(selected).isEmpty(),"missing selected AOI never falls back to another terrain capture");
+    selected.remove(QStringLiteral("selected_job_id"));check(kindCount(explorationPreviewMeshes(selected),QStringLiteral("terrain"))==0,"absent selector follows latest job even if an older capture has terrain");
     qInfo("Exploration preview contracts passed");
 }

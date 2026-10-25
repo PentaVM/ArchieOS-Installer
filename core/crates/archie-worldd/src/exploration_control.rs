@@ -399,6 +399,10 @@ fn authenticate(bytes: &[u8], expected: &str) -> Result<ExploreCommand, String> 
             "domain",
             "max_tiles",
             "max_bytes",
+            "imagery_sources",
+            "imagery_date",
+            "signal_updates",
+            "signal_interval_seconds",
         ];
         if request
             .as_object()

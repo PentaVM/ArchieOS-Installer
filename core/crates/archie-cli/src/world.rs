@@ -1,6 +1,6 @@
 //! Thin client of worldd's authenticated local command service.
 use archie_geofabric::exploration::{
-    self, ExplorationDomain, ExplorationLayer, ExplorationRequest,
+    self, ExplorationDomain, ExplorationLayer, ExplorationRequest, ImagerySource,
 };
 use archie_worldd::exploration::ExploreCommand;
 use clap::{Args, Subcommand, ValueEnum};
@@ -24,6 +24,7 @@ pub enum Layer {
     Terrain,
     Buildings,
     Imagery,
+    Signals,
     StreetView,
     Mesh,
 }
@@ -33,6 +34,7 @@ impl From<Layer> for ExplorationLayer {
             Layer::Terrain => Self::Terrain,
             Layer::Buildings => Self::Buildings,
             Layer::Imagery => Self::Imagery,
+            Layer::Signals => Self::Signals,
             Layer::StreetView => Self::StreetView,
             Layer::Mesh => Self::Mesh,
         }
@@ -57,6 +59,15 @@ pub struct Region {
     pub max_tiles: u32,
     #[arg(long, default_value_t = 67_108_864)]
     pub max_bytes: u64,
+    /// google-satellite, blue-marble, sentinel2, landsat, natural-color, infrared, night-lights, thermal.
+    #[arg(long, value_delimiter = ',')]
+    pub imagery_sources: Vec<ImagerySource>,
+    #[arg(long)]
+    pub imagery_date: Option<String>,
+    #[arg(long, default_value_t = 1)]
+    pub signal_updates: u32,
+    #[arg(long, default_value_t = 60)]
+    pub signal_interval_seconds: u32,
 }
 impl Region {
     fn request(&self) -> Result<ExplorationRequest, String> {
@@ -69,6 +80,10 @@ impl Region {
             domain: self.domain.into(),
             max_tiles: self.max_tiles,
             max_bytes: self.max_bytes,
+            imagery_sources: self.imagery_sources.clone(),
+            imagery_date: self.imagery_date.clone(),
+            signal_updates: self.signal_updates,
+            signal_interval_seconds: self.signal_interval_seconds,
         };
         exploration::plan(&request).map_err(|error| error.to_string())?;
         Ok(request)
@@ -186,6 +201,41 @@ mod tests {
     struct TestCli {
         #[command(subcommand)]
         command: WorldCommand,
+    }
+
+    #[test]
+    fn typed_imagery_and_bounded_refresh_flags_reach_the_request() {
+        let cli = TestCli::try_parse_from([
+            "world",
+            "explore",
+            "--latitude",
+            "0",
+            "--longitude",
+            "0",
+            "--domain",
+            "personal",
+            "--layers",
+            "imagery,signals",
+            "--imagery-sources",
+            "google-satellite,blue-marble",
+            "--imagery-date",
+            "2024-02-29",
+            "--signal-updates",
+            "2",
+            "--signal-interval-seconds",
+            "120",
+        ])
+        .unwrap();
+        let ExploreCommand::Explore { request } = cli.command.command().unwrap() else {
+            panic!("explore")
+        };
+        assert_eq!(
+            serde_json::to_value(&request.imagery_sources).unwrap(),
+            serde_json::json!(["google_satellite", "blue_marble"])
+        );
+        assert_eq!(request.signal_updates, 2);
+        assert_eq!(request.signal_interval_seconds, 120);
+        assert_eq!(request.imagery_date.as_deref(), Some("2024-02-29"));
     }
 
     #[test]

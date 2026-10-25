@@ -8,10 +8,11 @@ use archie_geofabric::{
     TileProvenance, PROVIDERS,
 };
 
-const EVERY_ID: [GeoProviderId; 10] = [
+const EVERY_ID: [GeoProviderId; 11] = [
     GeoProviderId::OpenStreetMap,
     GeoProviderId::MicrosoftBuildingFootprints,
     GeoProviderId::CopernicusDem30,
+    GeoProviderId::NasaGibs,
     GeoProviderId::AwsTerrainTiles,
     GeoProviderId::ArchiePhotogrammetry,
     GeoProviderId::ArchieGaussianSplat,
@@ -20,6 +21,20 @@ const EVERY_ID: [GeoProviderId; 10] = [
     GeoProviderId::BlacksharkSynth3d,
     GeoProviderId::VantorVivid,
 ];
+
+#[test]
+fn open_satellite_imagery_is_discoverable_without_enabling_a_billed_provider() {
+    let plan = FabricPlan::free_only();
+    assert_eq!(
+        plan.source_for(GeoDataClass::Imagery, 12),
+        Some(GeoProviderId::NasaGibs)
+    );
+    let tile = TileProvenance::from_provider(GeoProviderId::NasaGibs, None);
+    assert!(tile.may_be_cached().is_ok());
+    assert!(tile.may_be_reasoned_about().is_ok());
+    assert!(!provider(GeoProviderId::NasaGibs).serves(GeoDataClass::Imagery, 13));
+    assert!(!plan.is_enabled(GeoProviderId::GooglePhotorealistic));
+}
 
 // ------------------------------------------------------------- display is not analysis
 

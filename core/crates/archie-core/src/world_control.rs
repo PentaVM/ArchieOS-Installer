@@ -67,6 +67,30 @@ fn admit_command(
                     let host = match layer {
                         ExplorationLayer::Terrain => "elevation-tiles-prod.s3.amazonaws.com",
                         ExplorationLayer::Buildings => "overpass-api.de",
+                        ExplorationLayer::Imagery => {
+                            for source in archie_worldd::imagery::selected_sources(request) {
+                                let host = if source == exploration::ImagerySource::GoogleSatellite
+                                {
+                                    "mt1.google.com"
+                                } else {
+                                    "gibs.earthdata.nasa.gov"
+                                };
+                                if !hosts.contains(&host) {
+                                    hosts.push(host);
+                                }
+                            }
+                            continue;
+                        }
+                        ExplorationLayer::Signals => {
+                            for host in
+                                ["earthquake.usgs.gov", "eonet.gsfc.nasa.gov", "api.adsb.lol"]
+                            {
+                                if !hosts.contains(&host) {
+                                    hosts.push(host);
+                                }
+                            }
+                            continue;
+                        }
                         _ => {
                             return Err("world layer has no admitted fixed capture provider".into())
                         }
@@ -316,6 +340,85 @@ fn bindings(
         secure_owner_path(&path, false)?;
     }
     Ok(result)
+}
+
+/// Text tools carry bounded observations and metadata. Image understanding uses
+/// the separate IRIS path; neither open nor proprietary pixels belong here.
+fn compact_model_reply(value: &mut serde_json::Value) {
+    use serde_json::{json, Value};
+    match value {
+        Value::Object(fields) => {
+            if fields.remove("data_base64").is_some() {
+                fields.insert("pixels_omitted".into(), json!(true));
+            }
+            if let Some(plan) = fields.get_mut("plan").and_then(Value::as_object_mut) {
+                if let Some(tiles) = plan.get_mut("tiles").and_then(Value::as_array_mut) {
+                    if !tiles.is_empty() {
+                        let actual = tiles.len();
+                        tiles.clear();
+                        plan.insert("tiles_total".into(), json!(actual));
+                        plan.insert("omitted_tiles".into(), json!(actual));
+                    }
+                }
+            }
+            if let Some(terrain) = fields.get_mut("terrain").and_then(Value::as_object_mut) {
+                if let Some(Value::Array(samples)) = terrain.remove("elevations_m") {
+                    terrain.insert("samples_total".into(), json!(samples.len()));
+                    terrain.insert(
+                        "samples_available".into(),
+                        json!(samples.iter().filter(|sample| sample.is_number()).count()),
+                    );
+                }
+            }
+            let omitted_buildings = fields
+                .get("omitted_buildings")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            if let Some(buildings) = fields.get_mut("buildings").and_then(Value::as_array_mut) {
+                let total = (buildings.len() as u64).saturating_add(omitted_buildings);
+                for building in buildings {
+                    if let Some(building) = building.as_object_mut() {
+                        if let Some(Value::Array(ring)) = building.remove("ring") {
+                            building.insert("vertex_count".into(), json!(ring.len()));
+                        }
+                    }
+                }
+                fields.insert("buildings_total".into(), json!(total));
+            }
+            if let Some(signals) = fields.get_mut("signals").and_then(Value::as_object_mut) {
+                let omitted = signals
+                    .get("omitted_points")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                let known_total = signals.get("points_total").and_then(Value::as_u64);
+                if let Some(points) = signals.get_mut("points").and_then(Value::as_array_mut) {
+                    let offered = points.len();
+                    points.truncate(16);
+                    let returned = points.len();
+                    let total =
+                        known_total.unwrap_or_else(|| (offered as u64).saturating_add(omitted));
+                    signals.insert("points_total".into(), json!(total));
+                    signals.insert("points_returned".into(), json!(returned));
+                    signals.insert(
+                        "omitted_points".into(),
+                        json!(total.saturating_sub(returned as u64)),
+                    );
+                    if offered > returned {
+                        signals.insert("truncated".into(), json!(true));
+                    }
+                }
+            }
+            for child in fields.values_mut() {
+                compact_model_reply(child);
+            }
+        }
+        Value::Array(items) => {
+            for child in items {
+                compact_model_reply(child);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn scoped_status(
@@ -680,6 +783,7 @@ impl Runtime {
         if status {
             scoped_status(&mut value, &domain, &bindings(&binding_dir, None)?);
         }
+        compact_model_reply(&mut value);
         if serde_json::to_vec(&value)
             .map_err(|_| "invalid world response")?
             .len()
@@ -726,6 +830,89 @@ mod tests {
 
     fn scope() -> ContextDomain {
         ContextDomain::personal("owner").unwrap()
+    }
+
+    #[test]
+    fn model_world_reply_omits_pixels_and_dense_geometry_and_reports_real_point_counts() {
+        let mut value = serde_json::json!({"already_projected":{"plan":{"tiles":[],"estimated_requests":17}},
+            "jobs":[{"id":"owned","plan":{"tiles":[{"x":1,"y":1,"zoom":12},{"x":2,"y":1,"zoom":12}],"estimated_requests":9},"preview":{
+            "bounds":{"south":0,"west":0,"north":1,"east":1},
+            "terrain":{"width":2,"height":2,"elevations_m":[10,null,12,13]},
+            "buildings":[{"id":"b1","height_m":20,"ring":[[0,0],[1,0],[1,1],[0,0]]}],"omitted_buildings":2,
+            "imagery":[
+                {"source_id":"google_satellite","mode":"online_preview_only","state":"ready","tiles":[{"zoom":12,"width":256,"height":256,"data_base64":"GOOGLE_PIXELS"}]},
+                {"source_id":"sentinel2","mode":"open_data","state":"ready","imagery_date":"2026-10-20","attribution":"NASA","tiles":[{"zoom":11,"data_base64":"NASA_PIXELS"}]}
+            ],
+            "signals":{"points":(0..20).map(|n|serde_json::json!({"id":n,"latitude":0,"longitude":0})).collect::<Vec<_>>(),
+                "points_total":140,"omitted_points":120,"total_is_lower_bound":false,"sources":[{"id":"usgs_earthquakes","state":"stale","retrieved_at_ms":1234,"error":"offline"}]}
+        }}]});
+        compact_model_reply(&mut value);
+        let preview = &value["jobs"][0]["preview"];
+        assert!(value["jobs"][0]["plan"]["tiles"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert_eq!(value["jobs"][0]["plan"]["tiles_total"], 2);
+        assert_eq!(value["jobs"][0]["plan"]["omitted_tiles"], 2);
+        assert!(value["already_projected"]["plan"]
+            .get("tiles_total")
+            .is_none());
+        assert!(!value.to_string().contains("PIXELS"));
+        assert!(preview["terrain"].get("elevations_m").is_none());
+        assert_eq!(preview["terrain"]["samples_total"], 4);
+        assert_eq!(preview["terrain"]["samples_available"], 3);
+        assert!(preview["buildings"][0].get("ring").is_none());
+        assert_eq!(preview["buildings"][0]["vertex_count"], 4);
+        assert_eq!(preview["buildings_total"], 3);
+        assert_eq!(preview["imagery"][0]["state"], "ready");
+        assert_eq!(preview["imagery"][1]["imagery_date"], "2026-10-20");
+        assert_eq!(preview["signals"]["points"].as_array().unwrap().len(), 16);
+        assert_eq!(preview["signals"]["points_total"], 140);
+        assert_eq!(preview["signals"]["points_returned"], 16);
+        assert_eq!(preview["signals"]["omitted_points"], 124);
+        assert_eq!(preview["signals"]["total_is_lower_bound"], false);
+        assert_eq!(preview["signals"]["sources"][0]["retrieved_at_ms"], 1234);
+        assert_eq!(preview["signals"]["sources"][0]["error"], "offline");
+        let once = value.clone();
+        compact_model_reply(&mut value);
+        assert_eq!(
+            value, once,
+            "repeated compaction must not inflate omission counts"
+        );
+    }
+
+    #[test]
+    fn imagery_and_signal_hosts_are_admitted_from_the_exact_stored_request() {
+        let domain = ContextDomain::work("org", "a").unwrap();
+        let request = ExplorationRequest {
+            domain: ExplorationDomain::Work,
+            layers: vec![ExplorationLayer::Imagery, ExplorationLayer::Signals],
+            ..Default::default()
+        };
+        let id = "a".repeat(32);
+        let status = serde_json::json!({"jobs":[{"id":id,"domain":"work","request":request}]});
+        let ledger = [(id.clone(), domain.clone())].into();
+        let stored = owned_job_request(&status, &id, &domain, &ledger).unwrap();
+        let profile = RuntimeProfile::for_domain(domain.clone());
+        let command = ExploreCommand::Explore { request: stored };
+        assert_eq!(
+            admit_command(&profile, &domain, PrivacyGrade::Public, &command).unwrap(),
+            vec![
+                "mt1.google.com",
+                "gibs.earthdata.nasa.gov",
+                "earthquake.usgs.gov",
+                "eonet.gsfc.nasa.gov",
+                "api.adsb.lol"
+            ]
+        );
+        assert!(admit_command(&profile, &domain, PrivacyGrade::Restricted, &command).is_err());
+        assert!(owned_job_request(
+            &status,
+            &id,
+            &ContextDomain::work("org", "b").unwrap(),
+            &ledger
+        )
+        .is_err());
     }
 
     #[test]

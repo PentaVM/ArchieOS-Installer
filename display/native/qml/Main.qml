@@ -31,8 +31,14 @@ ApplicationWindow {
     readonly property color red: root.scene === "world" ? Shell.Theme.bad : "#f2626b"
     property string scene: "orb"
     property bool orbHudVisible: true
+    property bool worldHudVisible: true
     property var selection: null
     readonly property bool localTerrainPreview: root.scene === "world" && Exploration.localTerrainView(archieBridge.frame,archieBridge.explorationMeshes)
+    readonly property bool texturedTerrain: (archieBridge.imageryMeshes || []).some(function(mesh) {return mesh.source_id===archieBridge.selectedImagery && mesh.replacesTerrain===true})
+    function uiState() {
+        const job=Exploration.selectedJob(archieBridge.exploration || {})
+        return JSON.stringify({scene:root.scene,selectedArea:job ? job.id : "",selectedPoint:worldHud.selectedPointId,selectedImagery:archieBridge.selectedImagery,cameraOwner:worldHud.cameraOwner})
+    }
 
     // The scenes and the mode each runs in are DisplayControl's; the CLI and the voice ask
     // it for the same list.
@@ -52,7 +58,7 @@ ApplicationWindow {
                 // DisplayControl applies and validates the look before notifying us.
                 root.changeScene("orb")
             } else if (action === "overlay") {
-                if (value === "hud") root.orbHudVisible = enabled
+                if (value === "hud") {root.orbHudVisible = enabled;root.worldHudVisible=enabled}
                 else lumen.setSetting(value, enabled)
             }
         }
@@ -397,7 +403,7 @@ ApplicationWindow {
 
             WorldHud {
                 id:worldHud
-                visible:root.scene === "world"
+                visible:root.scene === "world" && root.worldHudVisible
                 Layout.preferredWidth:Math.min(370,root.width*0.36)
                 Layout.fillHeight:true
                 controller:archieBridge
@@ -447,7 +453,9 @@ ApplicationWindow {
                                                 : SceneEnvironment.Medium)
                         // The orb is lit in linear light and tonemapped as the design is:
                         // ACES, with the design's exposure.
-                        tonemapMode: root.scene === "orb" && !lumen.look.graded ? SceneEnvironment.TonemapModeFilmic : SceneEnvironment.TonemapModeAces
+                        // Dated map pixels use the sRGB transfer function without
+                        // cinematic contrast; global globe/orb keep their own look.
+                        tonemapMode: root.localTerrainPreview ? SceneEnvironment.TonemapModeLinear : root.scene === "orb" && !lumen.look.graded ? SceneEnvironment.TonemapModeFilmic : SceneEnvironment.TonemapModeAces
                         exposure: root.scene === "orb" ? lumen.look.exposure : 1.0
 
                         // Bloom, and only bloom, and only where the image is genuinely
@@ -469,7 +477,7 @@ ApplicationWindow {
                         // A whisper of a vignette. Not a filter — it keeps the eye on the
                         // planet by letting the corners fall a little into the dark the
                         // stars already live in.
-                        vignetteEnabled: true
+                        vignetteEnabled: !root.localTerrainPreview
                         vignetteStrength: 0.35
 
                         // Break up the gradients in the atmosphere and the dark sky so
@@ -490,7 +498,9 @@ ApplicationWindow {
                         position: archieBridge.frame.cameraEye
                         eulerRotation: Qt.vector3d(0, 0, 0)
                         fieldOfView: archieBridge.frame.cameraFov
-                        clipNear: root.scene === "world" ? 0.000003 : 0.1
+                        // Keep depth precision at AOI scale so a half-metre image
+                        // drape is distinct from terrain without moving either layer.
+                        clipNear: root.scene === "world" ? Exploration.worldNearClip(archieBridge.frame) : 0.1
                         // Far enough to enclose the star sphere at every framing. The old
                         // 400 sat inside the sky, so the whole starfield was clipped away
                         // and the planet hung in a void — the sky was there, just beyond
@@ -596,6 +606,7 @@ ApplicationWindow {
                             model:archieBridge.explorationMeshes
                             delegate:Model {
                                 required property var modelData
+                                visible:modelData.kind!=="terrain" || !root.texturedTerrain
                                 geometry:MeshGeometry { vertices:modelData.vertices; triangleIndices:modelData.triangleIndices }
                                 materials:PrincipledMaterial {
                                     baseColor:modelData.kind==="terrain" ? Shell.Theme.t3 : modelData.kind==="buildings" ? Shell.Theme.t2 : Shell.Theme.acc
@@ -606,30 +617,15 @@ ApplicationWindow {
                             }
                         }
 
-                        // The same list the CORE view draws. The model filters by mode, so
-                        // in Watcher these are exactly the things with a real place on
-                        // the globe — and the position, colour and stand-off are the
-                        // model's, from the same rules that decide them everywhere else.
-                        // The bridge used to project latitude and longitude itself and
-                        // pick a colour from a table of severity words, which is two more
-                        // answers to questions already answered.
                         Repeater3D {
-                            model: archieBridge.sceneNodes
-                            delegate: Model {
+                            model:archieBridge.imageryMeshes
+                            delegate:Model {
                                 required property var modelData
-                                property var payload: modelData.payload
-                                property string nodeId: modelData.id
-                                source: "#Sphere"
-                                pickable: true
-                                visible: modelData.onGlobe
-                                position: modelData.position
-                                scale: Qt.vector3d(modelData.scale, modelData.scale, modelData.scale)
-                                opacity: modelData.confidence
-                                materials: PrincipledMaterial {
-                                    baseColor: modelData.color
-                                    emissiveFactor: Qt.vector3d(modelData.emissive, modelData.emissive, modelData.emissive)
-                                    roughness: 0.32
-                                }
+                                visible:modelData.source_id===archieBridge.selectedImagery
+                                geometry:MeshGeometry {vertices:modelData.vertices;triangleIndices:modelData.triangleIndices;hasUv:true}
+                                materials:modelData.kind==="terrain" ? uncoveredMaterial : imageryMaterial
+                                PrincipledMaterial {id:uncoveredMaterial;baseColor:Shell.Theme.t3;roughness:1.0;cullMode:Material.NoCulling}
+                                WorldImageryMaterial {id:imageryMaterial;textureSource:modelData.textureSource || "";terrainColor:Shell.Theme.t3}
                             }
                         }
 
@@ -748,87 +744,24 @@ ApplicationWindow {
                     visible: root.scene === "forge"
                 }
 
-                Column {
-                    visible: root.scene === "world"
-                    anchors.left: parent.left; anchors.leftMargin: 18
-                    anchors.bottom: parent.bottom; anchors.bottomMargin: 18
-                    spacing: 4
-                    Text {
-                        text: {
-                            if (root.scene === "world") {
-                                var o = root.observations.length
-                                return "EARTH · NASA BLUE MARBLE · OFFLINE · " + o
-                                       + (o === 1 ? " REAL OBSERVATION" : " REAL OBSERVATIONS")
-                            }
-                            return ""
+                WorldBeacons {
+                    id:worldBeacons;anchors.fill:parent;visible:root.scene === "world"
+                    controller:archieBridge;view:view;selectedId:worldHud.selectedPointId
+                    onChosen:function(point) {
+                        worldHud.cedeCamera();worldHud.selectedPointId=point.id;root.worldHudVisible=true;root.selection=null
+                        if(point.kind==="aoi" && point.job && Exploration.validCamera(point.job.camera) && archieBridge.selectExplorationJob(point.job.id)) {
+                            const c=point.job.camera;const elevation=Exploration.cameraElevation(point.job)
+                            archieBridge.frameExploration(c.latitude,c.longitude,c.radius_m,elevation===null?0:elevation,Shell.Theme.spatial)
                         }
-                        color: root.soft; font.pixelSize: 10; font.letterSpacing: 1.1
                     }
-                    Text {
-                        text: "marker size = reported magnitude · source = " + (root.provider.authority || "none")
-                        color: root.dim; font.pixelSize: 9
-                    }
-                    // What the frame says about itself. A scene that is showing less than
-                    // it was given has to say so: an operator who is not told a record was
-                    // dropped will read the gap as "there is nothing there", which is the
-                    // one conclusion the display must never cause by accident.
-                    Text {
-                        readonly property var f: archieBridge.frame
-                        visible: f.aggregated > 0 || f.filteredOut > 0 || f.eventsElsewhere > 0
-                                 || !f.ingest.clean || f.dependencyCycle.length > 0
-                                 || f.collidingIds.length > 0
-                        text: {
-                            var parts = []
-                            if (f.aggregated > 0)
-                                parts.push(f.aggregated + " not drawn — over the " + f.tier + " budget")
-                            if (f.filteredOut > 0)
-                                parts.push(f.filteredOut + " not in this view")
-                            if (f.eventsElsewhere > 0)
-                                parts.push(f.eventsElsewhere + " changes elsewhere")
-                            if (f.ingest.dropped > 0)
-                                parts.push(f.ingest.dropped + " records unusable")
-                            if (f.dependencyCycle.length > 0)
-                                parts.push("dependency cycle: " + f.dependencyCycle.join(" → "))
-                            if (f.collidingIds.length > 0)
-                                parts.push("duplicate ids: " + f.collidingIds.join(", "))
-                            return parts.join(" · ")
-                        }
-                        color: "#f0b429"; font.pixelSize: 9
-                    }
-                    // Why the scene looks the way it does. A display that quietly gets
-                    // worse teaches its operator to distrust it.
-                    Text {
-                        visible: root.scene === "world"
-                        text: "Drag to orbit · Scroll to zoom · Esc to return"
-                        color: root.soft; font.pixelSize: 10
-                    }
-                    Text {
-                        readonly property var f: archieBridge.frame
-                        text: "render tier " + f.tier + " · " + f.tierReason
-                        color: root.dim; font.pixelSize: 9
-                    }
-                    // Ties the camera the operator is actually flying to the GeoFabric
-                    // table in the sidebar: this is the row that table highlights right
-                    // now, from the same real camera position, not a separate guess.
-                    Text {
-                        visible: root.scene === "world"
-                        readonly property string band: root.nearestBand(root.currentLod())
-                        text: band === "" ? "scale not yet known"
-                                          : "scale ≈ " + band.toUpperCase() + " (lod " + root.currentLod() + ", approx.)"
-                        color: root.dim; font.pixelSize: 9
-                    }
-                    // Provenance, in the one place it answers the question an operator
-                    // looking at the globe actually has: who is answerable for this.
-                    // Blank rather than a placeholder when nothing is known yet, or
-                    // when GeoFabric has genuinely selected nothing at this scale —
-                    // both are real states, and neither should print a dash dressed
-                    // up as an answer.
-                    Text {
-                        visible: root.scene === "world" && text.length > 0
-                        text: root.bandProvenance(root.nearestBand(root.currentLod()))
-                        color: root.dim; font.pixelSize: 9
-                        wrapMode: Text.Wrap
-                        width: 460
+                }
+                Rectangle {
+                    visible:root.scene === "world";anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom;anchors.margins:16
+                    height:provenance.implicitHeight+20;radius:Shell.Theme.rCard;color:Shell.Theme.panel;border.color:Shell.Theme.hair
+                    Column {
+                        id:provenance;anchors.left:parent.left;anchors.right:parent.right;anchors.margins:12;anchors.verticalCenter:parent.verticalCenter;spacing:4
+                        Text {textFormat:Text.PlainText;width:parent.width;text:worldHud.imageryCaption;color:Shell.Theme.t1;font.family:Shell.Theme.font;font.pixelSize:11;wrapMode:Text.Wrap}
+                        Text {width:parent.width;text:"Arrastrar · órbita   Rueda · escala   Puntos · datos   Esc · volver  ·  Balizas: ayuda visual, no tamaño físico";color:Shell.Theme.t3;font.family:Shell.Theme.font;font.pixelSize:10;wrapMode:Text.Wrap}
                     }
                 }
 

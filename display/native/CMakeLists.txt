@@ -52,6 +52,9 @@ qt_add_executable(archie-display
     src/ExplorationPreview.h
     src/ExplorationCredential.cpp
     src/ExplorationCredential.h
+    src/WorldVisuals.cpp
+    src/WorldVisuals.h
+    src/WorldImageProvider.h
     src/MeshGeometry.cpp
     src/MeshGeometry.h
     src/Payload.cpp
@@ -78,6 +81,8 @@ qt_add_qml_module(archie-display
         qml/LumenScene.qml
         qml/OrbHud.qml
         qml/WorldHud.qml
+        qml/WorldBeacons.qml
+        qml/WorldImageryMaterial.qml
         qml/Exploration.js
         qml/ForgeView.qml
         qml/OrbViewport.qml
@@ -200,6 +205,16 @@ if(ARCHIE_NATIVE_BUILD_TESTS)
     target_include_directories(test_exploration_preview PRIVATE src)
     target_link_libraries(test_exploration_preview PRIVATE archie::visual Qt6::Gui)
     add_test(NAME exploration_preview_contracts COMMAND test_exploration_preview)
+    qt_add_executable(test_world_visuals tests/test_world_visuals.cpp src/WorldVisuals.cpp)
+    target_include_directories(test_world_visuals PRIVATE src)
+    target_link_libraries(test_world_visuals PRIVATE archie::visual Qt6::Gui)
+    add_test(NAME world_visual_contracts COMMAND test_world_visuals)
+    qt_add_executable(test_world_texture tests/test_world_texture.cpp src/MeshGeometry.cpp src/MeshGeometry.h)
+    target_include_directories(test_world_texture PRIVATE src)
+    target_link_libraries(test_world_texture PRIVATE Qt6::Quick Qt6::Quick3D Qt6::Test)
+    qt_add_resources(test_world_texture "world-texture-material" PREFIX "/world-texture" BASE "${CMAKE_CURRENT_SOURCE_DIR}/qml"
+        FILES qml/WorldImageryMaterial.qml)
+    add_test(NAME world_texture_contracts COMMAND test_world_texture)
     qt_add_executable(test_exploration_credential tests/test_exploration_credential.cpp src/ExplorationCredential.cpp)
     target_include_directories(test_exploration_credential PRIVATE src)
     target_link_libraries(test_exploration_credential PRIVATE Qt6::Core)
@@ -208,11 +223,11 @@ if(ARCHIE_NATIVE_BUILD_TESTS)
     endif()
     add_test(NAME exploration_credential_contracts COMMAND test_exploration_credential)
     qt_add_executable(test_world_hud tests/test_world_hud.cpp)
-    target_link_libraries(test_world_hud PRIVATE Qt6::Quick Qt6::QuickControls2)
+    target_link_libraries(test_world_hud PRIVATE Qt6::Quick Qt6::QuickControls2 Qt6::Test)
     qt_add_resources(test_world_hud "world-hud-shell" PREFIX "/archie/shell" BASE "${CMAKE_CURRENT_SOURCE_DIR}/../shell"
         FILES ${ARCHIE_SHELL_QML} ${ARCHIE_SHELL_JS} ${ARCHIE_SHELL_FONTS} "${CMAKE_CURRENT_SOURCE_DIR}/../shell/prototype/qmldir")
     qt_add_resources(test_world_hud "world-hud-component" PREFIX "/world-test" BASE "${CMAKE_CURRENT_SOURCE_DIR}/qml"
-        FILES qml/WorldHud.qml qml/Exploration.js)
+        FILES qml/WorldHud.qml qml/WorldBeacons.qml qml/Exploration.js)
     add_test(NAME world_hud_contracts COMMAND test_world_hud)
     set_tests_properties(world_hud_contracts PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     qt_add_executable(test_display_control tests/test_display_control.cpp src/DisplayControl.cpp src/DisplayControl.h

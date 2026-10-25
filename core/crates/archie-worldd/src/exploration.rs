@@ -65,6 +65,10 @@ pub struct ExplorationJob {
     pub bytes_received: u64,
     #[serde(default)]
     pub stored_bytes: u64,
+    #[serde(default)]
+    pub signal_updates_done: u32,
+    #[serde(default)]
+    pub pinned_imagery_date: Option<String>,
     pub cache_hits: u64,
     pub error: Option<String>,
     pub artifacts: Vec<Artifact>,
@@ -98,6 +102,9 @@ pub struct ExplorationSnapshot {
     pub generated_at_ms: i64,
     pub domain: ExplorationDomain,
     pub jobs: Vec<ExplorationJob>,
+    /// Read-only viewer selection; absent for the normal latest-preview view.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_job_id: Option<String>,
     pub providers: Vec<ProviderUsage>,
     pub error: Option<String>,
 }
@@ -110,6 +117,7 @@ impl ExplorationSnapshot {
             generated_at_ms: 0,
             domain: ExplorationDomain::Personal,
             jobs: vec![],
+            selected_job_id: None,
             providers: vec![],
             error: Some("exploration service unavailable".into()),
         }

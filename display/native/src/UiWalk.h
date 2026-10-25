@@ -37,6 +37,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <functional>
+#include <utility>
 
 class UiWalk final : public QObject {
 public:
@@ -52,6 +53,7 @@ public:
         m_report.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text);
     }
     bool ready() const { return !m_queue.isEmpty() && m_report.isOpen(); }
+    void setCaptureAllowed(std::function<bool()> allowed) { m_captureAllowed=std::move(allowed); }
     void start(int settleMs) { QTimer::singleShot(settleMs, this, [this] { next(); }); }
 
 private:
@@ -62,6 +64,7 @@ private:
     int m_index = 0;
     int m_clicks = 0;
     int m_noEffect = 0;
+    std::function<bool()> m_captureAllowed;
 
     // The visual tree, not the QObject one: a Repeater's delegates are its parent's child
     // items but not necessarily its QObject children.
@@ -78,7 +81,9 @@ private:
 
     QString state() const {
         QVariant value;
-        if (auto *d = desktop()) QMetaObject::invokeMethod(d, "uiState", Q_RETURN_ARG(QVariant, value));
+        QObject *surface=desktop();
+        if(!surface)surface=m_window;
+        if(surface)QMetaObject::invokeMethod(surface, "uiState", Q_RETURN_ARG(QVariant, value));
         return value.toString();
     }
 
@@ -120,7 +125,13 @@ private:
         return text.isEmpty() ? name : name + QStringLiteral(" · ") + text.left(60);
     }
 
-    QImage grab() const { return m_window->grabWindow(); }
+    QImage grab() const {
+        if(m_captureAllowed && !m_captureAllowed()) {
+            qWarning("archie-display: online-preview imagery cannot be captured or exported");
+            return {};
+        }
+        return m_window->grabWindow();
+    }
 
     static double moved(const QImage &a, const QImage &b, const QRectF &r) {
         if (a.isNull() || b.isNull()) return 0;
@@ -146,6 +157,7 @@ private:
     }
 
     QString save(const QImage &image, const QString &name) {
+        if(image.isNull()) return {};
         const QString file = QStringLiteral("%1-%2.png").arg(m_index, 3, 10, QLatin1Char('0')).arg(name);
         image.save(m_out + QLatin1Char('/') + file);
         return file;

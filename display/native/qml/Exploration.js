@@ -1,6 +1,21 @@
 .pragma library
 function known(value) { return typeof value === "number" && Number.isFinite(value); }
 function count(value) { return known(value) ? String(value) : "Sin lectura"; }
+function timestampUtc(value) {
+    if(!known(value)) return "Sin lectura";
+    var date=new Date(value);
+    return Number.isFinite(date.getTime()) ? date.toISOString().slice(0,19).replace("T"," ")+" UTC" : "Sin lectura";
+}
+function signalSummary(source) {
+    var parts=[source.state || "Instantánea"];
+    var total=known(source.matched_total)?source.matched_total:source.points_total;
+    if(known(total)) parts.push((source.total_is_lower_bound?"≥":"")+total+" coincidencias");
+    if(source.total_is_lower_bound || source.truncated) parts.push("cobertura parcial");
+    if(known(source.omitted_points) && source.omitted_points>0) parts.push(source.omitted_points+" omitidas");
+    if(known(source.retrieved_at_ms)) parts.push("Instantánea: "+timestampUtc(source.retrieved_at_ms));
+    if(source.error) parts.push(source.error);
+    return parts.join(" · ");
+}
 function bytes(value) {
     if (!known(value)) return "Sin lectura";
     var n=Number(value);
@@ -21,6 +36,11 @@ function newJobs(jobs, seen) {
         seen.push(id);added.push(jobs[i]);
     }
     return added;
+}
+function selectedJob(projection) {
+    var jobs=projection.jobs || [];
+    if(typeof projection.selected_job_id==="undefined") return jobs.length?jobs[jobs.length-1]:null;
+    return jobs.find(function(job){return job.id===projection.selected_job_id}) || null;
 }
 function metrics(snapshot) {
     var rows=[], registry=snapshot.metrics || {};
@@ -46,6 +66,12 @@ function localTerrainView(frame, meshes) {
     // At close AOI scale the decoded patch replaces the global basemap, including ocean.
     return Number.isFinite(distance) && distance<=0.5 && (meshes || []).some(function(mesh) { return mesh.kind==="terrain"; });
 }
+function worldNearClip(frame) {
+    if(!frame || !frame.cameraEye || !frame.cameraTarget) return 0.01;
+    var eye=frame.cameraEye,target=frame.cameraTarget;
+    var distance=Math.hypot(eye.x-target.x,eye.y-target.y,eye.z-target.z);
+    return Number.isFinite(distance) ? Math.max(0.0000001,distance*0.05) : 0.01;
+}
 
 function inference(snapshot) {
     var gauges=snapshot.metrics && snapshot.metrics.gauges || {};
@@ -58,4 +84,20 @@ function inference(snapshot) {
         elapsed:gauges[prefix+"request_elapsed_ms_available"]===1 && known(gauges[prefix+"request_elapsed_ms"]) && gauges[prefix+"request_elapsed_ms"]>=0 ? gauges[prefix+"request_elapsed_ms"]+" ms" : "Sin lectura",
         observed:known(gauges[prefix+"observed_at_ms"]) ? new Date(gauges[prefix+"observed_at_ms"]).toLocaleTimeString() : "Sin lectura"
     };
+}
+
+function beaconMetrics(selected) { return {coreRadius:selected ? 2 : 1.6, haloRadius:selected ? 8 : 6, beamHeight:selected ? 22 : 14, pickRadius:8}; }
+function pickBeacon(points,x,y) {var best="",distance=64;points.forEach(function(point){var d=(point.x-x)*(point.x-x)+(point.y-y)*(point.y-y);if(point.visible && d<=distance){distance=d;best=point.id;}});return best;}
+function pointFacingEye(position,eye) {
+    if(!position || !eye) return false;
+    // Test the eye-to-observation segment against the reference globe. Elevated
+    // aircraft can remain visible beyond a surface point's tangent horizon.
+    var dx=position.x-eye.x,dy=position.y-eye.y,dz=position.z-eye.z;
+    var length2=dx*dx+dy*dy+dz*dz;
+    if(!(length2>0)) return false;
+    var t=-(eye.x*dx+eye.y*dy+eye.z*dz)/length2;
+    if(t<=0 || t>=1) return true;
+    var x=eye.x+t*dx,y=eye.y+t*dy,z=eye.z+t*dz;
+    var radius2=Math.min(400,position.x*position.x+position.y*position.y+position.z*position.z);
+    return x*x+y*y+z*z>=radius2-0.00000001;
 }

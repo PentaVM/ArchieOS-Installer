@@ -16,8 +16,16 @@ Shell.Panel {
     property bool cameraAutomatic: false
     property var elevationPlans: []
     property bool inspectorOpen: false
+    property string selectedPointId: ""
+    readonly property var selectedPoint:(controller.worldPoints || []).find(function(point){return point.id===hud.selectedPointId}) || null
+    readonly property var imageSources:controller.imagerySources || []
+    readonly property var signalSources:controller.signalSources || []
+    readonly property var activeImage:imageSources.find(function(source){return source.source_id===hud.controller.selectedImagery}) || null
+    readonly property string imageryCaption:activeImage ? (activeImage.label || activeImage.source_id)+" · "+(activeImage.attribution || "Atribución no publicada")+" · Fecha: "+(activeImage.imagery_date || "no publicada")+" · Recuperada: "+(Exploration.known(activeImage.retrieved_at_ms)?new Date(activeImage.retrieved_at_ms).toLocaleString():"sin lectura")+" · Estado: "+(activeImage.state || "sin lectura")+(activeImage.mode==="online_preview_only"?" · Vista experimental en línea, no dato abierto":" · Compuesto fechado, no imagen en vivo") : "NASA Blue Marble · contexto global incluido · sin teselas de imagen disponibles"
+    readonly property var pointProperties:selectedPoint && selectedPoint.properties ? Object.keys(selectedPoint.properties).slice(0,24).map(function(key){return {key:key,value:typeof hud.selectedPoint.properties[key]==="object"?JSON.stringify(hud.selectedPoint.properties[key]):String(hud.selectedPoint.properties[key])}}) : []
     readonly property var projection: controller.exploration || ({source:"unavailable"})
     readonly property var jobs: projection.jobs || []
+    readonly property var selectedJob:Exploration.selectedJob(hud.projection)
     readonly property var providers: projection.providers || []
     readonly property var snapshot: controller.snapshot || ({})
     readonly property var status: snapshot.status || ({})
@@ -38,6 +46,8 @@ Shell.Panel {
     function observeJobs() {
         if(!worldActive || projection.source==="unavailable") return
         var fresh=Exploration.newJobs(jobs,seenJobs)
+        // Explicit capture selection persists across polls and new worker jobs.
+        if(typeof projection.selected_job_id!=="undefined" || controller.selectedExplorationJob) return
         if(fresh.length>0) { applyCamera(fresh[fresh.length-1]);return }
         if(!cameraAutomatic || elevationPlans.indexOf(cameraJob)>=0) return
         // One terrain-ready correction is allowed only while this job still owns the camera.
@@ -55,15 +65,66 @@ Shell.Panel {
             width:parent.width; spacing:12
             RowLayout {
                 Layout.fillWidth:true
-                Text { text:"World"; font.family:Shell.Theme.disp; font.pixelSize:20; font.weight:Font.DemiBold; color:Shell.Theme.t1; Layout.fillWidth:true }
+                Text {textFormat:Text.PlainText; text:"World"; font.family:Shell.Theme.disp; font.pixelSize:20; font.weight:Font.DemiBold; color:Shell.Theme.t1; Layout.fillWidth:true }
                 Shell.SourceChip { projection:hud.projection; small:true }
             }
-            Label { text:"Exploración · GeoFabric / Aleph"; color:Shell.Theme.t2; font.family:Shell.Theme.font }
-            Label { Layout.fillWidth:true; wrapMode:Text.Wrap; text:"La voz y la CLI inician trabajos. Mover la cámara solo cambia esta vista."; color:Shell.Theme.t3; font.family:Shell.Theme.font; font.pixelSize:11 }
+            Label {textFormat:Text.PlainText; text:"Exploración · GeoFabric / Aleph"; color:Shell.Theme.t2; font.family:Shell.Theme.font }
+            Label {textFormat:Text.PlainText; Layout.fillWidth:true; wrapMode:Text.Wrap; text:"La voz y la CLI inician trabajos. Mover la cámara solo cambia esta vista."; color:Shell.Theme.t3; font.family:Shell.Theme.font; font.pixelSize:11 }
             Info { label:"Cámara"; value:hud.cameraOwner }
+            Info {label:"Área mostrada";value:hud.selectedJob ? hud.selectedJob.id : "Captura seleccionada no disponible"}
+            Label {textFormat:Text.PlainText;Layout.fillWidth:true;wrapMode:Text.Wrap;text:"Huecos de imagen: terreno neutro, sin píxeles de satélite.";color:Shell.Theme.t3;font.family:Shell.Theme.font;font.pixelSize:10}
+            Button {
+                id:latestArea;visible:!!hud.controller.selectedExplorationJob;Layout.fillWidth:true;text:"Última área";font.family:Shell.Theme.font;font.pixelSize:12
+                contentItem:Text {textFormat:Text.PlainText;text:latestArea.text;font:latestArea.font;color:Shell.Theme.t1;horizontalAlignment:Text.AlignHCenter;verticalAlignment:Text.AlignVCenter}
+                background:Rectangle {implicitHeight:34;color:latestArea.down?Shell.Theme.pressed:latestArea.hovered?Shell.Theme.hover:Shell.Theme.raised;radius:Shell.Theme.rCard;border.color:Shell.Theme.hair}
+                onClicked:{hud.selectedPointId="";hud.controller.latestExplorationJob();if(hud.jobs.length)hud.applyCamera(hud.jobs[hud.jobs.length-1])}
+            }
             Info { label:"Última proyección"; value:Exploration.known(hud.projection.generated_at_ms) ? new Date(hud.projection.generated_at_ms).toLocaleTimeString() : "Sin lectura" }
-            Label { visible:!!hud.projection.error; text:hud.projection.error || ""; color:Shell.Theme.bad; font.family:Shell.Theme.font; wrapMode:Text.Wrap; Layout.fillWidth:true }
-            Label { visible:hud.jobs.length===0; text:hud.projection.source==="unavailable" ? "Servicio de exploración sin lectura" : "Sin exploraciones publicadas"; color:Shell.Theme.t3; font.family:Shell.Theme.font; wrapMode:Text.Wrap; Layout.fillWidth:true }
+            Label {textFormat:Text.PlainText; visible:!!hud.projection.error; text:hud.projection.error || ""; color:Shell.Theme.bad; font.family:Shell.Theme.font; wrapMode:Text.Wrap; Layout.fillWidth:true }
+            Label {textFormat:Text.PlainText; visible:hud.jobs.length===0; text:hud.projection.source==="unavailable" ? "Servicio de exploración sin lectura" : "Sin exploraciones publicadas"; color:Shell.Theme.t3; font.family:Shell.Theme.font; wrapMode:Text.Wrap; Layout.fillWidth:true }
+            Text {textFormat:Text.PlainText;text:"Capas de imagen";color:Shell.Theme.t1;font.family:Shell.Theme.disp;font.pixelSize:14}
+            ComboBox {
+                id:imageryPicker
+                Layout.fillWidth:true;model:hud.imageSources;textRole:"label";valueRole:"source_id"
+                enabled:hud.imageSources.length>0
+                font.family:Shell.Theme.font;font.pixelSize:12
+                palette.window:Shell.Theme.panel;palette.base:Shell.Theme.raised;palette.button:Shell.Theme.hover
+                palette.text:Shell.Theme.t1;palette.buttonText:Shell.Theme.t1;palette.windowText:Shell.Theme.t1
+                palette.highlight:Shell.Theme.sel;palette.highlightedText:Shell.Theme.t1
+                contentItem:Text {textFormat:Text.PlainText;text:imageryPicker.displayText || "Aún sin imágenes";color:imageryPicker.enabled?Shell.Theme.t1:Shell.Theme.t3;font:imageryPicker.font;verticalAlignment:Text.AlignVCenter;leftPadding:10;rightPadding:30;elide:Text.ElideRight}
+                background:Rectangle {color:Shell.Theme.hover;radius:Shell.Theme.rCard;border.color:Shell.Theme.hair;implicitHeight:34}
+                currentIndex:hud.imageSources.findIndex(function(source){return source.source_id===hud.controller.selectedImagery})
+                onActivated:hud.controller.selectedImagery=currentValue
+            }
+            Repeater {
+                model:hud.imageSources
+                delegate:ColumnLayout {
+                    id:imageSource;required property var modelData;Layout.fillWidth:true;spacing:3
+                    Info {label:imageSource.modelData.label || imageSource.modelData.source_id;value:imageSource.modelData.state || "Sin lectura"}
+                    Text {textFormat:Text.PlainText;Layout.fillWidth:true;wrapMode:Text.Wrap;text:(imageSource.modelData.imagery_date || "Sin fecha de imagen")+" · "+(imageSource.modelData.mode==="online_preview_only"?"Vista experimental en línea":"Datos abiertos")+(imageSource.modelData.requested_date?" · solicitada "+imageSource.modelData.requested_date:"");font.family:Shell.Theme.font;font.pixelSize:10;color:Shell.Theme.t3}
+                    Info {label:"Resolución de fuente / vista";value:(Exploration.known(imageSource.modelData.source_resolution_m)?imageSource.modelData.source_resolution_m+" m":"sin lectura")+" / "+(Exploration.known(imageSource.modelData.preview_resolution_m)?imageSource.modelData.preview_resolution_m+" m":"sin lectura")}
+                    Text {textFormat:Text.PlainText;visible:!!text;Layout.fillWidth:true;wrapMode:Text.Wrap;text:imageSource.modelData.error || imageSource.modelData.renderer_error || "";font.family:Shell.Theme.font;font.pixelSize:10;color:Shell.Theme.warn}
+                }
+            }
+            Text {textFormat:Text.PlainText;text:"Señales observadas";color:Shell.Theme.t1;font.family:Shell.Theme.disp;font.pixelSize:14}
+            Repeater {model:hud.signalSources;delegate:Info {id:signalSource;required property var modelData;label:signalSource.modelData.label || signalSource.modelData.id;value:Exploration.signalSummary(signalSource.modelData)}}
+            Info {
+                visible:!!hud.selectedJob && !!hud.selectedJob.preview && !!hud.selectedJob.preview.signals
+                label:"Cobertura de señales"
+                value:Exploration.signalSummary(hud.selectedJob && hud.selectedJob.preview && hud.selectedJob.preview.signals || {})
+            }
+            Label {textFormat:Text.PlainText;visible:hud.signalSources.length===0;text:"No se ha publicado ninguna fuente de señales para esta área.";Layout.fillWidth:true;wrapMode:Text.Wrap;font.family:Shell.Theme.font;color:Shell.Theme.t3;font.pixelSize:11}
+            Label {objectName:"selectedPointExpired";textFormat:Text.PlainText;visible:!!hud.selectedPointId && !hud.selectedPoint;text:"Punto seleccionado sin lectura en esta captura.";Layout.fillWidth:true;wrapMode:Text.Wrap;font.family:Shell.Theme.font;color:Shell.Theme.warn;font.pixelSize:11}
+            ColumnLayout {
+                visible:!!hud.selectedPoint;Layout.fillWidth:true;spacing:6
+                Text {textFormat:Text.PlainText;Layout.fillWidth:true;wrapMode:Text.Wrap;text:hud.selectedPoint ? hud.selectedPoint.label || hud.selectedPoint.id : "";font.family:Shell.Theme.disp;color:Shell.Theme.t1;font.pixelSize:15}
+                Info {label:"Fuente";value:hud.selectedPoint ? hud.selectedPoint.source_id || "Sin lectura" : ""}
+                Info {label:"Observado";value:hud.selectedPoint && Exploration.known(hud.selectedPoint.observed_at_ms)?new Date(hud.selectedPoint.observed_at_ms).toLocaleString():"Sin hora publicada"}
+                Info {label:"Altitud publicada";value:hud.selectedPoint && hud.selectedPoint.altitudeKnown?hud.selectedPoint.altitude_m+" m":"Sin lectura"}
+                Info {label:"Anclaje visual";value:hud.selectedPoint ? hud.selectedPoint.anchor_mode || "Área solicitada" : ""}
+                Text {textFormat:Text.PlainText;Layout.fillWidth:true;wrapMode:Text.Wrap;text:hud.selectedPoint ? hud.selectedPoint.source_url || "" : "";font.family:Shell.Theme.font;color:Shell.Theme.t3;font.pixelSize:10}
+                Repeater {model:hud.pointProperties;delegate:Info {id:pointProperty;required property var modelData;label:pointProperty.modelData.key;value:pointProperty.modelData.value}}
+            }
             Repeater {
                 model:hud.jobs
                 delegate:Rectangle {
@@ -78,22 +139,22 @@ Shell.Panel {
                             Shell.Chip { text:jobCard.modelData.domain==="work" ? "Trabajo" : jobCard.modelData.domain==="personal" ? "Personal" : "Sin dominio"; domain:jobCard.modelData.domain || ""; small:true }
                             Shell.Chip { text:Exploration.state(jobCard.modelData.state); tone:Exploration.tone(jobCard.modelData.state); small:true }
                         }
-                        Text { Layout.fillWidth:true; text:jobCard.modelData.id || "Sin ID"; elide:Text.ElideMiddle; font.family:Shell.Theme.font; font.pixelSize:11; color:Shell.Theme.t2 }
-                        Text { Layout.fillWidth:true; text:Exploration.validCamera(jobCard.modelData.camera) ? Number(jobCard.modelData.camera.latitude).toFixed(5)+", "+Number(jobCard.modelData.camera.longitude).toFixed(5)+" · "+jobCard.modelData.camera.radius_m+" m" : "AOI sin lectura"; font.family:Shell.Theme.font; font.pixelSize:11; color:Shell.Theme.t3; wrapMode:Text.Wrap }
+                        Text {textFormat:Text.PlainText; Layout.fillWidth:true; text:jobCard.modelData.id || "Sin ID"; elide:Text.ElideMiddle; font.family:Shell.Theme.font; font.pixelSize:11; color:Shell.Theme.t2 }
+                        Text {textFormat:Text.PlainText; Layout.fillWidth:true; text:Exploration.validCamera(jobCard.modelData.camera) ? Number(jobCard.modelData.camera.latitude).toFixed(5)+", "+Number(jobCard.modelData.camera.longitude).toFixed(5)+" · "+jobCard.modelData.camera.radius_m+" m" : "AOI sin lectura"; font.family:Shell.Theme.font; font.pixelSize:11; color:Shell.Theme.t3; wrapMode:Text.Wrap }
                         Info { label:"Teselas"; value:Exploration.count(jobCard.modelData.tiles_done)+" / "+Exploration.count(jobCard.modelData.tiles_total) }
                         Info { label:"Recibido / caché"; value:Exploration.bytes(jobCard.modelData.bytes_received)+" / "+Exploration.count(jobCard.modelData.cache_hits) }
                         Info { label:"Capas solicitadas"; value:jobCard.modelData.request && jobCard.modelData.request.layers ? jobCard.modelData.request.layers.join(", ") : "Sin lectura" }
                         Info { label:"Elevación de cámara"; value:Exploration.cameraElevation(jobCard.modelData)===null ? "Sin lectura · datum provisional" : Exploration.cameraElevation(jobCard.modelData)+" m · fuente" }
                         Info { label:"Muestras de terreno"; value:Exploration.elevationRange(jobCard.modelData) }
                         Info { label:"Artefactos en esta vista"; value:String((jobCard.modelData.artifacts || []).length) }
-                        Label { objectName:"projectionTruncationNotice"; visible:jobCard.modelData.projection_truncated===true; text:"Proyección resumida: el plan y los artefactos están limitados en esta vista; los contadores del trabajo conservan sus totales."; color:Shell.Theme.warn; Layout.fillWidth:true; wrapMode:Text.Wrap; font.family:Shell.Theme.font; font.pixelSize:10 }
-                        Label { objectName:"omittedBuildingsNotice"; visible:!!jobCard.modelData.preview && Exploration.known(jobCard.modelData.preview.omitted_buildings) && jobCard.modelData.preview.omitted_buildings>0; text:jobCard.modelData.preview ? "Edificios omitidos de la vista previa: "+Exploration.count(jobCard.modelData.preview.omitted_buildings) : ""; color:Shell.Theme.warn; Layout.fillWidth:true; wrapMode:Text.Wrap; font.family:Shell.Theme.font; font.pixelSize:10 }
-                        Text { Layout.fillWidth:true; text:!jobCard.modelData.preview ? "Vista de datos pendiente" : "Terreno: muestras reales; edificios: contorno si falta altura. Datum base: terreno cuando existe; referencia del mar si falta. En vista local el terreno reemplaza el mapa global y el océano, conservando elevaciones negativas. Sin textura satelital descargada."; color:Shell.Theme.t3; font.family:Shell.Theme.font; font.pixelSize:10; wrapMode:Text.Wrap }
-                        Text { visible:!!jobCard.modelData.error; Layout.fillWidth:true; text:jobCard.modelData.error || ""; font.family:Shell.Theme.font; font.pixelSize:11; color:Shell.Theme.bad; wrapMode:Text.Wrap }
+                        Label {textFormat:Text.PlainText; objectName:"projectionTruncationNotice"; visible:jobCard.modelData.projection_truncated===true; text:"Proyección resumida: el plan y los artefactos están limitados en esta vista; los contadores del trabajo conservan sus totales."; color:Shell.Theme.warn; Layout.fillWidth:true; wrapMode:Text.Wrap; font.family:Shell.Theme.font; font.pixelSize:10 }
+                        Label {textFormat:Text.PlainText; objectName:"omittedBuildingsNotice"; visible:!!jobCard.modelData.preview && Exploration.known(jobCard.modelData.preview.omitted_buildings) && jobCard.modelData.preview.omitted_buildings>0; text:jobCard.modelData.preview ? "Edificios omitidos de la vista previa: "+Exploration.count(jobCard.modelData.preview.omitted_buildings) : ""; color:Shell.Theme.warn; Layout.fillWidth:true; wrapMode:Text.Wrap; font.family:Shell.Theme.font; font.pixelSize:10 }
+                        Text {textFormat:Text.PlainText; Layout.fillWidth:true; text:!jobCard.modelData.preview ? "Vista de datos pendiente" : "Terreno: muestras reales; edificios: contorno si falta altura. Datum base: terreno cuando existe; referencia del mar si falta. En vista local el terreno reemplaza el mapa global y el océano, conservando elevaciones negativas. Las imágenes conservan fuente, fecha y atribución."; color:Shell.Theme.t3; font.family:Shell.Theme.font; font.pixelSize:10; wrapMode:Text.Wrap }
+                        Text {textFormat:Text.PlainText; visible:!!jobCard.modelData.error; Layout.fillWidth:true; text:jobCard.modelData.error || ""; font.family:Shell.Theme.font; font.pixelSize:11; color:Shell.Theme.bad; wrapMode:Text.Wrap }
                     }
                 }
             }
-            Text { text:"Proveedores y cuotas"; color:Shell.Theme.t1; font.family:Shell.Theme.disp; font.pixelSize:14 }
+            Text {textFormat:Text.PlainText; text:"Proveedores y cuotas"; color:Shell.Theme.t1; font.family:Shell.Theme.disp; font.pixelSize:14 }
             Repeater {
                 model:hud.providers
                 delegate:ColumnLayout {
@@ -108,7 +169,12 @@ Shell.Panel {
                     Info { label:"Reintento"; value:Exploration.known(providerBlock.modelData.retry_at_ms) ? new Date(providerBlock.modelData.retry_at_ms).toLocaleTimeString() : "Sin espera publicada" }
                 }
             }
-            Button { text:hud.inspectorOpen ? "Cerrar inspector del sistema" : "Inspector del sistema"; Layout.fillWidth:true; font.family:Shell.Theme.font; onClicked:hud.inspectorOpen=!hud.inspectorOpen }
+            Button {
+                id:inspectorButton;text:hud.inspectorOpen ? "Cerrar inspector del sistema" : "Inspector del sistema";Layout.fillWidth:true;font.family:Shell.Theme.font;font.pixelSize:12
+                contentItem:Text {textFormat:Text.PlainText;text:inspectorButton.text;font:inspectorButton.font;color:Shell.Theme.t1;horizontalAlignment:Text.AlignHCenter;verticalAlignment:Text.AlignVCenter}
+                background:Rectangle {implicitHeight:34;color:inspectorButton.down?Shell.Theme.pressed:inspectorButton.hovered?Shell.Theme.hover:Shell.Theme.raised;radius:Shell.Theme.rCard;border.color:Shell.Theme.hair}
+                onClicked:hud.inspectorOpen=!hud.inspectorOpen
+            }
             ColumnLayout {
                 visible:hud.inspectorOpen; Layout.fillWidth:true; spacing:7
                 Shell.SourceChip { projection:hud.snapshot; small:true }
@@ -133,10 +199,10 @@ Shell.Panel {
                 Info { label:"Última inferencia"; value:hud.inference.observed }
                 Info { label:"Tokens de salida"; value:hud.inference.tokens }
                 Info { label:"Duración de solicitud"; value:hud.inference.elapsed }
-                Text { Layout.fillWidth:true; text:"E2e incluye toda la solicitud; no mide solo la generación del modelo."; font.family:Shell.Theme.font; color:Shell.Theme.t3; font.pixelSize:10; wrapMode:Text.Wrap }
+                Text {textFormat:Text.PlainText; Layout.fillWidth:true; text:"E2e incluye toda la solicitud; no mide solo la generación del modelo."; font.family:Shell.Theme.font; color:Shell.Theme.t3; font.pixelSize:10; wrapMode:Text.Wrap }
                 Repeater { model:hud.metricRows; delegate:Info { id:metricRow; required property var modelData; label:metricRow.modelData.name+" ("+metricRow.modelData.kind+")"; value:metricRow.modelData.value } }
             }
-            Text { Layout.fillWidth:true; text:"Diseño: Xavi · Implementación nativa: PentaVM"; color:Shell.Theme.t3; font.family:Shell.Theme.font; font.pixelSize:10; wrapMode:Text.Wrap }
+            Text {textFormat:Text.PlainText; Layout.fillWidth:true; text:"Diseño: Xavi · Implementación nativa: PentaVM"; color:Shell.Theme.t3; font.family:Shell.Theme.font; font.pixelSize:10; wrapMode:Text.Wrap }
         }
     }
     component Info: RowLayout {
@@ -144,7 +210,7 @@ Shell.Panel {
         property string label
         property string value
         Layout.fillWidth:true; spacing:8
-        Text { text:infoRow.label; Layout.fillWidth:true; Layout.preferredWidth:1; wrapMode:Text.Wrap; color:Shell.Theme.t3; font.family:Shell.Theme.font; font.pixelSize:11 }
-        Text { text:infoRow.value; Layout.fillWidth:true; Layout.preferredWidth:1; horizontalAlignment:Text.AlignRight; wrapMode:Text.Wrap; color:Shell.Theme.t1; font.family:Shell.Theme.font; font.pixelSize:11 }
+        Text {textFormat:Text.PlainText; text:infoRow.label; Layout.fillWidth:true; Layout.preferredWidth:1; wrapMode:Text.Wrap; color:Shell.Theme.t3; font.family:Shell.Theme.font; font.pixelSize:11 }
+        Text {textFormat:Text.PlainText; text:infoRow.value; Layout.fillWidth:true; Layout.preferredWidth:1; horizontalAlignment:Text.AlignRight; wrapMode:Text.Wrap; color:Shell.Theme.t1; font.family:Shell.Theme.font; font.pixelSize:11 }
     }
 }
