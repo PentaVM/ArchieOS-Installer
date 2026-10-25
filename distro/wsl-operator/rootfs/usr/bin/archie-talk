@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Talk with Archie. Say "Archie" to be heard. It answers aloud in the language it was
-# spoken to, Spanish or English, each with its own voice, and opens the applications the
-# Stage's policy names (Kdenlive, the browser) when asked.
+# Talk with Archie. It is always listening, and the floor decides when to answer: when it
+# has been given enough and there is a longer pause. It answers aloud in the language it
+# was spoken to, Spanish or English, each with its own male voice, and opens the
+# applications the Stage's policy names (Kdenlive, the browser) when asked.
 #
 #   archie-talk                 the microphone goes quiet while Archie speaks
 #   archie-talk --headphones    keeps listening while it speaks, so it can be interrupted
@@ -9,8 +10,8 @@
 #                               archie-local use 27b|9b chose
 #   archie-talk --spanish       listens for Spanish only (by default, either language)
 #   archie-talk --cloud         Nemotron on Nebius answers
-#   archie-talk --always        answers whatever it hears, its name or not: for one person
-#                               alone, since the recogniser often misses "Archie"
+#   archie-talk --named         only what starts with "Archie" is weighed: for a room with
+#                               other people talking
 #
 # What you say is recognised on this machine. Which model answers: the one on this
 # machine once its GPU runtime is built (archie-local gpu), and nothing then leaves;
@@ -20,14 +21,17 @@ set -euo pipefail
 KEY=$HOME/.config/archie/nebius.key
 grade=public
 where=auto
+# Always listening: whatever is heard reaches the floor, its name or not.
+export ALWAYS=1
 for option in "$@"; do
   case "$option" in
     --headphones) export HEADPHONES=1 ;;
     --local) where=local ;;
     --cloud) where=cloud ;;
     --always) export ALWAYS=1 ;;
+    --named) export ALWAYS=0 ;;
     --spanish) export LISTEN_LANGUAGE=es-US ;;
-    *) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
+    *) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
   esac
 done
 # One voice at a time, decided before anything else is touched: two would hear each

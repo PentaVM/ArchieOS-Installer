@@ -98,7 +98,7 @@ fi
 status
 cat <<'EOF'
 Ready.
-  archie-talk                                             talk with Archie; say "Archie" first
+  archie-talk                                             talk with Archie; it is always listening
   archie-operate "do a flip reset" --app car-soccer       have IRIS work a screen
   archie-video                                            the video bridge on ~/ArchieOS
   archie-design                                           the desktop design, as a preview

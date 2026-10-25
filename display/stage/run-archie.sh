@@ -53,10 +53,11 @@ ASR_MODEL=${ASR_MODEL:-$(ls "$HOME"/.cache/nemo-speech/models/nvidia/nemotron-3.
 PIPER_PYTHON=${PIPER_PYTHON:-python3}
 PIPER=${PIPER:-$REPO/scripts/models/piper-json-bridge.py}
 PIPER_VOICES=${PIPER_VOICES:-$REPO/models-cache/piper}
-# The voices heard best (scripts/models/install-piper-voices.sh), else the earlier pair.
+# Male voices, since 2026-10-25 (scripts/models/install-piper-voices.sh); else the pair
+# that was heard best.
 default_voice() { if [ -f "$PIPER_VOICES/$1.onnx" ]; then echo "$PIPER_VOICES/$1.onnx"; else echo "$PIPER_VOICES/$2.onnx"; fi; }
-PIPER_MODEL=${PIPER_MODEL:-$(default_voice es_MX-claude-high es_MX-ald-medium)}
-PIPER_MODEL_EN=${PIPER_MODEL_EN:-$(default_voice en_US-kristin-medium en_US-john-medium)}
+PIPER_MODEL=${PIPER_MODEL:-$(default_voice es_MX-ald-medium es_MX-claude-high)}
+PIPER_MODEL_EN=${PIPER_MODEL_EN:-$(default_voice en_US-john-medium en_US-kristin-medium)}
 HOST_WAYLAND=${HOST_WAYLAND:-${WAYLAND_DISPLAY:-}}
 RUN_DIR=${RUN_DIR:-/tmp/archie-run}
 SOCKET_NAME=archie-stage

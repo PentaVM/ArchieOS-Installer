@@ -646,7 +646,7 @@ function Open-Voice {
     # (archie-talk also refuses a second one; this spares the window it would open.)
     Wsl "pgrep -f '[a]rchie-voice converse'" { param($out, $code)
         if ($code -eq 0) { Add-Log 'La voz ya está abierta.'; return }
-        $always = if ($script:cfg.voice_always) { ' --always' } else { '' }
+        $always = if ($script:cfg.voice_always) { ' --always' } else { ' --named' }
         Start-Process wsl.exe -ArgumentList "-d $($script:cfg.distro) -- archie-talk --local$always"
     }
 }

@@ -34,7 +34,7 @@ With VirtualBox it starts the model on Windows first, hidden, and stops it with 
 | `distro`, `vm` | the WSL distribution, the VirtualBox machine |
 | `autostart_delay_s` | seconds of warning at sign-in (0: none). Whether it starts at sign-in at all is the Startup shortcut, switched in the launcher |
 | `open_gui_on_start`, `voice_on_start` | open the GUI, the voice, when the node is up |
-| `voice_always` | the voice answers what it hears without its name |
+| `voice_always` | the voice weighs everything it hears, its name or not (default); off, only what starts with "Archie" |
 | `host_model` | VirtualBox only: the model served from Windows (name, port, file, runtime) |
 
 Settings → Apps lists ArchieOS; `Uninstall-ArchieOS-Launcher.ps1` removes the launcher, its

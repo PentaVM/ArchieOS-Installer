@@ -142,5 +142,5 @@ Write-Host ''
 if ($NoAutostart) { Write-Host 'Done. The ArchieOS icon on the desktop starts it.' }
 else { Write-Host 'Done. The ArchieOS icon on the desktop starts it, and it starts at sign-in (the launcher turns that off).' }
 Write-Host "Or open it with:     wsl -d $Name"
-Write-Host 'Then:               archie-talk    (say "Archie" first)'
+Write-Host 'Then:               archie-talk    (always listening; --named waits for "Archie")'
 Write-Host '                    archie-video   (clips go in the ArchieOS folder on the desktop)'
