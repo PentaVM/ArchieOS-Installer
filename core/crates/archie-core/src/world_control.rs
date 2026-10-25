@@ -602,10 +602,8 @@ impl Runtime {
         let explore = matches!(command, ExploreCommand::Explore { .. });
         let starts_capture = explore || matches!(command, ExploreCommand::Resume { .. });
         // Verify ledger access before accepting a background job.
-        if explore {
-            if bindings(&binding_dir, None)?.len() >= 512 {
-                return Err("world binding history limit reached".into());
-            }
+        if explore && bindings(&binding_dir, None)?.len() >= 512 {
+            return Err("world binding history limit reached".into());
         }
         let now = Timestamp::now();
         let lifetime_ms = grants

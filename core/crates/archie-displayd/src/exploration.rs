@@ -33,7 +33,7 @@ async fn fetch() -> Result<ExplorationSnapshot, ()> {
     }
     let split = bytes.windows(4).position(|w| w == b"\r\n\r\n").ok_or(())?;
     let head = std::str::from_utf8(&bytes[..split]).map_err(|_| ())?;
-    if !head.lines().next().is_some_and(|s| s == "HTTP/1.1 200 OK") {
+    if head.lines().next().is_none_or(|s| s != "HTTP/1.1 200 OK") {
         return Err(());
     }
     let view: ExplorationSnapshot = serde_json::from_slice(&bytes[split + 4..]).map_err(|_| ())?;

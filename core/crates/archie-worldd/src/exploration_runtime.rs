@@ -438,7 +438,7 @@ impl ExplorationService {
                     id: format!("{:032x}", rand::random::<u128>()),
                     domain: request.domain,
                     state: JobState::Queued,
-                    camera: plan.camera.clone(),
+                    camera: plan.camera,
                     request,
                     tiles_total: total,
                     tiles_done: 0,
@@ -873,7 +873,7 @@ impl ExplorationService {
             .layers
             .contains(&ExplorationLayer::Terrain)
             .then_some(&terrain);
-        let geojson = geo_formats::export_geojson(export_bounds.clone(), dem, &buildings)?;
+        let geojson = geo_formats::export_geojson(export_bounds, dem, &buildings)?;
         self.export(id, "capture.geojson", "geojson", &geojson)
             .await?;
         let glb = geo_formats::export_glb(
@@ -967,6 +967,7 @@ impl ExplorationService {
             .map(f64::from);
         self.save_job(job)
     }
+    #[allow(clippy::too_many_arguments)]
     async fn artifact(
         &self,
         id: &str,
@@ -1388,8 +1389,10 @@ mod tests {
         assert_eq!(retry_after("Thu, 01 Jan 1970 00:01:00 GMT", 0), Some(60000));
         assert!(retry_after("bad", 0).is_none());
         let service = service();
-        let mut request = exploration::ExplorationRequest::default();
-        request.layers = vec![ExplorationLayer::Mesh];
+        let mut request = exploration::ExplorationRequest {
+            layers: vec![ExplorationLayer::Mesh],
+            ..Default::default()
+        };
         assert!(service.checked_plan(&request).is_err());
         request.layers = vec![ExplorationLayer::Terrain];
         request.zoom = 15;
