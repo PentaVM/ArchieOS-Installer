@@ -85,6 +85,7 @@ foreach ($module in 'ArchieOS-Machine.ps1', 'ArchieOS-HostModel.ps1') {
 }
 if (-not (Get-Command Start-HostModel -ErrorAction SilentlyContinue)) {
     function Start-HostModel($hostModel) { throw 'falta ArchieOS-HostModel.ps1 junto al lanzador' }
+    function Test-HostModel($hostModel) { return $false }
     function Stop-HostModel { }
 }
 
@@ -592,7 +593,28 @@ function Invoke-RemoveModel([string]$name) {
 $script:refreshing = $false
 function Refresh-All {
     if ($script:refreshing) { return }
-    if ($script:cfg.backend -eq 'virtualbox') { $script:status = $null; $script:config = $null; Update-View; return }
+    if ($script:cfg.backend -eq 'virtualbox') {
+        # The machine tells VirtualBox what runs in it (archie-guest-status); the model is
+        # the server on Windows itself.
+        $script:config = $null
+        if (-not (Test-Path $vbox)) { $script:status = $null; Update-View; return }
+        $script:refreshing = $true
+        Start-Command $vbox "guestproperty get `"$($script:cfg.vm)`" /ArchieOS/Status" { param($out, $code)
+            $services = @{}
+            if ($out -match 'Value:\s*(\S+)') {
+                foreach ($pair in $Matches[1] -split ',') { $k, $v = $pair -split '=', 2; $services[$k] = $v -eq 'active' }
+            }
+            $hostModel = $script:cfg.host_model
+            $services['model'] = [bool]($hostModel -and (Test-HostModel $hostModel))
+            $script:status = if ($services.Count -gt 1) {
+                [pscustomobject]@{ services = [pscustomobject]$services; wanda_configured = $false
+                    model = $(if ($hostModel) { [pscustomobject]@{ name = $hostModel.name; endpoint = "Windows :$($hostModel.port)" } }) }
+            } else { $null }
+            $script:refreshing = $false
+            Update-View
+        }
+        return
+    }
     if (-not $script:cfg.distro -or -not (Test-DistroRunning $script:cfg.distro)) {
         # A stopped distribution is not started just to be read.
         $script:status = $null; Update-View; Update-Models; return

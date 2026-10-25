@@ -103,10 +103,13 @@ function Stop-HostModel {
 function New-ArchieVm([string]$ova, [string]$name, [int]$cpus, [int]$memoryGb, [string]$baseFolder, $hostModel, [scriptblock]$log) {
     $vbox = Join-Path $env:ProgramFiles 'Oracle\VirtualBox\VBoxManage.exe'
     & $log "Importando $name en VirtualBox"
+    # VBoxManage writes progress to stderr, an error under 'Stop' in Windows PowerShell 5.1:
+    # its exit code decides instead.
+    $ErrorActionPreference = 'Continue'
     & $vbox import $ova --vsys 0 --vmname $name --cpus $cpus --memory ($memoryGb * 1024) --basefolder $baseFolder 2>&1 | ForEach-Object { & $log "$_" }
     if ($LASTEXITCODE -ne 0) { throw 'VirtualBox no pudo importar la máquina' }
     # 10.0.2.2 reaches Windows' loopback only with this on (off by default since 7.0).
-    & $vbox modifyvm $name --nat-localhostreachable1 on --graphicscontroller vmsvga --vram 128 --accelerate3d on `
+    & $vbox modifyvm $name --nat-localhostreachable1 on --graphicscontroller vmsvga --vram 128 --accelerate-3d on `
         --clipboard-mode bidirectional --audio-enabled on --audio-in on --audio-out on 2>&1 | ForEach-Object { & $log "$_" }
     if ($hostModel) {
         & $vbox guestproperty set $name /ArchieOS/Model/Name $hostModel.name --flags RDONLYGUEST

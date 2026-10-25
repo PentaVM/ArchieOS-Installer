@@ -1,0 +1,8 @@
+[Unit]
+Description=Tell VirtualBox which ArchieOS services run (for the Windows launcher)
+ConditionVirtualization=oracle
+After=vboxservice.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/archie/guest-status

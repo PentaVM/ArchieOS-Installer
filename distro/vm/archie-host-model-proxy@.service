@@ -1,0 +1,16 @@
+[Unit]
+Description=Proxy to the local model on the Windows host (10.0.2.2:%i)
+Requires=archie-host-model-proxy@%i.socket
+After=archie-host-model-proxy@%i.socket
+
+[Service]
+# 10.0.2.2 is Windows, seen from VirtualBox's NAT; the VM is created with
+# nat-localhostreachable, so it reaches llama-server on Windows' loopback.
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd 10.0.2.2:%i
+DynamicUser=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_UNIX

@@ -3,7 +3,8 @@
 # Windows or of WSL nothing is running, and this brings it back. The Windows launcher
 # (ArchieOS.exe's script, distro/windows) calls it; it can be used by hand as well.
 #
-#   archie-node db                 as root: the node's PostgreSQL
+#   archie-node db                 as root: the node's PostgreSQL (made and provisioned the
+#                                  first time, with the ISO's scripts)
 #   archie-node up | down | restart
 #                                  the chosen local model (archie-local), archied, displayd,
 #                                  worldd and Wanda, each left alone if it already runs
@@ -40,15 +41,44 @@ say() { echo "archie-node: $*"; }
 
 db() {
   [ "$(id -u)" -eq 0 ] || { say 'db: run it as root'; return 1; }
-  if ! command -v pg_isready >/dev/null || [ ! -d "$PG_DATA" ]; then say "no PostgreSQL at $PG_DATA"; return 0; fi
-  if pg_isready -q -h 127.0.0.1 -p "$PG_PORT"; then say "postgres :$PG_PORT already up"; return 0; fi
+  command -v pg_ctl >/dev/null || { say 'no PostgreSQL in this image'; return 0; }
   install -d -o postgres -g postgres -m 0700 /run/archie-postgres
   mkdir -p /var/tmp/archie-logs && chmod 1777 /var/tmp/archie-logs
-  if runuser -u postgres -- pg_ctl -D "$PG_DATA" -l /var/tmp/archie-logs/pg-node.log -w start >/dev/null; then
+  # The first time, the cluster as the ISO's archie-postgres-init.service makes it:
+  # PostgreSQL 18 on loopback port 55432, TimescaleDB preloaded, durable writes.
+  if [ ! -f "$PG_DATA/PG_VERSION" ] && [ -x /usr/lib/archie/initialize-cluster ]; then
+    install -d -o postgres -g postgres -m 0700 "$PG_DATA"
+    runuser -u postgres -- /usr/lib/archie/initialize-cluster || { say "the database cluster could not be made in $PG_DATA"; return 1; }
+    say "database cluster made in $PG_DATA"
+  fi
+  if pg_isready -q -h 127.0.0.1 -p "$PG_PORT"; then say "postgres :$PG_PORT already up"
+  elif runuser -u postgres -- pg_ctl -D "$PG_DATA" -l /var/tmp/archie-logs/pg-node.log -w start >/dev/null; then
     say "postgres :$PG_PORT up"
   else
     say "postgres :$PG_PORT failed"; tail -5 /var/tmp/archie-logs/pg-node.log; return 1
   fi
+  # The first time, the node's database, extensions and private credential, as the ISO's
+  # archie-database.service provisions them. A node root that already names its own
+  # database (one set up by hand) is left as it is.
+  if [ ! -f /etc/archie/database.json ] && [ ! -f "$NODE_ROOT/etc/database.json" ] && [ -x /usr/lib/archie/provision-node ]; then
+    /usr/lib/archie/provision-node || { say 'the database could not be provisioned'; return 1; }
+    say 'database provisioned (/etc/archie/database.json)'
+  fi
+}
+
+# The node's root the first time archied starts: the image's settings, modules, providers
+# and model manifests (/etc/archie), and the database credential provisioned by `db`.
+init_root() {
+  [ -e "$NODE_ROOT/etc/database.json" ] && return 0
+  [ -r /etc/archie/database.json ] || { say 'no database yet: archie-node db, as root, makes it'; return 1; }
+  install -d -m 0750 "$NODE_ROOT" "$NODE_ROOT/etc" "$NODE_ROOT/run" "$NODE_ROOT/var"
+  local part
+  for part in models modules providers; do
+    [ -d "/etc/archie/$part" ] && cp -r "/etc/archie/$part" "$NODE_ROOT/etc/"
+  done
+  [ -f /etc/archie/archie.toml ] && cp /etc/archie/archie.toml "$NODE_ROOT/etc/"
+  ln -s /etc/archie/database.json "$NODE_ROOT/etc/database.json"
+  say "node root made in $NODE_ROOT"
 }
 
 # Core reads its model manifests when it starts. A model fetched with archie-local gets one
@@ -84,6 +114,7 @@ start_archied() {
 
 up() {
   local failed=0
+  init_root || failed=1
   models >/dev/null
   if command -v archie-local >/dev/null && archie-local ready; then
     archie-local up && say "model: $(archie-local current)" || { say 'the local model did not start'; failed=1; }
@@ -138,8 +169,9 @@ down() {
 gui() {
   local mode=${1:-shell} software=0
   [ "${2:-}" = --software ] && software=1
-  # By its path: a pattern on the name would also match archie-displayd.
-  pkill -f -- "^$DISPLAY_BIN" 2>/dev/null
+  # By its path and the end of it: /usr/bin/archie-display is also the start of
+  # /usr/bin/archie-displayd, which must not be stopped with the GUI.
+  pkill -f -- "^$DISPLAY_BIN( |$)" 2>/dev/null
   [ "$mode" = stop ] && { say 'GUI closed'; return 0; }
   [ -x "$DISPLAY_BIN" ] || { say "no GUI at $DISPLAY_BIN (DISPLAY_BIN in $CONF)"; return 1; }
   [ -S /mnt/wslg/runtime-dir/wayland-0 ] || { say 'WSLg is not running: no screen to open the GUI on'; return 1; }
@@ -156,7 +188,7 @@ gui() {
   esac
   setsid nohup "$DISPLAY_BIN" "${args[@]}" > "$LOG/gui-$mode.log" 2>&1 < /dev/null &
   sleep 3
-  running "^$DISPLAY_BIN" && say "GUI ($mode) open" || { say "the GUI did not start ($LOG/gui-$mode.log)"; return 1; }
+  running "^$DISPLAY_BIN( |$)" && say "GUI ($mode) open" || { say "the GUI did not start ($LOG/gui-$mode.log)"; return 1; }
 }
 
 json_bool() { if "$@"; then echo true; else echo false; fi; }
@@ -169,13 +201,13 @@ status_json() {
   command -v archie-local >/dev/null && model=$(archie-local current 2>/dev/null | awk '{ printf "{\"name\":\"%s\",\"endpoint\":\"%s\",\"alias\":\"%s\"}", $1, $2, $3 }')
   printf '{"distro":"%s","node_root":"%s","services":{"model":%s,"archied":%s,"displayd":%s,"worldd":%s,"wanda":%s,"postgres":%s,"gui":%s},"ai_paused":%s,"model":%s,"wanda_configured":%s,"wslg":%s}\n' \
     "${WSL_DISTRO_NAME:-}" "$NODE_ROOT" \
-    "$(json_bool bash -c 'p=$(archie-local current 2>/dev/null | sed -E "s#.*:([0-9]+)/v1.*#\1#"); [ -n "$p" ] && curl -fsS -m 2 -o /dev/null http://127.0.0.1:$p/health')" \
+    "$(json_bool bash -c 'p=$(archie-local current 2>/dev/null | sed -E "s#.*:([0-9]+)/v1.*#\1#"); [ -n "$p" ] && curl -fs -m 2 -o /dev/null http://127.0.0.1:$p/health')" \
     "$(json_bool test -S "$NODE_ROOT/run/archied.sock")" \
     "$(json_bool answers http://127.0.0.1:7666/api/snapshot)" \
     "$(json_bool running '[a]rchie-worldd')" \
     "$(json_bool answers http://127.0.0.1:8791/)" \
     "$(json_bool bash -c "command -v pg_isready >/dev/null && pg_isready -q -h 127.0.0.1 -p $PG_PORT")" \
-    "$(json_bool running "^$DISPLAY_BIN")" \
+    "$(json_bool running "^$DISPLAY_BIN( |$)")" \
     "$paused" "${model:-null}" \
     "$(json_bool test -f "$WANDA_DIR/wanda.toml")" \
     "$(json_bool test -S /mnt/wslg/runtime-dir/wayland-0)"
@@ -186,7 +218,7 @@ status() {
   status_json | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
-for k, v in d["services"].items(): print(f"{k:9} {\"up\" if v else \"down\"}")
+for k, v in d["services"].items(): print(k.ljust(9), "up" if v else "down")
 print("model    ", (d["model"] or {}).get("name"), "paused" if d["ai_paused"] else "")'
 }
 
@@ -228,5 +260,5 @@ case "${1:-status}" in
   status) status "${2:-}" ;;
   config) config "${2:-}" ;;
   gui) gui "${2:-shell}" "${3:-}" ;;
-  *) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
+  *) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
 esac

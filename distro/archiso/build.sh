@@ -252,6 +252,18 @@ if find "${stage}/airootfs/usr/bin" -type f \
   exit 66
 fi
 
+# ARCHIE_PROFILE_ONLY=DIR: the staged profile (airootfs, packages, pacman.conf and the
+# reviewed repository it names) is kept in DIR and no ISO is made. distro/vm/build-vm.sh
+# installs that same system on a virtual disk.
+if [[ -n "${ARCHIE_PROFILE_ONLY:-}" ]]; then
+  rm -rf -- "${ARCHIE_PROFILE_ONLY}"
+  cp -a "${stage}" "${ARCHIE_PROFILE_ONLY}"
+  # pacman.conf names the reviewed repository by the staging path, which goes away.
+  sed -i "s#file://${stage}/reviewed-repo#file://${ARCHIE_PROFILE_ONLY}/reviewed-repo#" "${ARCHIE_PROFILE_ONLY}/pacman.conf"
+  echo "archieos-build: profile staged in ${ARCHIE_PROFILE_ONLY}"
+  exit 0
+fi
+
 install -d "${output_dir}" "${work_dir}"
 mkarchiso -v -w "${work_dir}" -o "${output_dir}" "${stage}"
 sha256sum "${output_dir}"/archieos-*.iso >"${output_dir}/SHA256SUMS"

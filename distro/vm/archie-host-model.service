@@ -1,0 +1,16 @@
+[Unit]
+Description=ArchieOS local model served from the Windows host (VirtualBox)
+Documentation=file:/usr/share/doc/archie-os/README.md
+# Only in VirtualBox, where the host names the model in a guest property.
+ConditionVirtualization=oracle
+After=systemd-modules-load.service vboxservice.service
+Before=archied.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=HOME=/root
+ExecStart=/usr/lib/archie/host-model
+
+[Install]
+WantedBy=multi-user.target

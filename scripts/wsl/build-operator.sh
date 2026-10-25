@@ -51,6 +51,10 @@ work_dir=${ARCHIE_WSL_WORK_DIR:-/var/tmp/archieos-wsl-operator}
 rootfs=$work_dir/rootfs
 
 [[ $EUID -eq 0 ]] || { echo 'run as root on Arch Linux' >&2; exit 1; }
+
+# copy_tree and refuse_world_writable: modes of the image's own, whatever the checkout's.
+# shellcheck source=../lib/copy-tree.sh
+. "$repo_root/scripts/lib/copy-tree.sh"
 command -v pacstrap >/dev/null
 rm -rf --one-file-system "${work_dir:?}"
 install -d "$rootfs"
@@ -75,16 +79,28 @@ rm -rf "${rootfs:?}/var/cache/pacman/pkg"/*
 read -r -a apps <<<"${ARCHIE_OPERATOR_APPS-kdenlive}"
 pacstrap "${conf[@]}" "$rootfs" mlt ffmpeg "${apps[@]}"
 rm -rf "${rootfs:?}/var/cache/pacman/pkg"/*
+# The node's database: PostgreSQL 18 with the reviewed TimescaleDB and pgvector, the same
+# signed packages the ISO ships (distro/database/arch-packages.lock), held at those
+# versions by the image's pacman.conf. archie-node db makes and provisions the cluster
+# the first time, with the ISO's own scripts.
+reviewed=$work_dir/reviewed-repo
+bash "$repo_root/distro/database/stage-reviewed-packages.sh" "$reviewed"
+awk -v repository="$reviewed" '/^\[core\]/ { print "[archie-reviewed]\nServer = file://" repository "\n" } { print }' \
+  "${ARCHIE_PACMAN_CONF:-/etc/pacman.conf}" > "$work_dir/pacman.reviewed.conf"
+pacstrap -C "$work_dir/pacman.reviewed.conf" "$rootfs" postgresql timescaledb pgvector
+rm -rf "${rootfs:?}/var/cache/pacman/pkg"/*
+arch-chroot "$rootfs" bash -c '[[ $(pacman -Q postgresql | cut -d" " -f2) == 18.* ]]' || {
+  echo 'build-operator: the image needs PostgreSQL 18 (distro/database/compatibility.json)' >&2; exit 65; }
 
 rm -f "$rootfs/etc/resolv.conf" "$rootfs/boot"/vmlinuz-* "$rootfs/boot"/initramfs-*
-cp -a "$repo_root/distro/wsl-operator/rootfs/." "$rootfs/"
-chmod 0755 "$rootfs"/usr/bin/archie-{setup,session,operate,talk,video,design,local}
+copy_tree "$repo_root/distro/wsl-operator/rootfs" "$rootfs"
+chmod 0755 "$rootfs"/usr/bin/archie-{setup,session,operate,talk,video,design,local,node}
 
 install -m 0755 "$stage" "$rootfs/usr/bin/archie-stage"
 # archie-bridges and archie-mcp-server serve the video bridge: timelines rendered by MLT
 # without a window, each with a project Kdenlive opens.
 for binary in archie-arena-live archie-stage-cli archie-ask archie-lan archie-netwatch archie-print archie-sentry-probe \
-  archie-bridges archie-mcp-server archie-voice archie archie-displayd archie-worldd archie-shell-bridge; do
+  archie-bridges archie-mcp-server archie-voice archie archied archie-db archie-displayd archie-worldd archie-shell-bridge; do
   install -m 0755 "$bin/$binary" "$rootfs/usr/bin/$binary"
 done
 install -m 0755 "$native_display" "$rootfs/usr/bin/archie-display"
@@ -105,13 +121,26 @@ install -Dm 0644 "$repo_root/core/crates/archie-stage/policy/apps.toml" "$rootfs
 # Explicit --preview retains the original design boards. Default archie-design opens
 # the native renderer and its read-only bridge, reporting unavailable sources honestly.
 install -d "$rootfs/usr/share/archie/shell-prototype"
-cp -a "$repo_root/display/shell/prototype/." "$rootfs/usr/share/archie/shell-prototype/"
+copy_tree "$repo_root/display/shell/prototype" "$rootfs/usr/share/archie/shell-prototype"
 
 # Which models the node has: the reasoning models reached through Nebius, and IRIS.
 while IFS= read -r -d '' manifest; do
   family=$(basename "$(dirname "$manifest")")
   install -Dm 0644 "$manifest" "$rootfs/etc/archie/models/$family/$(basename "$manifest")"
-done < <(find "$repo_root/models/nebius" "$repo_root/models/iris" -maxdepth 1 -name '*.toml' -type f -print0)
+done < <(find "$repo_root/models/nebius" "$repo_root/models/iris" "$repo_root/models/local" -maxdepth 1 -name '*.toml' -type f -print0)
+# The rest of what archied reads at boot, as the ISO stages it: the node's settings, its
+# modules and its providers. archie-node copies them into the node's root the first time.
+install -Dm 0644 "$repo_root/distro/archiso/airootfs/etc/archie/archie.toml" "$rootfs/etc/archie/archie.toml"
+while IFS= read -r -d '' manifest; do
+  install -Dm 0644 "$manifest" "$rootfs/etc/archie/modules/$(basename "$(dirname "$manifest")")/$(basename "$manifest")"
+done < <(find "$repo_root/modules" -name '*.toml' -type f -print0)
+while IFS= read -r -d '' manifest; do
+  install -Dm 0644 "$manifest" "$rootfs/etc/archie/providers/$(basename "$manifest")"
+done < <(find "$repo_root/providers/data" -name '*.toml' -type f -print0)
+install -Dm 0644 "$repo_root/distro/database/pacman.conf" "$rootfs/etc/pacman.conf"
+for helper in initialize-cluster provision-node wait-postgres; do
+  install -Dm 0755 "$repo_root/distro/database/$helper.sh" "$rootfs/usr/lib/archie/$helper"
+done
 install -Dm 0644 "$repo_root/ARCHIE.md" "$rootfs/usr/share/doc/archie-os/ARCHIE.md"
 install -Dm 0644 "$repo_root/bridges/video/bridge.toml" "$rootfs/usr/share/archie/bridges/video/bridge.toml"
 install -Dm 0644 "$repo_root/bridges/video/SKILL.md" "$rootfs/usr/share/archie/bridges/video/SKILL.md"
@@ -158,7 +187,7 @@ rm -rf "$rootfs/var/cache/pacman/pkg"/* "$rootfs/var/log"/* "$rootfs/usr/share/d
 
 # Every binary finds its libraries inside the image, or the image is not shipped.
 for binary in archie-stage archie-arena-live archie-stage-cli archie-ask archie-lan archie-netwatch archie-print \
-  archie-bridges archie-mcp-server archie-voice archie-iris-serve archie archie-display archie-displayd archie-worldd archie-shell-bridge; do
+  archie-bridges archie-mcp-server archie-voice archie-iris-serve archie archied archie-db archie-display archie-displayd archie-worldd archie-shell-bridge; do
   if arch-chroot "$rootfs" ldd "/usr/bin/$binary" | grep -q 'not found'; then
     echo "build-operator: $binary lacks a library in the image" >&2
     arch-chroot "$rootfs" ldd "/usr/bin/$binary" | grep 'not found' >&2
@@ -173,6 +202,7 @@ if [[ -n $iris_cuda_bin ]]; then
   [[ -z $missing ]] || { echo "build-operator: archie-iris-serve-cuda lacks: $missing" >&2; exit 65; }
 fi
 
+refuse_world_writable "$rootfs" || exit 65
 du -sh "$rootfs"
 if [[ $out == - ]]; then
   tar --numeric-owner --xattrs --acls -C "$rootfs" -cf - . | gzip -n -6 >&3

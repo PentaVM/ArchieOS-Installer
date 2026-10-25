@@ -1,0 +1,11 @@
+[Unit]
+Description=Tell VirtualBox which ArchieOS services run, every 20 seconds
+ConditionVirtualization=oracle
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=20s
+AccuracySec=2s
+
+[Install]
+WantedBy=timers.target

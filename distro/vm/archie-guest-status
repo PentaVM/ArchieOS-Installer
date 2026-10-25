@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# What runs in this ArchieOS machine, told to VirtualBox for the Windows launcher, which
+# shows it as it shows a WSL node's services: the guest property /ArchieOS/Status, as
+# service=state pairs. Run by archie-guest-status.timer.
+set -uo pipefail
+status=
+for pair in archied:archied displayd:archie-displayd worldd:archie-worldd gui:archie-display postgres:archie-postgres \
+  database:archie-database model:archie-host-model; do
+  status+="${status:+,}${pair%%:*}=$(systemctl is-active "${pair#*:}.service" 2>/dev/null)"
+done
+VBoxControl --nologo guestproperty set /ArchieOS/Status "$status" >/dev/null
