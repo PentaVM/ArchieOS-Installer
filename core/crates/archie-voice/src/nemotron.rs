@@ -68,7 +68,13 @@ pub struct RoutedSource {
     veil: Arc<Veil>,
     timeout: Duration,
     runtime: tokio::runtime::Handle,
+    /// When a refusal was last said aloud: while the local model is down (loading, say)
+    /// every utterance would get the same seven seconds of refusal.
+    last_refusal: Arc<std::sync::Mutex<Option<Instant>>>,
 }
+
+/// How long one spoken refusal stands before it is said again.
+const REFUSAL_QUIET: Duration = Duration::from_secs(60);
 
 impl RoutedSource {
     pub fn new(
@@ -86,6 +92,7 @@ impl RoutedSource {
             veil,
             timeout,
             runtime,
+            last_refusal: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 }
@@ -98,6 +105,7 @@ impl TurnSource for RoutedSource {
         let privacy = self.privacy;
         let role = self.role;
         let timeout = self.timeout;
+        let last_refusal = self.last_refusal.clone();
 
         let task = self.runtime.spawn(async move {
             // A local server that has stopped is offline here, so the turn goes veiled to
@@ -105,15 +113,29 @@ impl TurnSource for RoutedSource {
             routed.refresh_liveness().await;
             match routed.disclose_chat(&request, privacy, role, &veil) {
                 Err(RoutedError::Withheld(reason)) => {
+                    // The reason goes to the session log: the spoken refusal is the same
+                    // for a model that is loading and for text the veil cannot cover.
+                    eprintln!("[veil] not sent ({privacy:?}): {reason}");
                     let refusal = match privacy {
                         PrivacyGrade::Secret => {
                             "No puedo responder a esto porque los datos son secretos y no deben comunicarse a ningún modelo."
                         }
                         _ => {
-                            "No puedo responder a esto porque los datos son confidenciales y no hay un modelo local en este equipo disponible."
+                            "No puedo responder ahora: el modelo de este equipo no está disponible y esto no puede salir a la nube."
                         }
                     };
-                    let _ = send.send(Update::Event(StreamEvent::Text(refusal.to_string())));
+                    // Said once a minute, not to every utterance while the model is down.
+                    let say = {
+                        let mut last = last_refusal.lock().unwrap_or_else(|p| p.into_inner());
+                        let say = last.is_none_or(|at| at.elapsed() >= REFUSAL_QUIET);
+                        if say {
+                            *last = Some(Instant::now());
+                        }
+                        say
+                    };
+                    if say {
+                        let _ = send.send(Update::Event(StreamEvent::Text(refusal.to_string())));
+                    }
                     let _ = send.send(Update::Event(StreamEvent::Finished {
                         reason: Some(format!("withheld: {reason}")),
                     }));

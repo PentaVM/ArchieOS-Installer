@@ -642,8 +642,13 @@ function Open-Gui {
     Wsl "archie-node gui $($script:cfg.gui_mode)$soft" { param($out, $code) $script:busy = ''; Refresh-All } -label 'gui'
 }
 function Open-Voice {
-    $always = if ($script:cfg.voice_always) { ' --always' } else { '' }
-    Start-Process wsl.exe -ArgumentList "-d $($script:cfg.distro) -- archie-talk --local$always"
+    # One voice: a second would hear the first through the speakers and answer it.
+    # (archie-talk also refuses a second one; this spares the window it would open.)
+    Wsl "pgrep -f '[a]rchie-voice converse'" { param($out, $code)
+        if ($code -eq 0) { Add-Log 'La voz ya está abierta.'; return }
+        $always = if ($script:cfg.voice_always) { ' --always' } else { '' }
+        Start-Process wsl.exe -ArgumentList "-d $($script:cfg.distro) -- archie-talk --local$always"
+    }
 }
 function After-Start {
     $script:busy = ''

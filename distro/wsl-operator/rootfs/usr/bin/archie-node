@@ -157,6 +157,10 @@ up() {
 
 down() {
   gui stop >/dev/null
+  # The voice goes with the node: left open over a restart it outlives the model it asks,
+  # and the launcher opens another when the node is back.
+  pkill -TERM -f '[r]un-archie.sh' 2>/dev/null
+  pkill -TERM -f '[a]rchie-voice converse' 2>/dev/null
   pkill -TERM -f '[a]rchie-wanda --config' 2>/dev/null
   pkill -TERM -f '[a]rchie-worldd' 2>/dev/null
   pkill -TERM -f "[a]rchie-displayd --root $NODE_ROOT" 2>/dev/null

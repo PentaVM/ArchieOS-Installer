@@ -30,6 +30,13 @@ for option in "$@"; do
     *) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
   esac
 done
+# One voice at a time, decided before anything else is touched: two would hear each
+# other through the speakers and answer each other. By the voice's own process, not a
+# lock file: what it leaves running (the model's server) would hold a lock for ever.
+if pgrep -u "$(id -u)" -f '[a]rchie-voice converse' >/dev/null; then
+  echo "archie-talk: Archie's voice is already open" >&2
+  exit 0
+fi
 if [ "$where" = auto ]; then
   if archie-local ready; then where=local; else where=cloud; fi
 fi
