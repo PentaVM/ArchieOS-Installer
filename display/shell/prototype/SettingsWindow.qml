@@ -5,6 +5,7 @@ AppWindow {
     property var bridge:null
     property string st:Demo.state
     property int section:0
+    readonly property bool neuralPalette: typeof lumen !== "undefined" && lumen.settings.fieldSource === "neural"
     readonly property var catalog:bridge && bridge.catalog ? bridge.catalog : null
     readonly property var inspection:bridge && bridge.inspector ? bridge.inspector : null
     readonly property var providers:inspection && inspection.providers ? inspection.providers : []
@@ -84,7 +85,8 @@ AppWindow {
         OrbOpt { label:"Mostrar en escritorio"; options:["Sí","No"]; index:Demo.orbShow ? 0 : 1; onPicked:function(i) { Demo.orbShow=(i===0) } }
         OrbOpt { label:"Representación"; options:Demo.orbProfiles; index:typeof lumen!=="undefined" ? Demo.orbProfiles.indexOf(lumen.profile) : Demo.orbProfile; onPicked:function(i) { Demo.orbProfile=i } }
         OrbOpt { label:"Nodos visibles (máximo nativo)"; options:["60","120","220","360","420"]; index:Demo.orbNodesI; onPicked:function(i) { Demo.orbNodesI=i } }
-        OrbOpt { label:"Color de la esfera"; options:["Original","Holograma frío","Vivo"]; index:Demo.orbGradeI; onPicked:function(i) { Demo.orbGradeI=i } }
+        ListRow { visible:sw.neuralPalette; title:"Color de la esfera"; sub:"Paleta de categor�as de archivo � dise�o de Xavi" }
+        OrbOpt { visible:!sw.neuralPalette; label:"Color de la esfera"; options:["Original","Holograma frío","Vivo"]; index:Demo.orbGradeI; onPicked:function(i) { Demo.orbGradeI=i } }
         OrbOpt { label:"Polvo de luz"; options:["No","Sí"]; index:Demo.orbDust ? 1 : 0; onPicked:function(i) { Demo.orbDust=i===1 } }
         OrbOpt { label:"Brillo"; options:["Bajo","Normal","Alto"]; index:Demo.orbBrightI; onPicked:function(i) { Demo.orbBrightI=i } }
         OrbOpt { label:"Actividad visual"; options:["Apagada","Baja","Media","Alta"]; index:Demo.orbActI; onPicked:function(i) { Demo.orbActI=i } }

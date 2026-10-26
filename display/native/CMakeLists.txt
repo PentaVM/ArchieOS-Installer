@@ -71,6 +71,10 @@ qt_add_executable(archie-display
     src/XaviDesignBridge.h
     src/LumenGeometry.cpp
     src/LumenGeometry.h
+    src/NeuralField.cpp
+    src/NeuralField.h
+    src/NeuralGeometry.cpp
+    src/NeuralGeometry.h
     src/AppCatalog.cpp
     src/AppCatalog.h
     src/DisplayControl.cpp
@@ -84,15 +88,21 @@ qt_add_qml_module(archie-display
     VERSION 1.0
     QML_FILES
         qml/Main.qml
+        qml/ObservatoryContent.qml
         qml/LumenScene.qml
         qml/OrbHud.qml
         qml/WorldHud.qml
         qml/WorldBeacons.qml
         qml/WorldImageryMaterial.qml
         qml/Exploration.js
+        qml/OrbActions.js qml/NeuralControls.js
         qml/ForgeView.qml
         qml/OrbViewport.qml
         qml/HologramGrade.qml
+        qml/NeuralScene.qml
+        qml/NeuralHud.qml
+        qml/NeuralHolo.qml
+        qml/NeuralViewport.qml
 )
 
 # Keep relative prototype/font URLs intact; every operational shell asset is local.
@@ -111,7 +121,7 @@ qt_add_resources(archie-display "archie-shell-assets"
 file(GLOB archie_presets RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/presets/*.json")
 
-qt_add_resources(archie-display "archie-native-assets"
+qt_add_resources(archie-display "archie-native-assets" BIG_RESOURCES
     PREFIX "/archie"
     BASE "${CMAKE_CURRENT_SOURCE_DIR}"
     FILES
@@ -137,6 +147,14 @@ qt_add_resources(archie-display "archie-native-assets"
         shaders/xavi_ribbon.frag
         shaders/lumen_glow.vert
         shaders/lumen_glow.frag
+        shaders/neural_point.vert
+        shaders/neural_point.frag
+        shaders/neural_line.vert
+        shaders/neural_line.frag
+        shaders/neural_spark.vert
+        shaders/neural_spark.frag
+        shaders/neural_cone.vert
+        shaders/neural_cone.frag
         assets/xavi/prism-structure-4k.png
         assets/xavi/prism-surface-4k.png
         ${archie_presets}
@@ -152,7 +170,7 @@ qt_add_resources(archie-display "archie-native-assets"
 find_package(Qt6 6.6 REQUIRED COMPONENTS ShaderTools)
 qt_add_shaders(archie-display "archie-grade-shaders"
     PREFIX "/archie"
-    FILES shaders/hologram_grade.frag)
+    FILES shaders/hologram_grade.frag shaders/neural_holo.frag)
 
 target_link_libraries(archie-display PRIVATE
     archie::visual
@@ -195,7 +213,7 @@ if(ARCHIE_NATIVE_BUILD_TESTS)
     target_link_libraries(test_native PRIVATE archie::visual archie-lumen-design Qt6::Quick3D Qt6::Network Qt6::Test)
     qt_add_resources(test_native "archie-test-presets" PREFIX "/archie" BASE "${CMAKE_CURRENT_SOURCE_DIR}"
         FILES ${archie_presets})
-    qt_add_resources(test_native "archie-test-hybrid-assets" PREFIX "/archie" BASE "${CMAKE_CURRENT_SOURCE_DIR}"
+    qt_add_resources(test_native "archie-test-hybrid-assets" BIG_RESOURCES PREFIX "/archie" BASE "${CMAKE_CURRENT_SOURCE_DIR}"
         FILES assets/xavi/prism-structure-4k.png assets/xavi/prism-surface-4k.png)
     set_source_files_properties(tests/invalid-preset.json PROPERTIES QT_RESOURCE_ALIAS "invalid-test.json")
     qt_add_resources(test_native "archie-invalid-test-preset" PREFIX "/archie/presets" BASE "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -207,6 +225,12 @@ if(ARCHIE_NATIVE_BUILD_TESTS)
     target_include_directories(test_shell_runtime PRIVATE src)
     target_link_libraries(test_shell_runtime PRIVATE Qt6::Core Qt6::Test)
     add_test(NAME shell_runtime_contracts COMMAND test_shell_runtime)
+    qt_add_executable(test_app_catalog tests/test_app_catalog.cpp src/AppCatalog.cpp src/AppCatalog.h)
+    target_include_directories(test_app_catalog PRIVATE src)
+    target_link_libraries(test_app_catalog PRIVATE Qt6::Gui Qt6::Test)
+    qt_add_resources(test_app_catalog "archie-catalog-test-apps" PREFIX "/archie" BASE "${CMAKE_CURRENT_SOURCE_DIR}"
+        FILES apps/archie-stage.desktop apps/archie-voice.desktop apps/archie-editor.desktop apps/archie-lienzo.desktop apps/archie-cli.desktop)
+    add_test(NAME app_catalog_contracts COMMAND test_app_catalog)
     qt_add_executable(test_exploration_preview tests/test_exploration_preview.cpp src/ExplorationPreview.cpp)
     target_include_directories(test_exploration_preview PRIVATE src)
     target_link_libraries(test_exploration_preview PRIVATE archie::visual Qt6::Gui)
@@ -258,7 +282,14 @@ if(ARCHIE_NATIVE_BUILD_TESTS)
     qt_add_resources(test_display_control "archie-control-test-presets" PREFIX "/archie" BASE "${CMAKE_CURRENT_SOURCE_DIR}"
         FILES ${archie_presets})
     add_test(NAME display_control_contracts COMMAND test_display_control)
-    set_target_properties(test_native test_shell_runtime test_display_control PROPERTIES WIN32_EXECUTABLE FALSE)
+    qt_add_executable(test_neural tests/test_neural.cpp src/NeuralField.cpp src/NeuralField.h)
+    target_include_directories(test_neural PRIVATE src "${ARCHIE_LUMEN_DESIGN_DIR}/include")
+    target_link_libraries(test_neural PRIVATE archie-lumen-design Qt6::Concurrent Qt6::Gui Qt6::Test)
+    add_test(NAME neural_sphere_contracts COMMAND test_neural)
+    set_target_properties(test_native test_shell_runtime test_display_control test_neural
+        test_app_catalog test_exploration_preview test_globe_stream test_globe_tiles test_earth_meshes
+        test_world_visuals test_world_texture test_exploration_credential test_world_hud
+        PROPERTIES WIN32_EXECUTABLE FALSE)
     option(ARCHIE_NATIVE_BUILD_SHADER_TESTS "Run isolated CPU llvmpipe shader smoke tests" OFF)
     if(ARCHIE_NATIVE_BUILD_SHADER_TESTS)
         file(GLOB ARCHIE_TEST_SHADERS CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -268,7 +299,7 @@ if(ARCHIE_NATIVE_BUILD_TESTS)
             src/XaviDesignBridge.cpp src/XaviDesignBridge.h)
         target_include_directories(test_shaders PRIVATE src "${ARCHIE_LUMEN_DESIGN_DIR}/include")
         target_link_libraries(test_shaders PRIVATE archie::visual archie-lumen-design Qt6::Quick3D Qt6::Network Qt6::Test)
-        qt_add_resources(test_shaders "archie-shader-test-assets" PREFIX "/archie" BASE "${CMAKE_CURRENT_SOURCE_DIR}"
+        qt_add_resources(test_shaders "archie-shader-test-assets" BIG_RESOURCES PREFIX "/archie" BASE "${CMAKE_CURRENT_SOURCE_DIR}"
             FILES ${archie_presets} ${ARCHIE_TEST_SHADERS} qml/LumenScene.qml tests/ShaderSmoke.qml
                 assets/xavi/prism-structure-4k.png assets/xavi/prism-surface-4k.png)
         add_test(NAME cpu_shader_contracts COMMAND test_shaders)

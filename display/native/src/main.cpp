@@ -73,6 +73,7 @@ int main(int argc, char *argv[])
     arguments.addOption(QCommandLineOption(QStringLiteral("imagery-source"),QStringLiteral("Initial loaded imagery source preference; viewer-only."),QStringLiteral("source")));
     arguments.addOption(QCommandLineOption(QStringLiteral("displayd-port"),QStringLiteral("Trusted loopback read-only projection port."),QStringLiteral("port"),QStringLiteral("7666")));
     arguments.addOption(QCommandLineOption(QStringLiteral("control-port"),QStringLiteral("Loopback visual controls port."),QStringLiteral("port"),QStringLiteral("7668")));
+    arguments.addOption(QCommandLineOption(QStringLiteral("observatory"), QStringLiteral("Open the standalone rendering/verification host instead of the desktop.")));
     arguments.addOption(QCommandLineOption(QStringLiteral("shell"), QStringLiteral("Open the native Archie desktop shell.")));
     arguments.addOption(QCommandLineOption(QStringLiteral("theme"), QStringLiteral("Shell theme: dark or light (beta)."), QStringLiteral("mode"), QStringLiteral("dark")));
     arguments.addOption(QCommandLineOption(QStringLiteral("shell-bridge"), QStringLiteral("Trusted read-only shell bridge executable."),
@@ -90,7 +91,7 @@ int main(int argc, char *argv[])
     arguments.addOption(QCommandLineOption(QStringLiteral("ui-walk"), QStringLiteral("Shell or World: click through the steps in this JSON file and record each click (verification)."), QStringLiteral("steps")));
     arguments.addOption(QCommandLineOption(QStringLiteral("ui-walk-out"), QStringLiteral("Where --ui-walk writes its screenshots and report.jsonl."), QStringLiteral("dir"), QStringLiteral("ui-walk")));
     arguments.process(app);
-    const bool shellMode = arguments.isSet(QStringLiteral("shell"));
+    const bool shellMode = !arguments.isSet(QStringLiteral("observatory"));
     const QString theme=arguments.value(QStringLiteral("theme"));
     if (theme != QLatin1String("dark") && theme != QLatin1String("light")) {
         qCritical("archie-display: theme must be dark or light");
@@ -137,6 +138,19 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().front());
     auto *presentation=window ? new PresentationTracker(window, &bridge) : nullptr;
+    if (window)
+        displayControl.setViewHandler([window](const QString &action,const QVariantMap &arguments) {
+            QVariant error;
+            const bool invoked=QMetaObject::invokeMethod(window,"viewVerb",Q_RETURN_ARG(QVariant,error),
+                Q_ARG(QVariant,QVariant(action)),Q_ARG(QVariant,QVariant(arguments)));
+            return invoked && error.isValid() ? error.toString() : QStringLiteral("the active view did not acknowledge this command");
+        });
+    if (window)
+        displayControl.setCapture([window,captureAllowed](const QString &path) {
+            if (!captureAllowed()) return false;
+            const QImage frame = window->grabWindow();
+            return !frame.isNull() && frame.save(path, "PNG");
+        });
     if (!shellMode) {
         QString scene = displayControl.sceneNamed(arguments.value(QStringLiteral("scene")));
         if (scene.isEmpty()) {
@@ -157,33 +171,11 @@ int main(int argc, char *argv[])
         qWarning("archie-display: requested screen %d is unavailable; this WSL session exposes %lld screen(s)",
                  screenNumber, static_cast<long long>(screens.size()));
     }
-    // One listener, two host surfaces: the shell's World command opens the actual native
-    // renderer in this same engine, preserving the shell Theme singleton and all authority.
-    if (shellMode) {
-        QQmlComponent worldComponent(&engine);
-        worldComponent.loadFromModule(QStringLiteral("Archie.Observatory"),QStringLiteral("Main"));
-        auto *object=worldComponent.createWithInitialProperties({
-            {QStringLiteral("scene"),QStringLiteral("world")},
-            {QStringLiteral("worldHost"),true},{QStringLiteral("visible"),false}});
-        auto *worldWindow=qobject_cast<QQuickWindow*>(object);
-        if(worldWindow) {
-            object->setParent(&engine);
-            if(presentation) presentation->trackWindow(worldWindow);
-            displayControl.setWorldAvailable(true);
-            QObject::connect(&displayControl,&DisplayControl::commandReceived,&engine,
-                [worldWindow,&bridge](const QString &action,const QString &value,bool) {
-                    if(action==QStringLiteral("scene") && value==QStringLiteral("world")) {
-                        bridge.enableWorld();bridge.requestMode(QStringLiteral("watcher"));
-                        worldWindow->showFullScreen();worldWindow->raise();worldWindow->requestActivate();
-                    }
-                });
-            if(arguments.value(QStringLiteral("scene"))==QStringLiteral("world")) {
-                bridge.enableWorld();bridge.requestMode(QStringLiteral("watcher"));worldWindow->showFullScreen();
-            }
-        } else {
-            delete object;
-            qWarning("archie-display: native World host unavailable: %s",qPrintable(worldComponent.errorString()));
-        }
+    // World is a content view of this same desktop window: its dock, menus and
+    // controller remain the existing shell's, with no overlapping World window.
+    if (shellMode && window) {
+        displayControl.setWorldAvailable(true);
+        QMetaObject::invokeMethod(window, "showScene", Q_ARG(QVariant, arguments.value(QStringLiteral("scene"))));
     }
     if (!displayControl.start(static_cast<quint16>(controlPort)))
         qWarning("archie-display: local visual controls unavailable");

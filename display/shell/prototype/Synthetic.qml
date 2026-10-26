@@ -8,6 +8,7 @@ import QtQuick
 QtObject {
     readonly property var dock: [
         { id: "orb",    name: "Orb",     icon: "dkOrb",    running: true  },
+        { id: "world",  name: "World",   icon: "dkWorld",  running: false },
         { id: "vault",  name: "Vault",   icon: "dkVault",  running: true  },
         { id: "forge",  name: "Forge",   icon: "dkForge",  running: false },
         { id: "sentry", name: "Sentry",  icon: "dkSentry", running: false },

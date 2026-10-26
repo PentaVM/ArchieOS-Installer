@@ -7,12 +7,13 @@ Panel {
     kind: "panel"
     property string target: "vault"       // dock id: orb, vault, forge, sentry, stage, set
     signal activated()
+    signal spaceRequested(string space)
     width: 230
     height: col.implicitHeight + 12
     enterDy: 8
 
     readonly property bool isOrb: target === "orb"
-    readonly property var items: isOrb ? [
+    readonly property var items: target === "world" ? [{l:"Mostrar World",act:"world"},{l:"Volver al Orbe",act:"orb"}] : isOrb ? [
         { l: Demo.bare ? "Mostrar las ventanas" : "Mostrar el escritorio", act: "desk" },
         { l: "Minimizar todas", act: "minAll", dis: Wm.shownCount() === 0 },
         { l: "Cerrar todas", act: "closeAll", dis: Wm.openCount() === 0 } ] : [
@@ -23,7 +24,8 @@ Panel {
         { l: "Cerrar ventana", act: "close", dis: !Wm.isOpen(target) } ]
 
     function run(act) {
-        if (act === "desk") Demo.bare = !Demo.bare
+        if (act === "world" || act === "orb") spaceRequested(act)
+        else if (act === "desk") Demo.bare = !Demo.bare
         else if (act === "minAll") Wm.minimizeAll()
         else if (act === "closeAll") Wm.closeAll()
         else if (act === "open") Wm.open(target)
@@ -35,7 +37,7 @@ Panel {
 
     Column { id: col; x: 6; y: 6; width: parent.width - 12
         Item { width: col.width; height: 26
-            Text { x: 10; anchors.verticalCenter: parent.verticalCenter; text: dm.isOrb ? "Orb" : Wm.title(dm.target)
+            Text { x: 10; anchors.verticalCenter: parent.verticalCenter; text: dm.target === "world" ? "World" : dm.isOrb ? "Orb" : Wm.title(dm.target)
                 color: Theme.t3; font.family: Theme.font; font.pixelSize: 11; font.weight: Font.DemiBold; font.letterSpacing: 0.6; font.capitalization: Font.AllUppercase } }
         Repeater { model: dm.items
             delegate: Item { objectName: modelData.sep ? "" : "dockmenu." + modelData.act; width: col.width; height: modelData.sep ? 9 : 30

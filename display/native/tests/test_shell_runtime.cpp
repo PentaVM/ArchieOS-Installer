@@ -1,6 +1,8 @@
 #include "ShellRuntime.h"
 #include <QCoreApplication>
 #include <QFile>
+#include <QFileInfo>
+#include <QDir>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -48,6 +50,9 @@ private slots:
     void localModelsAreListedAndOnlyAListedOneIsUsed() {
         QTemporaryDir bin;
         QVERIFY(bin.isValid());
+#ifdef Q_OS_WIN
+        QVERIFY(QFile::copy(QCoreApplication::applicationFilePath(), bin.filePath(QStringLiteral("archie-local.exe"))));
+#else
         QFile tool(bin.filePath(QStringLiteral("archie-local")));
         QVERIFY(tool.open(QIODevice::WriteOnly));
         tool.write("#!/bin/sh\n"
@@ -59,8 +64,9 @@ private slots:
                    "esac\n");
         tool.close();
         QVERIFY(tool.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+#endif
         const QByteArray path = qgetenv("PATH");
-        qputenv("PATH", bin.path().toUtf8() + ':' + path);
+        qputenv("PATH", bin.path().toUtf8() + QDir::listSeparator().toLatin1() + path);
 
         ShellRuntime runtime(QStringLiteral("/missing/archie-shell-bridge"), QString(), QString());
         runtime.localModelsRefresh();
@@ -98,6 +104,22 @@ private slots:
 int main(int argc, char **argv) {
     QCoreApplication app(argc, argv);
     const auto args = app.arguments();
+#ifdef Q_OS_WIN
+    // The real child-process boundary is the fixture, without requiring /bin/sh.
+    if (QFileInfo(app.applicationFilePath()).baseName() == QStringLiteral("archie-local")) {
+        QFile calls(QDir(app.applicationDirPath()).filePath(QStringLiteral("calls")));
+        if (!calls.open(QIODevice::WriteOnly | QIODevice::Append)) return 2;
+        calls.write(args.mid(1).join(QLatin1Char(' ')).toUtf8() + '\n');
+        if (args.value(1) == QStringLiteral("list")) {
+            QFile output;
+            if (!output.open(stdout,QIODevice::WriteOnly)) return 2;
+            output.write(R"([{"name":"27b","label":"Bonsai 2 27B","port":8082,"here":true,"answering":false,"chosen":false},{"name":"9b","label":"Bonsai 2 9B","port":8081,"here":true,"answering":true,"chosen":true}])");
+            output.flush();
+            return 0;
+        }
+        return args.value(1) == QStringLiteral("use") && args.value(2) == QStringLiteral("27b") ? 0 : 64;
+    }
+#endif
     if (args.contains(QStringLiteral("watch"))) {
         QFile output;
         if (!output.open(stdout, QIODevice::WriteOnly)) return 2;

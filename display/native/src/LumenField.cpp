@@ -87,7 +87,9 @@ QString categoryLabel(const QString &key)
     return key;
 }
 
-const QStringList fieldSources{QStringLiteral("tfog"), QStringLiteral("content")};
+// "neural" is Xavi's neural sphere (NeuralField): it lists its own folder, so this object
+// neither asks displayd for a field nor lists one for it.
+const QStringList fieldSources{QStringLiteral("tfog"), QStringLiteral("content"), QStringLiteral("neural")};
 
 /// The folder the content sphere lists when nothing chose one: ARCHIE_CONTENT_ROOT, the
 /// repository this display was built from (as Xavi's desktop showed ArchieOS itself),
@@ -993,6 +995,8 @@ void LumenField::request()
         m_requestAgain = true;
         return;
     }
+    if (m_settings.value(QStringLiteral("fieldSource")).toString() == QLatin1String("neural"))
+        return;
     if (contentSource()) {
         requestContent();
         return;

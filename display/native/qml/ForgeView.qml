@@ -9,8 +9,8 @@ Item {
     id: forge
 
     property string notice: ""
-    readonly property var apps: appCatalog.apps.filter(function (a) { return a.section !== "suggested" })
-    readonly property var missing: appCatalog.apps.filter(function (a) { return a.section === "suggested" })
+    readonly property var apps: appCatalog.forgeApps.filter(function (a) { return a.section !== "suggested" })
+    readonly property var missing: appCatalog.forgeApps.filter(function (a) { return a.section === "suggested" })
 
     Connections {
         target: appCatalog

@@ -124,7 +124,13 @@ constexpr Suggestion suggestions[] = {
 
 }  // namespace
 
-AppCatalog::AppCatalog(QObject *parent) : QObject(parent)
+AppCatalog::AppCatalog(QObject *parent)
+    : AppCatalog(QStandardPaths::standardLocations(QStandardPaths::ApplicationsLocation), parent)
+{
+}
+
+AppCatalog::AppCatalog(const QStringList &applicationRoots, QObject *parent)
+    : QObject(parent), m_applicationRoots(applicationRoots)
 {
     const QString platform = QGuiApplication::platformName();
     m_canLaunch = platform == QLatin1String("wayland") || platform == QLatin1String("xcb");
@@ -207,6 +213,7 @@ void AppCatalog::scan()
         app.comment = entry.value(QStringLiteral("Comment"), entry.value(QStringLiteral("GenericName")));
         app.exec = expandShare(entry.value(QStringLiteral("Exec")));
         app.terminal = entry.value(QStringLiteral("Terminal")) == QLatin1String("true");
+        app.internal = entry.value(QStringLiteral("X-Archie-Internal")) == QLatin1String("true");
         app.binary = binaryOf(commandOf(app.exec));
         app.group = groupOf(entry.value(QStringLiteral("Categories")));
         app.icon = resolveIcon(entry.value(QStringLiteral("Icon")));
@@ -241,8 +248,7 @@ void AppCatalog::scan()
     }
     // Everything installed, as any application menu lists it. Earlier directories win,
     // as the XDG specification orders them.
-    const QStringList roots = QStandardPaths::standardLocations(QStandardPaths::ApplicationsLocation);
-    for (const QString &root : roots) {
+    for (const QString &root : std::as_const(m_applicationRoots)) {
         QDirIterator it(root, {QStringLiteral("*.desktop")}, QDir::Files, QDirIterator::Subdirectories);
         int budget = 4000;
         while (it.hasNext() && budget-- > 0) {
@@ -335,8 +341,9 @@ void AppCatalog::publish()
         return a.name.localeAwareCompare(b.name) < 0;
     });
     QVariantList rows;
+    QVariantList forgeRows;
     for (const App &app : std::as_const(m_apps)) {
-        rows.push_back(QVariantMap{
+        const QVariantMap row{
             {QStringLiteral("id"), app.id},
             {QStringLiteral("name"), app.name},
             {QStringLiteral("comment"), app.comment},
@@ -350,9 +357,13 @@ void AppCatalog::publish()
             {QStringLiteral("operable"), app.operable},
             {QStringLiteral("featured"), app.featured},
             {QStringLiteral("package"), app.package},
-        });
+        };
+        rows.push_back(row);
+        if (!app.internal)
+            forgeRows.push_back(row);
     }
     m_rows = rows;
+    m_forgeRows = forgeRows;
     emit appsChanged();
 }
 
