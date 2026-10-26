@@ -25,6 +25,13 @@ int main(int argc,char **argv){QCoreApplication app(argc,argv);EarthMeshes cache
     auto data=cache.meshes().first().toMap();const auto vertices=data.value(QStringLiteral("vertices")).toByteArray();float height;std::memcpy(&height,vertices.constData()+18*4,4);
     check(std::abs(height-.0001F)<1e-9F&&data.value(QStringLiteral("origin")).value<QVector3D>().z()==20,"local building height and native Earth origin retained");
     check(cache.images().cbegin().value().size()==QSize(256,256),"original texture pixels retained");
+    const auto decodedTexture=cache.images().cbegin().value().cacheKey();
+    check(!cache.ingest({mesh(a)},{a}),"duplicate immutable mesh delta preserves the draw model");
+    check(cache.images().cbegin().value().cacheKey()==decodedTexture,"duplicate delta must not JPEG-decode the same texture again");
+    const auto revised=QStringLiteral("earth:123:new-mask");
+    cache.ingest({mesh(revised)},{revised});
+    check(cache.images().cbegin().value().cacheKey()==decodedTexture,"new geometry mask reuses its unchanged original JPEG");
+    cache.clear();cache.ingest({mesh(a)},{a});
     check(!cache.ingest({},{a}),"unchanged delta preserves stable geometry data");
     check(cache.ingest({mesh(b,512)},{b}),"camera's active child replaces draw plan");
     check(cache.knownKeys().size()==2&&cache.meshes().size()==1,"cache history remains reusable but never becomes a draw list");

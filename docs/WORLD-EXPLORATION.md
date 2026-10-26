@@ -245,6 +245,13 @@ using the compiled CLI/daemons and a native executable installed at
 `/home/archie/.local/share/archie-world-demo/archie-display` (override with
 `-NativeBinary`). It creates a separate retained run directory and closes its
 own daemons when the window closes. It does not replace the installed OS startup.
+For the standalone desktop build, configure native CMake with
+`-DCMAKE_BUILD_TYPE=Release`; the development worldd crate also uses optimization.
+Streaming uses up to four existing-governor node requests concurrently and reuses
+immutable packet/JPEG allocations. It does not pause for focus/input in other apps.
+Measured load timings and graphics limitations are recorded in
+`_dev/WORLD-PERFORMANCE-2026-10-25.md`.
+
 The desktop demo initially selects Google's online RAM globe; use
 `-ImagerySource sentinel2` or the themed source selector for NASA. The Python
 helper also defaults to Google; pass `--source blue_marble` for reproducible

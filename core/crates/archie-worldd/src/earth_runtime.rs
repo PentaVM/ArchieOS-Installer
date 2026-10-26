@@ -17,12 +17,35 @@ struct Asset {
     texture_sizes: Vec<[u16; 2]>,
 }
 
+// Share immutable encoded buffers between publications; account for their wire
+// cost once, rather than cloning/serializing every cached JPEG on each arrival.
+#[derive(Clone)]
+struct Packet {
+    wire: Arc<Value>,
+    wire_bytes: usize,
+    payload_bytes: usize,
+}
+impl Packet {
+    fn new(wire: Value) -> Self {
+        let wire_bytes = wire.to_string().len();
+        let payload_bytes = ["vertices_base64", "indices_base64", "texture_base64"]
+            .iter()
+            .map(|field| wire[*field].as_str().map_or(0, str::len))
+            .sum();
+        Self {
+            wire: Arc::new(wire),
+            wire_bytes,
+            payload_bytes,
+        }
+    }
+}
+
 #[derive(Default)]
 pub(super) struct EarthState {
     planet: Option<Planet>,
     bulks: BTreeMap<String, (Vec<Node>, usize)>,
     assets: BTreeMap<String, Asset>,
-    packets: BTreeMap<String, Value>,
+    packets: BTreeMap<String, Packet>,
     active: Vec<String>,
     known: BTreeSet<String>,
     generation: u64,
@@ -50,16 +73,13 @@ impl EarthState {
                 continue;
             }
             if let Some(packet) = self.packets.get(key) {
-                let size = ["vertices_base64", "indices_base64", "texture_base64"]
-                    .iter()
-                    .map(|field| packet[*field].as_str().map_or(0, str::len))
-                    .sum::<usize>();
+                let size = packet.payload_bytes;
                 if size + bytes > budget {
                     more = true;
                     continue;
                 }
                 bytes += size;
-                packets.push(packet.clone());
+                packets.push(packet.wire.as_ref().clone());
             }
         }
         (
@@ -154,6 +174,39 @@ fn node_url(node: &Node) -> Result<String, String> {
             .map(|v| format!("!3u{v}"))
             .unwrap_or_default()
     ))
+}
+
+fn prepare_asset(data: Vec<u8>, node: Node, generation: u64, radius: f64) -> Result<Asset, String> {
+    let decoded = earth::decode(&data, 0, radius)?;
+    let mut cost = 0;
+    let mut texture_sizes = vec![];
+    for mesh in &decoded {
+        let bytes =
+            (mesh.vertices.len() + mesh.indices.len() + mesh.jpeg.len()).div_ceil(3) * 4 + 2048;
+        if bytes > 3 * 1024 * 1024 || mesh.vertex_count > 131072 || mesh.triangle_count > 262144 {
+            return Err("3D mesh exceeds renderer bounds".into());
+        }
+        let mut jpeg = jpeg_decoder::Decoder::new(std::io::Cursor::new(&mesh.jpeg));
+        jpeg.read_info().map_err(|_| "invalid Earth JPEG header")?;
+        let info = jpeg.info().ok_or("Earth JPEG dimensions missing")?;
+        if info.width > 4096 || info.height > 4096 {
+            return Err("Earth JPEG exceeds pixel bounds".into());
+        }
+        texture_sizes.push([info.width, info.height]);
+        cost += bytes.max(
+            mesh.vertices.len()
+                + mesh.indices.len()
+                + usize::from(info.width) * usize::from(info.height) * 4,
+        );
+    }
+    Ok(Asset {
+        raw: data,
+        node,
+        used: generation,
+        mesh_count: decoded.len(),
+        cost,
+        texture_sizes,
+    })
 }
 
 impl ExplorationService {
@@ -290,7 +343,7 @@ impl ExplorationService {
         id: &str,
         generation: u64,
         view: &GlobeViewport,
-        meter: &NavigationMeter,
+        meter: &Arc<NavigationMeter>,
     ) -> Result<(), String> {
         let cached = self
             .navigation
@@ -447,96 +500,107 @@ impl ExplorationService {
             .iter()
             .map(|n| n.path.clone())
             .collect::<BTreeSet<_>>();
-        if paths.is_empty() {
+        // Reuse the complete cached plan once. The previous path re-published
+        // and re-serialized all cached geometry for every individual node.
+        self.publish_earth(id, generation, &paths, planet.radius)
+            .await?;
+        let mut pending = std::collections::VecDeque::from(nodes);
+        let mut work = tokio::task::JoinSet::new();
+        let mut changed = 0usize;
+        let mut last_publication = std::time::Instant::now();
+        let mut failure = None;
+        loop {
+            if !self.earth_current(id, generation).await {
+                work.abort_all();
+                return Err("obsolete 3D camera".into());
+            }
+            while work.len() < 4 {
+                let Some(node) = pending.pop_front() else {
+                    break;
+                };
+                let cached = self
+                    .navigation
+                    .lock()
+                    .await
+                    .session
+                    .as_ref()
+                    .is_some_and(|s| s.id == id && s.earth.assets.contains_key(&node.path));
+                if cached {
+                    continue;
+                }
+                let service = self.clone();
+                let id = id.to_string();
+                let meter = meter.clone();
+                let radius = planet.radius;
+                work.spawn(async move {
+                    let data = service
+                        .earth_fetch(&id, generation, &node_url(&node)?, &meter)
+                        .await?;
+                    tokio::task::spawn_blocking(move || {
+                        prepare_asset(data, node, generation, radius)
+                    })
+                    .await
+                    .map_err(|_| "3D decoder task failed".to_string())?
+                });
+            }
+            let Some(result) = work.join_next().await else {
+                break;
+            };
+            let asset = match result {
+                Ok(Ok(asset)) => asset,
+                Ok(Err(error)) => {
+                    failure.get_or_insert(error);
+                    continue;
+                }
+                Err(_) => {
+                    failure.get_or_insert("3D download task failed".into());
+                    continue;
+                }
+            };
+            let mut state = self.navigation.lock().await;
+            let Some(s) = state.session.as_mut().filter(|s| {
+                s.id == id
+                    && s.generation == generation
+                    && s.meter.active().is_ok()
+                    && s.source == ImagerySource::GoogleSatellite
+            }) else {
+                work.abort_all();
+                return Err("obsolete 3D asset".into());
+            };
+            let path = asset.node.path.clone();
+            s.earth.assets.insert(path.clone(), asset);
+            while s.earth.assets.len() > MAX_NODES
+                || s.earth.assets.values().map(|a| a.raw.len()).sum::<usize>() > 32 * 1024 * 1024
+            {
+                let victim = s
+                    .earth
+                    .assets
+                    .iter()
+                    .filter(|(key, _)| *key != &path)
+                    .min_by_key(|(key, a)| (paths.contains(*key), a.used, key.len()))
+                    .map(|(k, _)| k.clone());
+                if let Some(victim) = victim {
+                    s.earth.assets.remove(&victim);
+                } else {
+                    break;
+                }
+            }
+            let first = s.earth.active.is_empty();
+            drop(state);
+            changed += 1;
+            if first || changed >= 4 || last_publication.elapsed() >= Duration::from_millis(120) {
+                self.publish_earth(id, generation, &paths, planet.radius)
+                    .await?;
+                changed = 0;
+                last_publication = std::time::Instant::now();
+            }
+        }
+        if changed > 0 {
             self.publish_earth(id, generation, &paths, planet.radius)
                 .await?;
         }
-        for node in nodes {
-            if !self.earth_current(id, generation).await {
-                return Err("obsolete 3D camera".into());
-            }
-            let cached = self
-                .navigation
-                .lock()
-                .await
-                .session
-                .as_ref()
-                .is_some_and(|s| s.earth.assets.contains_key(&node.path));
-            if !cached {
-                let data = self
-                    .earth_fetch(id, generation, &node_url(&node)?, meter)
-                    .await?;
-                // Decode before publication so malformed nodes never become ready.
-                let decoded = earth::decode(&data, 0, planet.radius)?;
-                let mut cost = 0;
-                let mut texture_sizes = vec![];
-                for mesh in &decoded {
-                    let bytes = (mesh.vertices.len() + mesh.indices.len() + mesh.jpeg.len())
-                        .div_ceil(3)
-                        * 4
-                        + 2048;
-                    if bytes > 3 * 1024 * 1024
-                        || mesh.vertex_count > 131072
-                        || mesh.triangle_count > 262144
-                    {
-                        return Err("3D mesh exceeds renderer bounds".into());
-                    }
-                    let mut jpeg = jpeg_decoder::Decoder::new(std::io::Cursor::new(&mesh.jpeg));
-                    jpeg.read_info().map_err(|_| "invalid Earth JPEG header")?;
-                    let info = jpeg.info().ok_or("Earth JPEG dimensions missing")?;
-                    if info.width > 4096 || info.height > 4096 {
-                        return Err(format!(
-                            "Earth JPEG {}x{} exceeds pixel bounds",
-                            info.width, info.height
-                        ));
-                    }
-                    texture_sizes.push([info.width, info.height]);
-                    cost += bytes.max(
-                        mesh.vertices.len()
-                            + mesh.indices.len()
-                            + usize::from(info.width) * usize::from(info.height) * 4,
-                    );
-                }
-                let mesh_count = decoded.len();
-                drop(decoded);
-                if let Some(s) = self.navigation.lock().await.session.as_mut().filter(|s| {
-                    s.id == id
-                        && s.generation == generation
-                        && s.meter.active().is_ok()
-                        && s.source == ImagerySource::GoogleSatellite
-                }) {
-                    s.earth.assets.insert(
-                        node.path.clone(),
-                        Asset {
-                            raw: data,
-                            node: node.clone(),
-                            used: generation,
-                            mesh_count,
-                            cost,
-                            texture_sizes,
-                        },
-                    );
-                    while s.earth.assets.len() > MAX_NODES
-                        || s.earth.assets.values().map(|a| a.raw.len()).sum::<usize>()
-                            > 32 * 1024 * 1024
-                    {
-                        let victim = s
-                            .earth
-                            .assets
-                            .iter()
-                            .filter(|(key, _)| *key != &node.path)
-                            .min_by_key(|(key, a)| (paths.contains(*key), a.used, key.len()))
-                            .map(|(k, _)| k.clone());
-                        if let Some(victim) = victim {
-                            s.earth.assets.remove(&victim);
-                        } else {
-                            break;
-                        }
-                    }
-                }
-            }
-            self.publish_earth(id, generation, &paths, planet.radius)
-                .await?;
+        if let Some(error) = failure {
+            return Err(error);
         }
         Ok(())
     }
@@ -613,15 +677,15 @@ impl ExplorationService {
                     if info.width > 4096 || info.height > 4096 {
                         return Err("3D JPEG dimensions exceed renderer bounds".into());
                     }
-                    decoded.push(json!({"key":key,"node_path":path,"origin":mesh.origin,"vertices_base64":STANDARD.encode(&mesh.vertices),"indices_base64":STANDARD.encode(&mesh.indices),"texture_base64":STANDARD.encode(&mesh.jpeg),"vertex_count":mesh.vertex_count,"triangle_count":mesh.triangle_count,"replace_mask":mask,"attribution":"© Google"}));
+                    decoded.push(Packet::new(json!({"key":key,"node_path":path,"origin":mesh.origin,"vertices_base64":STANDARD.encode(&mesh.vertices),"indices_base64":STANDARD.encode(&mesh.indices),"texture_base64":STANDARD.encode(&mesh.jpeg),"vertex_count":mesh.vertex_count,"triangle_count":mesh.triangle_count,"replace_mask":mask,"attribution":"© Google"})));
                 }
             }
             for packet in decoded {
-                let key = packet["key"]
+                let key = packet.wire["key"]
                     .as_str()
                     .ok_or("invalid cached3D key")?
                     .to_string();
-                let bytes = packet.to_string().len();
+                let bytes = packet.wire_bytes;
                 if bytes > 3 * 1024 * 1024 {
                     return Err("3D node exceeds live-frame mesh bound".into());
                 }
@@ -643,6 +707,32 @@ impl ExplorationService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn immutable_packets_share_buffers_and_keep_delta_and_clear_bounds() {
+        let value = json!({"key":"earth:test","vertices_base64":"abcd","indices_base64":"efgh","texture_base64":"ijkl"});
+        let serialized = value.to_string().len();
+        let packet = Packet::new(value);
+        let wire = packet.wire.clone();
+        let reused = packet.clone();
+        assert!(Arc::ptr_eq(&wire, &reused.wire));
+        assert_eq!(packet.wire_bytes, serialized);
+        assert_eq!(packet.payload_bytes, 12);
+        drop(reused);
+        let mut state = EarthState::default();
+        state.active.push("earth:test".into());
+        state.packets.insert("earth:test".into(), packet);
+        let (_, small, more) = state.frame(11);
+        assert!(small.is_empty() && more);
+        let (_, full, more) = state.frame(12);
+        assert_eq!(full.len(), 1);
+        assert!(!more);
+        state.inventory(&["earth:test".into()]);
+        let (_, known, more) = state.frame(0);
+        assert!(known.is_empty() && !more);
+        assert_eq!(Arc::strong_count(&wire), 2);
+        state.clear();
+        assert_eq!(Arc::strong_count(&wire), 1);
+    }
     #[tokio::test]
     async fn stop_blocks_late_mesh_publication_and_old_worker_cannot_adopt_new_session() {
         let root = std::env::temp_dir().join(format!(

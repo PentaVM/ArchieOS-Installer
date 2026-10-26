@@ -32,6 +32,10 @@ bool EarthMeshes::ingest(const QVariantList &deltas,const QStringList &activeKey
     for(const auto &entry:deltas.mid(0,64)){
         const auto wire=entry.toMap();const auto key=wire.value(QStringLiteral("key")).toString();
         if(!keyValid(key)||!m_active.contains(key))continue;
+        // Mesh keys include epoch/mask/revision and are immutable within the
+        // admitted session. Retransmission must not decode or upload them again.
+        auto resident=m_cache.find(key);
+        if(resident!=m_cache.end()){resident->used=++m_clock;continue;}
         auto fail=[&]{m_error=QStringLiteral("Rejected malformed or oversized 3D mesh");};
         bool vok=false,tok=false;
         const int vc=wire.value(QStringLiteral("vertex_count")).toInt(&vok),tc=wire.value(QStringLiteral("triangle_count")).toInt(&tok);
@@ -49,11 +53,15 @@ bool EarthMeshes::ingest(const QVariantList &deltas,const QStringList &activeKey
         for(qsizetype offset=0;offset<vertices.size();offset+=4){quint32 bits=qFromLittleEndian<quint32>(vertices.constData()+offset);float value;std::memcpy(&value,&bits,4);if(!std::isfinite(value)||std::abs(value)>80){valid=false;break;}std::memcpy(vertices.data()+offset,&value,4);}
         for(qsizetype offset=0;valid&&offset<indices.size();offset+=4){quint32 index=qFromLittleEndian<quint32>(indices.constData()+offset);if(index>=quint32(vc)){valid=false;break;}std::memcpy(indices.data()+offset,&index,4);}
         if(!valid){fail();continue;}
-        QBuffer buffer(&jpeg);buffer.open(QIODevice::ReadOnly);
-        QImageReader reader(&buffer,QByteArrayLiteral("jpeg"));reader.setAutoDetectImageFormat(false);reader.setDecideFormatFromContent(false);
-        const auto size=reader.size();if(!dimension(size.width())||!dimension(size.height())){fail();continue;}
-        auto image=reader.read();if(image.isNull()){fail();continue;}
         const auto imageKey=QStringLiteral("earth-")+QString::fromLatin1(QCryptographicHash::hash(jpeg,QCryptographicHash::Sha256).toHex());
+        QImage image;
+        for(const auto &cached:m_cache)if(cached.imageKey==imageKey){image=cached.image;break;}
+        if(image.isNull()){
+            QBuffer buffer(&jpeg);buffer.open(QIODevice::ReadOnly);
+            QImageReader reader(&buffer,QByteArrayLiteral("jpeg"));reader.setAutoDetectImageFormat(false);reader.setDecideFormatFromContent(false);
+            const auto size=reader.size();if(!dimension(size.width())||!dimension(size.height())){fail();continue;}
+            image=reader.read();if(image.isNull()){fail();continue;}
+        }
         QVariantMap mesh{{QStringLiteral("tile_id"),key},{QStringLiteral("vertices"),vertices},{QStringLiteral("triangleIndices"),indices},{QStringLiteral("origin"),QVariant::fromValue(QVector3D(xyz[0],xyz[1],xyz[2]))},{QStringLiteral("textureSource"),QStringLiteral("image://globe/")+imageKey},{QStringLiteral("vertex_count"),vc},{QStringLiteral("triangle_count"),tc},{QStringLiteral("attribution"),wire.value(QStringLiteral("attribution")).toString().left(2048)}};
         auto previous=m_cache.find(key);if(previous!=m_cache.end()){m_bytes-=previous->bytes;m_cache.erase(previous);}
         const auto cost=vertices.size()+indices.size()+image.sizeInBytes();
