@@ -57,3 +57,16 @@ not rebuild or certify the newer externally hosted draft image.
 A complete Linux/WSL installation and real pacman identity generation were not run
 on this host. No existing WSL distribution was stopped or changed. No hardware,
 model accuracy, latency or deployment validation is claimed.
+
+## Delivery and remote checks
+
+Security commit `5759b62d9bc69e9bb3e507d45fda6f0ca4372ff0` was fast-forwarded to
+GitHub main. A fresh remote verification confirmed all 13 removed objects/references
+(nine assets, two releases and two tag names) return HTTP 404.
+
+Actions run `40456703332` reports all three jobs failed **before starting**, with
+empty step lists and no allocated runner. GitHub's failure annotation says recent
+account payments failed or the spending limit needs increasing. Consequently no
+Linux CI execution is claimed; account Billing & plans must be resolved before
+retrying. The follow-up documentation-only receipt uses `[skip ci]` to avoid
+queuing another identical billing-blocked run.

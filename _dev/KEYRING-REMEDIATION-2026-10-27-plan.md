@@ -23,8 +23,8 @@ Implement inline. No new GUI, full WSL rebuild, or changes to another checkout.
   in the workstation variant, wire OOBE and both PowerShell import paths.
 - [x] Run affected packaging and initializer checks; inspect the final diff and
   scan changed files for secrets. Record actual limitations in _dev.
-- Delivery: commit and fast-forward the narrowly scoped fix to main after final
-  verification; the execution receipt belongs in the chat and git history.
+- [x] Delivered security commit 5759b62 to GitHub main. Removal verification passed;
+  CI run 40456703332 could not start due to account billing/spending restrictions.
 
 Review focus: no writes to a live host keyring; symlink escape must fail before
 cleanup; output archives must contain no builder identity/trust; initializer
