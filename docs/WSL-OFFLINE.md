@@ -30,6 +30,12 @@ base de datos del desarrollador, claves de cuenta, conversaciones, logs, checkpo
 de entrenamiento ni adaptadores Wanda. Los puertos ocupados por otros servicios
 se respetan: el arranque falla con un diagnóstico en vez de reemplazarlos.
 
+El keyring local de `pacman` también se genera en el primer inicio, desde las
+claves públicas de Arch incluidas. El instalador por importación ejecuta la misma
+inicialización como root antes de la configuración de usuario. Volver a ejecutar
+ese paso conserva la identidad local. Los empaquetadores rechazan un rootfs que
+todavía contenga el keyring del constructor, incluida su base de confianza.
+
 Para comprobar la integridad sin iniciar servicios: `archie-offline --check`.
 Los logs de tu instalación se guardan en `~/.local/state/archie-offline/`.
 

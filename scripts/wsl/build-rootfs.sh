@@ -67,6 +67,8 @@ install -m 0755 "$repo_root/core/target/release/archie" "$rootfs/usr/bin/archie"
 install -m 0755 "$repo_root/core/target/release/archie-db" "$rootfs/usr/bin/archie-db"
 install -m 0755 "$repo_root/core/target/release/archie-workstation-check" "$rootfs/usr/bin/archie-workstation-check"
 install -d "$rootfs/usr/lib/archie"
+install -m 0755 "$repo_root/distro/wsl-operator/rootfs/usr/lib/archie/init-pacman-keyring" \
+  "$rootfs/usr/lib/archie/init-pacman-keyring"
 install -m 0644 "$repo_root/distro/database/pacman.conf" "$rootfs/etc/pacman.conf"
 install -Dm 0644 "$repo_root/distro/database/compatibility.json" \
   "$rootfs/usr/share/archie/database-compatibility.json"
@@ -94,4 +96,5 @@ arch-chroot "$rootfs" pacman -Q > "$rootfs/package-versions.txt"
 rm -rf "$rootfs/var/cache/pacman/pkg"/* "$rootfs/var/log"/*
 rm -f "$rootfs/etc/machine-id"
 : > "$rootfs/etc/machine-id"
+python3 "$repo_root/scripts/wsl/image-keyring.py" prepare "$rootfs"
 "$repo_root/scripts/wsl/package-wsl.sh" "$rootfs" "$out_dir"

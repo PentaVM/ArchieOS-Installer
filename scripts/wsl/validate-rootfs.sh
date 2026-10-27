@@ -3,6 +3,7 @@ set -euo pipefail
 
 rootfs=${1:?usage: validate-rootfs.sh ROOTFS}
 rootfs=$(realpath "$rootfs")
+python3 "$(dirname "$0")/image-keyring.py" check "$rootfs"
 test -f "$rootfs/etc/os-release"
 grep -q '^ID=arch$' "$rootfs/etc/os-release"
 grep -q '^systemd=true$' "$rootfs/etc/wsl.conf"
@@ -16,6 +17,7 @@ test -x "$rootfs/usr/bin/archie"
 test -x "$rootfs/usr/bin/archied"
 test -x "$rootfs/usr/bin/archie-db"
 test -x "$rootfs/usr/bin/archie-workstation-check"
+test -x "$rootfs/usr/lib/archie/init-pacman-keyring"
 test "$(stat -c %u "$rootfs/home/archie")" = 1000
 if awk -F: '$2 !~ /^(!|\*)*$/ { exit 1 }' "$rootfs/etc/shadow"; then :; else
   echo 'password hash found in rootfs' >&2

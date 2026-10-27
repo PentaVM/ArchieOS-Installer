@@ -24,4 +24,6 @@ try {
 } finally {
   Remove-Item -LiteralPath $tar -Force -ErrorAction SilentlyContinue
 }
+& wsl.exe -d $Name -u root -- /usr/lib/archie/init-pacman-keyring
+if ($LASTEXITCODE -ne 0) { throw 'Package keyring initialization failed; installation is incomplete' }
 

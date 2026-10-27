@@ -54,6 +54,11 @@ wsl.exe --import $Name $InstallDir $image --version 2
 if ($LASTEXITCODE -ne 0) { throw 'wsl --import failed. Is WSL 2 installed? (wsl --install)' }
 if ($joined) { Remove-Item $joined }
 
+# A freshly imported image has no local package-signing identity. Initialize it
+# as root before user setup; --init preserves it if OOBE has already run.
+wsl.exe -d $Name -u root -- /usr/lib/archie/init-pacman-keyring
+if ($LASTEXITCODE -ne 0) { throw 'Package keyring initialization failed. Use a rebuilt image with the per-install initializer.' }
+
 # The folder Archie and the person share: on the Windows desktop, and ~/ArchieOS inside.
 $shared = Join-Path ([Environment]::GetFolderPath('Desktop')) 'ArchieOS'
 New-Item -ItemType Directory -Force $shared | Out-Null
