@@ -7,6 +7,7 @@ output=$(realpath -m "${2:?usage: package-offline.sh CLEAN_ROOTFS OUTPUT.wsl}")
 [[ "$output" == *.wsl && ! -e "$output" && ! -e "$output.partial" ]]
 case "$output" in "$rootfs"/*) echo 'output must be outside the image' >&2; exit 64;; esac
 repo_root=$(realpath "$(dirname "$0")/../..")
+python3 "$repo_root/scripts/wsl/image-keyring.py" check "$rootfs"
 python3 "$repo_root/scripts/wsl/validate-offline-overlay.py" "$repo_root/distro/wsl-operator/rootfs" "$rootfs"
 [[ ! -e "$rootfs/home/archie/.local/state" && ! -e "$rootfs/home/archie/.config" ]]
 [[ ! -e "$rootfs/home/archie/.cache/huggingface/token" ]]
@@ -17,7 +18,7 @@ if find "$rootfs/etc/pacman.d/gnupg/private-keys-v1.d" "$rootfs/etc/ssh" \
 fi
 grep -q '^command=/usr/lib/wsl/archie-offline-oobe$' "$rootfs/etc/wsl-distribution.conf"
 grep -q '^defaultName=ArchieOS-Bonsai-Xavi$' "$rootfs/etc/wsl-distribution.conf"
-for file in usr/bin/archie-offline usr/lib/wsl/archie-offline-oobe usr/bin/archie-display usr/bin/archied; do
+for file in usr/bin/archie-offline usr/lib/wsl/archie-offline-oobe usr/lib/archie/init-pacman-keyring usr/bin/archie-display usr/bin/archied; do
   test -x "$rootfs/$file"
 done
 python3 "$rootfs/usr/lib/archie/offline-session.py" --check --prefix "$rootfs"

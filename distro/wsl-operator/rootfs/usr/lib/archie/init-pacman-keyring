@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Called as root by WSL OOBE or immediately after a PowerShell import.
+# Images carry only /usr/share/pacman/keyrings, never the builder's local keyring.
+set -euo pipefail
+if [[ $# -ne 0 || $(id -u) -ne 0 ]]; then
+  echo 'init-pacman-keyring: run as root without arguments' >&2
+  exit 64
+fi
+umask 077
+# --init preserves an existing installation's key on subsequent invocations.
+pacman-key --init
+pacman-key --populate archlinux

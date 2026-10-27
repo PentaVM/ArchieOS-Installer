@@ -79,6 +79,7 @@ rm -rf "${rootfs:?}/var/cache/pacman/pkg"/*
 rm -f "$rootfs/etc/resolv.conf" "$rootfs/boot"/vmlinuz-* "$rootfs/boot"/initramfs-*
 cp -a "$repo_root/distro/wsl-operator/rootfs/." "$rootfs/"
 chmod 0755 "$rootfs"/usr/bin/archie-{setup,session,operate,talk,video,design,local}
+chmod 0755 "$rootfs/usr/lib/archie/init-pacman-keyring"
 
 install -m 0755 "$stage" "$rootfs/usr/bin/archie-stage"
 # archie-bridges and archie-mcp-server serve the video bridge: timelines rendered by MLT
@@ -174,6 +175,8 @@ if [[ -n $iris_cuda_bin ]]; then
 fi
 
 du -sh "$rootfs"
+# Final image packaging.
+python3 "$repo_root/scripts/wsl/image-keyring.py" prepare "$rootfs"
 if [[ $out == - ]]; then
   tar --numeric-owner --xattrs --acls -C "$rootfs" -cf - . | gzip -n -6 >&3
   exit 0

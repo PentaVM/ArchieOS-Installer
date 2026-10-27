@@ -9,6 +9,12 @@ permissions:
   contents: read
 
 jobs:
+  wsl-packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s scripts/wsl -p 'test_*.py' -v
+
   rust:
     runs-on: ubuntu-latest
     # Without debug info the workspace's test binaries fit the runner's disk: with it,
