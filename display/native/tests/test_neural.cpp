@@ -51,6 +51,7 @@ private slots:
     void modelAndDisplayUseTheSameStep();
     void inactiveViewsDeferFilesystemScanning();
     void lowerNodeLimitAndParticleLimitApplyImmediately();
+    void positionLookupDistinguishesMissingNodes();
 };
 
 void TestNeural::listsDrawsAndSettles()
@@ -267,6 +268,24 @@ void TestNeural::lowerNodeLimitAndParticleLimitApplyImmediately()
     QCOMPARE(field.sparks().size(), std::size_t(15));
     QVERIFY(field.setNumber(QStringLiteral("pulses"), 0));
     QVERIFY(field.sparks().empty());
+}
+
+void TestNeural::positionLookupDistinguishesMissingNodes()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QVERIFY(populate(dir.path()));
+    NeuralField field;
+    QCOMPARE(field.lookupPosition(QStringLiteral("src")).value(QStringLiteral("found")).toBool(), false);
+    field.setRoot(dir.path());
+    QVERIFY(field.loadNow());
+    QVERIFY(settle(field));
+    const QVariantMap present = field.lookupPosition(QStringLiteral("src"));
+    QVERIFY(present.value(QStringLiteral("found")).toBool());
+    QCOMPARE(present.value(QStringLiteral("position")).value<QVector3D>(), field.positionOf(QStringLiteral("src")));
+    const QVariantMap absent = field.lookupPosition(QStringLiteral("not/in/snapshot"));
+    QVERIFY(!absent.value(QStringLiteral("found")).toBool());
+    QVERIFY(!absent.contains(QStringLiteral("position")));
 }
 
 QTEST_GUILESS_MAIN(TestNeural)

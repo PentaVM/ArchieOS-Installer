@@ -60,11 +60,13 @@ int main(int argc,char **argv) {
     emit reader.explorationChanged();check(reader.plans==2,"a newly admitted voice/CLI exploration can navigate after startup history is seeded");
     reader.exploration.insert(QStringLiteral("source"),QStringLiteral("unavailable"));
     emit reader.explorationChanged();check(reader.plans==2,"unavailable snapshot cannot frame");
-    const auto darkFill=hud->property("fill");
+    const auto lightFill=hud->property("fill");
     QQmlComponent theme(&engine);
-    theme.setData("import QtQuick\nimport \"qrc:/archie/shell/prototype\" as Shell\nQtObject { Component.onCompleted: { Shell.Theme.colorMode=\"light\";Shell.Theme.reducedMotion=true } }",QUrl());
+    theme.setData("import QtQuick\nimport \"qrc:/archie/shell/prototype\" as Shell\nQtObject { property string mode: \"dark\"; onModeChanged: Shell.Theme.colorMode=mode; Component.onCompleted: { Shell.Theme.colorMode=mode;Shell.Theme.reducedMotion=true } }",QUrl());
     auto *themeSwitch=theme.create();check(themeSwitch,"shared Theme can be switched at runtime");
-    check(hud->property("fill")!=darkFill,"World HUD follows actual shared light theme");
+    check(hud->property("fill")!=lightFill,"World HUD follows actual shared dark theme");
+    themeSwitch->setProperty("mode",QStringLiteral("light"));
+    check(hud->property("fill")==lightFill,"World HUD returns to actual shared light theme");
     reader.exploration.insert(QStringLiteral("source"),QStringLiteral("live"));
     reader.exploration.insert(QStringLiteral("jobs"),QVariantList{job(QStringLiteral("reduced-motion"))});
     emit reader.explorationChanged();

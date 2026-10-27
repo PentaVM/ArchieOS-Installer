@@ -94,7 +94,7 @@ AppWindow {
         NoteBox { text:"Renderer nativo Lumenfield, geometría y cinemáticas existentes. El presupuesto del OS y movimiento reducido limitan efectos; una opción visual no cambia modelos, inferencia ni autoridad." }
     }
     Column { visible:sw.section===5; width:parent.width; spacing:8
-        OrbOpt { objectName:"themeMode"; label:"Tema"; options:["Oscuro","Claro · beta"]; index:Theme.light ? 1 : 0; onPicked:function(i) { Theme.colorMode=i===1 ? "light" : "dark" } }
+        OrbOpt { objectName:"themeMode"; label:"Tema"; options:["Oscuro","Claro"]; index:Theme.light ? 1 : 0; onPicked:function(i) { Theme.colorMode=i===1 ? "light" : "dark" } }
         OrbOpt { label:"Colores"; options:["Vívidos","Originales"]; index:Theme.vivid ? 0 : 1; onPicked:function(i) { Theme.vivid=(i===0) } }
         OrbOpt { label:"Perfil de movimiento"; options:["Completo","Equilibrado","Tranquilo"]; index:["full","balanced","quiet"].indexOf(Theme.motion); onPicked:function(i) { Theme.motion=["full","balanced","quiet"][i] } }
         OrbOpt { label:"Superficies opacas"; options:["No","Sí"]; index:Theme.opaque ? 1 : 0; onPicked:function(i) { Theme.opaque=i===1 } }

@@ -3,6 +3,8 @@ import QtQuick3D
 import QtQuick3D.Helpers
 import Archie.Observatory
 import "OrbActions.js" as OrbActions
+import "ModelActivity.js" as ModelActivity
+import "qrc:/archie/shell/prototype" as Shell
 
 // Shared by the shell and native renderer: one controller, one active scene.
 Item {
@@ -13,11 +15,15 @@ Item {
     property bool hudVisible: true
     property bool reducedMotion: false
     property bool frozen: false
-    property color backgroundColor: controller.look.background
-    property color textColor: "#e9edf3"
-    property color secondaryColor: "#c9ced8"
-    property color mutedColor: "#8b93a1"
-    property color errorColor: "#c98a8a"
+    property bool lightMode: Shell.Theme.light
+    property double modelActivityNow: Date.now()
+    property var modelActivity: ModelActivity.fromSnapshot(bridge.snapshot, modelActivityNow, bridge.connected)
+    Timer { interval:1000; repeat:true; running:viewport.presented; onTriggered:viewport.modelActivityNow=Date.now() }
+    property color backgroundColor: Shell.Theme.desktop
+    property color textColor: Shell.Theme.t1
+    property color secondaryColor: Shell.Theme.t2
+    property color mutedColor: Shell.Theme.t3
+    property color errorColor: Shell.Theme.bad
     property int frameIntervalMs: Number(bridge.frame.frameIntervalMs === undefined ? 16 : bridge.frame.frameIntervalMs)
     readonly property bool presented: viewport.visible && bridge.presented && viewport.width > 0 && viewport.height > 0
     // The hologram's grade is the look itself and costs one full-screen pass, so it runs
@@ -94,6 +100,12 @@ Item {
         id:neuralView
         anchors.fill: parent
         controller: viewport.controller
+        lightMode: viewport.lightMode
+        backgroundColor: viewport.backgroundColor
+        textColor: viewport.textColor
+        mutedColor: viewport.mutedColor
+        errorColor: viewport.errorColor
+        modelActivity: viewport.modelActivity
         renderBudget: viewport.bridge.frame
         active: viewport.ownsController && viewport.presented && viewport.neural
         navigationEnabled: viewport.navigationEnabled
@@ -111,6 +123,7 @@ Item {
         orbScene: scene
         navigationEnabled: viewport.navigationEnabled
         labelsVisible: viewport.hudVisible
+        lightMode: viewport.lightMode
         textColor:viewport.textColor
         secondaryColor:viewport.secondaryColor
         mutedColor:viewport.mutedColor

@@ -243,6 +243,9 @@ impl Runtime {
                     let result = service.execute(&request, Some(cancel)).await;
                     record_inference_metrics(
                         &self.metrics,
+                        result.as_ref().ok().map(|outcome| {
+                            (outcome.receipt.model_id.as_str(), outcome.receipt.status)
+                        }),
                         result
                             .as_ref()
                             .ok()

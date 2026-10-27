@@ -99,6 +99,9 @@ public:
     /// A ray in the field's own coordinates; the id of the node it meets first, or "".
     Q_INVOKABLE QString pick(const QVector3D &origin, const QVector3D &direction, float threshold = 3.0F) const;
     Q_INVOKABLE QVector3D positionOf(const QString &id) const;
+    /// Checked coordinates for camera following. Missing is {found:false}; a real
+    /// node at the origin remains {found:true,position:QVector3D(0,0,0)}.
+    Q_INVOKABLE QVariantMap lookupPosition(const QString &id) const;
     /// Labels for the HUD: [{kind: "p"|"f", x, y, z, id, text}] in field coordinates.
     Q_INVOKABLE QVariantList labels();
     /// The HUD's selection card, one string a line.

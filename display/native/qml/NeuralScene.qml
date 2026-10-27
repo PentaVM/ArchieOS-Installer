@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick3D
 import Archie.Observatory
+import "NeuralCameraMotion.js" as CameraMotion
 
 // Xavi's neural sphere (Lumenfield's "Esfera neuronal"). Rust (NeuralField) decides every
 // position, colour and spark; this file says which material each buffer wears, where the
@@ -14,6 +15,7 @@ import Archie.Observatory
 Node {
     id: scene
     required property NeuralField field
+    property bool lightMode: false
     property real pixelRatio: 1
     property bool running: true
     property bool reducedMotion: false
@@ -23,7 +25,6 @@ Node {
     property bool linksVisible: true
     property bool shellVisible: true
     property alias camera: camera
-
     readonly property real r: 100
     readonly property var cfg: field.settings
     readonly property real brightness: Number(cfg.brightness === undefined ? 1 : cfg.brightness)
@@ -32,7 +33,7 @@ Node {
     // afford the whole buffer; every spark has a trail of five points.
     readonly property bool drawGhosts: !!cfg.ghosts && particleLimit >= 1600
     readonly property int pulseLimit: Math.min(requestedPulses,70, Math.max(0, Math.floor((particleLimit - (drawGhosts ? 1600 : 0)) / 5)))
-    readonly property vector3d cyan: Qt.vector3d(0.1144, 0.6584, 1.0)   // 0x5fd4ff in linear light
+    readonly property vector3d cyan: lightMode ? Qt.vector3d(0.008, 0.085, 0.16) : Qt.vector3d(0.1144, 0.6584, 1.0)
 
     // The orbit about the target: degrees and a distance. HOME in those terms.
     readonly property vector3d home: Qt.vector3d(r * 0.55, r * 0.42, r * 3.55)
@@ -41,6 +42,53 @@ Node {
     property real yaw: 0
     property real elevation: 0
     property real distance: 1
+    property var cameraMotion: null
+    property bool cameraMoving: false
+    property string followedNode: ""
+    readonly property bool cameraEnabled: running && frameIntervalMs > 0
+
+    function currentPose() {
+        return {target:{x:target.x,y:target.y,z:target.z}, yaw:yaw,
+            elevation:elevation, distance:distance}
+    }
+    function homePose() {
+        const o=orbitOf(home,homeTarget)
+        return {target:{x:homeTarget.x,y:homeTarget.y,z:homeTarget.z},
+            yaw:o.yaw,elevation:o.elevation,distance:o.distance}
+    }
+    function applyCameraPose(p) {
+        target=Qt.vector3d(p.target.x,p.target.y,p.target.z)
+        yaw=p.yaw; elevation=p.elevation; distance=p.distance
+        cameraMoving=CameraMotion.moving(cameraMotion)
+        followedNode=cameraMotion.focusId
+    }
+    function resetCamera() {
+        if (!cameraMotion)
+            cameraMotion=CameraMotion.create(homePose(),{minDistance:r*0.4,maxDistance:r*12})
+        else CameraMotion.reset(cameraMotion,homePose())
+        CameraMotion.setEnabled(cameraMotion,cameraEnabled)
+        applyCameraPose(CameraMotion.pose(cameraMotion))
+    }
+    function updateCamera() {
+        if (!cameraMotion) return
+        if (cameraMotion.focusId)
+            CameraMotion.follow(cameraMotion,cameraMotion.focusId,
+                                field.lookupPosition(cameraMotion.focusId),reducedMotion)
+        applyCameraPose(CameraMotion.advance(cameraMotion,Date.now(),reducedMotion))
+    }
+    function focusNode(id) {
+        const lookup=field.lookupPosition(id)
+        if (!lookup.found) return false
+        if (!cameraMotion) resetCamera()
+        CameraMotion.cancel(cameraMotion,currentPose())
+        CameraMotion.advance(cameraMotion,Date.now(),reducedMotion)
+        if (!CameraMotion.focus(cameraMotion,id,lookup,
+                                {distance:Math.min(distance,r*2.2)},reducedMotion)) return false
+        applyCameraPose(CameraMotion.pose(cameraMotion))
+        return true
+    }
+    onCameraEnabledChanged: if (cameraMotion) CameraMotion.setEnabled(cameraMotion,cameraEnabled)
+    onReducedMotionChanged: if (cameraMotion) updateCamera()
 
     function orbitOf(position, centre) {
         const d = Qt.vector3d(position.x - centre.x, position.y - centre.y, position.z - centre.z)
@@ -48,18 +96,28 @@ Node {
         return { yaw: Math.atan2(d.x, d.z) * 180 / Math.PI, elevation: Math.asin(d.y / length) * 180 / Math.PI, distance: length }
     }
     function fit() {
-        const o = orbitOf(home, homeTarget)
-        target = homeTarget
-        yaw = o.yaw
-        elevation = o.elevation
-        distance = o.distance
+        if (!cameraMotion) { resetCamera(); return }
+        CameraMotion.cancel(cameraMotion,currentPose())
+        CameraMotion.advance(cameraMotion,Date.now(),reducedMotion)
+        CameraMotion.goHome(cameraMotion,reducedMotion)
+        applyCameraPose(CameraMotion.pose(cameraMotion))
     }
     function orbit(dYaw, dElevation) {
+        if (cameraMotion) CameraMotion.cancel(cameraMotion,currentPose())
         yaw += dYaw
         elevation = Math.max(-89, Math.min(89, elevation + dElevation))
+        if (cameraMotion) {
+            CameraMotion.cancel(cameraMotion,currentPose())
+            applyCameraPose(CameraMotion.pose(cameraMotion))
+        }
     }
     function zoom(factor) {
+        if (cameraMotion) CameraMotion.cancel(cameraMotion,currentPose())
         distance = Math.max(r * 0.4, Math.min(r * 12, distance * factor))
+        if (cameraMotion) {
+            CameraMotion.cancel(cameraMotion,currentPose())
+            applyCameraPose(CameraMotion.pose(cameraMotion))
+        }
     }
     function place() {
         const e = elevation * Math.PI / 180
@@ -73,7 +131,7 @@ Node {
     onElevationChanged: place()
     onDistanceChanged: place()
     onTargetChanged: place()
-    Component.onCompleted: { fit(); applyParticleBudget() }
+    Component.onCompleted: { resetCamera(); applyParticleBudget() }
 
     function link(kind) {
         const links = cfg.links
@@ -87,6 +145,8 @@ Node {
     Connections {
         target: scene.field
         function onSourceChanged() { scene.applyParticleBudget() }
+        function onRootChanged() { scene.resetCamera() }
+        function onUpdated() { if (scene.followedNode && !scene.field.loading) scene.updateCamera() }
     }
 
     // One clock for the model, shaders and camera, paced by the governor. Timer stops
@@ -96,14 +156,17 @@ Node {
         property double previous: 0
         interval: Math.max(16, scene.frameIntervalMs)
         repeat: true
-        running: scene.running && scene.frameIntervalMs > 0 && !scene.field.still
+        running: scene.cameraEnabled && (!scene.field.still || scene.cameraMoving)
         onRunningChanged: previous = Date.now()
         onTriggered: {
             const now = Date.now()
             const dt = scene.field.advance(Math.max(0, (now - previous) / 1000))
             previous = now
-            if (!scene.reducedMotion)
+            if (!scene.reducedMotion && !scene.cameraMoving && !scene.followedNode) {
                 scene.yaw -= 6 * 0.3 * Number(scene.cfg.rotationSpeed === undefined ? 1 : scene.cfg.rotationSpeed) * dt
+                if (scene.cameraMotion) CameraMotion.cancel(scene.cameraMotion,scene.currentPose())
+            }
+            scene.updateCamera()
         }
     }
 
@@ -131,9 +194,12 @@ Node {
         Model {
             geometry: NeuralGeometry { field: scene.field; kind: NeuralGeometry.Points }
             materials: CustomMaterial {
+                id: pointMaterial
                 shadingMode: CustomMaterial.Unshaded
-                sourceBlend: CustomMaterial.SrcAlpha
-                destinationBlend: CustomMaterial.One
+                // Light ink is premultiplied: keep the offscreen alpha intact so
+                // Qt Quick composition cannot turn translucent dark marks white.
+                sourceBlend: scene.lightMode ? CustomMaterial.One : CustomMaterial.SrcAlpha
+                destinationBlend: scene.lightMode ? CustomMaterial.OneMinusSrcAlpha : CustomMaterial.One
                 cullMode: Material.NoCulling
                 depthDrawMode: Material.NeverDepthDraw
                 property real time: scene.field.time
@@ -143,7 +209,7 @@ Node {
                 property real brightness: scene.brightness
                 property real nodeSize: Number(scene.cfg.nodeSize === undefined ? 1 : scene.cfg.nodeSize)
                 vertexShader: "qrc:/archie/shaders/neural_point.vert"
-                fragmentShader: "qrc:/archie/shaders/neural_point.frag"
+                fragmentShader: scene.lightMode ? "qrc:/archie/shaders/neural_point_light.frag" : "qrc:/archie/shaders/neural_point.frag"
             }
         }
 
@@ -153,14 +219,14 @@ Node {
             geometry: NeuralGeometry { field: scene.field; kind: NeuralGeometry.Sparks }
             materials: CustomMaterial {
                 shadingMode: CustomMaterial.Unshaded
-                sourceBlend: CustomMaterial.SrcAlpha
-                destinationBlend: CustomMaterial.One
+                sourceBlend: scene.lightMode ? CustomMaterial.One : CustomMaterial.SrcAlpha
+                destinationBlend: scene.lightMode ? CustomMaterial.OneMinusSrcAlpha : CustomMaterial.One
                 cullMode: Material.NoCulling
                 depthDrawMode: Material.NeverDepthDraw
                 property real pixelRatio: scene.pixelRatio
                 property real brightness: scene.brightness
                 vertexShader: "qrc:/archie/shaders/neural_spark.vert"
-                fragmentShader: "qrc:/archie/shaders/neural_spark.frag"
+                fragmentShader: scene.lightMode ? "qrc:/archie/shaders/neural_spark_light.frag" : "qrc:/archie/shaders/neural_spark.frag"
             }
         }
 
@@ -186,12 +252,12 @@ Node {
             geometry: NeuralGeometry { kind: NeuralGeometry.Cone }
             materials: CustomMaterial {
                 shadingMode: CustomMaterial.Unshaded
-                sourceBlend: CustomMaterial.SrcAlpha
-                destinationBlend: CustomMaterial.One
+                sourceBlend: scene.lightMode ? CustomMaterial.One : CustomMaterial.SrcAlpha
+                destinationBlend: scene.lightMode ? CustomMaterial.OneMinusSrcAlpha : CustomMaterial.One
                 cullMode: Material.NoCulling
                 depthDrawMode: Material.NeverDepthDraw
                 vertexShader: "qrc:/archie/shaders/neural_cone.vert"
-                fragmentShader: "qrc:/archie/shaders/neural_cone.frag"
+                fragmentShader: scene.lightMode ? "qrc:/archie/shaders/neural_cone_light.frag" : "qrc:/archie/shaders/neural_cone.frag"
             }
         }
         Node {
@@ -215,8 +281,8 @@ Node {
         geometry: NeuralGeometry { field: scene.field; kind: layer.kind; layer: layer.linkLayer }
         materials: CustomMaterial {
             shadingMode: CustomMaterial.Unshaded
-            sourceBlend: CustomMaterial.SrcAlpha
-            destinationBlend: CustomMaterial.One
+            sourceBlend: scene.lightMode ? CustomMaterial.One : CustomMaterial.SrcAlpha
+            destinationBlend: scene.lightMode ? CustomMaterial.OneMinusSrcAlpha : CustomMaterial.One
             cullMode: Material.NoCulling
             depthDrawMode: Material.NeverDepthDraw
             property vector3d tint: layer.tint
@@ -228,7 +294,7 @@ Node {
             property real fogFar: scene.r * 5
             property vector3d fogColour: scene.field.backgroundLinear
             vertexShader: "qrc:/archie/shaders/neural_line.vert"
-            fragmentShader: "qrc:/archie/shaders/neural_line.frag"
+            fragmentShader: scene.lightMode ? "qrc:/archie/shaders/neural_line_light.frag" : "qrc:/archie/shaders/neural_line.frag"
         }
     }
 }

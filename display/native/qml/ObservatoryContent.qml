@@ -7,6 +7,7 @@ import Archie.Observatory
 import "qrc:/archie/shell/prototype" as Shell
 import "Exploration.js" as Exploration
 import "OrbActions.js" as OrbActions
+import "ModelActivity.js" as ModelActivity
 
 Item {
     id: root
@@ -16,22 +17,25 @@ Item {
     property bool worldHost: false
     onVisibleChanged: if (worldHost && !visible) archieBridge.requestMode("cerebra")
 
-    readonly property color ink: root.scene === "world" ? Shell.Theme.t1 : "#e9edf3"
-    readonly property color soft: root.scene === "world" ? Shell.Theme.t2 : "#a4acb9"
-    readonly property color dim: root.scene === "world" ? Shell.Theme.t3 : "#687080"
-    readonly property color edge: root.scene === "world" ? Shell.Theme.hair : "#1c222c"
+    readonly property color ink: Shell.Theme.t1
+    readonly property color soft: Shell.Theme.t2
+    readonly property color dim: Shell.Theme.t3
+    readonly property color edge: Shell.Theme.hair
     // The corner-bracket frames want more presence than a hairline divider but less
     // than a highlight — bright enough to read as a deliberate frame against the
     // panel fill, dim enough to stay out of the way of anything real on top of it.
     readonly property color frame: "transparent"
-    readonly property color cyan: root.scene === "world" ? Shell.Theme.info : "#6fe3f5"
-    readonly property color green: root.scene === "world" ? Shell.Theme.ok : "#47d18b"
-    readonly property color amber: root.scene === "world" ? Shell.Theme.warn : "#f0b429"
-    readonly property color red: root.scene === "world" ? Shell.Theme.bad : "#f2626b"
+    readonly property color cyan: Shell.Theme.info
+    readonly property color green: Shell.Theme.ok
+    readonly property color amber: Shell.Theme.warn
+    readonly property color red: Shell.Theme.bad
     property string scene: "orb"
     // Xavi's neural sphere draws the orb when the look preset names it as the field source.
     readonly property bool neural: lumen.settings.fieldSource === "neural"
     property bool orbHudVisible: true
+    property double modelActivityNow: Date.now()
+    readonly property var modelActivity: ModelActivity.fromSnapshot(archieBridge.snapshot, modelActivityNow, archieBridge.connected)
+    Timer { interval:1000; repeat:true; running:root.visible; onTriggered:root.modelActivityNow=Date.now() }
     property bool worldHudVisible: true
     property var selection: null
     readonly property bool streamedWorld: globeStream.meshes.length>0 || globeStream.proprietaryActive
@@ -331,11 +335,11 @@ Item {
     Rectangle {
         visible:root.scene !== "world"
         anchors.fill: parent
-        color: "#04060a"
+        color: Shell.Theme.desktop
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#0b0e14" }
-            GradientStop { position: 0.55; color: "#07090e" }
-            GradientStop { position: 1.0; color: "#050609" }
+            GradientStop { position: 0.0; color: Shell.Theme.desktop }
+            GradientStop { position: 0.55; color: Shell.Theme.desktop }
+            GradientStop { position: 1.0; color: Shell.Theme.desktop }
         }
     }
 
@@ -366,8 +370,8 @@ Item {
             Rectangle {
                 anchors.centerIn: parent
                 width: sceneRow.implicitWidth + 8; height: 38; radius: 19
-                color: root.scene === "world" ? Shell.Theme.raised : "#10141b"
-                border.color: root.scene === "world" ? Shell.Theme.hair : "#1d232d"
+                color: Shell.Theme.raised
+                border.color: Shell.Theme.hair
                 Row {
                     id: sceneRow
                     anchors.centerIn: parent
@@ -407,7 +411,7 @@ Item {
                     Rectangle {
                         anchors.verticalCenter: parent.verticalCenter
                         width: 7; height: 7; radius: 3.5
-                        color: !archieBridge.connected ? "#d9807f" : snapshot.daemon_reachable ? "#8fe3c0" : "#e6c07a"
+                        color: !archieBridge.connected ? Shell.Theme.bad : snapshot.daemon_reachable ? Shell.Theme.ok : Shell.Theme.warn
                     }
                     Text {
                         id: liveText
@@ -422,7 +426,7 @@ Item {
             Rectangle {
                 anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
                 height: archieBridge.busy ? 2 : 0
-                color: "#3aa7ff"
+                color: Shell.Theme.acc
                 opacity: 0.6
                 Behavior on height { NumberAnimation { duration: 120 } }
             }
@@ -460,7 +464,7 @@ Item {
                     layer.effect: HologramGrade { look: lumen.look; postProcessing: !!archieBridge.frame.postProcessing }
                     environment: ExtendedSceneEnvironment {
                         backgroundMode: SceneEnvironment.Color
-                        clearColor: root.scene === "orb" ? lumen.look.background : Shell.Theme.desktop
+                        clearColor: Shell.Theme.light ? Shell.Theme.desktop : root.scene === "orb" ? lumen.look.background : Shell.Theme.desktop
                         // The budget is not a caption. Under real memory or CPU pressure
                         // the observatory spends less GPU, because it is the largest
                         // discretionary consumer on a node that has other work to do.
@@ -795,8 +799,14 @@ Item {
 
                 NeuralViewport {
                     id: neuralOrb
+                    modelActivity: root.modelActivity
                     anchors.fill: parent
                     controller: lumen
+                    lightMode: Shell.Theme.light
+                    backgroundColor: Shell.Theme.desktop
+                    textColor: Shell.Theme.t1
+                    mutedColor: Shell.Theme.t3
+                    errorColor: Shell.Theme.bad
                     renderBudget: archieBridge.frame
                     active: visible && archieBridge.presented
                     visible: root.scene === "orb" && root.neural
@@ -827,7 +837,7 @@ Item {
                     width: Math.min(parent.width - 48, popupLabel.implicitWidth + 36)
                     height: popupLabel.implicitHeight + 20
                     radius: 8
-                    color: "#d9101620"
+                    color: Shell.Theme.panel
                     border.color: root.edge
                     Text {
                         id: popupLabel
@@ -849,6 +859,11 @@ Item {
                     anchors.fill: parent
                     visible: root.scene === "orb" && !root.neural
                     labelsVisible: root.orbHudVisible && lumen.settings.labels
+                    lightMode: Shell.Theme.light
+                    textColor: Shell.Theme.t1
+                    secondaryColor: Shell.Theme.t2
+                    mutedColor: Shell.Theme.t3
+                    errorColor: Shell.Theme.bad
                     view: view
                     orbScene: lumenScene
                 }
@@ -892,7 +907,7 @@ Item {
                     anchors.right: parent.right; anchors.rightMargin: 18
                     anchors.bottom: parent.bottom; anchors.bottomMargin: 18
                     width: 330; height: detailColumn.implicitHeight + 24
-                    color: "#ec080d14"
+                    color: Shell.Theme.panel
                     CornerBrackets { legLength: 16; tint: root.cyan }
                     Column {
                         id: detailColumn
@@ -923,7 +938,7 @@ Item {
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.bottom: parent.bottom; anchors.bottomMargin: 18
                     width: Math.min(errorText.implicitWidth + 26, parent.width - 50); height: 34; radius: 4
-                    color: "#33171319"; border.color: root.red
+                    color: Shell.Theme.tint(Shell.Theme.bad, 0.10); border.color: root.red
                     Text { id: errorText; anchors.centerIn: parent; text: archieBridge.error; color: root.red; font.pixelSize: 10; elide: Text.ElideRight; width: parent.width - 20 }
                 }
             }
@@ -932,7 +947,7 @@ Item {
                 visible: false
                 Layout.preferredWidth: 338
                 Layout.fillHeight: true
-                color: "#0a0d13"
+                color: Shell.Theme.panel
                 CornerBrackets { legLength: 14; tint: root.frame }
                 ScrollView {
                     anchors.fill: parent
@@ -947,7 +962,7 @@ Item {
                             delegate: Rectangle {
                                 required property var modelData
                                 width: parent.width; height: moduleText.implicitHeight + 16; radius: 4
-                                color: "#10141b"; border.color: root.stateColor(modelData.state)
+                                color: Shell.Theme.raised; border.color: root.stateColor(modelData.state)
                                 RowLayout {
                                     anchors.fill: parent; anchors.margins: 8; spacing: 9
                                     Rectangle { width: 7; height: 7; radius: 4; color: root.stateColor(modelData.state) }
@@ -1099,7 +1114,7 @@ Item {
             visible: false
             Layout.fillWidth: true
             Layout.preferredHeight: 112
-            color: "#0a0d13"
+            color: Shell.Theme.panel
             CornerBrackets { legLength: 12; tint: root.frame }
             ColumnLayout {
                 anchors.fill: parent; anchors.margins: 14; spacing: 8
@@ -1111,7 +1126,7 @@ Item {
                         delegate: Rectangle {
                             required property var modelData
                             Layout.fillWidth: true; Layout.fillHeight: true
-                            radius: 3; color: "#10141b"; border.color: root.stateColor(modelData.status.status)
+                            radius: 3; color: Shell.Theme.raised; border.color: root.stateColor(modelData.status.status)
                             Column {
                                 anchors.fill: parent; anchors.margins: 8; spacing: 3
                                 Text { width: parent.width; text: modelData.name; color: root.soft; font.pixelSize: 9; elide: Text.ElideRight }
@@ -1187,7 +1202,7 @@ Item {
         Rectangle {
             anchors.fill: parent
             radius: 2
-            color: "#131c26"
+            color: Shell.Theme.track
         }
         Rectangle {
             visible: parent.known
@@ -1220,12 +1235,12 @@ Item {
         hoverEnabled: true
         background: Rectangle {
             radius: 15
-            color: parent.selected ? "#e9edf3" : (parent.hovered ? "#1a1f28" : "transparent")
+            color: parent.selected ? Shell.Theme.acc : (parent.hovered ? Shell.Theme.hover : "transparent")
             Behavior on color { ColorAnimation { duration: 160 } }
         }
         contentItem: Text {
             text: parent.text
-            color: parent.selected ? "#0b0e14" : root.soft
+            color: parent.selected ? Shell.Theme.onAccent : root.soft
             font.pixelSize: 13; font.weight: parent.selected ? Font.DemiBold : Font.Normal
             horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
         }

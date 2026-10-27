@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import "qrc:/archie/shell/prototype" as Shell
 
 // FORGE: the machine's applications as a desktop. Large icons, their names, and nothing
 // else to operate: Archie opens and uses them; a person can still click one open.
@@ -32,7 +33,7 @@ Item {
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: ScrollBar {
             policy: ScrollBar.AsNeeded
-            contentItem: Rectangle { implicitWidth: 4; radius: 2; color: "#33ffffff" }
+            contentItem: Rectangle { implicitWidth: 4; radius: 2; color: Shell.Theme.hair }
         }
 
         Column {
@@ -56,7 +57,7 @@ Item {
                 visible: forge.missing.length > 0
                 width: parent.width
                 spacing: 16
-                Text { text: "Para instalar"; color: "#5d6574"; font.pixelSize: 12; font.weight: Font.Medium; font.letterSpacing: 0.4 }
+                Text { text: "Para instalar"; color: Shell.Theme.t3; font.pixelSize: 12; font.weight: Font.Medium; font.letterSpacing: 0.4 }
                 Grid {
                     width: parent.width
                     columns: grid.columns
@@ -77,7 +78,7 @@ Item {
         anchors.bottomMargin: 22
         visible: forge.notice.length > 0
         text: forge.notice
-        color: "#c9ced8"
+        color: Shell.Theme.t2
         font.pixelSize: 12
     }
 
@@ -97,10 +98,10 @@ Item {
             scale: area.pressed ? 0.94 : (area.containsMouse ? 1.05 : 1.0)
             Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
             gradient: Gradient {
-                GradientStop { position: 0.0; color: icon.app.section === "archie" ? "#2a2433" : "#1b2029" }
-                GradientStop { position: 1.0; color: icon.app.section === "archie" ? "#171320" : "#12161d" }
+                GradientStop { position: 0.0; color: Shell.Theme.raised }
+                GradientStop { position: 1.0; color: Shell.Theme.side }
             }
-            border.color: area.containsMouse ? "#40ffffff" : "#14ffffff"
+            border.color: area.containsMouse ? Shell.Theme.acc : Shell.Theme.hair
             Image {
                 id: image
                 anchors.centerIn: parent
@@ -116,7 +117,7 @@ Item {
                 anchors.centerIn: parent
                 visible: image.status !== Image.Ready
                 text: icon.app.glyph || "·"
-                color: icon.app.section === "archie" ? "#d9c3ff" : "#dfe4ec"
+                color: Shell.Theme.t1
                 font.pixelSize: 30
                 font.weight: Font.Light
             }
@@ -128,7 +129,7 @@ Item {
             anchors.topMargin: 6
             width: 5; height: 5; radius: 2.5
             visible: icon.app.running > 0
-            color: "#9fe6c9"
+            color: Shell.Theme.ok
         }
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
@@ -137,7 +138,7 @@ Item {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             text: icon.app.name || ""
-            color: "#dfe4ec"
+            color: Shell.Theme.t1
             font.pixelSize: 12
             elide: Text.ElideRight
             maximumLineCount: 2

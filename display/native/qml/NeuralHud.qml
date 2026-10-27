@@ -1,5 +1,5 @@
 import QtQuick
-import Archie.Observatory
+import QtQuick.Controls
 
 // The neural sphere's HUD (hud.ts): a label over each folder of the first level and over
 // every running program, and the selection's card. Positions come from Rust in the
@@ -9,8 +9,11 @@ Item {
     required property var field
     required property var view
     property bool labelsVisible: true
-    property color textColor: "#bfeaff"
-    property color mutedColor: "#6f9bb0"
+    property bool lightMode: true
+    property color textColor: "#142236"
+    property color mutedColor: "#566c80"
+    property color errorColor: "#ba263b"
+    property color surfaceColor: "#eef3f8"
     property string rootLabel: ""
     property bool navigationEnabled: true
     // Advances whenever the sphere or the camera moved, so projections are taken again.
@@ -46,50 +49,55 @@ Item {
     onLabelsVisibleChanged: refresh()
     Component.onCompleted: refresh()
 
-    Column {
-        anchors.left: parent.left; anchors.leftMargin: 18
-        anchors.top: parent.top; anchors.topMargin: 18
-        width: Math.max(0, parent.width - 150)
-        spacing: 3
-        Text {
-            visible: hud.labelsVisible
-            width: parent.width
-            text: "INSTANTÁNEA DE ARCHIVOS · " + (hud.field.loading ? "ACTUALIZANDO" : "LECTURA LOCAL")
-            color: hud.mutedColor; font.family: hud.family; font.pixelSize: 10
-            wrapMode: Text.Wrap
-        }
-        Text {
-            visible: hud.labelsVisible && hud.rootLabel.length > 0
-            width: parent.width; text: hud.rootLabel
-            color: hud.textColor; font.family: hud.family; font.pixelSize: 10
-            wrapMode: Text.WrapAnywhere
-        }
-        Text {
-            visible: hud.labelsVisible && hud.field.ready
-            width: parent.width
-            text: "Muestra: hasta " + hud.field.limit + " nodos, " + hud.field.filesPerFolder
-                + " archivos por carpeta · " + hud.field.scannedAt
-                + "\nOmite ocultos y carpetas de compilación. Destellos decorativos; enlaces de estructura visual."
-            color: hud.mutedColor; font.family: hud.family; font.pixelSize: 10
-            wrapMode: Text.Wrap
-        }
-        Text {
-            visible: hud.field.error.length > 0
-            width: parent.width; text: hud.field.error
-            color: "#f2626b"; font.family: hud.family; font.pixelSize: 11
-            wrapMode: Text.Wrap
-        }
-    }
-
+    // Provenance remains inspectable without competing with active model readings.
     Rectangle {
+        id: detailsButton
+        objectName: "neuralDetailsButton"
         anchors.right: parent.right; anchors.rightMargin: 18
         anchors.top: parent.top; anchors.topMargin: 18
-        width: 104; height: 28; radius: 5
+        width: 86; height: 28; radius: 6
         visible: hud.labelsVisible
-        color: "#cc07141e"; border.color: hud.mutedColor
-        opacity: hud.navigationEnabled && !hud.field.loading ? 1 : 0.5
-        Text { anchors.centerIn: parent; text: "ACTUALIZAR"; color: hud.textColor; font.family: hud.family; font.pixelSize: 10 }
-        MouseArea { anchors.fill: parent; enabled: hud.navigationEnabled && !hud.field.loading; onClicked: hud.field.refresh() }
+        color: hud.surfaceColor; border.color: hud.mutedColor
+        Text {
+            anchors.centerIn: parent
+            text: hud.field.error.length > 0 ? "!  Detalles" : hud.field.loading ? "·  Leyendo" : "Detalles"
+            color: hud.field.error.length > 0 ? hud.errorColor : hud.mutedColor
+            font.family: hud.family; font.pixelSize: 10
+        }
+        MouseArea {
+            anchors.fill: parent
+            onClicked: details.opened ? details.close() : details.open()
+        }
+        Accessible.role: Accessible.Button
+        Accessible.name: "Detalles de la esfera"
+        Accessible.onPressAction: details.open()
+    }
+    Popup {
+        id: details
+        objectName: "neuralDetails"
+        x: Math.max(12, hud.width - width - 18); y: 52
+        width: Math.min(360, Math.max(0, hud.width - 24))
+        padding: 14
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        background: Rectangle { color: hud.surfaceColor; radius: 8; border.color: hud.mutedColor }
+        contentItem: Column {
+            spacing: 8
+            Text { width: parent.width; text: "Instantánea de archivos"; color: hud.textColor; font.family: hud.family; font.pixelSize: 12; font.weight: Font.Medium }
+            Text { width: parent.width; text: hud.rootLabel; textFormat: Text.PlainText; wrapMode: Text.WrapAnywhere; color: hud.mutedColor; font.family: hud.family; font.pixelSize: 11 }
+            Text {
+                width: parent.width
+                text: "Hasta " + hud.field.limit + " nodos · " + hud.field.filesPerFolder + " archivos por carpeta\n" + hud.field.scannedAt
+                    + "\nOmite ocultos y carpetas de compilación. Destellos decorativos; enlaces de estructura visual."
+                color: hud.mutedColor; font.family: hud.family; font.pixelSize: 11; wrapMode: Text.Wrap
+            }
+            Text { width: parent.width; visible: text.length > 0; text: hud.field.error; textFormat: Text.PlainText; color: hud.errorColor; font.family: hud.family; font.pixelSize: 11; wrapMode: Text.Wrap }
+            Button {
+                text: "Actualizar"
+                enabled: hud.navigationEnabled && !hud.field.loading
+                onClicked: hud.field.refresh()
+                palette.button: hud.surfaceColor; palette.buttonText: hud.textColor
+            }
+        }
     }
 
     Repeater {

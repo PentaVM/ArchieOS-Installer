@@ -13,6 +13,12 @@ Item {
     property bool presented: viewport.visible
     property bool hudVisible: true
     property bool reducedMotion: false
+    property bool lightMode: true
+    property color backgroundColor: "#eef3f8"
+    property color textColor: "#142236"
+    property color mutedColor: "#566c80"
+    property color errorColor: "#ba263b"
+    property var modelActivity: null
     // The existing controller/governor supplies authority; this view only applies its ceilings.
     property var renderBudget: controller.renderBudget || ({})
     property bool active: viewport.presented
@@ -37,8 +43,7 @@ Item {
     function focusNode(id) {
         if (id === "") { scene.fit(); return neural.select(".") }
         if (!neural.select(id)) return false
-        scene.zoom(Math.min(1, (scene.r * 2.2) / scene.distance))
-        return true
+        return scene.focusNode(id)
     }
     function highlightNode(id, on) { return neural.select(on ? id : ".") }
     function moveCamera(move) {
@@ -59,7 +64,7 @@ Item {
         const far = view.mapTo3DScene(Qt.vector3d(x, y, 1))
         const direction = Qt.vector3d(far.x - near.x, far.y - near.y, far.z - near.z).normalized()
         const id = neural.pick(scene.camera.position, direction, 3.0)
-        return id.length > 0 && neural.activate(id)
+        return id.length > 0 && neural.activate(id) && scene.focusNode(id)
     }
 
     NeuralField {
@@ -74,12 +79,14 @@ Item {
     function syncSettings() {
         const s=viewport.controller.settings
         const look=Controls.settings(s)
-        if (s.background) neural.setBackground(String(s.background))
+        neural.setBackground(viewport.lightMode ? String(viewport.backgroundColor) : String(s.background || viewport.backgroundColor))
         neural.setNumber("brightness",look.brightness)
         neural.setNumber("rotationSpeed",look.rotationSpeed)
         neural.setNumber("pulseSpeed",look.pulseSpeed)
         neural.setFlag("ghosts",look.ghosts)
     }
+    onLightModeChanged: syncSettings()
+    onBackgroundColorChanged: syncSettings()
     Component.onCompleted: syncSettings()
     Connections {
         target: viewport.controller
@@ -100,7 +107,7 @@ Item {
             antialiasingMode: SceneEnvironment.NoAA
             tonemapMode: SceneEnvironment.TonemapModeLinear
             // UnrealBloomPass(strength 0.6 x glow, radius 0.45, threshold 0.08)
-            glowEnabled: viewport.postProcessing && viewport.requested.bloom && Number(neural.settings.glow === undefined ? 1 : neural.settings.glow) > 0
+            glowEnabled: !viewport.lightMode && viewport.postProcessing && viewport.requested.bloom && Number(neural.settings.glow === undefined ? 1 : neural.settings.glow) > 0
             glowIntensity: 0.6 * Number(neural.settings.glow === undefined ? 1 : neural.settings.glow)
             glowBloom: 0.45
             glowStrength: 1.0
@@ -110,11 +117,12 @@ Item {
             glowQualityHigh: true
         }
         layer.enabled: viewport.postProcessing
-        layer.effect: NeuralHolo { field: neural; pixelRatio: Screen.devicePixelRatio }
+        layer.effect: NeuralHolo { field: neural; lightMode: viewport.lightMode; pixelRatio: Screen.devicePixelRatio }
 
         NeuralScene {
             id: scene
             field: neural
+            lightMode: viewport.lightMode
             pixelRatio: Screen.devicePixelRatio
             running: viewport.drawing && !viewport.frozen
             frameIntervalMs: viewport.frameIntervalMs
@@ -132,8 +140,22 @@ Item {
         field: neural
         view: view
         labelsVisible: viewport.hudVisible
+        textColor: viewport.textColor
+        mutedColor: viewport.mutedColor
+        errorColor: viewport.errorColor
+        surfaceColor: viewport.backgroundColor
+        lightMode: viewport.lightMode
         rootLabel: neural.sourceRoot
         navigationEnabled: viewport.navigationEnabled && viewport.drawing
+    }
+
+    ModelActivityHud {
+        z: 3
+        anchors.left: parent.left; anchors.top: parent.top; anchors.margins: 18
+        width: Math.min(300, Math.max(0, parent.width - 150))
+        visible: viewport.hudVisible
+        models: viewport.modelActivity
+        textColor: viewport.mutedColor
     }
 
     // The hands: drag turns, the wheel zooms, a click selects and opens a folded program,

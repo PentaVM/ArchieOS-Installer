@@ -6,6 +6,8 @@ import QtQuick
 ShaderEffect {
     required property var field
     property real pixelRatio: 1
+    property bool lightMode: false
+    property real lightTheme: lightMode ? 1 : 0
     property real time: Number(field.time)
     property real strength: Number(field.settings.holo === undefined ? 1 : field.settings.holo)
     property size resolution: Qt.size(width * pixelRatio, height * pixelRatio)

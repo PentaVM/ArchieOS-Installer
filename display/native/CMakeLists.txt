@@ -95,12 +95,13 @@ qt_add_qml_module(archie-display
         qml/WorldBeacons.qml
         qml/WorldImageryMaterial.qml
         qml/Exploration.js
-        qml/OrbActions.js qml/NeuralControls.js
+        qml/OrbActions.js qml/NeuralControls.js qml/NeuralCameraMotion.js qml/ModelActivity.js
         qml/ForgeView.qml
         qml/OrbViewport.qml
         qml/HologramGrade.qml
         qml/NeuralScene.qml
         qml/NeuralHud.qml
+        qml/ModelActivityHud.qml
         qml/NeuralHolo.qml
         qml/NeuralViewport.qml
 )
@@ -149,12 +150,16 @@ qt_add_resources(archie-display "archie-native-assets" BIG_RESOURCES
         shaders/lumen_glow.frag
         shaders/neural_point.vert
         shaders/neural_point.frag
+        shaders/neural_point_light.frag
         shaders/neural_line.vert
         shaders/neural_line.frag
+        shaders/neural_line_light.frag
         shaders/neural_spark.vert
         shaders/neural_spark.frag
+        shaders/neural_spark_light.frag
         shaders/neural_cone.vert
         shaders/neural_cone.frag
+        shaders/neural_cone_light.frag
         assets/xavi/prism-structure-4k.png
         assets/xavi/prism-surface-4k.png
         ${archie_presets}
@@ -204,6 +209,21 @@ install(TARGETS archie-display RUNTIME DESTINATION bin)
 
 option(ARCHIE_NATIVE_BUILD_TESTS "Build native lifecycle and transport tests" OFF)
 if(ARCHIE_NATIVE_BUILD_TESTS)
+    find_program(ARCHIE_NODE_EXECUTABLE NAMES node nodejs)
+    if(ARCHIE_NODE_EXECUTABLE)
+        add_test(NAME model_activity_contracts COMMAND "${ARCHIE_NODE_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_model_activity.js")
+        add_test(NAME neural_camera_contracts COMMAND "${ARCHIE_NODE_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_neural_camera.js")
+    endif()
+    find_program(ARCHIE_QMLTESTRUNNER_EXECUTABLE NAMES qmltestrunner qmltestrunner6
+        HINTS "${Qt6_DIR}/../../../bin")
+    if(ARCHIE_QMLTESTRUNNER_EXECUTABLE)
+        add_test(NAME neural_ui_qml_contracts COMMAND "${ARCHIE_QMLTESTRUNNER_EXECUTABLE}"
+            -input "${CMAKE_CURRENT_SOURCE_DIR}/tests/qml" -platform offscreen)
+        set_tests_properties(neural_ui_qml_contracts PROPERTIES ENVIRONMENT
+            "QML_XHR_ALLOW_FILE_READ=1;QT_QUICK_CONTROLS_STYLE=Basic")
+    endif()
     find_package(Qt6 6.6 REQUIRED COMPONENTS Test)
     enable_testing()
     qt_add_executable(test_native tests/test_native.cpp

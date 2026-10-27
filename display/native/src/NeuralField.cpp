@@ -371,6 +371,16 @@ QVector3D NeuralField::positionOf(const QString &id) const
     return {at[0], at[1], at[2]};
 }
 
+QVariantMap NeuralField::lookupPosition(const QString &id) const
+{
+    float at[3] = {0, 0, 0};
+    if (!m_sphere || !neural_position(m_sphere, id.toUtf8().constData(), at)
+        || !std::isfinite(at[0]) || !std::isfinite(at[1]) || !std::isfinite(at[2]))
+        return {{QStringLiteral("found"), false}};
+    return {{QStringLiteral("found"), true},
+            {QStringLiteral("position"), QVariant::fromValue(QVector3D(at[0], at[1], at[2]))}};
+}
+
 QVariantList NeuralField::labels()
 {
     QVariantList rows;

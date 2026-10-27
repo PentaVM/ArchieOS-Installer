@@ -75,7 +75,7 @@ int main(int argc, char *argv[])
     arguments.addOption(QCommandLineOption(QStringLiteral("control-port"),QStringLiteral("Loopback visual controls port."),QStringLiteral("port"),QStringLiteral("7668")));
     arguments.addOption(QCommandLineOption(QStringLiteral("observatory"), QStringLiteral("Open the standalone rendering/verification host instead of the desktop.")));
     arguments.addOption(QCommandLineOption(QStringLiteral("shell"), QStringLiteral("Open the native Archie desktop shell.")));
-    arguments.addOption(QCommandLineOption(QStringLiteral("theme"), QStringLiteral("Shell theme: dark or light (beta)."), QStringLiteral("mode"), QStringLiteral("dark")));
+    arguments.addOption(QCommandLineOption(QStringLiteral("theme"), QStringLiteral("Shell theme: light or dark."), QStringLiteral("mode"), QStringLiteral("light")));
     arguments.addOption(QCommandLineOption(QStringLiteral("shell-bridge"), QStringLiteral("Trusted read-only shell bridge executable."),
         QStringLiteral("path"), QStringLiteral("archie-shell-bridge")));
     arguments.addOption(QCommandLineOption(QStringLiteral("lan-file"), QStringLiteral("Read-only LAN inventory projection."),

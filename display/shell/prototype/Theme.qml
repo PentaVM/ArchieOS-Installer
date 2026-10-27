@@ -4,10 +4,10 @@ import QtQuick
 // Archie Mac · cristal grafito. Tokens from the Claude Design handoff
 // (archie-mac-handoff/tokens.css). Two surface sets: glass (translucent; real blur comes from
 // the compositor, not from the shell) and opaque (no blur: "reduce transparency" and the Quiet
-// profile). Light mode is a local beta; dark remains the default.
+// profile). Light mode is the desktop default; dark remains available.
 QtObject {
     id: t
-    property string colorMode: "dark"
+    property string colorMode: "light"
     readonly property bool light: colorMode === "light"
     property bool opaque: false
     // True only when the compositor really blurs what is behind a surface. The shell cannot blur:
