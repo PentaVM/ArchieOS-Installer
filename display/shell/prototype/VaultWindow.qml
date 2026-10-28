@@ -178,7 +178,7 @@ Panel {
         Row { x: 12; anchors.verticalCenter: parent.verticalCenter; spacing: 6
             Repeater { model: win.tabsModel
                 delegate: Rectangle { objectName: "vault.tab." + index; height: 28; radius: Theme.rRow; width: Math.min(180, tl.implicitWidth) + 8 + 12 + 19
-                    color: index === win.tabIndex ? Theme.hover : (tma.containsMouse ? Qt.rgba(1, 1, 1, 0.04) : "transparent")
+                    color: index === win.tabIndex ? Theme.sel : (tma.containsMouse ? Theme.hover : "transparent")
                     MouseArea { id: tma; anchors.fill: parent; hoverEnabled: true; onClicked: win.setTab(index) }
                     Row { x: 11; anchors.verticalCenter: parent.verticalCenter; spacing: 8
                         Text { id: tl; width: Math.min(180, implicitWidth); elide: Text.ElideMiddle
@@ -239,6 +239,7 @@ Panel {
 
     // ---- main: list | grid -------------------------------------------------------------------
     Item { id: main; x: side.width; y: side.y; width: parent.width - side.width; height: side.height
+        Rectangle { anchors.fill: parent; color: Theme.reading }
         VoidBox { visible: !win.loading && win.count === 0; x: 14; y: 14; width: parent.width - 28; icon: "folder"; title: "Carpeta vacía"
             text: "No hay archivos visibles aquí, o la carpeta no existe en este equipo. Los archivos ocultos no se muestran." }
 
@@ -274,7 +275,7 @@ Panel {
                 Rectangle { anchors.fill: parent; anchors.margins: 6; radius: 12
                     color: win.selected === index ? Theme.sel : "transparent"; border.width: 1; border.color: win.selected === index ? Theme.tint(Theme.acc, 0.45) : "transparent"
                     Column { x: 8; y: 8; width: parent.width - 16; spacing: 4
-                        Rectangle { width: parent.width; height: 62; radius: 9; color: Qt.rgba(1, 1, 1, 0.04); border.width: 1; border.color: Theme.hair
+                        Rectangle { width: parent.width; height: 62; radius: 9; color: Theme.raised; border.width: 1; border.color: Theme.hair
                             Icon { anchors.centerIn: parent; name: win.iconOf(fileIsDir, fileSuffix); size: 34; color: win.colorOf(fileIsDir, fileSuffix) } }
                         Text { text: fileName; elide: Text.ElideRight; width: parent.width; color: Theme.t1; font.family: Theme.font; font.pixelSize: 13; font.weight: Font.Medium }
                         Text { text: win.sizeText(fileIsDir, fileSize) + " · " + Qt.formatDateTime(fileModified, "d MMM HH:mm"); elide: Text.ElideRight; width: parent.width

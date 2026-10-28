@@ -15,6 +15,14 @@ Window {
         if (typeof insideStage !== "undefined" && insideStage) Wm.closeAll()
     }
     Main { id:desktop; objectName:"desktop"; anchors.fill:parent }
+    function showScene(value) { return desktop.run(value === "world" ? "app.world" : value === "forge" ? "app.forge" : "app.orb") }
+    function viewVerb(action,args) {
+        if (action === "window") {
+            visibility=args.state === "fullscreen" ? Window.FullScreen : args.state === "maximized" ? Window.Maximized : Window.Windowed
+            return ""
+        }
+        return desktop.viewVerb(action,args)
+    }
     // The profile goes through LiveOrb, which applies the preset and then the look chosen in
     // Settings (grade, brightness, nodes...). Applying it to lumen directly here as well
     // reset those settings to the preset's defaults after the look had been applied.
@@ -34,7 +42,7 @@ Window {
             if (action==="scene") {
                 if (value==="orb") desktop.run("app.orb")
                 else if (value==="forge") desktop.run("app.forge")
-                // World is opened by the display itself, as a window beside the shell.
+                else if (value==="world") window.showScene(value)
             } else if (action==="cinematic" || action==="preset") {
                 window.applyVisualProfile(value,true)
             } else if (action==="overlay" && typeof lumen !== "undefined") {

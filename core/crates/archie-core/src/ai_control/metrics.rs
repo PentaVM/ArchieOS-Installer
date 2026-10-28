@@ -1,3 +1,4 @@
+use archie_memory::inference::InferenceStatus;
 use std::time::Duration;
 
 /// Record one new Core AiInfer execution, without inspecting activity or Policy.
@@ -12,6 +13,7 @@ use std::time::Duration;
 /// Harness receipt timers must not be fed into this execution-duration series.
 pub(super) fn record_inference_metrics(
     metrics: &archie_observability::Metrics,
+    receipt_model: Option<(&str, InferenceStatus)>,
     output_tokens: Option<u64>,
     elapsed: Option<Duration>,
     observed_at_ms: i64,
@@ -53,16 +55,34 @@ pub(super) fn record_inference_metrics(
     }
     metrics.set_gauge("inference.last.observed_at_ms", observed_at_ms);
     metrics.count("inference.executions.observed");
+    // Runtime Ok can contain Failed or Cancelled receipts. Only Completed may
+    // create/refresh a recent_completed row; all attempts keep the legacy globals.
+    if let Some((model_id, InferenceStatus::Completed)) = receipt_model {
+        metrics.observe_model_inference(
+            model_id,
+            observed_at_ms,
+            tokens.and_then(|value| u64::try_from(value).ok()),
+            elapsed_ms.and_then(|value| u64::try_from(value).ok()),
+            effective_tps_x1000.and_then(|value| u64::try_from(value).ok()),
+        );
+    }
 }
 
 #[cfg(test)]
 mod inference_metrics_tests {
     type TestObservation = (Option<u64>, Option<Duration>);
+    use archie_memory::inference::InferenceStatus;
     use archie_observability::Metrics;
     use std::time::Duration;
 
     fn record_inference_metrics(metrics: &Metrics, usage: &TestObservation, observed_at_ms: i64) {
-        super::record_inference_metrics(metrics, usage.0, usage.1, observed_at_ms);
+        super::record_inference_metrics(
+            metrics,
+            Some(("receipt/test-model", InferenceStatus::Completed)),
+            usage.0,
+            usage.1,
+            observed_at_ms,
+        );
     }
 
     fn observed(output_tokens: Option<u64>, duration_ms: Option<u64>) -> TestObservation {
@@ -195,6 +215,106 @@ mod inference_metrics_tests {
         assert_eq!(
             gauges.get("inference.last.effective_output_tps_available"),
             Some(&0)
+        );
+    }
+
+    #[test]
+    fn per_model_rows_use_only_an_available_receipt_identity() {
+        let metrics = Metrics::new();
+        super::record_inference_metrics(
+            &metrics,
+            Some(("receipt/model-a", InferenceStatus::Completed)),
+            Some(120),
+            Some(Duration::from_millis(2500)),
+            1700000000000,
+        );
+        super::record_inference_metrics(
+            &metrics,
+            Some(("receipt/model-b", InferenceStatus::Completed)),
+            None,
+            Some(Duration::from_millis(900)),
+            1700000000001,
+        );
+        super::record_inference_metrics(
+            &metrics,
+            None,
+            Some(999),
+            Some(Duration::from_millis(1)),
+            1700000000002,
+        );
+        let snapshot = metrics.snapshot();
+        assert_eq!(snapshot.model_inference.len(), 2);
+        let a = &snapshot.model_inference[0];
+        assert_eq!(a.model_id, "receipt/model-a");
+        assert_eq!(a.output_tokens, Some(120));
+        assert_eq!(a.effective_output_tps_x1000, Some(48000));
+        assert_eq!(snapshot.model_inference[1].output_tokens, None);
+        assert_eq!(snapshot.model_inference[1].effective_output_tps_x1000, None);
+        assert_eq!(snapshot.gauge("inference.executions.observed"), 0);
+        assert_eq!(snapshot.counter("inference.executions.observed"), 3);
+        assert_eq!(snapshot.gauge("inference.last.output_tokens"), 999);
+    }
+
+    #[test]
+    fn only_completed_receipts_create_recent_completed_rows_but_all_attempts_update_globals() {
+        for status in [
+            InferenceStatus::Completed,
+            InferenceStatus::Failed,
+            InferenceStatus::Cancelled,
+        ] {
+            let metrics = Metrics::new();
+            super::record_inference_metrics(
+                &metrics,
+                Some(("receipt/model", status)),
+                Some(12),
+                Some(Duration::from_millis(250)),
+                1700000000000,
+            );
+            let snapshot = metrics.snapshot();
+            assert_eq!(
+                snapshot.model_inference.len(),
+                usize::from(status == InferenceStatus::Completed)
+            );
+            assert_eq!(snapshot.counter("inference.executions.observed"), 1);
+            assert_eq!(snapshot.gauge("inference.last.output_tokens"), 12);
+            assert_eq!(snapshot.gauge("inference.last.request_elapsed_ms"), 250);
+            assert_eq!(
+                snapshot.gauge("inference.last.effective_output_tokens_per_second_x1000"),
+                48000
+            );
+        }
+    }
+
+    #[test]
+    fn failed_and_cancelled_receipts_cannot_refresh_an_old_completion() {
+        let metrics = Metrics::new();
+        super::record_inference_metrics(
+            &metrics,
+            Some(("receipt/model", InferenceStatus::Completed)),
+            Some(120),
+            Some(Duration::from_millis(2500)),
+            1700000000000,
+        );
+        let completed = metrics.snapshot().model_inference;
+        for status in [InferenceStatus::Failed, InferenceStatus::Cancelled] {
+            super::record_inference_metrics(
+                &metrics,
+                Some(("receipt/model", status)),
+                None,
+                Some(Duration::from_millis(900)),
+                1700000001000,
+            );
+        }
+        assert_eq!(metrics.snapshot().model_inference, completed);
+        assert_eq!(
+            metrics.snapshot().counter("inference.executions.observed"),
+            3
+        );
+        assert_eq!(
+            metrics
+                .snapshot()
+                .gauge("inference.last.output_tokens_available"),
+            0
         );
     }
 }

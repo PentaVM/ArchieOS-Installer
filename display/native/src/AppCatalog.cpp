@@ -105,26 +105,44 @@ struct Suggestion {
     const char *group;
     const char *package;
     const char *glyph;
+    const char *iconName;
+    const char *iconFile;
 };
 
 // Tools an operator of this machine is likely to want, shown when they are missing so the
 // gap is visible. Installing is the operator's call and needs root; this only names the
 // package.
 constexpr Suggestion suggestions[] = {
-    {"org.kicad.kicad", "KiCad", "Diseño de circuitos y placas", "Ingeniería", "kicad", "K"},
-    {"firefox", "Firefox", "Navegador web", "Internet", "firefox", "F"},
-    {"org.kde.kdenlive", "Kdenlive", "Edición de video (el motor de Archie Cut)", "Multimedia", "kdenlive", "V"},
-    {"org.freecad.FreeCAD", "FreeCAD", "Modelado CAD paramétrico", "Ingeniería", "freecad", "C"},
-    {"blender", "Blender", "Modelado, animación y render 3D", "Gráficos", "blender", "B"},
-    {"org.inkscape.Inkscape", "Inkscape", "Gráficos vectoriales", "Gráficos", "inkscape", "I"},
-    {"gimp", "GIMP", "Edición de imágenes", "Gráficos", "gimp", "G"},
-    {"com.obsproject.Studio", "OBS Studio", "Grabar y transmitir la pantalla", "Multimedia", "obs-studio", "O"},
-    {"libreoffice-startcenter", "LibreOffice", "Documentos, hojas y presentaciones", "Oficina", "libreoffice-fresh", "L"},
+    {"org.kicad.kicad", "KiCad", "Diseño de circuitos y placas", "Ingeniería", "kicad", "K", "kicad", "kicad.png"},
+    {"firefox", "Firefox", "Navegador web", "Internet", "firefox", "F", "firefox", "firefox.svg"},
+    {"org.kde.kdenlive", "Kdenlive", "Edición de video (el motor de Archie Cut)", "Multimedia", "kdenlive", "V", "kdenlive", "kdenlive.png"},
+    {"org.freecad.FreeCAD", "FreeCAD", "Modelado CAD paramétrico", "Ingeniería", "freecad", "C", "org.freecad.FreeCAD", "freecad.svg"},
+    {"blender", "Blender", "Modelado, animación y render 3D", "Gráficos", "blender", "B", "blender", "blender.svg"},
+    {"org.inkscape.Inkscape", "Inkscape", "Gráficos vectoriales", "Gráficos", "inkscape", "I", "org.inkscape.Inkscape", "inkscape.svg"},
+    {"gimp", "GIMP", "Edición de imágenes", "Gráficos", "gimp", "G", "gimp", "gimp.svg"},
+    {"com.obsproject.Studio", "OBS Studio", "Grabar y transmitir la pantalla", "Multimedia", "obs-studio", "O", "com.obsproject.Studio", "obs-studio.png"},
+    {"libreoffice-startcenter", "LibreOffice", "Documentos, hojas y presentaciones", "Oficina", "libreoffice-fresh", "L", "libreoffice-startcenter", "libreoffice.png"},
 };
+
+QString bundledIcon(const QString &id)
+{
+    for (const auto &suggestion : suggestions) {
+        if (id != QLatin1String(suggestion.id)) continue;
+        const QString path = QStringLiteral("/archie/assets/app-icons/") + QLatin1String(suggestion.iconFile);
+        return QFile::exists(QLatin1Char(':') + path) ? QStringLiteral("qrc:") + path : QString();
+    }
+    return {};
+}
 
 }  // namespace
 
-AppCatalog::AppCatalog(QObject *parent) : QObject(parent)
+AppCatalog::AppCatalog(QObject *parent)
+    : AppCatalog(QStandardPaths::standardLocations(QStandardPaths::ApplicationsLocation), parent)
+{
+}
+
+AppCatalog::AppCatalog(const QStringList &applicationRoots, QObject *parent)
+    : QObject(parent), m_applicationRoots(applicationRoots)
 {
     const QString platform = QGuiApplication::platformName();
     m_canLaunch = platform == QLatin1String("wayland") || platform == QLatin1String("xcb");
@@ -207,9 +225,11 @@ void AppCatalog::scan()
         app.comment = entry.value(QStringLiteral("Comment"), entry.value(QStringLiteral("GenericName")));
         app.exec = expandShare(entry.value(QStringLiteral("Exec")));
         app.terminal = entry.value(QStringLiteral("Terminal")) == QLatin1String("true");
+        app.internal = entry.value(QStringLiteral("X-Archie-Internal")) == QLatin1String("true");
         app.binary = binaryOf(commandOf(app.exec));
         app.group = groupOf(entry.value(QStringLiteral("Categories")));
         app.icon = resolveIcon(entry.value(QStringLiteral("Icon")));
+        if (app.icon.isEmpty()) app.icon = bundledIcon(id);
         app.glyph = entry.value(QStringLiteral("X-Archie-Glyph"), app.name.left(1).toUpper());
         app.appId = entry.value(QStringLiteral("X-Archie-App-Id"), id);
         app.wmClass = entry.value(QStringLiteral("StartupWMClass"));
@@ -241,8 +261,7 @@ void AppCatalog::scan()
     }
     // Everything installed, as any application menu lists it. Earlier directories win,
     // as the XDG specification orders them.
-    const QStringList roots = QStandardPaths::standardLocations(QStandardPaths::ApplicationsLocation);
-    for (const QString &root : roots) {
+    for (const QString &root : std::as_const(m_applicationRoots)) {
         QDirIterator it(root, {QStringLiteral("*.desktop")}, QDir::Files, QDirIterator::Subdirectories);
         int budget = 4000;
         while (it.hasNext() && budget-- > 0) {
@@ -267,6 +286,8 @@ void AppCatalog::scan()
         app.section = QStringLiteral("suggested");
         app.missing = QStringLiteral("no instalada · pacman -S ") + app.package;
         app.appId = id;
+        app.icon = resolveIcon(QString::fromLatin1(s.iconName));
+        if (app.icon.isEmpty()) app.icon = bundledIcon(id);
         m_apps.push_back(app);
     }
 }
@@ -335,14 +356,17 @@ void AppCatalog::publish()
         return a.name.localeAwareCompare(b.name) < 0;
     });
     QVariantList rows;
+    QVariantList forgeRows;
     for (const App &app : std::as_const(m_apps)) {
-        rows.push_back(QVariantMap{
+        const QVariantMap row{
             {QStringLiteral("id"), app.id},
             {QStringLiteral("name"), app.name},
             {QStringLiteral("comment"), app.comment},
             {QStringLiteral("group"), app.group},
             {QStringLiteral("section"), app.section},
             {QStringLiteral("icon"), app.icon},
+            {QStringLiteral("iconSource"), app.icon.startsWith(QLatin1String("qrc:/archie/assets/app-icons/"))
+                ? QStringLiteral("official_bundle") : app.icon.isEmpty() ? QString() : QStringLiteral("installed")},
             {QStringLiteral("glyph"), app.glyph},
             {QStringLiteral("available"), app.available},
             {QStringLiteral("missing"), app.missing},
@@ -350,9 +374,13 @@ void AppCatalog::publish()
             {QStringLiteral("operable"), app.operable},
             {QStringLiteral("featured"), app.featured},
             {QStringLiteral("package"), app.package},
-        });
+        };
+        rows.push_back(row);
+        if (!app.internal)
+            forgeRows.push_back(row);
     }
     m_rows = rows;
+    m_forgeRows = forgeRows;
     emit appsChanged();
 }
 

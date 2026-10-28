@@ -1,5 +1,9 @@
 """Owner launcher lifecycle regressions; no claim of live provider coverage."""
 import unittest
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
 from globe_demo import maintain_navigation
 
 
@@ -42,6 +46,24 @@ class NavigationLifetime(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             maintain_navigation(self.current, failed, self.renew, 1001)
         self.assertEqual(self.calls, [])
+
+
+class LauncherPrerequisites(unittest.TestCase):
+    def test_missing_shell_bridge_is_reported_before_starting_services(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ['archie', 'archie-worldd', 'archie-displayd', 'native']:
+                binary = root / name
+                binary.write_text('launcher prerequisite fixture', encoding='utf-8')
+                binary.chmod(0o700)
+            result = subprocess.run([
+                sys.executable, str(Path(__file__).with_name('globe_demo.py')),
+                '--bin-dir', str(root), '--run-dir', str(root / 'run'),
+                '--native-bin', str(root / 'native'),
+            ], capture_output=True, text=True, timeout=10)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('archie-shell-bridge', result.stderr)
+            self.assertFalse((root / 'run').exists())
 
 
 if __name__ == '__main__':

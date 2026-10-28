@@ -20,6 +20,11 @@ Panel {
         Row { anchors.centerIn: parent
             Text { text: "Stage"; color: Theme.t1; font.family: Theme.disp; font.pixelSize: 17; font.weight: Font.DemiBold; font.letterSpacing: -0.17 }
             Text { text: st.live ? " — este escritorio" : " — vista local"; color: Theme.t2; font.family: Theme.disp; font.pixelSize: 17; font.weight: Font.Medium; font.letterSpacing: -0.17 } } }
+    Rectangle {
+        x:1; y:52; width:parent.width-2; height:Math.max(0,parent.height-y-1)
+        bottomLeftRadius:Theme.rWindow-1; bottomRightRadius:Theme.rWindow-1
+        color:Theme.reading
+    }
     Column { x: 20; y: 72; width: parent.width - 40; spacing: 16
         Row { spacing: 14
             Chip { icon: st.live ? "pointer" : "unknown"; tone: st.live ? "ok" : "unk"; text: st.live ? "Autoridad: abajo a la derecha" : "Autoridad: sin lectura"; anchors.verticalCenter: parent.verticalCenter }
@@ -28,7 +33,7 @@ Panel {
                 Text { text: "Core y Policy autorizan las operaciones"; color: Theme.t2; font.family: Theme.font; font.pixelSize: 13; anchors.verticalCenter: parent.verticalCenter } } }
         Item { width: parent.width; height: st.height - 72 - 20 - 34
             DashedRect { anchors.fill: parent; radius: Theme.rCard; color: Theme.hair }
-            Rectangle { anchors.fill: parent; radius: Theme.rCard; color: Qt.rgba(0, 0, 0, 0.22) }
+            Rectangle { anchors.fill: parent; radius: Theme.rCard; color: Theme.raised }
             DashedRect { anchors.fill: parent; radius: Theme.rCard; color: Theme.hair }
             Column { anchors.centerIn: parent; spacing: 4
                 Text { anchors.horizontalCenter: parent.horizontalCenter; text: st.live ? "Estás dentro del Stage" : "Sin canal gráfico del compositor"; color: Theme.t2; font.family: Theme.font; font.pixelSize: 13 }

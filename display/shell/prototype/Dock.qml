@@ -10,7 +10,8 @@ Panel {
     width: row.implicitWidth + 24
     height: Theme.dockIcon + 26
     // The app in front: the window manager's front window, or the Orb when the desktop is showing.
-    readonly property string current: Wm.front() === "" ? "orb" : Wm.front()
+    property string desktopSpace:"orb"
+    readonly property string current: Wm.front() === "" || Demo.bare ? desktopSpace : Wm.front()
     signal launched(string id)
     // Right click: ask the host for the icon's context menu, centred on the icon (x in the dock's coordinates).
     signal menuRequested(string id, real centerX)
@@ -48,10 +49,10 @@ Panel {
                     Rectangle { anchors.fill: parent; radius: parent.radius; color: "white"
                         opacity: (!Theme.spatial && ma.containsMouse) ? 0.12 : 0
                         Behavior on opacity { NumberAnimation { duration: Theme.durDock } } }
-                    Icon { anchors.centerIn: parent; name: modelData.icon; size: 28; color: "#ffffff" }
+                    Icon { anchors.centerIn: parent; name: modelData.icon; size: 28; color: Theme.dockInk }
                 }
                 // A dot under what is open (the Orb always runs); dimmer while its window is minimised.
-                Rectangle { visible: modelData.id === "orb" || Wm.isOpen(modelData.id); width: 4; height: 4; radius: 2; color: Theme.t1
+                Rectangle { visible: modelData.id === dock.desktopSpace || Wm.isOpen(modelData.id); width: 4; height: 4; radius: 2; color: Theme.t1
                     opacity: Wm.isMin(modelData.id) ? 0.4 : 1
                     anchors.horizontalCenter: parent.horizontalCenter; anchors.top: parent.bottom; anchors.topMargin: 8 }
                 Rectangle { visible: ma.containsMouse; y: -30; anchors.horizontalCenter: parent.horizontalCenter

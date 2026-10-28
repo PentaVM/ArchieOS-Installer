@@ -49,10 +49,19 @@ def main():
     # Stopped by whoever started it (run-archie.sh's exit trap sends SIGTERM): unwind, so the
     # daemons below are stopped too instead of keeping their ports.
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    args.bin_dir = args.bin_dir.resolve()
+    required = [args.bin_dir / name for name in ('archie', 'archie-worldd', 'archie-displayd')]
+    if args.native_bin:
+        args.native_bin = args.native_bin.resolve()
+        required.extend([args.native_bin, args.bin_dir / 'archie-shell-bridge'])
+    for binary in required:
+        if not binary.is_file() or not os.access(binary, os.X_OK):
+            parser.error(f'Required executable unavailable: {binary}')
     args.run_dir.mkdir(parents=True, exist_ok=False)
     runtime = args.run_dir / 'runtime'
     environment = dict(os.environ, ARCHIE_WORLD_RUNTIME_DIR=str(runtime),
-                       ARCHIE_WORLDD_PORT=str(args.world_port))
+                       ARCHIE_WORLDD_PORT=str(args.world_port),
+                       PATH=str(args.bin_dir) + os.pathsep + os.environ.get('PATH', ''))
     processes, logs = [], []
     # Keep dated NASA products pinned throughout this window, including renewals.
     imagery_date = (datetime.now(timezone.utc).date() - timedelta(days=3)).isoformat()
@@ -104,10 +113,11 @@ def main():
         (args.run_dir / 'summary.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
         print(json.dumps(summary, indent=2), flush=True)
         if args.native_bin:
-            # The shell opens World as a window of its desktop when its dock or a command asks.
+            # The shell opens World as a view of its own desktop window when its dock or a command asks.
             view = ['--shell'] if args.shell else ['--scene', 'world']
             native = start('archie-display', [*view, '--displayd-port', str(args.display_port),
-                          '--control-port', str(args.native_port), '--imagery-source', args.source],
+                          '--control-port', str(args.native_port), '--imagery-source', args.source,
+                          '--shell-bridge', str(args.bin_dir / 'archie-shell-bridge')],
                           executable=args.native_bin)
             while native.poll() is None:
                 if any(p.poll() is not None for p in processes if p is not native):

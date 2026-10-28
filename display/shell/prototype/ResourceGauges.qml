@@ -45,7 +45,7 @@ Column {
             Rectangle { visible: m.v >= 0 && m.limit; x: parent.width - 2; y: -3; width: 2; height: 12; radius: 1; color: Theme.t2 }
             // no reading: dashed line only, no track
             Row { visible: m.v < 0; anchors.verticalCenter: parent.verticalCenter; spacing: 3
-                Repeater { model: Math.max(0, Math.ceil(trk.width / 6)); Rectangle { width: 3; height: 2; color: Qt.rgba(141 / 255, 140 / 255, 156 / 255, 0.7) } } }
+                Repeater { model: Math.max(0, Math.ceil(trk.width / 6)); Rectangle { width: 3; height: 2; color: Theme.t3 } } }
         }
         Row { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; spacing: 5
             Icon { visible: m.v < 0 && m.valueText !== ""; name: "unknown"; size: 12; color: Theme.unk; anchors.verticalCenter: parent.verticalCenter }

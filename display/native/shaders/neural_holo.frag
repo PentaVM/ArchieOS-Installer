@@ -11,6 +11,7 @@ layout(std140, binding = 0) uniform buf {
     float qt_Opacity;
     float time;
     float strength;
+    float lightTheme;
     vec2 resolution;
 };
 layout(binding = 1) uniform sampler2D source;
@@ -18,6 +19,10 @@ layout(binding = 1) uniform sampler2D source;
 void main()
 {
     vec2 uv = qt_TexCoord0;
+    if (lightTheme > 0.5) {
+        fragColor = texture(source, uv) * qt_Opacity;
+        return;
+    }
     float ca = 0.0007;
     vec3 c = vec3(texture(source, uv + vec2(ca, 0.0)).r, texture(source, uv).g, texture(source, uv - vec2(ca, 0.0)).b);
     float scan = mix(1.0, 0.94 + 0.06 * sin(uv.y * resolution.y * 1.5708), strength);

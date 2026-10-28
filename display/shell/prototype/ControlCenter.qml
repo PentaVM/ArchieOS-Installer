@@ -10,6 +10,10 @@ Panel {
     height: content.implicitHeight + 40
     readonly property var sys: bridge.system
 
+    Rectangle {
+        x:12; y:12; width:parent.width-24; height:Math.max(0,parent.height-24)
+        radius:Math.max(0,Theme.rPanel-6); color:Theme.reading
+    }
     Column { id: content; x: 20; y: 20; width: parent.width - 40; spacing: 0
         Text { text: "Centro de control"; color: Theme.t1; font.family: Theme.disp; font.pixelSize: 22; font.weight: Font.DemiBold; font.letterSpacing: -0.33 }
         Flow { width: parent.width; topPadding: 12; spacing: 8

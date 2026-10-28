@@ -125,6 +125,7 @@ private slots:
         LumenField field;
         DisplayControl control(&field);
         QVERIFY(control.start(0));
+        control.setViewHandler([](const QString &,const QVariantMap &) { return QString(); });
         QSignalSpy views(&control, &DisplayControl::viewCommand);
         QSignalSpy looks(&control, &DisplayControl::commandReceived);
         const QList<QByteArray> good{
@@ -188,6 +189,35 @@ private slots:
         QFile::remove(written);
         control.setCapture([](const QString &) { return false; });
         QVERIFY(request(control, "{\"action\":\"capture\"}\n").startsWith("error:"));
+    }
+    void viewWithoutActiveHandlerDoesNotClaimApplied() {
+        LumenField field;
+        DisplayControl control(&field);
+        QVERIFY(control.start(0));
+        QVERIFY(request(control, "{\"action\":\"focus\",\"value\":\"missing-node\"}\n").startsWith("error:"));
+    }
+    void neuralLayersDoNotAcknowledgeUnavailableGuides() {
+        LumenField field;
+        QVERIFY(field.applyProfile(QStringLiteral("neural")));
+        DisplayControl control(&field);
+        QVERIFY(control.start(0));
+        QSignalSpy delivered(&control, &DisplayControl::commandReceived);
+        QVERIFY(request(control,"{\"action\":\"overlay\",\"value\":\"guides\",\"enabled\":true}\n").startsWith("error:"));
+        QCOMPARE(delivered.count(),0);
+    }
+    void activeViewFailureIsReturnedWithoutSuccessNotification() {
+        LumenField field;
+        DisplayControl control(&field, nullptr, true);
+        QVERIFY(control.start(0));
+        QSignalSpy views(&control, &DisplayControl::viewCommand);
+        control.setViewHandler([](const QString &, const QVariantMap &args) {
+            return args.value(QStringLiteral("id")).toString() == QStringLiteral("present")
+                ? QString() : QStringLiteral("node absent");
+        });
+        QCOMPARE(request(control, "{\"action\":\"focus\",\"value\":\"absent\"}\n"), QByteArray("error: node absent\n"));
+        QCOMPARE(views.count(), 0);
+        QCOMPARE(request(control, "{\"action\":\"focus\",\"value\":\"present\"}\n"), QByteArray("ok\n"));
+        QCOMPARE(views.count(), 1);
     }
     void shellRefusesTheOrbVerbsButCanCapture() {
         LumenField field;

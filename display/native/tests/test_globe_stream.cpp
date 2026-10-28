@@ -13,11 +13,43 @@
 #include <QTest>
 #include <QSignalSpy>
 #include <cstdlib>
+#ifdef Q_OS_WIN
+#include <QtCore/qt_windows.h>
+#include <aclapi.h>
+#endif
+void credentialPermissions(const QString &path,bool privateOnly) {
+#ifdef Q_OS_WIN
+ HANDLE token=nullptr;
+ if(!OpenProcessToken(GetCurrentProcess(),TOKEN_QUERY,&token)) std::exit(1);
+ DWORD size=0;GetTokenInformation(token,TokenUser,nullptr,0,&size);
+ QByteArray user(static_cast<qsizetype>(size),0);
+ if(!GetTokenInformation(token,TokenUser,user.data(),size,&size)) std::exit(1);
+ CloseHandle(token);
+ auto sid=reinterpret_cast<TOKEN_USER*>(user.data())->User.Sid;
+ BYTE group[SECURITY_MAX_SID_SIZE];DWORD groupSize=sizeof(group);
+ if(!CreateWellKnownSid(WinBuiltinUsersSid,nullptr,group,&groupSize)) std::exit(1);
+ EXPLICIT_ACCESS_W entries[2]{};
+ for(int i=0;i<2;++i) {
+  entries[i].grfAccessPermissions=GENERIC_READ|GENERIC_WRITE|READ_CONTROL;
+  entries[i].grfAccessMode=SET_ACCESS;
+  entries[i].Trustee.TrusteeForm=TRUSTEE_IS_SID;
+  entries[i].Trustee.ptstrName=reinterpret_cast<LPWSTR>(i ? static_cast<void*>(group) : sid);
+ }
+ PACL acl=nullptr;
+ if(SetEntriesInAclW(privateOnly?1:2,entries,nullptr,&acl)!=ERROR_SUCCESS) std::exit(1);
+ const auto result=SetNamedSecurityInfoW(reinterpret_cast<LPWSTR>(const_cast<ushort*>(path.utf16())),SE_FILE_OBJECT,
+   DACL_SECURITY_INFORMATION|PROTECTED_DACL_SECURITY_INFORMATION,nullptr,nullptr,acl,nullptr);
+ LocalFree(acl);
+ if(result!=ERROR_SUCCESS) std::exit(1);
+#else
+ QFile::setPermissions(path,QFileDevice::ReadOwner|QFileDevice::WriteOwner|(privateOnly?QFileDevice::Permissions{}:QFileDevice::ReadGroup));
+#endif
+}
 void check(bool ok,const char *why){if(!ok){qCritical("%s",why);std::exit(1);}}
 int main(int argc,char **argv){QGuiApplication app(argc,argv);QTemporaryDir runtime;QTcpServer server;check(server.listen(QHostAddress::LocalHost),"loopback fixture listens");
  const auto descriptorPath=runtime.filePath("navigation.json");QFile descriptor(descriptorPath);check(descriptor.open(QIODevice::WriteOnly),"session fixture created");
  auto object=QJsonObject{{"schema_version",1},{"address",QString("127.0.0.1:%1").arg(server.serverPort())},{"token",QString(64,'a')},{"session_id",QString(32,'b')},{"domain","personal"},{"expires_at_ms",QDateTime::currentMSecsSinceEpoch()+60000}};
- descriptor.write(QJsonDocument(object).toJson(QJsonDocument::Compact));descriptor.close();descriptor.setPermissions(QFileDevice::ReadOwner|QFileDevice::WriteOwner);
+ descriptor.write(QJsonDocument(object).toJson(QJsonDocument::Compact));descriptor.close();credentialPermissions(descriptorPath,true);
  QImage image(256,256,QImage::Format_RGB32);image.fill(Qt::green);QByteArray png;QBuffer encoded(&png);encoded.open(QIODevice::WriteOnly);image.save(&encoded,"PNG");
  const auto tile=QJsonObject{{"key","blue_marble:0/0/0"},{"zoom",0},{"x",0},{"y",0},{"mime","image/png"},{"width",256},{"height",256},{"data_base64",QString::fromLatin1(png.toBase64())}};
  QByteArray jpeg;QBuffer jpegBuffer(&jpeg);jpegBuffer.open(QIODevice::WriteOnly);image.save(&jpegBuffer,"JPEG");
@@ -57,6 +89,6 @@ int main(int argc,char **argv){QGuiApplication app(argc,argv);QTemporaryDir runt
  const double oldGeneration=requests.last()["command"].toObject()["generation"].toDouble();
  GlobeStreamBridge reopened(runtime.path());reopened.setViewport({0,0,44},{0,0,0},1200,800,45);QTest::qWait(600);
  check(requests.last()["command"].toObject()["generation"].toDouble()>oldGeneration,"reopened viewer generations supersede the previous process");
- QFile::setPermissions(descriptorPath,QFileDevice::ReadOwner|QFileDevice::WriteOwner|QFileDevice::ReadGroup);
+ credentialPermissions(descriptorPath,false);
  const int before=requests.size();bridge.setViewport({10,0,44},{0,0,0},1200,800,45);QTest::qWait(600);check(requests.size()==before,"group-readable capability cannot dispatch navigation");
  qInfo("Globe stream TCP/coalescing/capability contracts passed");}

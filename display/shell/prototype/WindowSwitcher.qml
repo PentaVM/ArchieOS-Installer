@@ -37,7 +37,7 @@ Panel {
         Column { id: tcol; x: 12; y: 14; width: parent.width - 24; spacing: 8
             Rectangle { width: 44; height: 44; radius: 11; color: Theme.dk[tile.info.key] || Theme.raised
                 Rectangle { anchors.fill: parent; radius: 11; gradient: Gradient { GradientStop { position: 0; color: Theme.track } GradientStop { position: 1; color: "transparent" } } }
-                Icon { anchors.centerIn: parent; name: tile.iconOf[tile.info.key] || "devunk"; size: 20; color: "#ffffff" } }
+                Icon { anchors.centerIn: parent; name: tile.iconOf[tile.info.key] || "devunk"; size: 20; color: Theme.dk[tile.info.key] ? Theme.dockInk : Theme.t1 } }
             Text { width: parent.width; elide: Text.ElideRight; text: tile.info.title; color: Theme.t1; font.family: Theme.font; font.pixelSize: 13; font.weight: Font.Medium }
             Text { width: parent.width; elide: Text.ElideRight; text: tile.info.app; color: Theme.t3; font.family: Theme.font; font.pixelSize: 11 }
             Chip { small: true; icon: "unknown"; tone: "unk"; text: "Dominio sin lectura" }

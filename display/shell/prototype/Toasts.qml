@@ -24,13 +24,13 @@ Item {
         property string chipIcon
         property string chipTone: "neutral"
         width: 380; height: tc.implicitHeight + 24
-        Rectangle { x: 14; y: 12; width: 32; height: 32; radius: 8; color: Qt.rgba(1, 1, 1, 0.05); border.width: 1; border.color: Theme.hair
+        Rectangle { x: 14; y: 12; width: 32; height: 32; radius: 8; color: Theme.raised; border.width: 1; border.color: Theme.hair
             Icon { anchors.centerIn: parent; name: t.glyph; size: 16; color: t.glyphColor } }
         Column { id: tc; x: 58; y: 12; width: parent.width - 58 - 14; spacing: 2
             Text { width: parent.width; elide: Text.ElideRight; text: t.title; color: Theme.t1; font.family: Theme.font; font.pixelSize: 13; font.weight: Font.Medium }
             Text { width: parent.width; elide: Text.ElideRight; text: t.detail; color: Theme.t2; font.family: Theme.font; font.pixelSize: 12 }
             Item { visible: t.progress >= 0; width: parent.width; height: 12
-                Rectangle { y: 4; width: parent.width; height: 4; radius: 2; color: Qt.rgba(1, 1, 1, 0.10)
+                Rectangle { y: 4; width: parent.width; height: 4; radius: 2; color: Theme.track
                     Rectangle { width: parent.width * t.progress; height: 4; radius: 2; color: Theme.acc } } }
             Item { width: 1; height: 4 }
             Row { spacing: 8

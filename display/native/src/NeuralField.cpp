@@ -3,6 +3,7 @@
 #include <QColor>
 #include <QCoreApplication>
 #include <QDir>
+#include <QDateTime>
 #include <QEventLoop>
 #include <QFutureWatcher>
 #include <QJsonDocument>
@@ -12,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <memory>
 
 namespace {
 // The original's RNG seed for the sparks (`?still` and live alike).
@@ -61,7 +63,24 @@ void NeuralField::setRoot(const QString &root)
     if (cleaned == m_root)
         return;
     m_root = cleaned;
+    // A different root is a different domain: never draw the old domain under its name.
+    release();
+    publish();
     emit rootChanged();
+    load();
+}
+
+void NeuralField::setActive(bool active)
+{
+    if (active == m_active)
+        return;
+    m_active = active;
+    emit activeChanged();
+    load();
+}
+
+void NeuralField::refresh()
+{
     load();
 }
 
@@ -81,6 +100,11 @@ void NeuralField::setLimit(int limit)
     limit = std::clamp(limit, 1, 20000);
     if (limit == m_limit)
         return;
+    // A stricter governor ceiling takes effect immediately, before the asynchronous scan.
+    if (limit < m_limit) {
+        release();
+        publish();
+    }
     m_limit = limit;
     emit rootChanged();
     load();
@@ -101,41 +125,60 @@ void NeuralField::release()
     if (m_sphere)
         neural_free(m_sphere);
     m_sphere = nullptr;
+    m_modelRevision = ~0ULL;
+    m_time = 0.0;
+    m_sourceRoot.clear();
+    m_scannedAt.clear();
+    emit sourceChanged();
 }
 
 void NeuralField::load()
 {
     ++m_generation;
+    m_loading = false;
+    if (!m_error.isEmpty()) {
+        m_error.clear();
+        emit errorChanged();
+    }
     if (m_root.isEmpty()) {
         release();
         publish();
         return;
     }
+    if (!m_active) {
+        emit sourceChanged();
+        return;
+    }
+    m_loading = true;
+    emit sourceChanged();
     const QByteArray root = m_root.toUtf8();
     const auto limit = static_cast<std::uint32_t>(m_limit);
     const auto files = static_cast<std::uint32_t>(m_filesPerFolder);
     const quint64 generation = m_generation;
-    auto *watcher = new QFutureWatcher<NeuralIndex *>(this);
+    // The future owns its result even if the view is destroyed before scanning finishes.
+    using Index = std::shared_ptr<NeuralIndex>;
+    auto *watcher = new QFutureWatcher<Index>(this);
     connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, generation] {
-        NeuralIndex *index = watcher->result();
+        const Index index = watcher->result();
         watcher->deleteLater();
-        if (generation != m_generation) {
-            neural_index_free(index);
+        if (generation != m_generation)
             return;
-        }
-        accept(index);
+        accept(index.get());
     });
     // The listing reads directory entries only and is safe off the GUI thread.
     watcher->setFuture(QtConcurrent::run([root, limit, files] {
-        return neural_scan(root.constData(), static_cast<std::size_t>(root.size()), limit, files);
+        return Index(neural_scan(root.constData(), static_cast<std::size_t>(root.size()), limit, files), neural_index_free);
     }));
 }
 
 void NeuralField::accept(NeuralIndex *index)
 {
+    m_loading = false;
     if (!index) {
+        release();
         m_error = QStringLiteral("No se pudo leer la carpeta %1").arg(m_root);
         emit errorChanged();
+        publish();
         return;
     }
     if (!m_error.isEmpty()) {
@@ -158,12 +201,16 @@ void NeuralField::accept(NeuralIndex *index)
                 neural_set_link(m_sphere, static_cast<std::uint32_t>(it.key()), it.value().first, it.value().second);
         }
     }
-    neural_index_free(index);
     if (!m_sphere) {
         m_error = QStringLiteral("La esfera neuronal no pudo crearse");
         emit errorChanged();
+        emit sourceChanged();
+        publish();
         return;
     }
+    m_sourceRoot = m_root;
+    m_scannedAt = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+    emit sourceChanged();
     if (m_still)
         m_time = static_cast<double>(neural_prime_still(m_sphere));
     readSettings();
@@ -173,26 +220,36 @@ void NeuralField::accept(NeuralIndex *index)
 bool NeuralField::loadNow()
 {
     // A capture waits for the listing instead of racing it.
-    while (!m_root.isEmpty() && !m_sphere && m_error.isEmpty())
+    while (m_loading)
         QCoreApplication::processEvents(QEventLoop::AllEvents | QEventLoop::WaitForMoreEvents, 50);
     return m_sphere != nullptr;
 }
 
-void NeuralField::advance(double seconds)
+double NeuralField::advance(double seconds)
 {
-    if (!m_sphere || m_still)
-        return;
-    seconds = std::clamp(seconds, 0.0, 0.1);
-    neural_step(m_sphere, static_cast<float>(seconds));
-    m_time += seconds;
+    if (!m_sphere || m_still || !m_active || !std::isfinite(seconds))
+        return 0.0;
+    // Rust widens the f32 argument then clamps it to 50ms. Match that accepted delta
+    // exactly (0.05f is slightly larger than 0.05 in f64) for shaders and camera too.
+    const float dt = static_cast<float>(std::clamp(seconds, 0.0, 0.05));
+    const double accepted = std::min(static_cast<double>(dt), 0.05);
+    neural_step(m_sphere, dt);
+    m_time += accepted;
     publish();
+    return accepted;
 }
 
 void NeuralField::publish()
 {
     NeuralStats stats{};
-    if (m_sphere && neural_stats(m_sphere, &stats))
-        m_revision = stats.revision;
+    if (m_sphere && neural_stats(m_sphere, &stats)) {
+        if (m_modelRevision != stats.revision) {
+            m_modelRevision = stats.revision;
+            ++m_revision;
+        }
+    } else {
+        ++m_revision;
+    }
     emit updated();
 }
 
@@ -226,6 +283,7 @@ bool NeuralField::setNumber(const QString &key, double value)
     }
     m_numbers.insert(key, value);
     readSettings();
+    publish();
     return true;
 }
 
@@ -238,6 +296,7 @@ bool NeuralField::setFlag(const QString &key, bool value)
     }
     m_flags.insert(key, value);
     readSettings();
+    publish();
     return true;
 }
 
@@ -264,6 +323,7 @@ bool NeuralField::setLink(int kind, int on, double opacity)
         return false;
     m_links.insert(kind, {on, opacity});
     readSettings();
+    publish();
     return true;
 }
 
@@ -309,6 +369,16 @@ QVector3D NeuralField::positionOf(const QString &id) const
     if (!m_sphere || !neural_position(m_sphere, id.toUtf8().constData(), at))
         return {};
     return {at[0], at[1], at[2]};
+}
+
+QVariantMap NeuralField::lookupPosition(const QString &id) const
+{
+    float at[3] = {0, 0, 0};
+    if (!m_sphere || !neural_position(m_sphere, id.toUtf8().constData(), at)
+        || !std::isfinite(at[0]) || !std::isfinite(at[1]) || !std::isfinite(at[2]))
+        return {{QStringLiteral("found"), false}};
+    return {{QStringLiteral("found"), true},
+            {QStringLiteral("position"), QVariant::fromValue(QVector3D(at[0], at[1], at[2]))}};
 }
 
 QVariantList NeuralField::labels()
@@ -412,5 +482,9 @@ std::vector<NeuralSpark> NeuralField::sparks() const
     out.resize(count);
     if (count && neural_sparks(m_sphere, out.data(), count) != count)
         out.clear();
+    // Rust keeps the original fixed 70x5 trail storage. Upload only the budgeted
+    // active trails; inactive slots are irrelevant even in a deterministic still frame.
+    const auto active = static_cast<std::size_t>(std::clamp(std::lround(m_settings.value(QStringLiteral("pulses"), 70).toDouble()), 0L, 70L));
+    out.resize(std::min(out.size(), active * 5));
     return out;
 }

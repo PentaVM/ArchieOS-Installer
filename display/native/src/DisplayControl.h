@@ -43,6 +43,8 @@ public:
     quint16 port() const { return m_server.serverPort(); }
     /// What `capture` does: write the window to the path it is given and say whether it did.
     void setCapture(std::function<bool(const QString &)> capture) { m_capture = std::move(capture); }
+    // Empty result means the active view applied the command; otherwise return its error.
+    void setViewHandler(std::function<QString(const QString &, const QVariantMap &)> handler) { m_viewHandler=std::move(handler); }
     /// Where captures are written: a folder of the display's own, never one a caller names.
     QString captureFolder() const;
 
@@ -66,6 +68,7 @@ private:
     QByteArray answer(const QByteArray &line);
     QByteArray answerView(const QString &action, const QJsonObject &command);
     std::function<bool(const QString &)> m_capture;
+    std::function<QString(const QString &, const QVariantMap &)> m_viewHandler;
 
     LumenField *m_lumen = nullptr;
     QTcpServer m_server;

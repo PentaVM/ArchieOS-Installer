@@ -506,7 +506,7 @@ pub unsafe extern "C" fn neural_pick(
         };
         let three = |v: &[f32]| [f64::from(v[0]), f64::from(v[1]), f64::from(v[2])];
         match s.sphere.pick(three(o), three(d), f64::from(threshold)) {
-            Some(id) if capacity > id.len() => unsafe { write_text(&id, out, capacity) },
+            Some(id) => unsafe { write_text(&id, out, capacity) },
             _ => 0,
         }
     })

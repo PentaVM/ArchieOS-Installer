@@ -1,5 +1,6 @@
 #pragma once
 
+// Design: Xavi. Native Rust/C++ implementation: PentaVM.
 // Xavi's neural sphere (Lumenfield's "Esfera neuronal", API 2), as the host sees it.
 //
 // The model, the live build, the motion and the sparks are Rust (`archie-lumen-design`,
@@ -29,6 +30,10 @@ class NeuralField : public QObject
     QML_ELEMENT
     /// The folder drawn. Listed again when it changes; empty draws nothing.
     Q_PROPERTY(QString root READ root WRITE setRoot NOTIFY rootChanged)
+    Q_PROPERTY(bool active READ active WRITE setActive NOTIFY activeChanged)
+    Q_PROPERTY(bool loading READ loading NOTIFY sourceChanged)
+    Q_PROPERTY(QString sourceRoot READ sourceRoot NOTIFY sourceChanged)
+    Q_PROPERTY(QString scannedAt READ scannedAt NOTIFY sourceChanged)
     /// The original's deterministic frame (`?still`): no motion, no live build.
     Q_PROPERTY(bool still READ still WRITE setStill NOTIFY stillChanged)
     Q_PROPERTY(int limit READ limit WRITE setLimit NOTIFY rootChanged)
@@ -56,6 +61,11 @@ public:
 
     QString root() const { return m_root; }
     void setRoot(const QString &root);
+    bool active() const { return m_active; }
+    void setActive(bool active);
+    bool loading() const { return m_loading; }
+    QString sourceRoot() const { return m_sourceRoot; }
+    QString scannedAt() const { return m_scannedAt; }
     bool still() const { return m_still; }
     void setStill(bool still);
     int limit() const { return m_limit; }
@@ -72,7 +82,9 @@ public:
     QVector3D backgroundLinear() const { return m_backgroundLinear; }
 
     /// Steps the sphere by `seconds` of wall time (the original steps once a frame).
-    Q_INVOKABLE void advance(double seconds);
+    Q_INVOKABLE double advance(double seconds);
+    /// Explicitly refresh the bounded filesystem snapshot; no synthetic live graph is inferred.
+    Q_INVOKABLE void refresh();
     /// Waits for the listing and draws the original's deterministic frame; for captures.
     Q_INVOKABLE bool loadNow();
     Q_INVOKABLE bool setNumber(const QString &key, double value);
@@ -87,6 +99,9 @@ public:
     /// A ray in the field's own coordinates; the id of the node it meets first, or "".
     Q_INVOKABLE QString pick(const QVector3D &origin, const QVector3D &direction, float threshold = 3.0F) const;
     Q_INVOKABLE QVector3D positionOf(const QString &id) const;
+    /// Checked coordinates for camera following. Missing is {found:false}; a real
+    /// node at the origin remains {found:true,position:QVector3D(0,0,0)}.
+    Q_INVOKABLE QVariantMap lookupPosition(const QString &id) const;
     /// Labels for the HUD: [{kind: "p"|"f", x, y, z, id, text}] in field coordinates.
     Q_INVOKABLE QVariantList labels();
     /// The HUD's selection card, one string a line.
@@ -104,6 +119,8 @@ public:
 
 signals:
     void rootChanged();
+    void activeChanged();
+    void sourceChanged();
     void stillChanged();
     void errorChanged();
     void settingsChanged();
@@ -120,6 +137,8 @@ private:
 
     ::NeuralSphere *m_sphere = nullptr;
     QString m_root;
+    QString m_sourceRoot;
+    QString m_scannedAt;
     QString m_error;
     QString m_background = QStringLiteral("#01060b");
     QVector3D m_backgroundLinear;
@@ -130,8 +149,11 @@ private:
     QMap<int, QPair<int, double>> m_links;
     quint64 m_generation = 0;
     qulonglong m_revision = 0;
+    qulonglong m_modelRevision = ~0ULL;
     double m_time = 0.0;
     int m_limit = 2500;
     int m_filesPerFolder = 30;
     bool m_still = false;
+    bool m_active = true;
+    bool m_loading = false;
 };

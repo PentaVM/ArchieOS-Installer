@@ -156,6 +156,8 @@ QByteArray DisplayControl::answer(const QByteArray &line)
             QStringLiteral("guides"), QStringLiteral("links"), QStringLiteral("pulses"), QStringLiteral("bloom")};
         if (!overlays.contains(value) || !command.value(QStringLiteral("enabled")).isBool())
             return refusal(QStringLiteral("an overlay requires a known layer and a boolean enabled value"));
+        if (value == QLatin1String("guides") && m_lumen->settings().value(QStringLiteral("fieldSource")).toString() == QLatin1String("neural"))
+            return refusal(QStringLiteral("guides are unavailable in the neural file snapshot"));
         emit commandReceived(action, value, command.value(QStringLiteral("enabled")).toBool());
         return QByteArrayLiteral("ok\n");
     }
@@ -186,7 +188,7 @@ QByteArray DisplayControl::answerView(const QString &action, const QJsonObject &
     if (!views.contains(action))
         return refusal(QStringLiteral("unknown action ") + action);
     // The shell has its own window and no sphere of its own to move: only a capture is the same there.
-    if (m_shellMode && action != QLatin1String("capture"))
+    if (m_shellMode && !m_viewHandler && action != QLatin1String("capture"))
         return refusal(action + QStringLiteral(" is available in Observatory, not in the shell"));
 
     const QJsonValue raw = command.value(QStringLiteral("value"));
@@ -256,6 +258,10 @@ QByteArray DisplayControl::answerView(const QString &action, const QJsonObject &
             return refusal(QStringLiteral("freeze requires a boolean enabled value"));
         arguments.insert(QStringLiteral("enabled"), command.value(QStringLiteral("enabled")).toBool());
     }
+    if (!m_viewHandler)
+        return refusal(QStringLiteral("no active view can apply this command"));
+    const QString error=m_viewHandler(action,arguments);
+    if (!error.isEmpty()) return refusal(error);
     emit viewCommand(action, arguments);
     return QByteArrayLiteral("ok\n");
 }

@@ -20,7 +20,7 @@ QtObject {
         var result=["holograma", "holograma-calido", "sphere", "orb", "field", "neural", "crown", "atlas", "dense"]
         for (var i=0;i<nativeProfiles.length;i++)
             if (result.indexOf(nativeProfiles[i])<0) result.push(nativeProfiles[i])
-        return result
+        return nativeProfiles.length ? result.filter(function(p) { return nativeProfiles.indexOf(p)>=0 }) : result
     }
     // The local control server has already validated/applied this profile atomically.
     property string orbAcceptedProfile: ""
