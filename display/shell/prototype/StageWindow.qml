@@ -6,6 +6,8 @@ import QtQuick
 Panel {
     id: st
     kind: "window"
+    // This shell is the stage's own desktop: the stage is not elsewhere, it is around it.
+    readonly property bool live: typeof insideStage !== "undefined" && insideStage
     readonly property string wid: "stage"
     width: 600; height: 400
     enterScale: 0.96
@@ -17,10 +19,10 @@ Panel {
         Lights { x: 16; anchors.verticalCenter: parent.verticalCenter; wid: st.wid }
         Row { anchors.centerIn: parent
             Text { text: "Stage"; color: Theme.t1; font.family: Theme.disp; font.pixelSize: 17; font.weight: Font.DemiBold; font.letterSpacing: -0.17 }
-            Text { text: " — vista local"; color: Theme.t2; font.family: Theme.disp; font.pixelSize: 17; font.weight: Font.Medium; font.letterSpacing: -0.17 } } }
+            Text { text: st.live ? " — este escritorio" : " — vista local"; color: Theme.t2; font.family: Theme.disp; font.pixelSize: 17; font.weight: Font.Medium; font.letterSpacing: -0.17 } } }
     Column { x: 20; y: 72; width: parent.width - 40; spacing: 16
         Row { spacing: 14
-            Chip { icon: "unknown"; tone: "unk"; text: "Autoridad: sin lectura"; anchors.verticalCenter: parent.verticalCenter }
+            Chip { icon: st.live ? "pointer" : "unknown"; tone: st.live ? "ok" : "unk"; text: st.live ? "Autoridad: abajo a la derecha" : "Autoridad: sin lectura"; anchors.verticalCenter: parent.verticalCenter }
             Row { spacing: 6; anchors.verticalCenter: parent.verticalCenter
                 Icon { name: "pointer"; size: 14; color: Theme.t3; anchors.verticalCenter: parent.verticalCenter }
                 Text { text: "Core y Policy autorizan las operaciones"; color: Theme.t2; font.family: Theme.font; font.pixelSize: 13; anchors.verticalCenter: parent.verticalCenter } } }
@@ -29,6 +31,6 @@ Panel {
             Rectangle { anchors.fill: parent; radius: Theme.rCard; color: Qt.rgba(0, 0, 0, 0.22) }
             DashedRect { anchors.fill: parent; radius: Theme.rCard; color: Theme.hair }
             Column { anchors.centerIn: parent; spacing: 4
-                Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Sin canal gráfico del compositor"; color: Theme.t2; font.family: Theme.font; font.pixelSize: 13 }
-                Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Esta vista no inicia Stage ni representa su sesión"; color: Theme.t3; font.family: Theme.font; font.pixelSize: 11 } } } }
+                Text { anchors.horizontalCenter: parent.horizontalCenter; text: st.live ? "Estás dentro del Stage" : "Sin canal gráfico del compositor"; color: Theme.t2; font.family: Theme.font; font.pixelSize: 13 }
+                Text { anchors.horizontalCenter: parent.horizontalCenter; text: st.live ? "Las aplicaciones que Archie usa se abren enmarcadas sobre este escritorio" : "Esta vista no inicia Stage ni representa su sesión"; color: Theme.t3; font.family: Theme.font; font.pixelSize: 11 } } } }
 }

@@ -19,6 +19,8 @@ Rectangle {
         id: mi
         property string label
         objectName: "bar.menu." + label
+        Accessible.role: Accessible.MenuItem
+        Accessible.name: label
         height: 24; radius: 6; width: mt.implicitWidth + 18
         color: bar.menu === label ? Theme.pressed : (mma.containsMouse ? Theme.hover : "transparent")
         Text { id: mt; anchors.centerIn: parent; text: mi.label; color: (bar.menu === mi.label || mma.containsMouse) ? Theme.t1 : Theme.t2; font.family: Theme.font; font.pixelSize: 13 }
@@ -29,7 +31,11 @@ Rectangle {
         property string icon
         property string count: ""
         property bool active: false
+        /// What the button is called, for whoever cannot see its icon.
+        property string label: icon
         signal clicked()
+        Accessible.role: Accessible.Button
+        Accessible.name: label
         width: count === "" ? 28 : cr.implicitWidth + 16; height: 26; radius: 7
         color: active ? Theme.pressed : (ma.containsMouse ? Theme.hover : "transparent")
         Row { id: cr; anchors.centerIn: parent; spacing: 6
@@ -58,11 +64,11 @@ Rectangle {
             MouseArea { anchors.fill: parent; onClicked: bar.toggle("workspace") } }
         Item { width: 13; height: 14; anchors.verticalCenter: parent.verticalCenter
             Rectangle { anchors.centerIn: parent; width: 1; height: 14; color: Theme.hair } }
-        IconButton { objectName: "bar.palette"; icon: "search"; active: bar.overlay === "palette"; onClicked: bar.toggle("palette"); anchors.verticalCenter: parent.verticalCenter }
+        IconButton { objectName: "bar.palette"; icon: "search"; label: "Buscar"; active: bar.overlay === "palette"; onClicked: bar.toggle("palette"); anchors.verticalCenter: parent.verticalCenter }
         // Running long jobs from the bridge; "—" when no workspace is configured, never a made-up 0.
-        IconButton { objectName: "bar.activity"; icon: "activity"; count: bar.bridge.jobs.state === "ok" ? String(bar.bridge.runningJobs) : "—"
+        IconButton { objectName: "bar.activity"; icon: "activity"; label: "Actividad"; count: bar.bridge.jobs.state === "ok" ? String(bar.bridge.runningJobs) : "—"
             active: bar.overlay === "activity"; onClicked: bar.toggle("activity"); anchors.verticalCenter: parent.verticalCenter }
-        IconButton { objectName: "bar.control"; icon: "control"; active: bar.overlay === "control"; onClicked: bar.toggle("control"); anchors.verticalCenter: parent.verticalCenter }
+        IconButton { objectName: "bar.control"; icon: "control"; label: "Centro de control"; active: bar.overlay === "control"; onClicked: bar.toggle("control"); anchors.verticalCenter: parent.verticalCenter }
         Text { leftPadding: 8; text: Demo.barClock; color: Theme.t1; font.family: Theme.font; font.pixelSize: 13; font.weight: Font.Medium
             font.features: { "tnum": 1 }; anchors.verticalCenter: parent.verticalCenter }
     }

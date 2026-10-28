@@ -125,6 +125,10 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("appCatalog"), &appCatalog);
     engine.rootContext()->setContextProperty(QStringLiteral("displayControl"), &displayControl);
     engine.rootContext()->setContextProperty(QStringLiteral("shellRuntime"), &shellRuntime);
+    // Run as the Archie Stage's desktop (display/stage/run-archie.sh DESKTOP=1): the stage
+    // frames the applications Archie uses over this shell, so the shell starts bare.
+    engine.rootContext()->setContextProperty(QStringLiteral("insideStage"),
+        qEnvironmentVariableIntValue("ARCHIE_STAGE_DESKTOP") == 1);
     engine.rootContext()->setContextProperty(QStringLiteral("shellColorMode"), theme);
     lumen.setLens(arguments.value(QStringLiteral("lens")));
     if (arguments.isSet(QStringLiteral("content-root")))
@@ -170,7 +174,7 @@ int main(int argc, char *argv[])
         worldComponent.loadFromModule(QStringLiteral("Archie.Observatory"),QStringLiteral("Main"));
         auto *object=worldComponent.createWithInitialProperties({
             {QStringLiteral("scene"),QStringLiteral("world")},
-            {QStringLiteral("worldHost"),true},{QStringLiteral("visible"),false}});
+            {QStringLiteral("worldHost"),true}});
         auto *worldWindow=qobject_cast<QQuickWindow*>(object);
         if(worldWindow) {
             object->setParent(&engine);

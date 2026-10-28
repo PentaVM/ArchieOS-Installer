@@ -65,9 +65,9 @@ QtObject {
                                   archive: "#cc79a7", executable: "#d55e00", other: "#bbbbbb" })
     // Dock icons: solid colour under a 165° white→black wash.
     readonly property var dk: (vivid ? { orb: "#00b4d8", vault: "#2f7bff", forge: "#ff9500",
-                                 sentry: "#00c46a", stage: "#9b5cff", set: "#7b8798" }
+                                 sentry: "#00c46a", world: "#14b8a6", stage: "#9b5cff", set: "#7b8798" }
                                : { orb: "#1b8fa6", vault: "#3b7fd6", forge: "#b87a0b",
-                                 sentry: "#1f9a62", stage: "#8a5fd6", set: "#6b7686" })
+                                 sentry: "#1f9a62", world: "#1f8f84", stage: "#8a5fd6", set: "#6b7686" })
     // Window controls.
     readonly property color tlClose: "#d9605a"
     readonly property color tlMin: "#d9a441"

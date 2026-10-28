@@ -1,6 +1,6 @@
 import QtQuick
 
-// Dock: Orb, Vault, Forge, Sentry, Stage, Ajustes, in that order. 56 px icons, white line glyph
+// Dock: Orb, Vault, Forge, Sentry, World, Stage, Ajustes, in that order. 56 px icons, white line glyph
 // on a solid colour under a 165° wash. A 4 px dot under apps whose window is open (dim while it is
 // minimised); the app in front has a 1.5 px accent outline 3 px away. Clicking opens, restores,
 // raises or minimises its window (Wm.dockClick).
@@ -23,6 +23,10 @@ Panel {
                 id: cell
                 objectName: "dock." + modelData.id
                 width: Theme.dockIcon; height: Theme.dockIcon
+                // Named to the accessibility bus, so a screen reader, or Archie, finds it by name.
+                Accessible.role: Accessible.Button
+                Accessible.name: modelData.name
+                Accessible.onPressAction: dock.launched(modelData.id)
                 // Quiet and reduced motion: no scaling, only the highlight below.
                 scale: !Theme.spatial ? 1.0 : (ma.pressed ? 0.96 : (ma.containsMouse ? 1.12 : 1.0))
                 Behavior on scale { NumberAnimation { duration: Theme.durDock; easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.easeOut } }

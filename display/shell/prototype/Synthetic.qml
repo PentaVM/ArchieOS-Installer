@@ -11,6 +11,7 @@ QtObject {
         { id: "vault",  name: "Vault",   icon: "dkVault",  running: true  },
         { id: "forge",  name: "Forge",   icon: "dkForge",  running: false },
         { id: "sentry", name: "Sentry",  icon: "dkSentry", running: false },
+        { id: "world",  name: "World",   icon: "dkWorld",  running: false },
         { id: "stage",  name: "Stage",   icon: "dkStage",  running: true  },
         { id: "set",    name: "Ajustes", icon: "dkSet",    running: false }
     ]

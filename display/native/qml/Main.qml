@@ -9,13 +9,14 @@ import "Exploration.js" as Exploration
 
 ApplicationWindow {
     id: root
-    visible: true
-    visibility: Window.FullScreen
+    // Hosted by the shell, World waits hidden until the dock or a command asks for it; it then
+    // opens as one more window of the desktop.
+    visibility: root.worldHost ? Window.Hidden : Window.FullScreen
     color: Shell.Theme.desktop
     property bool worldHost: false
     onVisibleChanged: if (worldHost && !visible) archieBridge.requestMode("cerebra")
     onClosing: function(event) { if(worldHost) { event.accepted=false; hide() } }
-    title: "Archie Observatory"
+    title: root.worldHost ? "World" : "Archie Observatory"
 
     readonly property color ink: root.scene === "world" ? Shell.Theme.t1 : "#e9edf3"
     readonly property color soft: root.scene === "world" ? Shell.Theme.t2 : "#a4acb9"
@@ -380,7 +381,7 @@ ApplicationWindow {
             Text {
                 anchors.left: parent.left; anchors.leftMargin: 28
                 anchors.verticalCenter: parent.verticalCenter
-                text: "Archie"
+                text: root.worldHost ? "World" : "Archie"
                 color: root.ink
                 font.pixelSize: 19
                 font.weight: Font.DemiBold
@@ -390,7 +391,9 @@ ApplicationWindow {
             // The places, as one segmented control. The mode is told to the model, not
             // merely kept here: the model owns the morph between scenes and re-homes the
             // camera when it changes.
+            // In the shell, Orb and Forge are the shell's own apps: World's window has no other places.
             Rectangle {
+                visible: !root.worldHost
                 anchors.centerIn: parent
                 width: sceneRow.implicitWidth + 8; height: 38; radius: 19
                 color: root.scene === "world" ? Shell.Theme.raised : "#10141b"

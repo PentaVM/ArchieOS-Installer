@@ -9,7 +9,11 @@ Window {
     color:Theme.desktop
     readonly property string bridgeLink:desktop.bridge.link
     readonly property string orbDiagnostics:desktop.orbDiagnostics
-    Component.onCompleted: if (typeof shellColorMode !== "undefined") Theme.colorMode=shellColorMode
+    Component.onCompleted: {
+        if (typeof shellColorMode !== "undefined") Theme.colorMode=shellColorMode
+        // As the stage's desktop the shell starts bare: the orb, the bar and the dock.
+        if (typeof insideStage !== "undefined" && insideStage) Wm.closeAll()
+    }
     Main { id:desktop; objectName:"desktop"; anchors.fill:parent }
     // The profile goes through LiveOrb, which applies the preset and then the look chosen in
     // Settings (grade, brightness, nodes...). Applying it to lumen directly here as well
@@ -30,7 +34,7 @@ Window {
             if (action==="scene") {
                 if (value==="orb") desktop.run("app.orb")
                 else if (value==="forge") desktop.run("app.forge")
-                else if (value==="world") { desktop.actionNote="World sigue disponible en Observatory; no se convierte en una vista ficticia." }
+                // World is opened by the display itself, as a window beside the shell.
             } else if (action==="cinematic" || action==="preset") {
                 window.applyVisualProfile(value,true)
             } else if (action==="overlay" && typeof lumen !== "undefined") {

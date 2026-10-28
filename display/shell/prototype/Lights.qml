@@ -16,9 +16,11 @@ Item {
         id: row
         spacing: 8
         Repeater {
-            model: [ { c: Theme.tlClose, g: "×", act: "close" }, { c: Theme.tlMin, g: "–", act: "min" }, { c: Theme.tlZoom, g: "+", act: "zoom" } ]
+            model: [ { c: Theme.tlClose, g: "×", act: "close", n: "Cerrar" }, { c: Theme.tlMin, g: "–", act: "min", n: "Minimizar" }, { c: Theme.tlZoom, g: "+", act: "zoom", n: "Ampliar" } ]
             delegate: Rectangle {
                 width: 12; height: 12; radius: 6
+                Accessible.role: Accessible.Button
+                Accessible.name: modelData.n + " " + Wm.title(l.wid)
                 color: l.lit ? modelData.c : Theme.tlOff
                 border.width: 1; border.color: Qt.rgba(0, 0, 0, 0.22)
                 Text { anchors.centerIn: parent; anchors.verticalCenterOffset: -0.5; visible: group.containsMouse

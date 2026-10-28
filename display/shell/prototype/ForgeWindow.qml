@@ -57,6 +57,7 @@ AppWindow {
                     Text { anchors.horizontalCenter:parent.horizontalCenter; y:tile.y + tile.height + 12; width:parent.width - 8
                         horizontalAlignment:Text.AlignHCenter; text:modelData.name || ""; elide:Text.ElideRight; maximumLineCount:2; wrapMode:Text.Wrap
                         color:Theme.t1; font.family:Theme.font; font.pixelSize:12 }
+                    Accessible.role: Accessible.Button; Accessible.name: modelData.name || ""
                     MouseArea { id:ama; anchors.fill:parent; hoverEnabled:true; enabled:parent.ready; onClicked:fg.launch(modelData.id) } } } }
         Eyebrow { visible:fg.suggested.length>0; text:"Para instalar" }
         Repeater { model:fg.suggested

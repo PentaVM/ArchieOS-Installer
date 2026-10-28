@@ -51,6 +51,9 @@ public:
     Q_INVOKABLE QString sceneNamed(const QString &name) const;
     /// The displayd mode a scene runs in: WORLD watches, the others think.
     Q_INVOKABLE QString modeOf(const QString &scene) const;
+    /// The shell's own dock asking for a scene: the same checked, presentation-only command
+    /// the loopback channel takes, from inside the display. False when there is no such scene.
+    Q_INVOKABLE bool showScene(const QString &name);
 
 signals:
     void scenesChanged();

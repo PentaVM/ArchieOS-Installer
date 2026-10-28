@@ -64,6 +64,7 @@ Item {
     function actionContext() {
         return { nativeReady: live.ok,
             stageLauncher: typeof appCatalog !== "undefined" && appCatalog.canLaunch,
+            worldHost: typeof displayControl !== "undefined" && displayControl !== null && displayControl.scenes.indexOf("world") >= 0,
             compositorBlur: false }
     }
     // Explicit development replay: recordings cannot present themselves as live.
@@ -100,6 +101,9 @@ Item {
         case "app.orb": overlay = ""; Demo.bare = true; break
         case "app.vault": case "app.forge": case "app.sentry": case "app.set":
             overlay = ""; Wm.open(id.slice(4)); break
+        // World is the native globe, a window of its own beside these: the display opens it
+        // through the same checked, presentation-only command the voice and the CLI use.
+        case "app.world": overlay = ""; return displayControl.showScene("world")
         case "app.stage": {
             var stage = appCatalog.apps.filter(function(a) { return a.available && a.id.indexOf("archie-stage") >= 0 })
             if (!stage.length) { actionNote = "Stage no está instalado en el catálogo"; actionDenied(id, actionNote); return false }
@@ -193,8 +197,8 @@ Item {
         onMenuClicked: function(n,x) { if (root.overlay === "menu" && root.menuName === n) root.overlay = ""; else { root.menuName = n; menuDrop.x = x; root.overlay = "menu" } }
         onToggle: function(n) { root.toggle(n) } }
     Dock { id: dock; objectName: "dock"; z: 500; anchors.horizontalCenter: parent.horizontalCenter; y: parent.height - height - 14
-        onLaunched: function(id) { root.run(id === "orb" ? "app.orb" : "dock." + id) }
-        onMenuRequested: function(id,cx) { dockMenu.target = id; dockMenu.x = Math.max(8, Math.min(root.width - dockMenu.width - 8, dock.x + cx - dockMenu.width / 2)); root.overlay = "dockmenu" } }
+        onLaunched: function(id) { root.run(id === "orb" ? "app.orb" : id === "world" ? "app.world" : "dock." + id) }
+        onMenuRequested: function(id,cx) { if (id === "world") return; dockMenu.target = id; dockMenu.x = Math.max(8, Math.min(root.width - dockMenu.width - 8, dock.x + cx - dockMenu.width / 2)); root.overlay = "dockmenu" } }
     Rectangle { visible: Demo.orbNav; z: 700; anchors.horizontalCenter: parent.horizontalCenter; y: 40; width: navTxt.implicitWidth + 28; height: 30; radius: 15
         MouseArea { anchors.fill: parent; onClicked: Demo.orbNav = false }
         color: Theme.panel; border.width: 1; border.color: Theme.hair

@@ -37,6 +37,8 @@ def main():
     parser.add_argument('--display-port', type=int, default=17666)
     parser.add_argument('--native-port', type=int, default=17668)
     parser.add_argument('--keep', action='store_true')
+    parser.add_argument('--shell', action='store_true',
+                        help='open the ArchieOS shell (World in its dock) instead of World alone')
     parser.add_argument('--renew-navigation', action='store_true',
                         help='Owner desktop: renew expired hourly sessions while its window remains open')
     parser.add_argument('--session-seconds', type=int, default=3600, choices=range(1, 3601),
@@ -97,7 +99,9 @@ def main():
         (args.run_dir / 'summary.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
         print(json.dumps(summary, indent=2), flush=True)
         if args.native_bin:
-            native = start('archie-display', ['--scene', 'world', '--displayd-port', str(args.display_port),
+            # The shell opens World as a window of its desktop when its dock or a command asks.
+            view = ['--shell'] if args.shell else ['--scene', 'world']
+            native = start('archie-display', [*view, '--displayd-port', str(args.display_port),
                           '--control-port', str(args.native_port), '--imagery-source', args.source],
                           executable=args.native_bin)
             while native.poll() is None:

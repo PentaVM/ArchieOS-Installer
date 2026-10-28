@@ -5,6 +5,7 @@ function allowed(id, context) {
     context = context || {}
     if (id === "orb.nav") return context.nativeReady === true
     if (id === "app.stage") return context.stageLauncher === true
+    if (id === "app.world") return context.worldHost === true
     if (id.indexOf("dock.") === 0 || id.indexOf("window.") === 0)
         return ["vault","forge","sentry","stage","set"].indexOf(id.slice(id.indexOf(".") + 1)) >= 0
     // Vault reads the person's folders; it never creates, moves, copies or deletes a file.
@@ -26,6 +27,7 @@ function reason(id, context) {
         return "Vault solo lee archivos: no copia, mueve ni borra."
     if (id === "orb.nav") return "El viewport nativo aún no está disponible."
     if (id === "app.stage") return "El lanzador de Stage no está disponible en este host."
+    if (id === "app.world") return "World no está disponible en este host."
     if (id === "theme.blur") return "El compositor no ha declarado soporte de desenfoque."
     return "Acción sin contrato disponible."
 }

@@ -20,6 +20,13 @@ WaylandCompositor {
     required property int screenIndex
     required property int initialWidth
     required property int initialHeight
+    /// The desktop: the window of this app id and title lies under every other one, across
+    /// the whole screen and unframed, and the others are framed between its top bar and its
+    /// dock — ArchieOS's own shell, so its apps and the ones Archie uses share one screen.
+    required property string desktopApp
+    required property string desktopTitle
+    /// A local file Archie's voice rewrites with each line it says on its own; "" for none.
+    required property string narrationUrl
 
     socketName: stageSocketName
 
@@ -31,13 +38,86 @@ WaylandCompositor {
     readonly property color green: "#47d18b"
     readonly property color amber: "#f0b429"
     readonly property color red: "#f2626b"
+    // The shell's own window tokens (display/shell/prototype/Theme.qml, vivid dark), so a
+    // window the stage frames looks like one the shell does.
+    readonly property color winFill: "#050507"
+    readonly property color hair: Qt.rgba(1, 1, 1, 0.09)
+    readonly property color accent: "#1ec0ff"
+    readonly property color title1: "#ffffff"
+    readonly property color title2: "#cfcfdc"
+    readonly property string sans: "Inter, Noto Sans, DejaVu Sans, sans-serif"
+
+    // Bumped whenever a window comes, goes or is renamed: what is the desktop, and where the
+    // other windows tile, is read again.
+    property int layoutVersion: 0
+    // Whether the desktop has the keyboard: the shell's own windows (Sentry, Forge, Vault)
+    // are inside it, so the stage's windows step aside to the shelf while it is in use.
+    property bool desktopFocused: false
+    function setStashed(index, stashed) {
+        if (index < 0 || index >= shellSurfaces.count || shellSurfaces.get(index).stashed === stashed)
+            return
+        shellSurfaces.setProperty(index, "stashed", stashed)
+        compositor.layoutVersion++
+    }
+    function isDesktop(xdg) {
+        if (!xdg || !xdg.toplevel || compositor.desktopApp.length === 0)
+            return false
+        return xdg.toplevel.appId === compositor.desktopApp
+                && (compositor.desktopTitle.length === 0 || xdg.toplevel.title === compositor.desktopTitle)
+    }
+    readonly property bool hasDesktop: {
+        void compositor.layoutVersion
+        for (let i = 0; i < shellSurfaces.count; ++i)
+            if (compositor.isDesktop(shellSurfaces.get(i).shellSurface))
+                return true
+        return false
+    }
+    // Where window `index` stands among the framed ones, and how many there are.
+    function authorityTint() {
+        return compositor.stage.authority === "autonomous" ? compositor.cyan
+             : compositor.stage.authority === "operator" ? compositor.amber : compositor.red
+    }
+    function authorityLabel() {
+        return compositor.stage.authority === "autonomous" ? "ARCHIE TRABAJA"
+             : compositor.stage.authority === "operator" ? "CONTROL HUMANO" : "PAUSADO"
+    }
+    function windowSlot(index) {
+        void compositor.layoutVersion
+        let slot = 0, count = 0
+        for (let i = 0; i < shellSurfaces.count; ++i) {
+            if (compositor.isDesktop(shellSurfaces.get(i).shellSurface) || shellSurfaces.get(i).stashed)
+                continue
+            if (i < index)
+                ++slot
+            ++count
+        }
+        return { slot: slot, count: Math.max(1, count) }
+    }
 
     Component.onCompleted: stage.compositor = compositor
 
     // What each verb reads as, in the operator's language. The model hands over a verb, an
     // application and a count; there is no field that could carry typed text.
+    // What a person calls an application: the first part of its window's title (Photopea,
+    // not "Photopea | Online Photo Editor — Mozilla Firefox"), else its app id.
+    function appName(appId) {
+        // The desktop's own windows (World beside the shell) go by the desktop's name.
+        if (appId.length > 0 && appId === compositor.desktopApp && compositor.hasDesktop)
+            return compositor.desktopTitle
+        void compositor.layoutVersion
+        for (let i = 0; i < shellSurfaces.count; ++i) {
+            const xdg = shellSurfaces.get(i).shellSurface
+            if (!xdg || !xdg.toplevel || xdg.toplevel.appId !== appId || compositor.isDesktop(xdg))
+                continue
+            const name = xdg.toplevel.title.split(/ [|—–-] /)[0].trim()
+            if (name.length > 0 && name.length <= 40)
+                return name
+        }
+        return appId
+    }
+
     function captionText() {
-        const app = stage.captionApp
+        const app = compositor.appName(stage.captionApp)
         switch (stage.captionVerb) {
         case "moving": return "moviendo el puntero · " + app
         case "clicking": return "clic · " + app
@@ -47,6 +127,7 @@ WaylandCompositor {
         case "typing": return "escribiendo " + stage.captionCount + " caracteres · " + app
         case "pressing_keys": return "pulsando " + stage.captionCount + (stage.captionCount === 1 ? " tecla · " : " teclas · ") + app
         case "focusing": return "enfocando · " + app
+        case "drawing": return "dibujando · " + app
         case "observing": return "mirando · " + app
         case "interrupted": return "acción detenida · el control es tuyo"
         case "refused": return "rechazado · " + refusalText(stage.captionRefusal) + " · " + app
@@ -55,7 +136,8 @@ WaylandCompositor {
     }
 
     // The same verbs, past tense, for the strip of recent actions in the status line.
-    function activityText(entry) {
+    function activityText(raw) {
+        const entry = { verb: raw.verb, count: raw.count, refusal: raw.refusal, app: compositor.appName(raw.app) }
         switch (entry.verb) {
         case "moving": return "movió el puntero · " + entry.app
         case "clicking": return "clic · " + entry.app
@@ -65,6 +147,7 @@ WaylandCompositor {
         case "typing": return "escribió " + entry.count + " car. · " + entry.app
         case "pressing_keys": return (entry.count === 1 ? "tecla · " : "atajo · ") + entry.app
         case "focusing": return "enfocó · " + entry.app
+        case "drawing": return "dibujó · " + entry.app
         case "observing": return "miró · " + entry.app
         case "interrupted": return "detenida por ti · " + entry.app
         case "refused": return "no se hizo: " + refusalText(entry.refusal) + " · " + entry.app
@@ -90,9 +173,13 @@ WaylandCompositor {
     }
 
     // Tiles for n windows: one fills the desk, two share it, three give the first the left
-    // half, more form a grid. Space is kept for the status line above and the caption below.
+    // half, more form a grid. Space is kept for the status line above and the caption below,
+    // or, over the desktop, for its top bar and its dock.
     function tileFor(index, count, width, height) {
-        const top = 64, bottom = 104, side = 32, gap = 20
+        const top = compositor.hasDesktop ? 52 : 64
+        const bottom = compositor.hasDesktop ? 116 : 104
+        const side = compositor.hasDesktop ? 40 : 32
+        const gap = 20
         const w = width - 2 * side
         const h = height - top - bottom
         if (count <= 1)
@@ -115,7 +202,10 @@ WaylandCompositor {
     ListModel { id: shellSurfaces }
 
     XdgShell {
-        onToplevelCreated: (toplevel, xdgSurface) => shellSurfaces.append({ shellSurface: xdgSurface })
+        onToplevelCreated: (toplevel, xdgSurface) => {
+            shellSurfaces.append({ shellSurface: xdgSurface, stashed: false })
+            compositor.layoutVersion++
+        }
         // A menu is a surface of its own. The stage gives it an item under the window
         // it belongs to and puts it on the table, so the agent can name it.
         onPopupCreated: (popup, xdgSurface) => compositor.stage.addPopup(xdgSurface)
@@ -168,7 +258,9 @@ WaylandCompositor {
                     Scale { xScale: compositor.stage.viewZoom; yScale: compositor.stage.viewZoom }
                 ]
 
+                // The desk's own ground is below everything, the desktop included.
                 Rectangle {
+                    z: -3
                     anchors.fill: parent
                     gradient: Gradient {
                         GradientStop { position: 0.0; color: "#07101a" }
@@ -178,25 +270,66 @@ WaylandCompositor {
                 // A faint grid, so a zoom reads as moving closer rather than things growing.
                 Repeater {
                     model: Math.ceil(win.width / 64)
-                    Rectangle { required property int index; x: index * 64; width: 1; height: win.height; color: "#0a1420" }
+                    Rectangle { required property int index; z: -3; x: index * 64; width: 1; height: win.height; color: "#0a1420" }
                 }
                 Repeater {
                     model: Math.ceil(win.height / 64)
-                    Rectangle { required property int index; y: index * 64; height: 1; width: win.width; color: "#0a1420" }
+                    Rectangle { required property int index; z: -3; y: index * 64; height: 1; width: win.width; color: "#0a1420" }
                 }
 
                 Repeater {
+                    id: frames
                     model: shellSurfaces
                     delegate: Item {
                         id: frame
                         required property var shellSurface
+                        required property bool stashed
                         required property int index
-                        readonly property rect tile: compositor.tileFor(index, shellSurfaces.count, win.width, win.height)
+                        readonly property bool desktopRole: compositor.isDesktop(frame.shellSurface)
+                        readonly property var slot: compositor.windowSlot(index)
+                        readonly property rect tile: frame.desktopRole
+                            ? Qt.rect(0, 0, win.width, win.height)
+                            : compositor.tileFor(frame.slot.slot, frame.slot.count, win.width, win.height)
                         readonly property bool focused: compositor.stage.focusedItem === surfaceItem
+                        // The desktop's own top: its header and its edge are the shell's.
+                        readonly property int header: frame.desktopRole ? 0 : 35
+                        readonly property int edgeWidth: frame.desktopRole ? 0 : 1
+                        z: frame.desktopRole ? -1 : 0
                         x: tile.x
-                        y: tile.y
+                        y: tile.y + (frame.stashed ? 60 : 0)
                         width: tile.width
                         height: tile.height
+                        // On the shelf: out of sight and out of the tiling, still a live window.
+                        opacity: frame.stashed ? 0 : 1
+                        scale: frame.stashed ? 0.94 : 1
+                        visible: opacity > 0.01
+                        Behavior on opacity { NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
+                        Behavior on scale { NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
+                        onFocusedChanged: {
+                            if (frame.desktopRole)
+                                compositor.desktopFocused = frame.focused
+                            else if (frame.focused)
+                                compositor.setStashed(frame.index, false)
+                        }
+                        Connections {
+                            target: compositor
+                            function onDesktopFocusedChanged() {
+                                if (compositor.desktopFocused && !frame.desktopRole)
+                                    compositor.setStashed(frame.index, true)
+                            }
+                        }
+                        // Whatever Archie is working in comes back into view.
+                        Connections {
+                            target: frame.stashed ? compositor.stage : null
+                            function onFrameChanged() {
+                                // The desktop's own windows share its app id: acting on the desktop
+                                // is not acting on them.
+                                if (compositor.stage.captionOpacity > 0.5 && compositor.stage.captionVerb !== "refused"
+                                        && compositor.stage.captionApp === frame.appId() && !frame.desktopRole
+                                        && frame.appId() !== compositor.desktopApp)
+                                    compositor.setStashed(frame.index, false)
+                            }
+                        }
                         Behavior on x { NumberAnimation { duration: 380; easing.type: Easing.OutCubic } }
                         Behavior on y { NumberAnimation { duration: 380; easing.type: Easing.OutCubic } }
                         Behavior on width { NumberAnimation { duration: 380; easing.type: Easing.OutCubic } }
@@ -205,34 +338,79 @@ WaylandCompositor {
                         function appId() {
                             return frame.shellSurface && frame.shellSurface.toplevel ? frame.shellSurface.toplevel.appId : ""
                         }
+                        function title() {
+                            const t = frame.shellSurface && frame.shellSurface.toplevel ? frame.shellSurface.toplevel.title : ""
+                            return t.length ? t : (frame.appId().length ? frame.appId() : "aplicación sin nombre")
+                        }
                         function sendSize() {
                             if (frame.shellSurface && frame.shellSurface.toplevel)
-                                frame.shellSurface.toplevel.sendMaximized(Qt.size(Math.max(1, width - 2), Math.max(1, height - 36)))
+                                frame.shellSurface.toplevel.sendMaximized(Qt.size(Math.max(1, width - 2 * frame.edgeWidth),
+                                                                                  Math.max(1, height - frame.header - frame.edgeWidth)))
                         }
+                        onDesktopRoleChanged: sendSize()
                         onWidthChanged: sendSize()
                         onHeightChanged: sendSize()
                         onXChanged: compositor.stage.updateSurface(surfaceItem, appId())
                         onYChanged: compositor.stage.updateSurface(surfaceItem, appId())
 
+                        // A window the way the shell draws one: its fill, its hairline, the three
+                        // lights and the title in the middle of the header.
                         Rectangle {
+                            visible: !frame.desktopRole
                             anchors.fill: parent
-                            radius: 12
-                            color: "#0b1119"
+                            radius: 14
+                            color: compositor.winFill
                             border.width: 1
-                            border.color: frame.focused ? compositor.cyan : compositor.edge
+                            border.color: frame.focused ? Qt.rgba(30 / 255, 192 / 255, 1, 0.55) : compositor.hair
                             Behavior on border.color { ColorAnimation { duration: 200 } }
                         }
+                        Rectangle {
+                            visible: !frame.desktopRole
+                            x: 1; y: 34; width: frame.width - 2; height: 1
+                            color: compositor.hair
+                        }
                         Row {
+                            visible: !frame.desktopRole
                             x: 14
-                            y: 9
+                            y: 12
                             spacing: 8
-                            Rectangle { width: 8; height: 8; radius: 4; y: 5; color: frame.focused ? compositor.cyan : compositor.dim }
-                            Text {
-                                text: frame.appId().length ? frame.appId() : "aplicación sin nombre"
-                                color: compositor.soft
-                                font.family: "monospace"
-                                font.pixelSize: 13
+                            Repeater {
+                                model: ["#d9605a", "#d9a441", "#4fb67b"]
+                                Rectangle {
+                                    id: light
+                                    required property string modelData
+                                    required property int index
+                                    width: 11; height: 11; radius: 5.5
+                                    color: frame.focused || lightArea.containsMouse ? modelData : Qt.rgba(1, 1, 1, 0.17)
+                                    // A person's hand only: close asks the application to close, the
+                                    // middle one puts the window on the shelf.
+                                    MouseArea {
+                                        id: lightArea
+                                        anchors.fill: parent
+                                        anchors.margins: -3
+                                        hoverEnabled: true
+                                        enabled: compositor.stage.physicalInput && light.index < 2
+                                        onClicked: {
+                                            if (light.index === 0 && frame.shellSurface && frame.shellSurface.toplevel)
+                                                frame.shellSurface.toplevel.sendClose()
+                                            else if (light.index === 1)
+                                                compositor.setStashed(frame.index, true)
+                                        }
+                                    }
+                                }
                             }
+                        }
+                        Text {
+                            visible: !frame.desktopRole
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            y: 9
+                            width: Math.min(implicitWidth, frame.width - 160)
+                            elide: Text.ElideRight
+                            text: frame.title()
+                            color: frame.focused ? compositor.title1 : compositor.title2
+                            font.family: compositor.sans
+                            font.pixelSize: 13
+                            font.weight: Font.DemiBold
                         }
 
                         // The surface sits in its own container. When a client acknowledges the
@@ -241,10 +419,10 @@ WaylandCompositor {
                         // so the window cannot slide up over the header.
                         Item {
                             id: content
-                            x: 1
-                            y: 35
-                            width: frame.width - 2
-                            height: frame.height - 36
+                            x: frame.edgeWidth
+                            y: frame.header
+                            width: frame.width - 2 * frame.edgeWidth
+                            height: frame.height - frame.header - frame.edgeWidth
                             clip: true
                             ShellSurfaceItem {
                                 id: surfaceItem
@@ -256,6 +434,7 @@ WaylandCompositor {
                                 onSurfaceDestroyed: {
                                     compositor.stage.unregisterSurface(surfaceItem)
                                     shellSurfaces.remove(frame.index)
+                                    compositor.layoutVersion++
                                 }
                                 onXChanged: compositor.stage.updateSurface(surfaceItem, frame.appId())
                                 onYChanged: compositor.stage.updateSurface(surfaceItem, frame.appId())
@@ -269,7 +448,11 @@ WaylandCompositor {
                         }
                         Connections {
                             target: frame.shellSurface ? frame.shellSurface.toplevel : null
-                            function onAppIdChanged() { compositor.stage.updateSurface(surfaceItem, frame.appId()) }
+                            function onAppIdChanged() {
+                                compositor.stage.updateSurface(surfaceItem, frame.appId())
+                                compositor.layoutVersion++
+                            }
+                            function onTitleChanged() { compositor.layoutVersion++ }
                         }
                     }
                 }
@@ -277,8 +460,151 @@ WaylandCompositor {
 
             // ---- Screen space: never zoomed. ----
 
+            // Archie's own presses move no keyboard focus, so where they land is watched instead:
+            // a press on the desktop, outside every window, is the desktop in use too.
+            Item {
+                id: pressWatch
+                // How bright the brightest ripple was last frame: a new press is one that is
+                // brighter than that (the camera moves ripples, so their place says nothing).
+                property real last: 0
+                Connections {
+                    target: compositor.hasDesktop ? compositor.stage : null
+                    function onFrameChanged() {
+                        const ripples = compositor.stage.ripples
+                        // The newest press is the brightest ripple; a slow frame may already
+                        // find it half faded.
+                        let fresh = null
+                        for (let i = 0; i < ripples.length; ++i)
+                            if (!fresh || ripples[i].opacity > fresh.opacity)
+                                fresh = ripples[i]
+                        const brightest = fresh ? fresh.opacity : 0
+                        const pressed = brightest > pressWatch.last + 0.05
+                        pressWatch.last = brightest
+                        if (!pressed)
+                            return
+                        for (let i = 0; i < frames.count; ++i) {
+                            const window = frames.itemAt(i)
+                            if (!window || !window.visible || window.desktopRole)
+                                continue
+                            const at = window.mapFromItem(null, fresh.x, fresh.y)
+                            if (at.x >= 0 && at.y >= 0 && at.x <= window.width && at.y <= window.height)
+                                return
+                        }
+
+                        for (let i = 0; i < shellSurfaces.count; ++i)
+                            if (!compositor.isDesktop(shellSurfaces.get(i).shellSurface))
+                                compositor.setStashed(i, true)
+                    }
+                }
+            }
+
+            // The shelf: windows that stepped aside while the desktop was in use, one press away.
+            Row {
+                visible: compositor.hasDesktop
+                x: 24
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 96
+                spacing: 8
+                z: 2
+                Repeater {
+                    model: shellSurfaces
+                    delegate: Rectangle {
+                        id: shelved
+                        required property var shellSurface
+                        required property bool stashed
+                        required property int index
+                        visible: shelved.stashed && !compositor.isDesktop(shelved.shellSurface)
+                        width: shelvedText.implicitWidth + 30
+                        height: 30
+                        radius: 15
+                        color: shelfArea.containsMouse ? "#ee101015" : "#cc050507"
+                        border.color: compositor.hair
+                        Row {
+                            anchors.centerIn: parent
+                            spacing: 7
+                            Rectangle { width: 6; height: 6; radius: 3; color: compositor.accent; anchors.verticalCenter: parent.verticalCenter }
+                            Text {
+                                id: shelvedText
+                                text: {
+                                    void compositor.layoutVersion
+                                    const top = shelved.shellSurface && shelved.shellSurface.toplevel
+                                    const title = top ? shelved.shellSurface.toplevel.title : ""
+                                    const name = title.split(/ [|—–-] /)[0].trim()
+                                    return name.length ? name : (top ? shelved.shellSurface.toplevel.appId : "")
+                                }
+                                color: compositor.title2
+                                font.family: compositor.sans
+                                font.pixelSize: 12
+                            }
+                        }
+                        MouseArea {
+                            id: shelfArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: compositor.setStashed(shelved.index, false)
+                        }
+                    }
+                }
+            }
+
+            // Over the desktop, who holds the stage and the newest thing Archie did, in the corner
+            // beside its dock; its top bar keeps the shell's own status.
+            Row {
+                visible: compositor.hasDesktop && compositor.stage.surfaceCount > 1
+                anchors.right: parent.right
+                anchors.rightMargin: 24
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 44
+                spacing: 8
+                z: 2
+                // The newest thing Archie did, beside who holds the stage.
+                Repeater {
+                    model: compositor.stage.activity.slice(0, 1)
+                    delegate: Rectangle {
+                        id: lastChip
+                        required property var modelData
+                        opacity: modelData.opacity
+                        width: lastRow.implicitWidth + 18
+                        height: 26
+                        radius: 13
+                        color: "#cc050507"
+                        border.color: compositor.hair
+                        Row {
+                            id: lastRow
+                            anchors.centerIn: parent
+                            spacing: 6
+                            Rectangle {
+                                width: 6; height: 6; radius: 3
+                                anchors.verticalCenter: parent.verticalCenter
+                                color: lastChip.modelData.verb === "refused" ? compositor.amber
+                                       : lastChip.modelData.verb === "interrupted" ? compositor.red : compositor.green
+                            }
+                            Text { text: compositor.activityText(lastChip.modelData); color: compositor.title2; font.pixelSize: 11 }
+                        }
+                    }
+                }
+                Rectangle {
+                    width: deskPillText.implicitWidth + 22
+                    height: 26
+                    radius: 13
+                    color: compositor.hasDesktop ? "#cc050507" : "transparent"
+                    border.color: compositor.authorityTint()
+                    Text {
+                        id: deskPillText
+                        anchors.centerIn: parent
+                        text: compositor.authorityLabel()
+                        color: compositor.authorityTint()
+                        font.family: "monospace"
+                        font.pixelSize: 11
+                        font.bold: true
+                        font.letterSpacing: 1.5
+                    }
+                }
+            }
+
             // The status line.
             Rectangle {
+                visible: !compositor.hasDesktop
                 width: parent.width
                 height: 48
                 color: "#cc070c12"
@@ -347,19 +673,16 @@ WaylandCompositor {
                         font.pixelSize: 11
                     }
                     Rectangle {
-                        readonly property color tint: compositor.stage.authority === "autonomous" ? compositor.cyan
-                                                      : compositor.stage.authority === "operator" ? compositor.amber : compositor.red
                         width: authorityText.implicitWidth + 22
                         height: 26
                         radius: 13
-                        color: "transparent"
-                        border.color: tint
+                        color: compositor.hasDesktop ? "#cc050507" : "transparent"
+                        border.color: compositor.authorityTint()
                         Text {
                             id: authorityText
                             anchors.centerIn: parent
-                            text: compositor.stage.authority === "autonomous" ? "ARCHIE TRABAJA"
-                                  : compositor.stage.authority === "operator" ? "CONTROL HUMANO" : "PAUSADO"
-                            color: parent.tint
+                            text: compositor.authorityLabel()
+                            color: compositor.authorityTint()
                             font.family: "monospace"
                             font.pixelSize: 11
                             font.bold: true
@@ -459,7 +782,7 @@ WaylandCompositor {
                 opacity: compositor.stage.captionOpacity
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.bottom: parent.bottom
-                anchors.bottomMargin: 30
+                anchors.bottomMargin: compositor.hasDesktop ? 124 : 30
                 width: Math.min(parent.width - 80, captionLabel.implicitWidth + 48)
                 height: 52
                 radius: 26
@@ -471,6 +794,82 @@ WaylandCompositor {
                     text: "Archie · " + compositor.captionText()
                     color: compositor.ink
                     font.pixelSize: 19
+                }
+            }
+
+            // What Archie says on its own while it works, as a subtitle while it is said. The
+            // voice writes each line whole to a file; it shows for about as long as it takes
+            // to say, and the newest line replaces the one before.
+            Item {
+                id: subtitle
+                property string text: ""
+                property double shownAt: 0
+                property double lastAt: 0
+                property double now: 0
+                readonly property double showFor: Math.min(14000, 2200 + subtitle.text.length * 75)
+                readonly property bool shown: subtitle.text.length > 0 && subtitle.now - subtitle.shownAt < subtitle.showFor
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: (compositor.hasDesktop ? 124 : 30) + 66
+                width: Math.min(parent.width * 0.72, subtitleText.implicitWidth + 64)
+                height: subtitleText.implicitHeight + 40
+                opacity: subtitle.shown ? 1 : 0
+                visible: opacity > 0.01
+                Behavior on opacity { NumberAnimation { duration: 260 } }
+                Timer {
+                    interval: 250
+                    repeat: true
+                    running: compositor.narrationUrl.length > 0
+                    onTriggered: {
+                        subtitle.now = Date.now()
+                        const request = new XMLHttpRequest()
+                        request.onreadystatechange = function() {
+                            if (request.readyState !== XMLHttpRequest.DONE || request.responseText.length === 0)
+                                return
+                            let line
+                            try { line = JSON.parse(request.responseText) } catch (e) { return }
+                            if (!line || typeof line.text !== "string" || typeof line.at_ms !== "number")
+                                return
+                            if (line.at_ms !== subtitle.lastAt) {
+                                subtitle.lastAt = line.at_ms
+                                subtitle.text = line.text
+                                // A line written while the stage was not looking is not news.
+                                subtitle.shownAt = Math.min(Date.now(), line.at_ms)
+                            }
+                        }
+                        request.open("GET", compositor.narrationUrl)
+                        request.send()
+                    }
+                }
+                Rectangle {
+                    anchors.fill: parent
+                    radius: 16
+                    color: "#e6050507"
+                    border.color: compositor.hair
+                }
+                Text {
+                    x: 32
+                    y: -9
+                    text: "ARCHIE"
+                    color: compositor.accent
+                    font.family: "monospace"
+                    font.pixelSize: 11
+                    font.bold: true
+                    font.letterSpacing: 2
+                    style: Text.Outline
+                    styleColor: "#050507"
+                }
+                Text {
+                    id: subtitleText
+                    anchors.centerIn: parent
+                    width: Math.min(implicitWidth, compositor.stage ? win.width * 0.72 - 64 : implicitWidth)
+                    wrapMode: Text.Wrap
+                    horizontalAlignment: Text.AlignHCenter
+                    text: subtitle.text
+                    color: compositor.title1
+                    font.family: compositor.sans
+                    font.pixelSize: 22
+                    lineHeight: 1.15
                 }
             }
 

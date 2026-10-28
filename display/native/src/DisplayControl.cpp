@@ -86,6 +86,15 @@ QString DisplayControl::sceneNamed(const QString &name) const
     return scenes().contains(wanted) ? wanted : QString();
 }
 
+bool DisplayControl::showScene(const QString &name)
+{
+    const QString scene = sceneNamed(name);
+    if (scene.isEmpty())
+        return false;
+    emit commandReceived(QStringLiteral("scene"), scene, true);
+    return true;
+}
+
 QString DisplayControl::modeOf(const QString &scene) const
 {
     for (const auto &entry : sceneTable)
