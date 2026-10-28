@@ -52,8 +52,11 @@ command -v archie-session >/dev/null && archie-session down >/dev/null 2>&1 || t
 mkdir -p "$RUN_DIR"
 chmod 700 "$RUN_DIR"
 PROFILE=$RUN_DIR/firefox
-# A browser left from an earlier take holds the profile's lock.
+# A browser left from an earlier take holds the profile's lock, and World's daemons from one
+# that was cut short hold their private ports (17666/17667): the new take's World cannot start.
 pkill -f -- "--profile $PROFILE" 2>/dev/null || true
+pkill -u "$(id -u)" -f -- "archie-worldd --bind 127.0.0.1:17667" 2>/dev/null || true
+pkill -u "$(id -u)" -f -- "archie-displayd .*--bind 127.0.0.1:17666" 2>/dev/null || true
 rm -rf "${PROFILE:?}"
 mkdir -p "$PROFILE" "$RUN_DIR/downloads"
 cat > "$PROFILE/user.js" <<EOF

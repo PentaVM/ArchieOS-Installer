@@ -10,8 +10,10 @@
 //! - Photopea declares nothing to the accessibility bus; it draws its whole interface in one
 //!   canvas. Where its tools are is read off a capture: the page starts where its own grey
 //!   (71, 71, 71) does, and the tool column below it is a fixed ladder.
-//! - The brush is chosen by clicking it, and that click is what gives the page the keyboard;
-//!   `[` then thins the brush, from 15 pixels to 8 in three presses and by one after that.
+//! - The brush is clicked where the ladder puts it, and that click is what gives the page the
+//!   keyboard; `b` then takes the brush even where the column is drawn at another scale (under
+//!   WSLg the click lands on the blur tool), and `[` thins it, from 15 pixels to 8 in three
+//!   presses and by one after that.
 //! - A stroke the compositor executed is not a mark on the paper. After the first lines the
 //!   paper is looked at again, and a white sheet means the brush was not in hand.
 

@@ -38,6 +38,11 @@
 #   STROKE_SPEED  how fast a drawn line goes, pixels a second       default: the tempo's
 #   DRAW_SECONDS  how long a painting is planned to take            default: 150
 #   PICTURES      where the paintings Archie can draw are           default: archie-arena's
+#   STAGE_ARGS    more stage flags, e.g. "--windowed --width 1600 --height 900" or
+#                 "--grab DIR/stage.png --grab-every-ms 5000" (the stage's own window, numbered)
+#   REHEARSE      a painting to draw with no voice and no model ("the Mona Lisa"): the
+#                 desktop, World and the drawing exactly as in a take, nothing listened to
+#   REHEARSE_LANGUAGE  the narration's language in a rehearsal (en or es)   default: en
 set -eu
 
 GRADE=${1:-}
@@ -46,7 +51,8 @@ case "$GRADE" in
     *) echo "run-archie: say how private this is: run-archie.sh public (or internal)" >&2; exit 64 ;;
 esac
 # ARCHIE_VOICE_ENDPOINT names a reasoning model on this machine; then no key is needed.
-[ -n "${NEBIUS_TOKEN_FACTORY_KEY:-}" ] || [ -n "${ARCHIE_VOICE_ENDPOINT:-}" ] || {
+# A rehearsal asks no model anything.
+[ -n "${REHEARSE:-}" ] || [ -n "${NEBIUS_TOKEN_FACTORY_KEY:-}" ] || [ -n "${ARCHIE_VOICE_ENDPOINT:-}" ] || {
     echo "run-archie: set NEBIUS_TOKEN_FACTORY_KEY, or ARCHIE_VOICE_ENDPOINT for a local model" >&2
     exit 64
 }
@@ -85,9 +91,12 @@ if [ -z "${PULSE_SERVER:-}" ]; then
         export PULSE_SERVER="unix:$XDG_RUNTIME_DIR/pulse/native"
     fi
 fi
-[ -n "$ASR_MODEL" ] && [ -f "$ASR_MODEL" ] || { echo "run-archie: no ASR model; run nemo-speech pull nemotron-3.5 or set ASR_MODEL" >&2; exit 1; }
-[ -f "$PIPER_MODEL" ] || { echo "run-archie: no Spanish Piper model at $PIPER_MODEL; run scripts/models/install-piper-voices.sh" >&2; exit 1; }
-if [ "$PIPER" = "$REPO/scripts/models/piper-json-bridge.py" ]; then
+# A rehearsal neither listens nor speaks: it needs no recogniser and no voices.
+if [ -z "${REHEARSE:-}" ]; then
+    [ -n "$ASR_MODEL" ] && [ -f "$ASR_MODEL" ] || { echo "run-archie: no ASR model; run nemo-speech pull nemotron-3.5 or set ASR_MODEL" >&2; exit 1; }
+    [ -f "$PIPER_MODEL" ] || { echo "run-archie: no Spanish Piper model at $PIPER_MODEL; run scripts/models/install-piper-voices.sh" >&2; exit 1; }
+fi
+if [ -z "${REHEARSE:-}" ] && [ "$PIPER" = "$REPO/scripts/models/piper-json-bridge.py" ]; then
     PIPER_PYTHON_BIN=$(command -v "$PIPER_PYTHON" 2>/dev/null || true)
     [ -n "$PIPER_PYTHON_BIN" ] || { echo "run-archie: Python runtime not found: $PIPER_PYTHON" >&2; exit 1; }
     PATH=$(dirname "$PIPER_PYTHON_BIN"):$PATH
@@ -115,6 +124,8 @@ set -- --socket-name "$SOCKET_NAME" --control "$RUN_DIR/control.sock" --key-file
 [ -n "${SCREEN:-}" ] && set -- "$@" --screen "$SCREEN"
 [ -n "${TEMPO:-}" ] && set -- "$@" --tempo "$TEMPO"
 [ -n "${STROKE_SPEED:-}" ] && set -- "$@" --stroke-speed "$STROKE_SPEED"
+# shellcheck disable=SC2086 # STAGE_ARGS is a list of flags on purpose.
+[ -n "${STAGE_ARGS:-}" ] && set -- "$@" $STAGE_ARGS
 XDG_RUNTIME_DIR="$RUN_DIR/xdg" WAYLAND_DISPLAY="$HOST_WAYLAND" QT_QPA_PLATFORM=wayland \
     "$STAGE" "$@" > "$RUN_DIR/stage.log" 2>&1 &
 STAGE_PID=$!
@@ -165,6 +176,18 @@ if [ "${DESKTOP:-0}" = 1 ]; then
     trap 'kill "$SHELL_PID" "$STAGE_PID" 2>/dev/null || true' EXIT INT TERM
 fi
 
+if [ -n "${REHEARSE:-}" ]; then
+    # The drawing the conversation would start, on its own, narrated in subtitles.
+    set -- draw "$REHEARSE" --language "${REHEARSE_LANGUAGE:-en}" \
+        --socket "$RUN_DIR/control.sock" --key-file "$RUN_DIR/key" --policy "$POLICY" \
+        --stage-display "$SOCKET_NAME" --app-log "$RUN_DIR/apps.log" \
+        --subtitles "$NARRATION" --seconds "${DRAW_SECONDS:-150}"
+    [ -n "${PICTURES:-}" ] && set -- "$@" --pictures "$PICTURES"
+    XDG_RUNTIME_DIR="$RUN_DIR/xdg" OMP_WAIT_POLICY=PASSIVE \
+        QT_QUICK_BACKEND=software LIBGL_ALWAYS_SOFTWARE=1 QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 \
+        "$ARCHIE_VOICE" "$@"
+    exit
+fi
 set -- converse --grade "$GRADE" --asr-model "$ASR_MODEL" \
     --voice-engine piper --piper "$PIPER" --piper-model "$PIPER_MODEL" \
     --socket "$RUN_DIR/control.sock" --key-file "$RUN_DIR/key" --policy "$POLICY" \

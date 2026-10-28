@@ -9,7 +9,8 @@
 //!    in hand ([`archie_paint::photopea::url`]); nothing else is opened, and only the
 //!    stage policy's Photopea entry may be used.
 //! 2. Archie looks at the window until Photopea's page and its paper are there, clicks the
-//!    brush where Photopea keeps it, and thins it with `[`.
+//!    brush where Photopea keeps it, takes it with `b` (whatever the column's scale), and
+//!    thins it with `[`.
 //! 3. The painting becomes lines that follow its forms ([`archie_paint::flow_plan`]), in the
 //!    two inks; `x` swaps them halfway.
 //! 4. The lines go through the stage gate in batches ([`archie_paint::session::perform`]):
@@ -688,6 +689,11 @@ mod job {
     ) -> Result<(), String> {
         let (x, y) = photopea::brush_at(page_top);
         seat.click(x, y, "pick up Photopea's brush").await?;
+        // The click gives the page the keyboard; B is the brush whatever the column's scale,
+        // which is not the same under every display (under WSLg the click lands two tools
+        // lower, on the blur tool, and the lines leave no ink).
+        let brush = KeyChord::parse("b").ok_or("no b key")?;
+        seat.key(brush, "take the brush").await?;
         let thinner = KeyChord::parse("[").ok_or("no [ key")?;
         for _ in 0..photopea::thinner_presses(pen) {
             seat.key(thinner.clone(), "thin the brush").await?;

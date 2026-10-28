@@ -144,6 +144,10 @@ def main():
             while all(p.poll() is None for p in processes):
                 time.sleep(1)
     finally:
+        # Ctrl+C reaches this process and run-archie.sh's trap sends SIGTERM as well: a second
+        # signal here would cut the cleanup short and leave the daemons holding their ports.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         for child in processes:
             child.terminate()
         for child in processes:
