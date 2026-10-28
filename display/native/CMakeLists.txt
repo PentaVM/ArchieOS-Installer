@@ -119,6 +119,18 @@ qt_add_resources(archie-display "archie-shell-assets"
     BASE "${CMAKE_CURRENT_SOURCE_DIR}/../shell"
     FILES ${ARCHIE_SHELL_QML} ${ARCHIE_SHELL_JS} ${ARCHIE_SHELL_FONTS}
           "${CMAKE_CURRENT_SOURCE_DIR}/../shell/prototype/qmldir")
+# The ArchieOS brand (logo package v3.5, design by Xavi): wordmarks, the app icon and the
+# three-second boot animation as 90 JPEG frames at 30 fps.
+file(GLOB ARCHIE_BRAND CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../shell/brand/*.png"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../shell/brand/boot/*.jpg")
+qt_add_resources(archie-display "archie-brand" BIG_RESOURCES
+    PREFIX "/archie/shell"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/../shell"
+    FILES ${ARCHIE_BRAND})
+if(WIN32)
+    enable_language(RC)
+    target_sources(archie-display PRIVATE archie-display.rc)
+endif()
 # Every file in presets/ is a look preset; the display lists them from its resources, so
 # adding one is adding the file.
 file(GLOB archie_presets RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" CONFIGURE_DEPENDS

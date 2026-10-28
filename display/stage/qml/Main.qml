@@ -628,7 +628,7 @@ WaylandCompositor {
                     anchors.verticalCenter: parent.verticalCenter
                     x: 24
                     spacing: 18
-                    Text { text: "ARCHIE·OS"; color: compositor.ink; font.pixelSize: 15; font.weight: Font.DemiBold; font.letterSpacing: 4 }
+                    Image { source: "qrc:/archie/brand/archieos-logo-dark.png"; height: 22; fillMode: Image.PreserveAspectFit; smooth: true; mipmap: true; sourceSize.height: 88; anchors.verticalCenter: parent.verticalCenter }
                     Text { text: "STAGE"; color: compositor.dim; font.family: "monospace"; font.pixelSize: 12; font.letterSpacing: 3; anchors.verticalCenter: parent.verticalCenter }
                 }
                 // What Archie did lately, newest first: someone who looks up, or who has just
@@ -712,7 +712,8 @@ WaylandCompositor {
                 visible: compositor.stage.surfaceCount === 0
                 anchors.centerIn: parent
                 spacing: 10
-                Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Archie Stage"; color: compositor.ink; font.pixelSize: 34; font.weight: Font.Light; font.letterSpacing: 3 }
+                Image { anchors.horizontalCenter: parent.horizontalCenter; source: "qrc:/archie/brand/archieos-logo-dark.png"; height: 64; fillMode: Image.PreserveAspectFit; smooth: true; mipmap: true; sourceSize.height: 256 }
+                Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Stage"; color: compositor.ink; font.pixelSize: 24; font.weight: Font.Light; font.letterSpacing: 3 }
                 Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Las aplicaciones que Archie use aparecerán aquí."; color: compositor.soft; font.pixelSize: 16 }
                 Text {
                     anchors.horizontalCenter: parent.horizontalCenter

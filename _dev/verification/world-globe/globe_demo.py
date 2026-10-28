@@ -39,6 +39,9 @@ def main():
     parser.add_argument('--display-port', type=int, default=17666)
     parser.add_argument('--native-port', type=int, default=17668)
     parser.add_argument('--keep', action='store_true')
+    # Host-only settings for the shell's World console (archie-display --archie-root etc.).
+    parser.add_argument('--native-arg', action='append', default=[], metavar='ARG',
+                        help='one more argument for archie-display, repeatable')
     parser.add_argument('--shell', action='store_true',
                         help='open the ArchieOS shell (World in its dock) instead of World alone')
     parser.add_argument('--renew-navigation', action='store_true',
@@ -117,7 +120,7 @@ def main():
             view = ['--shell'] if args.shell else ['--scene', 'world']
             native = start('archie-display', [*view, '--displayd-port', str(args.display_port),
                           '--control-port', str(args.native_port), '--imagery-source', args.source,
-                          '--shell-bridge', str(args.bin_dir / 'archie-shell-bridge')],
+                          '--shell-bridge', str(args.bin_dir / 'archie-shell-bridge'), *args.native_arg],
                           executable=args.native_bin)
             while native.poll() is None:
                 if any(p.poll() is not None for p in processes if p is not native):

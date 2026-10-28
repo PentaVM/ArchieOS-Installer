@@ -1,6 +1,6 @@
 import QtQuick
 
-// Dock: Orb, Vault, Forge, Sentry, World, Stage, Ajustes, in that order. 56 px icons, white line glyph
+// Dock: Orb, World, Vault, Forge, Sentry, Stage, Ajustes, in that order. 56 px icons, white line glyph
 // on a solid colour under a 165° wash. A 4 px dot under apps whose window is open (dim while it is
 // minimised); the app in front has a 1.5 px accent outline 3 px away. Clicking opens, restores,
 // raises or minimises its window (Wm.dockClick).

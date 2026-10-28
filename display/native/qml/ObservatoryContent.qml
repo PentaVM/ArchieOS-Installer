@@ -354,14 +354,15 @@ Item {
             Layout.fillWidth: true
             Layout.preferredHeight: root.embedded ? 0 : 64
 
-            Text {
+            // The ArchieOS wordmark: dark ink in the light theme, neon in the dark one.
+            Image {
+                objectName: "observatory.logo"
                 anchors.left: parent.left; anchors.leftMargin: 28
                 anchors.verticalCenter: parent.verticalCenter
-                text: "Archie"
-                color: root.ink
-                font.pixelSize: 19
-                font.weight: Font.DemiBold
-                font.letterSpacing: 0.2
+                source: Shell.Theme.logo
+                height: 28; fillMode: Image.PreserveAspectFit
+                sourceSize.height: 112; smooth: true; mipmap: true
+                Accessible.role: Accessible.StaticText; Accessible.name: "ArchieOS"
             }
 
             // The places, as one segmented control. The mode is told to the model, not
@@ -437,16 +438,6 @@ Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: 0
-
-            WorldHud {
-                id:worldHud
-                visible:root.scene === "world" && root.worldHudVisible
-                Layout.preferredWidth:Math.min(370,root.width*0.36)
-                Layout.fillHeight:true
-                controller:archieBridge
-                stream:globeStream
-                worldActive:root.scene === "world" && root.visible
-            }
 
             Item {
                 Layout.fillWidth: true
@@ -897,6 +888,18 @@ Item {
                         Text {textFormat:Text.PlainText;width:parent.width;text:worldHud.imageryCaption;color:Shell.Theme.t1;font.family:Shell.Theme.font;font.pixelSize:11;wrapMode:Text.Wrap}
                         Text {width:parent.width;text:"Arrastrar · órbita   Rueda · escala   Puntos · datos   Esc · volver  ·  Balizas: ayuda visual, no tamaño físico";color:Shell.Theme.t3;font.family:Shell.Theme.font;font.pixelSize:10;wrapMode:Text.Wrap}
                     }
+                }
+                // World's minimal HUD floats over the globe: search, navigation rail and
+                // panels that open only when asked. Above the globe's hands, it only takes
+                // the pointer where it draws something.
+                WorldHud {
+                    id:worldHud
+                    anchors.fill:parent
+                    visible:root.scene === "world" && root.worldHudVisible
+                    controller:archieBridge
+                    stream:globeStream
+                    view:view
+                    worldActive:root.scene === "world" && root.visible
                 }
 
                 Rectangle {

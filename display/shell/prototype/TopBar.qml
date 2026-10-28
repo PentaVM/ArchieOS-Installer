@@ -48,8 +48,9 @@ Rectangle {
     Row {
         x: 14; anchors.verticalCenter: parent.verticalCenter; spacing: 4
         Row { spacing: 8; rightPadding: 14; anchors.verticalCenter: parent.verticalCenter
-            Icon { name: "archie"; size: 18; color: Theme.t1; anchors.verticalCenter: parent.verticalCenter }
-            Text { text: "Archie"; color: Theme.t1; font.family: Theme.font; font.pixelSize: 14; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter } }
+            Image { objectName: "bar.logo"; source: Theme.logo; height: 20; fillMode: Image.PreserveAspectFit; smooth: true; mipmap: true
+                sourceSize.height: 80; anchors.verticalCenter: parent.verticalCenter
+                Accessible.role: Accessible.StaticText; Accessible.name: "ArchieOS" } }
         Text { text: bar.app; rightPadding: 12; color: Theme.t1; font.family: Theme.font; font.pixelSize: 13; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
         MenuItem { label: "Archivo"; anchors.verticalCenter: parent.verticalCenter } MenuItem { label: "Editar"; anchors.verticalCenter: parent.verticalCenter } MenuItem { label: "Vista"; anchors.verticalCenter: parent.verticalCenter } MenuItem { label: "Ir"; anchors.verticalCenter: parent.verticalCenter } MenuItem { label: "Ventana"; anchors.verticalCenter: parent.verticalCenter }
     }

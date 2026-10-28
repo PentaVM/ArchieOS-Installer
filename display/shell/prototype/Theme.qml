@@ -66,6 +66,12 @@ QtObject {
     readonly property color info: light ? "#005166" : "#83d9ee"
     readonly property color unk: t3
 
+    // ArchieOS brand (logo package v3.5, design by Xavi): mint neon on deep matte black.
+    // The light theme carries the dark-ink wordmark; the dark theme carries the neon one.
+    readonly property color brandMint: "#20d79d"
+    readonly property color brandInk: "#0a0a0a"
+    readonly property url logo: Qt.resolvedUrl(light ? "../brand/archieos-logo-light.png" : "../brand/archieos-logo-dark.png")
+    readonly property url mark: Qt.resolvedUrl(light ? "../brand/archieos-icon-light-256.png" : "../brand/archieos-icon-256.png")
     readonly property color onAccent: light ? "#ffffff" : "#07131c"
     readonly property color dockInk: "#ffffff"
     readonly property color track: light ? "#d9e3ed" : Qt.rgba(1,1,1,0.10)

@@ -43,10 +43,23 @@ int main(int argc,char **argv) {
     QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
     QGuiApplication app(argc,argv);QQmlEngine engine;ProjectionReader reader;
     reader.exploration={{QStringLiteral("source"),QStringLiteral("live")},{QStringLiteral("jobs"),QVariantList{job(QStringLiteral("first"))}}};
-    QQmlComponent component(&engine,QUrl(QStringLiteral("qrc:/world-test/WorldHud.qml")));
+    // The minimal HUD: search, rail, layers, ruler, console, and the reader as its drawer.
+    QQmlComponent minimal(&engine,QUrl(QStringLiteral("qrc:/world-test/WorldHud.qml")));
+    auto *overlay=minimal.createWithInitialProperties({{QStringLiteral("controller"),QVariant::fromValue(&reader)},{QStringLiteral("worldActive"),true}});
+    if(!overlay)qCritical()<<minimal.errors();
+    check(overlay,"production minimal WorldHud loads with actual shared shell resources");
+    for(const auto *name:{"world.search","world.rail","world.layers","world.ruler","world.console"})
+        check(findNotice(qobject_cast<QQuickItem*>(overlay),QString::fromLatin1(name)),"minimal HUD carries its search, rail and on-demand panels");
+    check(overlay->property("panel").toString().isEmpty()&&!overlay->property("measuring").toBool(),"World opens with every panel closed");
+    QMetaObject::invokeMethod(overlay,"search",Q_ARG(QVariant,QVariant(QStringLiteral("-33.45, -70.66"))));
+    check(reader.plans==1,"coordinates in the search box frame the camera there");
+    QMetaObject::invokeMethod(overlay,"search",Q_ARG(QVariant,QVariant(QStringLiteral("Santiago"))));
+    check(reader.plans==1&&!overlay->property("searchNote").toString().isEmpty(),"a place name without the console says what it needs instead of guessing");
+    delete overlay;reader.plans=0;
+    QQmlComponent component(&engine,QUrl(QStringLiteral("qrc:/world-test/WorldDetails.qml")));
     auto *hud=component.createWithInitialProperties({{QStringLiteral("controller"),QVariant::fromValue(&reader)},{QStringLiteral("worldActive"),true}});
     if(!hud)qCritical()<<component.errors();
-    check(hud,"production WorldHud loads with actual shared shell resources");
+    check(hud,"production WorldDetails loads with actual shared shell resources");
     check(reader.plans==0,"World startup retains global home even when saved jobs exist");
     emit reader.explorationChanged();check(reader.plans==0,"poll cannot reclaim the navigation camera");
     reader.exploration.insert(QStringLiteral("jobs"),QVariantList{job(QStringLiteral("first"),4200)});

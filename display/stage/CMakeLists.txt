@@ -56,6 +56,12 @@ if(ARCHIE_STAGE_BUILD_COMPOSITOR)
         QML_FILES
             qml/Main.qml
     )
+    # The ArchieOS mark (logo package v3.5, design by Xavi), shared with the shell.
+    qt_add_resources(archie-stage "archie-stage-brand"
+        PREFIX "/archie/brand"
+        BASE "${CMAKE_CURRENT_SOURCE_DIR}/../shell/brand"
+        FILES "${CMAKE_CURRENT_SOURCE_DIR}/../shell/brand/archieos-logo-dark.png"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../shell/brand/archieos-app-512.png")
     target_link_libraries(archie-stage PRIVATE
         archie-stage-codec
         Qt6::Gui

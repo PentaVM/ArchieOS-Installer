@@ -32,6 +32,8 @@
 #                 then opens the globe on a bounded navigation session of its own (see
 #                 docs/WORLD-EXPLORATION.md), renewed hourly while the shell is open
 #   WORLD_SOURCE  World's first imagery              default: google_satellite
+#   ARCHIE_ROOT   Core node root for World's console    default: none (console reads only help)
+#   WORLD_CONTEXT ContextDomain of World's console      default: personal/owner
 #   TEMPO         the stage's tempo: person, video, agent or live   default: person
 #   STROKE_SPEED  how fast a drawn line goes, pixels a second       default: the tempo's
 #   DRAW_SECONDS  how long a painting is planned to take            default: 150
@@ -133,19 +135,26 @@ if [ "${DESKTOP:-0}" = 1 ]; then
         echo "run-archie: DESKTOP=1 needs archie-display (set ARCHIE_DISPLAY)" >&2
         exit 1
     }
+    # World's console reaches Core through the archie CLI, and IRIS goals through this
+    # stage's own socket, key and Policy. Every value is the host's, never the console's.
+    set -- --world-context "\"${WORLD_CONTEXT:-personal/owner}\"" \
+        --stage-socket "$RUN_DIR/control.sock" --stage-key-file "$RUN_DIR/key" --stage-policy "$POLICY"
+    [ -n "${ARCHIE_ROOT:-}" ] && set -- "$@" --archie-root "$ARCHIE_ROOT"
     if [ -n "${WORLD_BIN_DIR:-}" ]; then
+        # globe_demo.py hands each of them on to the shell.
+        for arg do set -- "$@" "--native-arg=$arg"; shift; done
         # World's daemons and its owner session, with the shell as their window. Their own
         # loopback ports (17666/17667); the shell keeps the visual controls on 7668.
         XDG_RUNTIME_DIR="$RUN_DIR/xdg" WAYLAND_DISPLAY="$SOCKET_NAME" QT_QPA_PLATFORM=wayland \
             LIBGL_ALWAYS_SOFTWARE=1 QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 ARCHIE_STAGE_DESKTOP=1 \
             python3 "$REPO/_dev/verification/world-globe/globe_demo.py" --bin-dir "$WORLD_BIN_DIR" \
                 --run-dir "$RUN_DIR/world-$(date +%s)" --native-bin "$ARCHIE_DISPLAY" --shell \
-                --native-port 7668 --source "${WORLD_SOURCE:-google_satellite}" --renew-navigation \
+                --native-port 7668 --source "${WORLD_SOURCE:-google_satellite}" --renew-navigation "$@" \
                 > "$RUN_DIR/shell.log" 2>&1 &
     else
         XDG_RUNTIME_DIR="$RUN_DIR/xdg" WAYLAND_DISPLAY="$SOCKET_NAME" QT_QPA_PLATFORM=wayland \
             LIBGL_ALWAYS_SOFTWARE=1 QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 ARCHIE_STAGE_DESKTOP=1 \
-            "$ARCHIE_DISPLAY" --shell > "$RUN_DIR/shell.log" 2>&1 &
+            "$ARCHIE_DISPLAY" --shell "$@" > "$RUN_DIR/shell.log" 2>&1 &
     fi
     SHELL_PID=$!
     trap 'kill "$SHELL_PID" "$STAGE_PID" 2>/dev/null || true' EXIT INT TERM

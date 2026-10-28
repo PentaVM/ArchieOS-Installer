@@ -12,6 +12,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QIcon>
 #include <QScreen>
 #include <QQmlApplicationEngine>
 #include <QQuickWindow>
@@ -26,6 +27,7 @@ int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
     QGuiApplication::setApplicationName(QStringLiteral("archie-stage"));
+    QGuiApplication::setWindowIcon(QIcon(QStringLiteral(":/archie/brand/archieos-app-512.png")));
     QGuiApplication::setDesktopFileName(QStringLiteral("org.archieos.Stage"));
 
     QCommandLineParser parser;

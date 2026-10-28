@@ -15,6 +15,13 @@ Window {
         if (typeof insideStage !== "undefined" && insideStage) Wm.closeAll()
     }
     Main { id:desktop; objectName:"desktop"; anchors.fill:parent }
+    // The boot animation covers the desktop while it comes up (`--no-boot-splash` skips it).
+    Loader {
+        id:boot
+        anchors.fill:parent; z:10000
+        active:typeof bootSplash !== "undefined" && bootSplash
+        sourceComponent:BootSplash { objectName:"bootSplash"; onFinished:boot.active=false }
+    }
     function showScene(value) { return desktop.run(value === "world" ? "app.world" : value === "forge" ? "app.forge" : "app.orb") }
     function viewVerb(action,args) {
         if (action === "window") {

@@ -3,11 +3,13 @@
 #include "LumenField.h"
 #include "DisplayControl.h"
 #include "ShellRuntime.h"
+#include "WorldConsole.h"
 #include "WorldImageProvider.h"
 #include "GlobeStreamBridge.h"
 #include "UiWalk.h"
 
 #include <QGuiApplication>
+#include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQmlComponent>
@@ -64,6 +66,11 @@ int main(int argc, char *argv[])
     QQuickStyle::setStyle(QStringLiteral("Basic"));
 
     QGuiApplication app(argc, argv);
+    // The ArchieOS mark everywhere the system shows this program: taskbar, switcher, title.
+    QGuiApplication::setApplicationDisplayName(QStringLiteral("ArchieOS"));
+    // Also the Wayland app id: the Stage's policy and the image's .desktop entry both say archie-display.
+    QGuiApplication::setDesktopFileName(QStringLiteral("archie-display"));
+    QGuiApplication::setWindowIcon(QIcon(QStringLiteral(":/archie/shell/brand/archieos-app-512.png")));
     QSurfaceFormat::setDefaultFormat(QQuick3D::idealSurfaceFormat());
     LumenField lumen;
     AppCatalog appCatalog;
@@ -90,6 +97,15 @@ int main(int argc, char *argv[])
     arguments.addOption(QCommandLineOption(QStringLiteral("content-root"), QStringLiteral("Folder the content sphere lists (read-only)."), QStringLiteral("path")));
     arguments.addOption(QCommandLineOption(QStringLiteral("ui-walk"), QStringLiteral("Click through this JSON's UI steps and record real window captures (verification)."), QStringLiteral("steps")));
     arguments.addOption(QCommandLineOption(QStringLiteral("ui-walk-out"), QStringLiteral("Where --ui-walk writes its screenshots and report.jsonl."), QStringLiteral("dir"), QStringLiteral("ui-walk")));
+    // World's console: every value is the host's. The console itself accepts no flags.
+    arguments.addOption(QCommandLineOption(QStringLiteral("archie-root"), QStringLiteral("Core node root the World console's archie CLI reads."), QStringLiteral("path")));
+    arguments.addOption(QCommandLineOption(QStringLiteral("world-context"), QStringLiteral("ContextDomain (JSON string) for World console operations, e.g. \"personal/owner\"."), QStringLiteral("json")));
+    arguments.addOption(QCommandLineOption(QStringLiteral("stage-socket"), QStringLiteral("Stage operator socket for IRIS goals from the console."), QStringLiteral("path")));
+    arguments.addOption(QCommandLineOption(QStringLiteral("stage-key-file"), QStringLiteral("Stage operator key file for IRIS goals."), QStringLiteral("path")));
+    arguments.addOption(QCommandLineOption(QStringLiteral("stage-policy"), QStringLiteral("Stage Policy file for IRIS goals."), QStringLiteral("path")));
+    arguments.addOption(QCommandLineOption(QStringLiteral("ground-model"), QStringLiteral("IRIS grounding model for console goals."), QStringLiteral("name")));
+    arguments.addOption(QCommandLineOption(QStringLiteral("iris-health"), QStringLiteral("Loopback IRIS health URL."), QStringLiteral("url"), QStringLiteral("http://127.0.0.1:8765/health")));
+    arguments.addOption(QCommandLineOption(QStringLiteral("no-boot-splash"), QStringLiteral("Start without the three-second ArchieOS boot animation.")));
     arguments.process(app);
     const bool shellMode = !arguments.isSet(QStringLiteral("observatory"));
     const QString theme=arguments.value(QStringLiteral("theme"));
@@ -118,6 +134,16 @@ int main(int argc, char *argv[])
     ShellRuntime shellRuntime(arguments.value(QStringLiteral("shell-bridge")),
         arguments.value(QStringLiteral("lan-file")), arguments.value(QStringLiteral("workspaces-root")),
         static_cast<quint16>(projectionPort));
+    WorldConsole::Config consoleConfig;
+    if (arguments.isSet(QStringLiteral("archie-root")))
+        consoleConfig.programPrefixArguments={QStringLiteral("--root"),arguments.value(QStringLiteral("archie-root"))};
+    consoleConfig.contextJson=arguments.value(QStringLiteral("world-context"));
+    consoleConfig.stageSocket=arguments.value(QStringLiteral("stage-socket"));
+    consoleConfig.stageKeyFile=arguments.value(QStringLiteral("stage-key-file"));
+    consoleConfig.stagePolicy=arguments.value(QStringLiteral("stage-policy"));
+    consoleConfig.groundModel=arguments.value(QStringLiteral("ground-model"));
+    consoleConfig.irisHealthUrl=QUrl(arguments.value(QStringLiteral("iris-health")));
+    WorldConsole worldConsole(consoleConfig);
     QQmlApplicationEngine engine;
     auto *worldImages=new WorldImageProvider;engine.addImageProvider(QStringLiteral("world"),worldImages);bridge.setWorldImageProvider(worldImages);
     auto *globeImages=new WorldImageProvider;engine.addImageProvider(QStringLiteral("globe"),globeImages);globeStream.setImageProvider(globeImages);
@@ -127,11 +153,15 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("appCatalog"), &appCatalog);
     engine.rootContext()->setContextProperty(QStringLiteral("displayControl"), &displayControl);
     engine.rootContext()->setContextProperty(QStringLiteral("shellRuntime"), &shellRuntime);
+    engine.rootContext()->setContextProperty(QStringLiteral("worldConsole"), &worldConsole);
     // Run as the Archie Stage's desktop (display/stage/run-archie.sh DESKTOP=1): the stage
     // frames the applications Archie uses over this shell, so the shell starts bare.
     engine.rootContext()->setContextProperty(QStringLiteral("insideStage"),
         qEnvironmentVariableIntValue("ARCHIE_STAGE_DESKTOP") == 1);
     engine.rootContext()->setContextProperty(QStringLiteral("shellColorMode"), theme);
+    engine.rootContext()->setContextProperty(QStringLiteral("bootSplash"),
+        !arguments.isSet(QStringLiteral("no-boot-splash")) && qEnvironmentVariable("ARCHIE_BOOT_SPLASH") != QLatin1String("0")
+        && !arguments.isSet(QStringLiteral("ui-walk")) && !arguments.isSet(QStringLiteral("render-check")));
     lumen.setLens(arguments.value(QStringLiteral("lens")));
     if (arguments.isSet(QStringLiteral("content-root")))
         lumen.setContentRoot(arguments.value(QStringLiteral("content-root")));
