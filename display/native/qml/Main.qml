@@ -897,6 +897,66 @@ ApplicationWindow {
                         }
                     }
                 }
+                // The machine under the scene, read by displayd from /proc and /sys: whether
+                // it is measured at all, and why the scene is drawn at the tier it is. It
+                // stays true while the daemon is unreachable, which is exactly when an
+                // operator most needs to know whether the box is thrashing; and a scene that
+                // has quietly got worse says why, or its operator learns to distrust it.
+                Rectangle {
+                    visible: root.scene !== "forge" && (root.scene === "world" ? root.worldHudVisible : root.orbHudVisible)
+                    anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 16
+                    width: 320; height: machine.implicitHeight + 20
+                    radius: Shell.Theme.rCard; color: Shell.Theme.panel; border.color: Shell.Theme.hair
+                    Column {
+                        id: machine
+                        anchors.left: parent.left; anchors.right: parent.right; anchors.margins: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 6
+                        SectionTitle { text: "MACHINE" }
+                        Fact {
+                            label: "pressure"
+                            value: root.pressureKnown
+                                   ? ((root.kernel.verdict || "—") + " · " + (root.kernel.worst_resource || "—"))
+                                   : "not measured"
+                            valueColor: root.pressureKnown ? root.verdictColor(root.kernel.verdict) : root.dim
+                        }
+                        Meter {
+                            known: root.pressureKnown
+                            fraction: root.pressureKnown && root.pressure ? root.worstPressureFraction() : 0
+                            fill: root.verdictColor(root.kernel.verdict)
+                        }
+                        Fact {
+                            label: "render tier"
+                            value: archieBridge.frame.tier + " · " + archieBridge.frame.tierReason
+                            valueColor: root.budgetReduced() ? root.amber : root.soft
+                        }
+                        Fact {
+                            label: "thermal"
+                            value: root.thermalKnown
+                                   ? ((root.kernel.thermal_state || "—")
+                                      + (root.kernel.hottest_zone ? " · " + root.kernel.hottest_zone : ""))
+                                   : "no zones published"
+                            valueColor: root.thermalKnown ? root.thermalColor(root.kernel.thermal_state) : root.dim
+                        }
+                        Repeater {
+                            model: root.zones.slice(0, 4)
+                            Column {
+                                required property var modelData
+                                width: parent ? parent.width : implicitWidth
+                                spacing: 3
+                                Fact { label: modelData.zone_type; value: modelData.celsius.toFixed(1) + " °C" }
+                                // Scaled against this zone's own critical trip, never a shared
+                                // axis: a zone with no trip point has no scale to draw against.
+                                Meter {
+                                    known: modelData.headroom_fraction !== null
+                                           && modelData.headroom_fraction !== undefined
+                                    fraction: modelData.headroom_fraction || 0
+                                    fill: root.thermalColor(modelData.state)
+                                }
+                            }
+                        }
+                    }
+                }
                 Rectangle {
                     visible:root.scene === "world";anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom;anchors.margins:16
                     height:provenance.implicitHeight+20;radius:Shell.Theme.rCard;color:Shell.Theme.panel;border.color:Shell.Theme.hair
