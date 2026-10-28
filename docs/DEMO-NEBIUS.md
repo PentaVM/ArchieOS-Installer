@@ -9,6 +9,21 @@ por qué.
 
 Diseño: Xavi (`ByXavi270` / `XaviCottier`). Implementación nativa: PentaVM.
 
+## En la máquina del dueño (Windows + WSL), sin pensar
+
+1. `Desktop\ArchieOS\preparar-demo-nebius.bat`: exporta el commit de este worktree y compila
+   todo en la WSL (`~/archieos-nebius`, log `/var/tmp/archie-logs/nebius-build.log`).
+2. Empezar a grabar (OBS, pantalla completa) y `Desktop\ArchieOS\grabar-demo-nebius.bat [segundos]`.
+   Arranca Core si no está (la consola de World le pregunta) y este mismo lanzador.
+3. Guion toma por toma, OBS y evidencia: `Desktop\Video-pitch\GRABACION-REAL\GUION-DE-GRABACION.md`.
+
+Al abrir, el shell muestra la animación de arranque de 3 s (paquete del logo, diseño de Xavi;
+un clic o una tecla la saltan, `ARCHIE_BOOT_SPLASH=0` o `--no-boot-splash` la quitan). La barra
+lleva el logo: tinta en tema Claro, neón en Oscuro. World es una vista del mismo escritorio con
+un HUD mínimo: búsqueda (lugar o «lat, lon»), riel con acercar/alejar, 2D/3D, Tierra completa,
+capas, regla, detalles y la consola de Archie (`world …`, `os …`, `iris …`, siempre por Core,
+Policy y el Stage).
+
 ## Lo que hay que tener
 
 En la distro WSL (o Linux) donde corre Archie:

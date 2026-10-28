@@ -15,6 +15,8 @@
 #   ARCHIE_DISPLAY   the shell                         default: the native build, else PATH
 #   WORLD_BIN_DIR    World's daemons and CLI           default: core/target/release, if built
 #   RUN_DIR          key, sockets, logs, the profile   default: /tmp/archie-demo
+#   ARCHIE_ROOT      Core node for World's console     default: /home/archie/archie-node, if there
+#   SESSION_LOG      the take's log, each line timed   default: $RUN_DIR/takes/take-<time>.log
 #
 # The browser starts from a new profile every time: Photopea keeps its last documents in
 # the browser's storage and reopens them, and a first run shows welcome pages. Nothing in
@@ -83,6 +85,12 @@ POLICY=$RUN_DIR/apps.toml
 sed -e "s|@FIREFOX_APP_ID@|$FIREFOX_APP_ID|" -e "s|@FIREFOX@|$FIREFOX_BIN|" -e "s|@PROFILE@|$PROFILE|" \
     "$HERE/nebius-demo-apps.toml" > "$POLICY"
 export POLICY DESKTOP=1 DRAW_SECONDS=${DRAW_SECONDS:-150}
+# World's console asks Core (archied) for places and OS state when the demo node is there.
+[ -z "${ARCHIE_ROOT:-}" ] && [ -S /home/archie/archie-node/run/archied.sock ] && export ARCHIE_ROOT=/home/archie/archie-node
+# Every take keeps its own timed log: what was heard, said and done (the evidence .txt of
+# the brief's capture rules starts from it).
+mkdir -p "$RUN_DIR/takes"
+export SESSION_LOG=${SESSION_LOG:-$RUN_DIR/takes/take-$(date +%Y%m%d-%H%M%S).log}
 export LISTEN_LANGUAGE=${LISTEN_LANGUAGE:-auto}
 # Binaries of this checkout's builds, when they are there; otherwise the installed ones.
 [ -z "${ARCHIE_VOICE:-}" ] && [ -x "$REPO/core/target/release/archie-voice" ] && export ARCHIE_VOICE=$REPO/core/target/release/archie-voice
