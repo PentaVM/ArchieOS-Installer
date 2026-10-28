@@ -30,6 +30,15 @@ neuronal, 3cc8d37) integrados, más:
 - Repetido en español (`--language es`) con el shell como escritorio.
 - Clics sellados de `archie-stage-cli` sobre el dock: World se abre enmarcado; Sentry al frente
   y World a la repisa.
+- Con un bus de sesión y `at-spi2-core`: `archie-look --find Sentry|Forge|World --kind button`
+  encuentra cada ícono por su nombre declarado (sin modelo) y lo presiona a través del Stage
+  (`clicked_and_repainted`, 0,6–2,3 s).
+- `globe_demo.py --shell` dentro del Stage (worldd, displayd y `archie world navigate` reales):
+  globo continuo `ready`, 20–32 teselas NASA, USGS ~196 y EONET 50 señales, HTTP 35–48/1800.
+  World pedía maximizado y la integración de QtWayland le respondía con la salida entera
+  (1920×1080, recortado por el marco); el Stage ahora reenvía el tamaño del marco (1838×876).
+- Corrida en español con el escritorio: primero 29 tandas rechazadas (la repisa reaccionaba a
+  los trazos y movía la ventana); corregido, 463 líneas, 0 rechazadas.
 - Tests: `cargo test -p archie-voice` y `-p archie-paint` verdes; clippy 1.88 `-D warnings`
   con y sin `live,speech,rvc`; ctest nativo 12/13 (falla `cpu_shader_contracts`, opcional y
   previo: `LumenScene` no encuentra `Exploration.js` en los recursos del test).

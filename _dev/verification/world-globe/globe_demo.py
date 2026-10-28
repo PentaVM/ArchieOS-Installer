@@ -8,6 +8,8 @@ import argparse
 import json
 import os
 from pathlib import Path
+import signal
+import sys
 import subprocess
 import time
 from datetime import datetime, timedelta, timezone
@@ -44,6 +46,9 @@ def main():
     parser.add_argument('--session-seconds', type=int, default=3600, choices=range(1, 3601),
                         metavar='1..3600')
     args = parser.parse_args()
+    # Stopped by whoever started it (run-archie.sh's exit trap sends SIGTERM): unwind, so the
+    # daemons below are stopped too instead of keeping their ports.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     args.run_dir.mkdir(parents=True, exist_ok=False)
     runtime = args.run_dir / 'runtime'
     environment = dict(os.environ, ARCHIE_WORLD_RUNTIME_DIR=str(runtime),

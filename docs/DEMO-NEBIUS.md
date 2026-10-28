@@ -97,15 +97,18 @@ aquelarre (imágenes de dominio público en `core/crates/archie-arena/tasks`).
 ## Qué está verificado y qué no
 
 Verificado en un ensayo sin pantalla (Xvfb, render por software, Firefox real, photopea.com
-real): el shell como escritorio dentro del Stage, World y Sentry abiertos desde el dock con
-clics sellados a través del Stage (por coordenadas, con `archie-stage-cli`), la repisa, y el
-dibujo narrado completo en inglés y en
-español (470 líneas, 0 rechazadas) con subtítulos y caption, lanzado con
-`archie-voice draw`. Las herramientas de voz, la política de la demo y la narración dentro de
-la conversación tienen tests (`cargo test -p archie-voice`).
+real): el shell como escritorio dentro del Stage; Sentry, Forge y World abiertos desde el dock
+por su nombre de accesibilidad (AT-SPI, sin modelo de visión) con clics sellados a través del
+Stage (`archie-look --find Sentry --kind button`); la repisa (Sentry al frente, World a un
+lado, World de vuelta al pedirlo otra vez); World con sus daemons en vivo dentro del
+escritorio (`globe_demo.py --shell`: globo continuo listo, teselas NASA, señales USGS y
+EONET); y el dibujo narrado completo en inglés (470 líneas) y en español (463 líneas), 0
+rechazadas, con subtítulos y caption, lanzado con `archie-voice draw`. Las herramientas de
+voz, la política de la demo y la narración dentro de la conversación tienen tests
+(`cargo test -p archie-voice`).
 
 No verificado aquí: la conversación con micrófono y parlantes reales (no hay NeMo-Speech ni
-audio en el ensayo), el modelo de Nebius eligiendo `draw_picture`/`open_website`, el clic por
-nombre vía AT-SPI (no hay bus de accesibilidad en el ensayo), el globo de World con sus
-daemons en vivo dentro del escritorio unificado, y el rendimiento en la RTX 3070 bajo WSLg.
+audio en el ensayo), el modelo de Nebius eligiendo `draw_picture`/`open_website`/`click`, la
+fotogrametría de Google a nivel de calle dentro del escritorio, y el rendimiento en la RTX 3070
+bajo WSLg.
 Conviene un ensayo completo antes de grabar.

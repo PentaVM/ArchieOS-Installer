@@ -209,7 +209,7 @@ WaylandCompositor {
 
     XdgShell {
         onToplevelCreated: (toplevel, xdgSurface) => {
-            shellSurfaces.append({ shellSurface: xdgSurface, stashed: false })
+            shellSurfaces.append({ shellSurface: xdgSurface, stashed: false, born: Date.now() })
             compositor.layoutVersion++
         }
         // A menu is a surface of its own. The stage gives it an item under the window
@@ -459,6 +459,10 @@ WaylandCompositor {
                                 compositor.layoutVersion++
                             }
                             function onTitleChanged() { compositor.layoutVersion++ }
+                            // A window that asks to be maximised or full screen is answered with
+                            // the whole output by Qt's own handling; its size is its frame's.
+                            function onSetMaximized() { Qt.callLater(frame.sendSize) }
+                            function onSetFullscreen() { Qt.callLater(frame.sendSize) }
                         }
                     }
                 }
@@ -499,8 +503,11 @@ WaylandCompositor {
                                 return
                         }
 
+                        // A window that opened just now was opened by that press (World from
+                        // the dock): it is what the press asked for, not what it set aside.
                         for (let i = 0; i < shellSurfaces.count; ++i)
-                            if (!compositor.isDesktop(shellSurfaces.get(i).shellSurface))
+                            if (!compositor.isDesktop(shellSurfaces.get(i).shellSurface)
+                                    && Date.now() - shellSurfaces.get(i).born > 2000)
                                 compositor.setStashed(i, true)
                     }
                 }

@@ -180,15 +180,26 @@ int main(int argc, char *argv[])
             object->setParent(&engine);
             if(presentation) presentation->trackWindow(worldWindow);
             displayControl.setWorldAvailable(true);
+            // Inside the stage World is one window of its desktop, sized by the stage's frame;
+            // on its own it takes the screen.
+            const bool framed=qEnvironmentVariableIntValue("ARCHIE_STAGE_DESKTOP")==1;
+            const auto showWorld=[worldWindow,framed] {
+                if(!framed) { worldWindow->showFullScreen(); return; }
+                // A window the stage set aside is not brought back by raising it: opening it
+                // again makes it a new window there, in front.
+                if(worldWindow->isVisible()) worldWindow->hide();
+                worldWindow->showMaximized();
+            };
             QObject::connect(&displayControl,&DisplayControl::commandReceived,&engine,
-                [worldWindow,&bridge](const QString &action,const QString &value,bool) {
+                [worldWindow,&bridge,showWorld](const QString &action,const QString &value,bool) {
                     if(action==QStringLiteral("scene") && value==QStringLiteral("world")) {
-                        bridge.enableWorld();bridge.requestMode(QStringLiteral("watcher"));
-                        worldWindow->showFullScreen();worldWindow->raise();worldWindow->requestActivate();
+                        // Shown first: hiding it to reopen it puts the display back in cerebra.
+                        bridge.enableWorld();showWorld();bridge.requestMode(QStringLiteral("watcher"));
+                        worldWindow->raise();worldWindow->requestActivate();
                     }
                 });
             if(arguments.value(QStringLiteral("scene"))==QStringLiteral("world")) {
-                bridge.enableWorld();bridge.requestMode(QStringLiteral("watcher"));worldWindow->showFullScreen();
+                bridge.enableWorld();bridge.requestMode(QStringLiteral("watcher"));showWorld();
             }
         } else {
             delete object;
