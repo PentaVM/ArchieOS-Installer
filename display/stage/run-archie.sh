@@ -25,6 +25,17 @@
 #   HEADPHONES=1  keep listening while Archie speaks, so it can be interrupted
 #   ALWAYS=1      answer whatever is heard, named or not (one person alone)
 #   SESSION_LOG   also write the session there, each line with its time
+#   DESKTOP=1     ArchieOS's own shell inside the stage, as its desktop: the apps Archie
+#                 opens are framed over it, between its top bar and its dock
+#   ARCHIE_DISPLAY  the shell's binary                    default: archie-display
+#   WORLD_BIN_DIR   where archie, archie-worldd and archie-displayd are: World's dock icon
+#                 then opens the globe on a bounded navigation session of its own (see
+#                 docs/WORLD-EXPLORATION.md), renewed hourly while the shell is open
+#   WORLD_SOURCE  World's first imagery              default: google_satellite
+#   TEMPO         the stage's tempo: person, video, agent or live   default: person
+#   STROKE_SPEED  how fast a drawn line goes, pixels a second       default: the tempo's
+#   DRAW_SECONDS  how long a painting is planned to take            default: 150
+#   PICTURES      where the paintings Archie can draw are           default: archie-arena's
 set -eu
 
 GRADE=${1:-}
@@ -94,8 +105,14 @@ if [ -x /usr/lib/at-spi-bus-launcher ]; then
     /usr/lib/at-spi-bus-launcher --launch-immediately >/dev/null 2>&1 &
 fi
 
-set -- --socket-name "$SOCKET_NAME" --control "$RUN_DIR/control.sock" --key-file "$RUN_DIR/key"
+# What Archie says on its own while it works is shown under the stage as it is said.
+NARRATION=$RUN_DIR/narration.json
+rm -f "$NARRATION"
+set -- --socket-name "$SOCKET_NAME" --control "$RUN_DIR/control.sock" --key-file "$RUN_DIR/key" \
+    --narration-file "$NARRATION"
 [ -n "${SCREEN:-}" ] && set -- "$@" --screen "$SCREEN"
+[ -n "${TEMPO:-}" ] && set -- "$@" --tempo "$TEMPO"
+[ -n "${STROKE_SPEED:-}" ] && set -- "$@" --stroke-speed "$STROKE_SPEED"
 XDG_RUNTIME_DIR="$RUN_DIR/xdg" WAYLAND_DISPLAY="$HOST_WAYLAND" QT_QPA_PLATFORM=wayland \
     "$STAGE" "$@" > "$RUN_DIR/stage.log" 2>&1 &
 STAGE_PID=$!
@@ -107,10 +124,39 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
 done
 [ -S "$RUN_DIR/xdg/$SOCKET_NAME" ] || { echo "run-archie: the stage did not start; see $RUN_DIR/stage.log" >&2; exit 1; }
 
+# ArchieOS's shell as the stage's desktop: Orb, Vault, Forge, Sentry and World in one
+# screen, with what Archie opens framed over it. Qt Quick 3D draws with Mesa's software GL:
+# a nested compositor shares no GPU buffers (WSLg included). The shell reads only; it has
+# no authority the stage policy does not give an entry for it.
+if [ "${DESKTOP:-0}" = 1 ]; then
+    ARCHIE_DISPLAY=$(command -v "${ARCHIE_DISPLAY:-archie-display}") || {
+        echo "run-archie: DESKTOP=1 needs archie-display (set ARCHIE_DISPLAY)" >&2
+        exit 1
+    }
+    if [ -n "${WORLD_BIN_DIR:-}" ]; then
+        # World's daemons and its owner session, with the shell as their window. Their own
+        # loopback ports (17666/17667); the shell keeps the visual controls on 7668.
+        XDG_RUNTIME_DIR="$RUN_DIR/xdg" WAYLAND_DISPLAY="$SOCKET_NAME" QT_QPA_PLATFORM=wayland \
+            LIBGL_ALWAYS_SOFTWARE=1 QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 ARCHIE_STAGE_DESKTOP=1 \
+            python3 "$REPO/_dev/verification/world-globe/globe_demo.py" --bin-dir "$WORLD_BIN_DIR" \
+                --run-dir "$RUN_DIR/world-$(date +%s)" --native-bin "$ARCHIE_DISPLAY" --shell \
+                --native-port 7668 --source "${WORLD_SOURCE:-google_satellite}" --renew-navigation \
+                > "$RUN_DIR/shell.log" 2>&1 &
+    else
+        XDG_RUNTIME_DIR="$RUN_DIR/xdg" WAYLAND_DISPLAY="$SOCKET_NAME" QT_QPA_PLATFORM=wayland \
+            LIBGL_ALWAYS_SOFTWARE=1 QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1 ARCHIE_STAGE_DESKTOP=1 \
+            "$ARCHIE_DISPLAY" --shell > "$RUN_DIR/shell.log" 2>&1 &
+    fi
+    SHELL_PID=$!
+    trap 'kill "$SHELL_PID" "$STAGE_PID" 2>/dev/null || true' EXIT INT TERM
+fi
+
 set -- converse --grade "$GRADE" --asr-model "$ASR_MODEL" \
     --voice-engine piper --piper "$PIPER" --piper-model "$PIPER_MODEL" \
     --socket "$RUN_DIR/control.sock" --key-file "$RUN_DIR/key" --policy "$POLICY" \
-    --stage-display "$SOCKET_NAME" --app-log "$RUN_DIR/apps.log"
+    --stage-display "$SOCKET_NAME" --app-log "$RUN_DIR/apps.log" \
+    --subtitles "$NARRATION" --seconds "${DRAW_SECONDS:-150}"
+[ -n "${PICTURES:-}" ] && set -- "$@" --pictures "$PICTURES"
 if [ -f "$PIPER_MODEL_EN" ]; then
     set -- "$@" --piper-model-en "$PIPER_MODEL_EN"
 else

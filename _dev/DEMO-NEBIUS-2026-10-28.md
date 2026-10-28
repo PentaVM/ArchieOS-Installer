@@ -1,0 +1,41 @@
+# Demo Nebius: escritorio único y dibujo narrado por voz (2026-10-28)
+
+Rama `claude/laughing-lamport-5af9cs`: main 994740a + #52 (World, 36b2588) + #53 (esfera
+neuronal, 3cc8d37) integrados, más:
+
+- `archie-paint`: `session.rs` (Seat/perform: mirar, actuar, esperar a la persona, continuar
+  la línea interrumpida) y `photopea.rs` (URL con documento y dos tintas, página por su gris
+  71, pincel en la columna de herramientas, `[` para afinar, papel en blanco = sin pincel).
+  `Picture::matted` quita el 4 % de cada borde (el viñeteado del cuadro dibujaba una franja de
+  trazos rectos arriba).
+- `archie-voice`: `draw_picture`, `stop_drawing`, `open_website` decididos en `act.rs`; un
+  `Desk` compartido por `converse` y `live` (manos del Stage + dibujo en segundo plano en su
+  propia conexión); narración en cola dicha en silencio antes de los avisos de Sentry y
+  escrita como subtítulo.
+- Stage: escritorio (`--desktop-app archie-display --desktop-title ArchieOS`), marcos con el
+  estilo del shell, repisa, píldora de autoridad, caption con nombre de app, verbo "drawing",
+  subtítulos (`--narration-file`).
+- Shell: World en el dock (`DisplayControl::showScene`), ventana World sin pestañas Orb/Forge,
+  accesibilidad en dock/barra/luces/filas/apps de Forge, arranque limpio dentro del Stage
+  (`ARCHIE_STAGE_DESKTOP=1`).
+- `display/session/nebius-demo.sh` + `nebius-demo-apps.toml`; `run-archie.sh` con `DESKTOP`,
+  `WORLD_BIN_DIR`, `TEMPO`, `STROKE_SPEED`, `DRAW_SECONDS`, `PICTURES`. Runbook:
+  `docs/DEMO-NEBIUS.md`.
+
+## Ensayo (Xvfb 1920×1080, Qt 6.8.3, Mesa llvmpipe, Firefox 144 real, photopea.com real)
+
+- `archie-voice draw "the Mona Lisa" --language en`: 470 líneas, 42 comandos, 0 rechazados,
+  322,8 s (plan 120 s, tempo persona, render por software), 188 px de línea/s. Narración en
+  cada hito y subtítulo visible bajo el papel.
+- Repetido en español (`--language es`) con el shell como escritorio.
+- Clics sellados de `archie-stage-cli` sobre el dock: World se abre enmarcado; Sentry al frente
+  y World a la repisa.
+- Tests: `cargo test -p archie-voice` y `-p archie-paint` verdes; clippy 1.88 `-D warnings`
+  con y sin `live,speech,rvc`; ctest nativo 12/13 (falla `cpu_shader_contracts`, opcional y
+  previo: `LumenScene` no encuentra `Exploration.js` en los recursos del test).
+
+## No verificado
+
+Micrófono/parlantes reales con NeMo-Speech, elección de herramientas por el modelo de Nebius,
+clic por nombre vía AT-SPI (sin bus de accesibilidad en el ensayo), World con daemons en vivo
+dentro del escritorio, rendimiento en RTX 3070/WSLg.
