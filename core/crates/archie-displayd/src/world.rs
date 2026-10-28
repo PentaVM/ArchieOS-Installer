@@ -220,7 +220,11 @@ mod tests {
         ] {
             let mut child = std::process::Command::new(std::env::current_exe().unwrap());
             child
-                .args(["--exact", "world::tests::configured_world_port", "--nocapture"])
+                .args([
+                    "--exact",
+                    "world::tests::configured_world_port",
+                    "--nocapture",
+                ])
                 .env(EXPECTED, expected);
             match port {
                 Some(port) => {

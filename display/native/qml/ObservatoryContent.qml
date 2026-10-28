@@ -794,6 +794,7 @@ Item {
                     frozen: root.frozen
                     hudVisible: root.orbHudVisible
                     reducedMotion: !archieBridge.frame.ambientMotion
+                    machineDetails: machineDetails
                 }
 
                 // The AI's pointer: a ring where it looked or clicked, gone after two seconds.
@@ -846,6 +847,87 @@ Item {
                     errorColor: Shell.Theme.bad
                     view: view
                     orbScene: lumenScene
+                }
+
+                // The machine's own condition, read where the sphere's provenance is read:
+                // in Details. The neural sphere's HUD has that button; the other spheres
+                // get the same one here, in the same place.
+                Component {
+                    id: machineDetails
+                    Column {
+                        spacing: 6
+                        SectionTitle { text: "MÁQUINA" }
+                        Fact {
+                            label: "presión"
+                            value: root.pressureKnown
+                                   ? ((root.kernel.verdict || "—") + " · " + (root.kernel.worst_resource || "—"))
+                                   : "sin medir"
+                            valueColor: root.pressureKnown ? root.verdictColor(root.kernel.verdict) : root.dim
+                        }
+                        Meter {
+                            known: root.pressureKnown
+                            fraction: root.pressureKnown && root.pressure ? root.worstPressureFraction() : 0
+                            fill: root.verdictColor(root.kernel.verdict)
+                        }
+                        Fact {
+                            label: "render"
+                            value: archieBridge.frame.tier + " · " + archieBridge.frame.tierReason
+                            valueColor: root.budgetReduced() ? root.amber : root.soft
+                        }
+                        Fact {
+                            label: "temperatura"
+                            value: root.thermalKnown
+                                   ? ((root.kernel.thermal_state || "—")
+                                      + (root.kernel.hottest_zone ? " · " + root.kernel.hottest_zone : ""))
+                                   : "sin zonas publicadas"
+                            valueColor: root.thermalKnown ? root.thermalColor(root.kernel.thermal_state) : root.dim
+                        }
+                        Repeater {
+                            model: root.zones.slice(0, 4)
+                            Column {
+                                required property var modelData
+                                width: parent ? parent.width : implicitWidth
+                                spacing: 3
+                                Fact { label: modelData.zone_type; value: modelData.celsius.toFixed(1) + " °C" }
+                                // Scaled against this zone's own critical trip, never a shared
+                                // axis: a zone with no trip point has no scale to draw against.
+                                Meter {
+                                    known: modelData.headroom_fraction !== null
+                                           && modelData.headroom_fraction !== undefined
+                                    fraction: modelData.headroom_fraction || 0
+                                    fill: root.thermalColor(modelData.state)
+                                }
+                            }
+                        }
+                    }
+                }
+                Rectangle {
+                    objectName: "orbDetailsButton"
+                    anchors.right: parent.right; anchors.rightMargin: 18
+                    anchors.top: parent.top; anchors.topMargin: 18
+                    width: 96; height: 32; radius: 8
+                    visible: root.scene === "orb" && !root.neural && root.orbHudVisible
+                    color: Shell.Theme.panel; border.color: Shell.Theme.hair
+                    Text {
+                        anchors.centerIn: parent
+                        text: "Detalles"
+                        color: root.budgetReduced() ? root.amber : root.dim
+                        font.pixelSize: 12
+                    }
+                    MouseArea { anchors.fill: parent; onClicked: orbDetails.opened ? orbDetails.close() : orbDetails.open() }
+                    Accessible.role: Accessible.Button
+                    Accessible.name: "Detalles de la máquina"
+                    Accessible.onPressAction: orbDetails.open()
+                }
+                Popup {
+                    id: orbDetails
+                    objectName: "orbDetails"
+                    x: Math.max(12, parent.width - width - 18); y: 52
+                    width: Math.min(360, Math.max(0, parent.width - 24))
+                    padding: 14
+                    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+                    background: Rectangle { color: Shell.Theme.panel; radius: 10; border.color: Shell.Theme.hair }
+                    contentItem: Loader { sourceComponent: machineDetails }
                 }
 
                 ForgeView {

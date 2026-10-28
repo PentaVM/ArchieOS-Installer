@@ -48,3 +48,19 @@ neuronal, 3cc8d37) integrados, más:
 Micrófono/parlantes reales con NeMo-Speech, elección de herramientas por el modelo de Nebius,
 clic por nombre vía AT-SPI (sin bus de accesibilidad en el ensayo), World con daemons en vivo
 dentro del escritorio, rendimiento en RTX 3070/WSLg.
+
+## GUI final de Codex (merge `65db85b` y siguientes)
+
+- La GUI clara de Codex (Orb/Forge/World, "Claro", "Detalles", "Sin telemetría") ya está en la
+  rama. El Observatory pasó de `Main.qml` a `ObservatoryContent.qml` y su tarjeta MACHINE quedó
+  fuera; los tests de empaquetado leían solo `Main.qml` y CI `rust` se cayó en `cargo fmt`.
+- Arreglado sin cambiar la vista por defecto: el estado de la máquina (presión o "sin medir",
+  tier de render con su razón, zonas térmicas con su propia escala) vive dentro de "Detalles":
+  en la esfera neural, en el popup que ya existía; en las otras esferas, con el mismo botón en
+  el mismo lugar. Los tests leen `Main.qml` + `ObservatoryContent.qml`; ninguna aserción cambió.
+- Visto en el Stage (Xvfb, render por software): `archie-display --observatory`, clic sellado
+  en "Detalles", MÁQUINA bajo "Instantánea de archivos" (neural) y en su propio popup (tfog).
+- `cargo test --workspace` 1.88: todo verde salvo `archie-lan autonomy_cli`, que falla solo en
+  este contenedor (ruta 192.0.2.2) y pasa en CI. ctest nativo 18/20: `cpu_shader_contracts`
+  (previo, `Exploration.js` fuera de los recursos del test) y `world_texture_contracts` (sin
+  RHI en el ensayo); CI no corre el ctest nativo.

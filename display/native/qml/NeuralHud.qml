@@ -21,6 +21,8 @@ Item {
     property string rootLabel: ""
     // Whether Core is publishing model activity to this view (shown in Details only).
     property bool telemetryKnown: true
+    // The machine's condition, when the host reads it (the Observatory does).
+    property Component machine: null
     property bool navigationEnabled: true
     // Advances whenever the sphere or the camera moved, so projections are taken again.
     property int frame: 0
@@ -130,6 +132,7 @@ Item {
                 text: hud.telemetryKnown ? "Actividad de modelos: publicada por Core" : "Actividad de modelos: sin telemetría de Core todavía"
                 color: hud.mutedColor; font.family: hud.family; font.pixelSize: 11; wrapMode: Text.Wrap
             }
+            Loader { width: parent.width; active: hud.machine !== null; visible: active; sourceComponent: hud.machine }
             Button {
                 text: "Actualizar"
                 enabled: hud.navigationEnabled && !hud.field.loading

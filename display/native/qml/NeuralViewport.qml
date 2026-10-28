@@ -21,6 +21,8 @@ Item {
     property color mutedColor: "#566c80"
     property color errorColor: "#ba263b"
     property var modelActivity: null
+    // The host's reading of the machine, shown in the HUD's Details.
+    property Component machineDetails: null
     // The existing controller/governor supplies authority; this view only applies its ceilings.
     property var renderBudget: controller.renderBudget || ({})
     property bool active: viewport.presented
@@ -152,6 +154,7 @@ Item {
         lightMode: viewport.lightMode
         rootLabel: neural.sourceRoot
         telemetryKnown: Array.isArray(viewport.modelActivity)
+        machine: viewport.machineDetails
         navigationEnabled: viewport.navigationEnabled && viewport.drawing
     }
 
