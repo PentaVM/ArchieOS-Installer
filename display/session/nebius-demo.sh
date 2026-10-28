@@ -95,6 +95,10 @@ export POLICY DESKTOP=1 DRAW_SECONDS=${DRAW_SECONDS:-150}
 mkdir -p "$RUN_DIR/takes"
 export SESSION_LOG=${SESSION_LOG:-$RUN_DIR/takes/take-$(date +%Y%m%d-%H%M%S).log}
 export LISTEN_LANGUAGE=${LISTEN_LANGUAGE:-auto}
+# "Archie, open Sentry" is a click on the dock's button. The desktop names its buttons to the
+# accessibility bus, so they are found with no model; the grounding model (docs/STAGE.md) is
+# only asked about what a window does not declare. Without one, every click is refused.
+export GROUND_MODEL=${GROUND_MODEL:-moonshotai/Kimi-K3}
 # Binaries of this checkout's builds, when they are there; otherwise the installed ones.
 [ -z "${ARCHIE_VOICE:-}" ] && [ -x "$REPO/core/target/release/archie-voice" ] && export ARCHIE_VOICE=$REPO/core/target/release/archie-voice
 [ -z "${STAGE_CLI:-}" ] && [ -x "$REPO/core/target/release/archie-stage-cli" ] && export STAGE_CLI=$REPO/core/target/release/archie-stage-cli

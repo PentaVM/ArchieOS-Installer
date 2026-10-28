@@ -19,7 +19,9 @@ pub fn os_control() -> Vec<ToolDefinition> {
         ToolDefinition {
             name: "open_app".into(),
             description: "Abre una aplicación del sistema por su nombre, por ejemplo \
-                          firefox, terminal o el editor de texto."
+                          firefox, terminal o el editor de texto. Las apps del escritorio de \
+                          ArchieOS también: Orb, World (el globo terráqueo de ArchieOS, no un \
+                          sitio web), Vault, Forge, Sentry, Stage y Ajustes."
                 .into(),
             parameters: json!({
                 "type": "object",

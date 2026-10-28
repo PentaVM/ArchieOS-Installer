@@ -45,6 +45,10 @@
 #   REHEARSE_LANGUAGE  the narration's language in a rehearsal (en or es)   default: en
 #   WAV_IN, WAV_OUT  a recording heard instead of the microphone, and a file Archie's voice
 #                 goes to instead of the speaker
+#   STAGE_ONLY=1  the stage and its desktop with nobody listening (footage, typed turns)
+#   GROUND_MODEL, GROUND_ENDPOINT  the model that finds what a click names when the window
+#                 declares nothing (Nebius unless an endpoint names a local NIM); without one,
+#                 clicks are refused, the dock's included
 set -eu
 
 GRADE=${1:-}
@@ -52,9 +56,11 @@ case "$GRADE" in
     public|internal) ;;
     *) echo "run-archie: say how private this is: run-archie.sh public (or internal)" >&2; exit 64 ;;
 esac
+# Neither a rehearsal nor the stage alone listens, speaks or asks a model anything.
+QUIET=${REHEARSE:-}
+[ "${STAGE_ONLY:-0}" = 1 ] && QUIET=stage
 # ARCHIE_VOICE_ENDPOINT names a reasoning model on this machine; then no key is needed.
-# A rehearsal asks no model anything.
-[ -n "${REHEARSE:-}" ] || [ -n "${NEBIUS_TOKEN_FACTORY_KEY:-}" ] || [ -n "${ARCHIE_VOICE_ENDPOINT:-}" ] || {
+[ -n "$QUIET" ] || [ -n "${NEBIUS_TOKEN_FACTORY_KEY:-}" ] || [ -n "${ARCHIE_VOICE_ENDPOINT:-}" ] || {
     echo "run-archie: set NEBIUS_TOKEN_FACTORY_KEY, or ARCHIE_VOICE_ENDPOINT for a local model" >&2
     exit 64
 }
@@ -94,14 +100,14 @@ if [ -z "${PULSE_SERVER:-}" ]; then
     fi
 fi
 # A rehearsal neither listens nor speaks: it needs no recogniser and no voices.
-if [ -z "${REHEARSE:-}" ]; then
+if [ -z "$QUIET" ]; then
     [ -n "$ASR_MODEL" ] && [ -f "$ASR_MODEL" ] || { echo "run-archie: no ASR model; run nemo-speech pull nemotron-3.5 or set ASR_MODEL" >&2; exit 1; }
     [ -f "$PIPER_MODEL" ] || { echo "run-archie: no Spanish Piper model at $PIPER_MODEL; run scripts/models/install-piper-voices.sh" >&2; exit 1; }
 fi
 # The bridge runs as `env python3`: put the Python that has Piper first on PATH, for this
 # checkout's bridge and for the installed one (/usr/lib/archie) alike. Without it the bridge
 # starts under the system Python, dies at the first reply, and the conversation ends.
-if [ -z "${REHEARSE:-}" ] && { [ "$PIPER" = "$REPO/scripts/models/piper-json-bridge.py" ] || [ "$PIPER_PYTHON" != python3 ]; }; then
+if [ -z "$QUIET" ] && { [ "$PIPER" = "$REPO/scripts/models/piper-json-bridge.py" ] || [ "$PIPER_PYTHON" != python3 ]; }; then
     PIPER_PYTHON_BIN=$(command -v "$PIPER_PYTHON" 2>/dev/null || true)
     [ -n "$PIPER_PYTHON_BIN" ] || { echo "run-archie: Python runtime not found: $PIPER_PYTHON" >&2; exit 1; }
     PATH=$(dirname "$PIPER_PYTHON_BIN"):$PATH
@@ -181,6 +187,13 @@ if [ "${DESKTOP:-0}" = 1 ]; then
     trap 'kill "$SHELL_PID" "$STAGE_PID" 2>/dev/null || true' EXIT INT TERM
 fi
 
+if [ "${STAGE_ONLY:-0}" = 1 ]; then
+    # The stage and its desktop, nobody listening: for looking around, for footage of the
+    # desktop alone, and for typed turns (archie-voice do) against this stage.
+    echo "run-archie: stage only, at $RUN_DIR (Ctrl+C ends it)"
+    wait "$STAGE_PID"
+    exit
+fi
 if [ -n "${REHEARSE:-}" ]; then
     # The drawing the conversation would start, on its own, narrated in subtitles.
     set -- draw "$REHEARSE" --language "${REHEARSE_LANGUAGE:-en}" \
@@ -207,6 +220,10 @@ fi
 [ -n "${LISTEN_LANGUAGE:-}" ] && set -- "$@" --listen-language "$LISTEN_LANGUAGE"
 [ "${HEADPHONES:-0}" = 1 ] && set -- "$@" --headphones
 [ "${ALWAYS:-0}" = 1 ] && set -- "$@" --always
+# Clicks by name: what a window declares to the accessibility bus is found with no model
+# (the desktop's dock); the grounding model only looks for what declares nothing.
+[ -n "${GROUND_MODEL:-}" ] && set -- "$@" --ground-model "$GROUND_MODEL"
+[ -n "${GROUND_ENDPOINT:-}" ] && set -- "$@" --ground-endpoint "$GROUND_ENDPOINT"
 # A recording in place of the microphone, and a file in place of the speaker: the whole
 # spoken loop, tested without a room.
 [ -n "${WAV_IN:-}" ] && set -- "$@" --wav-in "$WAV_IN"

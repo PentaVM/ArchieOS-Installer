@@ -104,6 +104,18 @@ pub fn decide(
         "open_app" => {
             let args = arguments(&intent.raw_arguments, &["app"])?;
             let name = text(&args, "app", 128)?;
+            // Orb, World, Vault, Forge, Sentry, Stage and Ajustes are not programs but buttons
+            // of the desktop's dock: opening one is pressing it, by the name it gives the
+            // accessibility bus, when the policy lets Archie press the desktop at all.
+            if policy.named(name).is_none() {
+                if let Some(button) = dock_button(name) {
+                    permitted(policy, DESKTOP_APP, ActionKind::Click, "hacer clic")?;
+                    return Ok(Plan::Click {
+                        app_id: DESKTOP_APP.into(),
+                        target: button.into(),
+                    });
+                }
+            }
             let app = policy.named(name).ok_or_else(|| {
                 refuse(
                     "unknown_app",
@@ -387,6 +399,30 @@ fn front_app(front: Option<&str>) -> Result<String, Refusal> {
             "nothing_in_front",
             "No hay ninguna aplicación al frente para eso.",
         )
+    })
+}
+
+/// The ArchieOS desktop's app id, as the stage lays it under every window.
+pub const DESKTOP_APP: &str = "archie-display";
+
+/// The dock button a spoken app name means, by the name the dock gives the accessibility
+/// bus (display/shell/prototype/Synthetic.qml), in either language.
+pub fn dock_button(name: &str) -> Option<&'static str> {
+    let said = name.trim().to_lowercase();
+    let said = said
+        .strip_prefix("el ")
+        .or_else(|| said.strip_prefix("la "))
+        .or_else(|| said.strip_prefix("the "))
+        .unwrap_or(&said);
+    Some(match said {
+        "orb" | "orbe" | "la esfera" | "esfera" => "Orb",
+        "world" | "mundo" | "el mundo" | "globo" | "el globo" | "globe" => "World",
+        "vault" | "bóveda" | "boveda" | "archivos" | "files" => "Vault",
+        "forge" | "forja" => "Forge",
+        "sentry" | "sentinel" | "centinela" => "Sentry",
+        "stage" | "escenario" => "Stage",
+        "ajustes" | "settings" | "configuración" | "configuracion" | "preferencias" => "Ajustes",
+        _ => return None,
     })
 }
 
@@ -791,6 +827,28 @@ aliases = ["browser", "navegador", "photopea"]
             .code,
             "not_openable"
         );
+        // The dock's apps open by pressing their buttons, in either language.
+        for (said, button) in [
+            ("Sentry", "Sentry"),
+            ("World", "World"),
+            ("el mundo", "World"),
+            ("Forge", "Forge"),
+            ("ajustes", "Ajustes"),
+        ] {
+            assert_eq!(
+                decide(
+                    &intent("open_app", &format!(r#"{{"app":"{said}"}}"#)),
+                    &policy,
+                    None
+                )
+                .unwrap(),
+                Plan::Click {
+                    app_id: "archie-display".into(),
+                    target: button.into()
+                },
+                "{said}"
+            );
+        }
         assert_eq!(
             decide(
                 &intent("type_text", r#"{"text":"hola"}"#),

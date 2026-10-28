@@ -558,6 +558,8 @@ fn connect(
     use archie_types::AgentId;
     use archie_voice::{Grounding, Hands, Launch};
     use std::path::Path;
+    /// How long a click waits to see the window it pressed repaint.
+    const CLICK_REPAINT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
     use std::sync::Arc;
     use tokio::net::UnixStream;
 
@@ -583,7 +585,11 @@ fn connect(
         agent: AgentId::new(),
     };
     let operator = Operator::new(key, policy.clone(), PolicyEngine::default());
-    let mut sight = Sight::new(operator, client, world, snapshot_dir, principal.clone());
+    // A window drawn in software inside a nested compositor (the stage's own desktop under
+    // WSLg) repaints well after the 300 ms a GPU-drawn one needs: a click that opened Sentry
+    // was reported as not done, and retried until the dock had toggled it shut and open.
+    let mut sight = Sight::new(operator, client, world, snapshot_dir, principal.clone())
+        .with_timeouts(archie_sight::RECEIPT_TIMEOUT, CLICK_REPAINT_TIMEOUT);
     // What applications declare about their controls is the first way to find one: exact,
     // live, and it needs neither a capture nor a model.
     match asking
