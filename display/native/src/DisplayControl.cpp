@@ -2,10 +2,13 @@
 
 #include "LumenField.h"
 
+#include <QDateTime>
+#include <QDir>
 #include <QHostAddress>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QStandardPaths>
 #include <QTcpSocket>
 #include <QTimer>
 
@@ -155,5 +158,95 @@ QByteArray DisplayControl::answer(const QByteArray &line)
         emit commandReceived(action, value, false);
         return QByteArrayLiteral("ok\n");
     }
-    return refusal(QStringLiteral("unknown action ") + action);
+    return answerView(action, command);
+}
+
+QString DisplayControl::captureFolder() const
+{
+    QString base = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
+    if (base.isEmpty())
+        base = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+    return base + QStringLiteral("/archie-display");
+}
+
+QByteArray DisplayControl::answerView(const QString &action, const QJsonObject &command)
+{
+    static const QStringList views{QStringLiteral("focus"), QStringLiteral("camera"), QStringLiteral("window"),
+        QStringLiteral("pointer"), QStringLiteral("highlight"), QStringLiteral("popup"), QStringLiteral("freeze"),
+        QStringLiteral("capture")};
+    if (!views.contains(action))
+        return refusal(QStringLiteral("unknown action ") + action);
+    // The shell has its own window and no sphere of its own to move: only a capture is the same there.
+    if (m_shellMode && action != QLatin1String("capture"))
+        return refusal(action + QStringLiteral(" is available in Observatory, not in the shell"));
+
+    const QJsonValue raw = command.value(QStringLiteral("value"));
+    const QString value = raw.toString();
+    const auto plain = [](const QString &text, qsizetype longest) {
+        if (text.size() > longest)
+            return false;
+        for (const QChar c : text)
+            if (c.unicode() < 0x20 || c.unicode() == 0x7f)
+                return false;
+        return true;
+    };
+
+    if (action == QLatin1String("capture")) {
+        if (!m_capture)
+            return refusal(QStringLiteral("the window cannot be captured here"));
+        const QString folder = captureFolder();
+        if (!QDir().mkpath(folder))
+            return refusal(QStringLiteral("the capture folder is not writable"));
+        const QString path = folder + QStringLiteral("/capture-")
+            + QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd-HHmmss-zzz")) + QStringLiteral(".png");
+        if (!m_capture(path))
+            return refusal(QStringLiteral("the capture failed"));
+        return QByteArrayLiteral("ok ") + path.toUtf8() + '\n';
+    }
+
+    QVariantMap arguments;
+    if (action == QLatin1String("focus")) {
+        // An empty value lets go of the node.
+        if (!raw.isString() || value.size() > 256 || !plain(value, 256))
+            return refusal(QStringLiteral("focus requires a node id of at most 256 characters"));
+        arguments.insert(QStringLiteral("id"), value);
+    } else if (action == QLatin1String("camera")) {
+        static const QStringList moves{QStringLiteral("home"), QStringLiteral("closer"), QStringLiteral("farther"),
+            QStringLiteral("left"), QStringLiteral("right"), QStringLiteral("up"), QStringLiteral("down")};
+        if (!moves.contains(value))
+            return refusal(QStringLiteral("unknown camera move ") + value.left(40));
+        arguments.insert(QStringLiteral("move"), value);
+    } else if (action == QLatin1String("window")) {
+        static const QStringList states{QStringLiteral("windowed"), QStringLiteral("fullscreen"), QStringLiteral("maximized")};
+        if (!states.contains(value))
+            return refusal(QStringLiteral("unknown window state ") + value.left(40));
+        arguments.insert(QStringLiteral("state"), value);
+    } else if (action == QLatin1String("pointer")) {
+        const QJsonValue x = command.value(QStringLiteral("x")), y = command.value(QStringLiteral("y"));
+        const QJsonValue click = command.value(QStringLiteral("click"));
+        if (!x.isDouble() || !y.isDouble() || x.toDouble() < 0.0 || x.toDouble() > 1.0 || y.toDouble() < 0.0 || y.toDouble() > 1.0
+            || (!click.isUndefined() && !click.isBool()))
+            return refusal(QStringLiteral("a pointer requires x and y between 0 and 1, and click as a boolean when given"));
+        arguments.insert(QStringLiteral("x"), x.toDouble());
+        arguments.insert(QStringLiteral("y"), y.toDouble());
+        arguments.insert(QStringLiteral("click"), click.toBool(false));
+    } else if (action == QLatin1String("highlight")) {
+        if (!raw.isString() || value.isEmpty() || !plain(value, 256) || !command.value(QStringLiteral("enabled")).isBool())
+            return refusal(QStringLiteral("highlight requires a node id and a boolean enabled value"));
+        arguments.insert(QStringLiteral("id"), value);
+        arguments.insert(QStringLiteral("enabled"), command.value(QStringLiteral("enabled")).toBool());
+    } else if (action == QLatin1String("popup")) {
+        const QJsonValue seconds = command.value(QStringLiteral("seconds"));
+        if (!raw.isString() || value.trimmed().isEmpty() || !plain(value, 200)
+            || (!seconds.isUndefined() && (!seconds.isDouble() || seconds.toDouble() < 1.0 || seconds.toDouble() > 30.0)))
+            return refusal(QStringLiteral("a popup requires text of at most 200 characters and seconds between 1 and 30"));
+        arguments.insert(QStringLiteral("text"), value.trimmed());
+        arguments.insert(QStringLiteral("seconds"), seconds.toDouble(4.0));
+    } else {  // freeze
+        if (!command.value(QStringLiteral("enabled")).isBool())
+            return refusal(QStringLiteral("freeze requires a boolean enabled value"));
+        arguments.insert(QStringLiteral("enabled"), command.value(QStringLiteral("enabled")).toBool());
+    }
+    emit viewCommand(action, arguments);
+    return QByteArrayLiteral("ok\n");
 }

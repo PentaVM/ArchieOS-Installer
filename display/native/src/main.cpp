@@ -137,6 +137,12 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().front());
     auto *presentation=window ? new PresentationTracker(window, &bridge) : nullptr;
+    // `archie visual capture`: the window as it is drawn now, into the display's own folder.
+    if (window)
+        displayControl.setCapture([window](const QString &path) {
+            const QImage frame = window->grabWindow();
+            return !frame.isNull() && frame.save(path, "PNG");
+        });
     if (!shellMode) {
         QString scene = displayControl.sceneNamed(arguments.value(QStringLiteral("scene")));
         if (scene.isEmpty()) {

@@ -25,10 +25,18 @@ Qt/QML, GPU shaders and World remain the native host. See
 [`source-port.md`](../../_dev/verification/xavi/source-port.md) for source attribution,
 CPU validation and the explicit visual/hardware fidelity limits.
 
-`holograma` and `holograma-calido` are Xavi's desktop sphere: the content sphere lists a
-folder read-only (Rust, `fieldSource: content`) and draws it with his hologram grade,
-rings, projector and labels. `--preset holograma --content-root <dir>` opens it; see
-[`content-sphere.md`](../../_dev/verification/xavi/content-sphere.md).
+`holograma` and `neural` are Xavi's desktop sphere (Lumenfield's "Esfera neuronal"): Rust
+lists a folder read-only and lays the sphere out (`fieldSource: neural`, the
+`archie-lumen-design` crate's `neural_*` ABI); Qt Quick 3D draws it with his points, link
+layers, sparks, projection base and cone, bloom and hologram pass, and labels it in Inter.
+`--preset holograma --content-root <dir>` opens it. The older content source
+(`fieldSource: content`) stays in the renderer for the `field`/`crown`/`atlas`/`dense`
+profiles; no preset of Xavi's uses it any more.
+
+The loopback channel also takes the verbs an AI needs to see what it does, each checked before
+it moves (`archie visual focus|camera|window|pointer|highlight|popup|freeze|capture`); see
+`DisplayControl.h` for the wire format. `capture` writes a PNG into the display's own folder
+(`$XDG_RUNTIME_DIR/archie-display`) and replies with its path.
 
 Build with Cargo plus the existing Qt6/CMake dependencies; CMake builds/links the
 Rust static library automatically. Optional CPU shader checks use Mesa llvmpipe:

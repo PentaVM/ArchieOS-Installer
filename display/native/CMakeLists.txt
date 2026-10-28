@@ -71,6 +71,10 @@ qt_add_executable(archie-display
     src/XaviDesignBridge.h
     src/LumenGeometry.cpp
     src/LumenGeometry.h
+    src/NeuralField.cpp
+    src/NeuralField.h
+    src/NeuralGeometry.cpp
+    src/NeuralGeometry.h
     src/AppCatalog.cpp
     src/AppCatalog.h
     src/DisplayControl.cpp
@@ -93,6 +97,10 @@ qt_add_qml_module(archie-display
         qml/ForgeView.qml
         qml/OrbViewport.qml
         qml/HologramGrade.qml
+        qml/NeuralScene.qml
+        qml/NeuralHud.qml
+        qml/NeuralHolo.qml
+        qml/NeuralViewport.qml
 )
 
 # Keep relative prototype/font URLs intact; every operational shell asset is local.
@@ -137,6 +145,14 @@ qt_add_resources(archie-display "archie-native-assets"
         shaders/xavi_ribbon.frag
         shaders/lumen_glow.vert
         shaders/lumen_glow.frag
+        shaders/neural_point.vert
+        shaders/neural_point.frag
+        shaders/neural_line.vert
+        shaders/neural_line.frag
+        shaders/neural_spark.vert
+        shaders/neural_spark.frag
+        shaders/neural_cone.vert
+        shaders/neural_cone.frag
         assets/xavi/prism-structure-4k.png
         assets/xavi/prism-surface-4k.png
         ${archie_presets}
@@ -152,7 +168,7 @@ qt_add_resources(archie-display "archie-native-assets"
 find_package(Qt6 6.6 REQUIRED COMPONENTS ShaderTools)
 qt_add_shaders(archie-display "archie-grade-shaders"
     PREFIX "/archie"
-    FILES shaders/hologram_grade.frag)
+    FILES shaders/hologram_grade.frag shaders/neural_holo.frag)
 
 target_link_libraries(archie-display PRIVATE
     archie::visual
@@ -258,7 +274,11 @@ if(ARCHIE_NATIVE_BUILD_TESTS)
     qt_add_resources(test_display_control "archie-control-test-presets" PREFIX "/archie" BASE "${CMAKE_CURRENT_SOURCE_DIR}"
         FILES ${archie_presets})
     add_test(NAME display_control_contracts COMMAND test_display_control)
-    set_target_properties(test_native test_shell_runtime test_display_control PROPERTIES WIN32_EXECUTABLE FALSE)
+    qt_add_executable(test_neural tests/test_neural.cpp src/NeuralField.cpp src/NeuralField.h)
+    target_include_directories(test_neural PRIVATE src "${ARCHIE_LUMEN_DESIGN_DIR}/include")
+    target_link_libraries(test_neural PRIVATE archie-lumen-design Qt6::Concurrent Qt6::Gui Qt6::Test)
+    add_test(NAME neural_sphere_contracts COMMAND test_neural)
+    set_target_properties(test_native test_shell_runtime test_display_control test_neural PROPERTIES WIN32_EXECUTABLE FALSE)
     option(ARCHIE_NATIVE_BUILD_SHADER_TESTS "Run isolated CPU llvmpipe shader smoke tests" OFF)
     if(ARCHIE_NATIVE_BUILD_SHADER_TESTS)
         file(GLOB ARCHIE_TEST_SHADERS CONFIGURE_DEPENDS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
