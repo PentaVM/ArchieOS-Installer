@@ -290,7 +290,8 @@ pub fn say(work: &Work, lang: Lang, beat: &Beat) -> Said {
         (Lang::En, Beat::Stopped { lines }) => format!("Stopped, as you asked. {lines} lines are on the paper."),
         (Lang::Es, Beat::Stopped { lines }) => format!("Me detuve, como pediste. Hay {lines} líneas en el papel."),
         (Lang::En, Beat::Failed { why }) => format!("I couldn't finish the drawing: {why}."),
-        (Lang::Es, Beat::Failed { why }) => format!("No pude terminar el dibujo: {why}."),
+        // The reason is the program's, in English; the log has it.
+        (Lang::Es, Beat::Failed { .. }) => "No pude terminar el dibujo; el motivo quedó en el registro.".into(),
     };
     Said {
         text,
@@ -388,18 +389,23 @@ mod job {
         Ok(CommandKey::from_bytes(&bytes))
     }
 
-    /// The stage policy's Photopea entry: its application, and the address it may open.
+    /// The stage policy's Photopea entry: its application, and the browser that opens it.
+    /// The entry may open Photopea itself, with a document of its own in the address; the
+    /// address is then replaced by the one this drawing needs, which is photopea.com too.
     fn photopea_entry(policy: &StagePolicy) -> Result<(String, Vec<String>), String> {
         let app = policy
             .named("photopea")
             .ok_or("the stage policy has no Photopea entry")?;
-        let at = app
-            .launch
+        let mut argv = app.launch.clone();
+        if let Some(at) = argv
             .iter()
             .position(|arg| arg.starts_with("https://www.photopea.com/"))
-            .ok_or("the Photopea entry does not open photopea.com")?;
-        let mut argv = app.launch.clone();
-        argv.truncate(at);
+        {
+            argv.truncate(at);
+        }
+        if argv.is_empty() {
+            return Err("the Photopea entry opens nothing".into());
+        }
         Ok((app.app_id.clone(), argv))
     }
 
@@ -411,13 +417,14 @@ mod job {
         narrate: &mut dyn Narrate,
         stop: Arc<AtomicBool>,
     ) -> Result<Summary, String> {
+        // Saying yes is the caller's: a voice answers in its own words, a command prints it.
         let mut tell = |beat: Beat| narrate.tell(say(work, lang, &beat));
-        tell(Beat::Accepted);
         let picture_path = studio.picture(work);
         let picture = archie_paint::Picture::read(&picture_path)
             .map_err(|e| format!("{}: {e}", picture_path.display()))?;
         let radius = (picture.width() / 200).max(1);
-        let picture = picture.softened(radius).stretched();
+        // A mat of a twenty-fifth: the darkened edges of an old painting are not its form.
+        let picture = picture.matted(0.04).softened(radius).stretched();
 
         let policy = StagePolicy::load(&studio.policy).map_err(|e| e.to_string())?;
         let (app_id, argv) = photopea_entry(&policy)?;
@@ -436,7 +443,9 @@ mod job {
         // 1. Photopea, with the sheet and both inks.
         tell(Beat::Opening);
         let (w, h) = sheet_for(picture.width(), picture.height());
-        let address = photopea::url(w, h, work.en, work.inks[0], work.inks[1]);
+        // The document is named for the painting, without the article it is said with.
+        let name = work.en.trim_start_matches("the ");
+        let address = photopea::url(w, h, name, work.inks[0], work.inks[1]);
         let (program, args) = argv
             .split_first()
             .ok_or("the Photopea entry starts nothing")?;
