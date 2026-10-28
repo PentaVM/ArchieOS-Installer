@@ -53,6 +53,11 @@ WaylandCompositor {
     // Whether the desktop has the keyboard: the shell's own windows (Sentry, Forge, Vault)
     // are inside it, so the stage's windows step aside to the shelf while it is in use.
     property bool desktopFocused: false
+    // What the stage's caption calls an app id: its last dotted part (org.mozilla.firefox: firefox).
+    function labelOf(appId) {
+        const dot = appId.lastIndexOf(".")
+        return dot >= 0 ? appId.slice(dot + 1) : appId
+    }
     function setStashed(index, stashed) {
         if (index < 0 || index >= shellSurfaces.count || shellSurfaces.get(index).stashed === stashed)
             return
@@ -100,14 +105,15 @@ WaylandCompositor {
     // application and a count; there is no field that could carry typed text.
     // What a person calls an application: the first part of its window's title (Photopea,
     // not "Photopea | Online Photo Editor — Mozilla Firefox"), else its app id.
+    // `appId` is as the caption gives it (labelOf).
     function appName(appId) {
         // The desktop's own windows (World beside the shell) go by the desktop's name.
-        if (appId.length > 0 && appId === compositor.desktopApp && compositor.hasDesktop)
+        if (appId.length > 0 && appId === compositor.labelOf(compositor.desktopApp) && compositor.hasDesktop)
             return compositor.desktopTitle
         void compositor.layoutVersion
         for (let i = 0; i < shellSurfaces.count; ++i) {
             const xdg = shellSurfaces.get(i).shellSurface
-            if (!xdg || !xdg.toplevel || xdg.toplevel.appId !== appId || compositor.isDesktop(xdg))
+            if (!xdg || !xdg.toplevel || compositor.labelOf(xdg.toplevel.appId) !== appId || compositor.isDesktop(xdg))
                 continue
             const name = xdg.toplevel.title.split(/ [|—–-] /)[0].trim()
             if (name.length > 0 && name.length <= 40)
@@ -296,15 +302,15 @@ WaylandCompositor {
                         readonly property int edgeWidth: frame.desktopRole ? 0 : 1
                         z: frame.desktopRole ? -1 : 0
                         x: tile.x
-                        y: tile.y + (frame.stashed ? 60 : 0)
+                        y: tile.y
                         width: tile.width
                         height: tile.height
-                        // On the shelf: out of sight and out of the tiling, still a live window.
+                        // On the shelf: out of sight, still a live window where it was. Its
+                        // place and size do not change, so nothing Archie is doing in it is
+                        // refused for a window that moved.
                         opacity: frame.stashed ? 0 : 1
-                        scale: frame.stashed ? 0.94 : 1
-                        visible: opacity > 0.01
+                        enabled: !frame.stashed
                         Behavior on opacity { NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
-                        Behavior on scale { NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
                         onFocusedChanged: {
                             if (frame.desktopRole)
                                 compositor.desktopFocused = frame.focused
@@ -325,7 +331,7 @@ WaylandCompositor {
                                 // The desktop's own windows share its app id: acting on the desktop
                                 // is not acting on them.
                                 if (compositor.stage.captionOpacity > 0.5 && compositor.stage.captionVerb !== "refused"
-                                        && compositor.stage.captionApp === frame.appId() && !frame.desktopRole
+                                        && compositor.stage.captionApp === compositor.labelOf(frame.appId()) && !frame.desktopRole
                                         && frame.appId() !== compositor.desktopApp)
                                     compositor.setStashed(frame.index, false)
                             }
@@ -480,11 +486,13 @@ WaylandCompositor {
                         const brightest = fresh ? fresh.opacity : 0
                         const pressed = brightest > pressWatch.last + 0.05
                         pressWatch.last = brightest
-                        if (!pressed)
+                        // Only a press on the desktop's own app counts: a stroke in Photopea
+                        // is Photopea's, wherever the camera has put it.
+                        if (!pressed || compositor.stage.captionApp !== compositor.labelOf(compositor.desktopApp))
                             return
                         for (let i = 0; i < frames.count; ++i) {
                             const window = frames.itemAt(i)
-                            if (!window || !window.visible || window.desktopRole)
+                            if (!window || window.stashed || window.desktopRole)
                                 continue
                             const at = window.mapFromItem(null, fresh.x, fresh.y)
                             if (at.x >= 0 && at.y >= 0 && at.x <= window.width && at.y <= window.height)

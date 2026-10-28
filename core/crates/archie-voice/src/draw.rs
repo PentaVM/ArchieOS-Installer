@@ -207,6 +207,8 @@ pub enum Beat {
     Done {
         lines: usize,
         seconds: f32,
+        /// Batches the stage did not carry out.
+        refused: usize,
     },
     Stopped {
         lines: usize,
@@ -281,11 +283,17 @@ pub fn say(work: &Work, lang: Lang, beat: &Beat) -> Said {
         (Lang::Es, Beat::Resumed) => "Sigo.".into(),
         (Lang::En, Beat::Retrying) => "The first lines left no ink: the brush wasn't in my hand. Picking it up again.".into(),
         (Lang::Es, Beat::Retrying) => "Las primeras líneas no dejaron tinta: el pincel no estaba en mi mano. Lo tomo de nuevo.".into(),
-        (Lang::En, Beat::Done { lines, seconds }) => format!(
+        (Lang::En, Beat::Done { lines, seconds, refused: 0 }) => format!(
             "Done. {lines} lines in {seconds:.0} seconds, every one drawn by my own pointer, through the Stage's gate."
         ),
-        (Lang::Es, Beat::Done { lines, seconds }) => format!(
+        (Lang::Es, Beat::Done { lines, seconds, refused: 0 }) => format!(
             "Listo. {lines} líneas en {seconds:.0} segundos, cada una dibujada por mi propio puntero, a través de la puerta del Stage."
+        ),
+        (Lang::En, Beat::Done { lines, refused, .. }) => format!(
+            "I've finished, but the Stage refused {refused} of my batches, so only {lines} lines reached the paper."
+        ),
+        (Lang::Es, Beat::Done { lines, refused, .. }) => format!(
+            "Terminé, pero el Stage rechazó {refused} de mis tandas, así que solo {lines} líneas llegaron al papel."
         ),
         (Lang::En, Beat::Stopped { lines }) => format!("Stopped, as you asked. {lines} lines are on the paper."),
         (Lang::Es, Beat::Stopped { lines }) => format!("Me detuve, como pediste. Hay {lines} líneas en el papel."),
@@ -626,6 +634,9 @@ mod job {
                         second_told = true;
                         tell(Beat::SecondInk);
                     }
+                    Progress::Refused(why) => {
+                        eprintln!("archie-voice: the stage refused a batch: {why}")
+                    }
                     Progress::Colour(_) | Progress::Drew { .. } => {}
                 }
             }
@@ -663,6 +674,7 @@ mod job {
             tell(Beat::Done {
                 lines: summary.lines,
                 seconds: summary.seconds,
+                refused: summary.refused,
             });
         }
         Ok(summary)
@@ -754,6 +766,12 @@ mod tests {
             Beat::Done {
                 lines: 900,
                 seconds: 149.6,
+                refused: 0,
+            },
+            Beat::Done {
+                lines: 300,
+                seconds: 149.6,
+                refused: 4,
             },
             Beat::Stopped { lines: 120 },
             Beat::Failed { why: "x".into() },

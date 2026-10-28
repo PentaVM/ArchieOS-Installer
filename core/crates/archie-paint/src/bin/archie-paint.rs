@@ -834,6 +834,7 @@ mod unix {
                     println!("{lines} of {of} lines");
                 }
             }
+            Progress::Refused(why) => println!("refused: {why}"),
             Progress::Colour(_) => {}
         })
         .await?;

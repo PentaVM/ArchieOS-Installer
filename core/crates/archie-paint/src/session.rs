@@ -196,6 +196,8 @@ pub enum Progress {
     Waiting,
     /// The person let go, and the drawing carries on.
     Resumed,
+    /// A command the stage did not carry out, and why.
+    Refused(String),
 }
 
 /// What a drawing came to.
@@ -319,6 +321,7 @@ where
         } else {
             summary.refused += 1;
             summary.lines += carried;
+            on(Progress::Refused(refusal_of(&outcome)));
         }
     }
     summary.seconds = started.elapsed().as_secs_f32();
