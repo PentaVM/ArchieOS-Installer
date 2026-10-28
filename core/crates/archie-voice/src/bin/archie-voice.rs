@@ -21,6 +21,17 @@
 //!              [the stage flags of do]
 //! ```
 //!
+//! `draw` is the drawing on its own, with no model in the loop: Archie opens Photopea on the
+//! stage and draws a painting it knows, telling what it does as it goes (printed, and shown
+//! under the stage when `--subtitles` names the file the stage reads). It is how the demo is
+//! rehearsed, and what `draw_picture` runs when the model proposes it:
+//!
+//! ```text
+//! archie-voice draw "the Mona Lisa" [--language en] --socket … --key-file … --policy …
+//!              [--stage-display <wayland display>] [--pictures <dir>] [--subtitles <file>]
+//!              [--seconds 150] [--pen 4] [--batch 12] [--app-log <file>]
+//! ```
+//!
 //! `live` is `converse` with a browser page for microphone, speaker and camera (loopback;
 //! reach it through an SSH tunnel), IRIS for eyes, and curiosity: it looks closer at what
 //! is in front, finds out what it is and reads about it, and keeps that until asked:
@@ -114,9 +125,12 @@ fn run(mut args: Vec<String>, offset: Option<time::UtcOffset>) -> Result<ExitCod
     const USAGE: &str =
         "usage: archie-voice ask|do \"<what was said>\" --grade public | converse --grade public …";
     let command = match args.first().map(String::as_str) {
-        Some("ask") | Some("do") | Some("converse") | Some("live") => args.remove(0),
+        Some("ask") | Some("do") | Some("converse") | Some("live") | Some("draw") => args.remove(0),
         _ => return Err(USAGE.into()),
     };
+    if command == "draw" {
+        return draw(args);
+    }
     if command == "live" {
         let speech = speech_flags(&mut args)?;
         let flags = live_flags(&mut args)?;
@@ -380,6 +394,109 @@ fn listen(cognitive: &mut NemotronCognitive<RoutedSource>, started: Instant) -> 
             }
         }
     }
+}
+
+/// Where paintings are drawn: the stage, and what a drawing needs besides.
+struct DrawFlags {
+    pictures: String,
+    subtitles: Option<String>,
+    seconds: f32,
+    pen: u32,
+    batch: usize,
+}
+
+fn draw_flags(args: &mut Vec<String>) -> Result<DrawFlags, String> {
+    let number = |value: Option<String>,
+                  flag: &str,
+                  low: f32,
+                  high: f32,
+                  default: f32|
+     -> Result<f32, String> {
+        match value {
+            None => Ok(default),
+            Some(text) => text
+                .parse::<f32>()
+                .ok()
+                .filter(|v| (low..=high).contains(v))
+                .ok_or(format!("{flag} is between {low} and {high}")),
+        }
+    };
+    Ok(DrawFlags {
+        // The paintings Archie Arena ships, unless told otherwise.
+        pictures: take(args, "--pictures")
+            .or_else(|| std::env::var("ARCHIE_PICTURES").ok())
+            .unwrap_or_else(|| {
+                concat!(env!("CARGO_MANIFEST_DIR"), "/../archie-arena/tasks").into()
+            }),
+        subtitles: take(args, "--subtitles"),
+        seconds: number(take(args, "--seconds"), "--seconds", 20.0, 900.0, 150.0)?,
+        pen: number(take(args, "--pen"), "--pen", 1.0, 15.0, 4.0)? as u32,
+        batch: number(take(args, "--batch"), "--batch", 1.0, 64.0, 12.0)? as usize,
+    })
+}
+
+#[cfg(unix)]
+fn studio(stage: &StageFlags, draw: &DrawFlags) -> archie_voice::draw::Studio {
+    archie_voice::draw::Studio {
+        socket: stage.socket.clone().into(),
+        key_file: stage.key_file.clone().into(),
+        policy: stage.policy.clone().into(),
+        wayland_display: stage.display.clone(),
+        pictures: draw.pictures.clone().into(),
+        pen: draw.pen,
+        seconds: draw.seconds,
+        batch: draw.batch,
+        log: stage.app_log.clone().map(Into::into),
+    }
+}
+
+#[cfg(not(unix))]
+fn draw(_args: Vec<String>) -> Result<ExitCode, String> {
+    Err("draw works a stage, which listens on a Unix socket; run it where the stage runs".into())
+}
+
+/// `archie-voice draw "<painting>"`: the drawing with nobody in the loop but Archie.
+#[cfg(unix)]
+fn draw(mut args: Vec<String>) -> Result<ExitCode, String> {
+    use archie_voice::draw::{self, Lang, NarrateWith};
+    use archie_voice::narration::Narration;
+    let language = Lang::of(&take(&mut args, "--language").unwrap_or_else(|| "es".into()));
+    let flags = draw_flags(&mut args)?;
+    let stage = stage_flags(&mut args)?;
+    if args.len() != 1 {
+        return Err(
+            "usage: archie-voice draw \"<painting>\" --socket … --key-file … --policy …".into(),
+        );
+    }
+    let work = draw::find_work(&args[0])
+        .ok_or_else(|| format!("I can draw {}; not {}", draw::repertoire(language), args[0]))?;
+    let studio = studio(&stage, &flags);
+    let subtitles = Narration::new(flags.subtitles.clone().map(Into::into));
+    let started = Instant::now();
+    let mut narrate = NarrateWith(move |said: draw::Said| {
+        println!("{:>7.1}s  {}", started.elapsed().as_secs_f32(), said.text);
+        subtitles.subtitle(&said.text, said.lang.code());
+    });
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())?;
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let summary = runtime.block_on(draw::run(studio, work, language, &mut narrate, stop))?;
+    println!(
+        "{} lines, {} commands, {} refused, {:.1}s ({:.1}s waiting for a person), {:.0} pixels of line a second",
+        summary.lines,
+        summary.commands,
+        summary.refused,
+        summary.seconds,
+        summary.waited_seconds,
+        summary.pixels_per_second()
+    );
+    Ok(if summary.refused == 0 {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(4)
+    })
 }
 
 /// Where the stage is, and how to act on it.

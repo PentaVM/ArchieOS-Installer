@@ -948,6 +948,7 @@ dependencies = [
  "archie-model-runtime",
  "archie-notices",
  "archie-orb",
+ "archie-paint",
  "archie-policy",
  "archie-registry",
  "archie-router",

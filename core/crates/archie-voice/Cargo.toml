@@ -35,6 +35,7 @@ archie-registry.workspace = true
 archie-router.workspace = true
 archie-vault.workspace = true
 archie-stage.workspace = true
+archie-paint.workspace = true
 archie-sight.workspace = true
 archie-a11y.workspace = true
 archie-iris.workspace = true
