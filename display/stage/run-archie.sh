@@ -43,6 +43,8 @@
 #   REHEARSE      a painting to draw with no voice and no model ("the Mona Lisa"): the
 #                 desktop, World and the drawing exactly as in a take, nothing listened to
 #   REHEARSE_LANGUAGE  the narration's language in a rehearsal (en or es)   default: en
+#   WAV_IN, WAV_OUT  a recording heard instead of the microphone, and a file Archie's voice
+#                 goes to instead of the speaker
 set -eu
 
 GRADE=${1:-}
@@ -96,7 +98,10 @@ if [ -z "${REHEARSE:-}" ]; then
     [ -n "$ASR_MODEL" ] && [ -f "$ASR_MODEL" ] || { echo "run-archie: no ASR model; run nemo-speech pull nemotron-3.5 or set ASR_MODEL" >&2; exit 1; }
     [ -f "$PIPER_MODEL" ] || { echo "run-archie: no Spanish Piper model at $PIPER_MODEL; run scripts/models/install-piper-voices.sh" >&2; exit 1; }
 fi
-if [ -z "${REHEARSE:-}" ] && [ "$PIPER" = "$REPO/scripts/models/piper-json-bridge.py" ]; then
+# The bridge runs as `env python3`: put the Python that has Piper first on PATH, for this
+# checkout's bridge and for the installed one (/usr/lib/archie) alike. Without it the bridge
+# starts under the system Python, dies at the first reply, and the conversation ends.
+if [ -z "${REHEARSE:-}" ] && { [ "$PIPER" = "$REPO/scripts/models/piper-json-bridge.py" ] || [ "$PIPER_PYTHON" != python3 ]; }; then
     PIPER_PYTHON_BIN=$(command -v "$PIPER_PYTHON" 2>/dev/null || true)
     [ -n "$PIPER_PYTHON_BIN" ] || { echo "run-archie: Python runtime not found: $PIPER_PYTHON" >&2; exit 1; }
     PATH=$(dirname "$PIPER_PYTHON_BIN"):$PATH
@@ -202,6 +207,10 @@ fi
 [ -n "${LISTEN_LANGUAGE:-}" ] && set -- "$@" --listen-language "$LISTEN_LANGUAGE"
 [ "${HEADPHONES:-0}" = 1 ] && set -- "$@" --headphones
 [ "${ALWAYS:-0}" = 1 ] && set -- "$@" --always
+# A recording in place of the microphone, and a file in place of the speaker: the whole
+# spoken loop, tested without a room.
+[ -n "${WAV_IN:-}" ] && set -- "$@" --wav-in "$WAV_IN"
+[ -n "${WAV_OUT:-}" ] && set -- "$@" --wav-out "$WAV_OUT"
 
 # Two thread pools share this process's cores; spinning ones starve each other.
 # Applications opened by voice inherit the stage's runtime directory and software rendering.

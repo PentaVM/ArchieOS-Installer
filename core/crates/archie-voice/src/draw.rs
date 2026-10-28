@@ -57,6 +57,13 @@ pub const WORKS: &[Work] = &[
             "joconde",
             "la joconda",
             "leonardo",
+            // What the Nemotron 3.5 recogniser heard for "the Mona Lisa" in rehearsals.
+            "moaner lisa",
+            "moaner lea",
+            "owner leaser",
+            "mona lease",
+            "mona leaser",
+            "mona liza",
         ],
         inks: [[0x4a, 0x2e, 0x1a], [0xa5, 0x52, 0x2e]],
         ink_names_en: ["sepia", "red chalk"],
@@ -714,6 +721,8 @@ mod tests {
             "MONA LISA!",
             "la mona lisa de Leonardo",
             "monalisa",
+            "the moaner lea",
+            "the owner leaser",
         ] {
             assert_eq!(find_work(said).map(|w| w.id), Some("mona-lisa"), "{said}");
         }
