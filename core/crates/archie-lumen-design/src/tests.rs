@@ -1072,8 +1072,8 @@ mod neural_golden {
         ];
         for (name, hex) in named {
             let c = linear_colour(hex);
-            for a in 0..3 {
-                close(c[a], f(&p[name][a]), name);
+            for (a, value) in c.iter().enumerate() {
+                close(*value, f(&p[name][a]), name);
             }
         }
         let mut rng = Rng::new(7);
