@@ -209,14 +209,46 @@ Node {
             brightness: 0.8
         }
         Model {
-            visible: scene.shellVisible
+            visible: scene.shellVisible && !scene.lightMode
             source: "#Sphere"
             scale: Qt.vector3d(scene.r/50,scene.r/50,scene.r/50)
             materials: PrincipledMaterial {
-                baseColor: scene.lightMode ? Qt.rgba(0.19,0.54,0.72,0.11) : Qt.rgba(0.12,0.47,0.68,0.09)
+                baseColor: Qt.rgba(0.12,0.47,0.68,0.09)
                 alphaMode: PrincipledMaterial.Blend
                 roughness: 1; metalness: 0; specularAmount: 0
                 depthDrawMode: Material.NeverDepthDraw
+            }
+        }
+        // Light-mode volume/rim and external halo use the actual camera view
+        // vector. Both are decorative envelopes of the existing sphere, not nodes.
+        Model {
+            visible: scene.shellVisible && scene.lightMode
+            source: "#Sphere"
+            scale: Qt.vector3d(scene.r*1.08/50,scene.r*1.08/50,scene.r*1.08/50)
+            materials: CustomMaterial {
+                shadingMode: CustomMaterial.Unshaded
+                sourceBlend: CustomMaterial.One
+                destinationBlend: CustomMaterial.OneMinusSrcAlpha
+                cullMode: Material.BackFaceCulling
+                depthDrawMode: Material.NeverDepthDraw
+                property real atmospherePass: 1
+                vertexShader: "qrc:/archie/shaders/neural_atmosphere.vert"
+                fragmentShader: "qrc:/archie/shaders/neural_atmosphere_light.frag"
+            }
+        }
+        Model {
+            visible: scene.shellVisible && scene.lightMode
+            source: "#Sphere"
+            scale: Qt.vector3d(scene.r/50,scene.r/50,scene.r/50)
+            materials: CustomMaterial {
+                shadingMode: CustomMaterial.Unshaded
+                sourceBlend: CustomMaterial.One
+                destinationBlend: CustomMaterial.OneMinusSrcAlpha
+                cullMode: Material.BackFaceCulling
+                depthDrawMode: Material.NeverDepthDraw
+                property real atmospherePass: 0
+                vertexShader: "qrc:/archie/shaders/neural_atmosphere.vert"
+                fragmentShader: "qrc:/archie/shaders/neural_atmosphere_light.frag"
             }
         }
 

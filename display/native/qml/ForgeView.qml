@@ -95,13 +95,9 @@ Item {
             id: tile
             anchors.horizontalCenter: parent.horizontalCenter
             width: 76; height: 76; radius: 20
-            opacity: icon.faint ? 0.65 : (icon.app.available ? 1 : 0.75)
             scale: area.pressed ? 0.94 : (area.containsMouse ? 1.05 : 1.0)
             Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: Shell.Theme.raised }
-                GradientStop { position: 1.0; color: Shell.Theme.side }
-            }
+            color: Shell.Theme.iconSurface
             border.color: area.containsMouse ? Shell.Theme.acc : Shell.Theme.hair
             Image {
                 id: image
@@ -118,7 +114,7 @@ Item {
                 anchors.centerIn: parent
                 visible: image.status !== Image.Ready
                 text: icon.app.glyph || "·"
-                color: Shell.Theme.t1
+                color: Shell.Theme.iconInk
                 font.pixelSize: 30
                 font.weight: Font.Light
             }

@@ -8,6 +8,8 @@
 //   any application menu on Linux lists (KiCad, Firefox, Kdenlive...);
 // - a short list of well-known tools that are not installed, with the package that
 //   provides them. Nothing is installed from here.
+// Installed icons take precedence. Known applications have unmodified official
+// fallback artwork embedded offline; source pins/licenses live in assets/app-icons.
 //
 // For each it reports whether it can start (its executable exists), whether it is running
 // now (a process of that executable in /proc), and whether Archie may operate it (the

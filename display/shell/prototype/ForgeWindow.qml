@@ -42,10 +42,10 @@ AppWindow {
                     readonly property bool ready: !!modelData.available && fg.hasCatalog && appCatalog.canLaunch
                     color:ama.containsMouse && ready ? Theme.hover : "transparent"
                     Rectangle { id:tile; anchors.horizontalCenter:parent.horizontalCenter; y:8; width:60; height:60; radius:16
-                        color: modelData.section === "archie" ? Theme.tint(Theme.acc, 0.16) : Theme.raised; border.width:1; border.color:Theme.hair
+                        color: Theme.iconSurface; border.width:1; border.color:Theme.hair
                         Image { id:img; anchors.centerIn:parent; width:40; height:40; source:modelData.icon || ""; sourceSize:Qt.size(80,80)
                             fillMode:Image.PreserveAspectFit; visible:status===Image.Ready; asynchronous:true }
-                        Text { anchors.centerIn:parent; visible:img.status!==Image.Ready; text:modelData.glyph || "·"; color:Theme.t1; font.pixelSize:24; font.family:Theme.font } }
+                        Text { anchors.centerIn:parent; visible:img.status!==Image.Ready; text:modelData.glyph || "·"; color:Theme.iconInk; font.pixelSize:24; font.family:Theme.font } }
                     Rectangle { visible:modelData.running > 0; anchors.horizontalCenter:parent.horizontalCenter; anchors.top:tile.bottom; anchors.topMargin:4
                         width:5; height:5; radius:2.5; color:Theme.ok }
                     Text { anchors.horizontalCenter:parent.horizontalCenter; y:tile.y + tile.height + 12; width:parent.width - 8
@@ -54,7 +54,7 @@ AppWindow {
                     MouseArea { id:ama; anchors.fill:parent; hoverEnabled:true; enabled:parent.ready; onClicked:fg.launch(modelData.id) } } } }
         Eyebrow { visible:fg.suggested.length>0; text:"Para instalar" }
         Repeater { model:fg.suggested
-            delegate:ListRow { glyph:"plus"; title:modelData.name; sub:(modelData.comment || "") + " · " + (modelData.missing || "")
+            delegate:ListRow { glyph:"plus"; iconSource:modelData.icon || ""; title:modelData.name; sub:(modelData.comment || "") + " · " + (modelData.missing || "")
                 Chip { small:true; text:"no instalada"; tone:"unk" } } }
     }
 

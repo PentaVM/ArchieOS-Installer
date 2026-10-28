@@ -105,22 +105,34 @@ struct Suggestion {
     const char *group;
     const char *package;
     const char *glyph;
+    const char *iconName;
+    const char *iconFile;
 };
 
 // Tools an operator of this machine is likely to want, shown when they are missing so the
 // gap is visible. Installing is the operator's call and needs root; this only names the
 // package.
 constexpr Suggestion suggestions[] = {
-    {"org.kicad.kicad", "KiCad", "Diseño de circuitos y placas", "Ingeniería", "kicad", "K"},
-    {"firefox", "Firefox", "Navegador web", "Internet", "firefox", "F"},
-    {"org.kde.kdenlive", "Kdenlive", "Edición de video (el motor de Archie Cut)", "Multimedia", "kdenlive", "V"},
-    {"org.freecad.FreeCAD", "FreeCAD", "Modelado CAD paramétrico", "Ingeniería", "freecad", "C"},
-    {"blender", "Blender", "Modelado, animación y render 3D", "Gráficos", "blender", "B"},
-    {"org.inkscape.Inkscape", "Inkscape", "Gráficos vectoriales", "Gráficos", "inkscape", "I"},
-    {"gimp", "GIMP", "Edición de imágenes", "Gráficos", "gimp", "G"},
-    {"com.obsproject.Studio", "OBS Studio", "Grabar y transmitir la pantalla", "Multimedia", "obs-studio", "O"},
-    {"libreoffice-startcenter", "LibreOffice", "Documentos, hojas y presentaciones", "Oficina", "libreoffice-fresh", "L"},
+    {"org.kicad.kicad", "KiCad", "Diseño de circuitos y placas", "Ingeniería", "kicad", "K", "kicad", "kicad.png"},
+    {"firefox", "Firefox", "Navegador web", "Internet", "firefox", "F", "firefox", "firefox.svg"},
+    {"org.kde.kdenlive", "Kdenlive", "Edición de video (el motor de Archie Cut)", "Multimedia", "kdenlive", "V", "kdenlive", "kdenlive.png"},
+    {"org.freecad.FreeCAD", "FreeCAD", "Modelado CAD paramétrico", "Ingeniería", "freecad", "C", "org.freecad.FreeCAD", "freecad.svg"},
+    {"blender", "Blender", "Modelado, animación y render 3D", "Gráficos", "blender", "B", "blender", "blender.svg"},
+    {"org.inkscape.Inkscape", "Inkscape", "Gráficos vectoriales", "Gráficos", "inkscape", "I", "org.inkscape.Inkscape", "inkscape.svg"},
+    {"gimp", "GIMP", "Edición de imágenes", "Gráficos", "gimp", "G", "gimp", "gimp.svg"},
+    {"com.obsproject.Studio", "OBS Studio", "Grabar y transmitir la pantalla", "Multimedia", "obs-studio", "O", "com.obsproject.Studio", "obs-studio.png"},
+    {"libreoffice-startcenter", "LibreOffice", "Documentos, hojas y presentaciones", "Oficina", "libreoffice-fresh", "L", "libreoffice-startcenter", "libreoffice.png"},
 };
+
+QString bundledIcon(const QString &id)
+{
+    for (const auto &suggestion : suggestions) {
+        if (id != QLatin1String(suggestion.id)) continue;
+        const QString path = QStringLiteral("/archie/assets/app-icons/") + QLatin1String(suggestion.iconFile);
+        return QFile::exists(QLatin1Char(':') + path) ? QStringLiteral("qrc:") + path : QString();
+    }
+    return {};
+}
 
 }  // namespace
 
@@ -217,6 +229,7 @@ void AppCatalog::scan()
         app.binary = binaryOf(commandOf(app.exec));
         app.group = groupOf(entry.value(QStringLiteral("Categories")));
         app.icon = resolveIcon(entry.value(QStringLiteral("Icon")));
+        if (app.icon.isEmpty()) app.icon = bundledIcon(id);
         app.glyph = entry.value(QStringLiteral("X-Archie-Glyph"), app.name.left(1).toUpper());
         app.appId = entry.value(QStringLiteral("X-Archie-App-Id"), id);
         app.wmClass = entry.value(QStringLiteral("StartupWMClass"));
@@ -273,6 +286,8 @@ void AppCatalog::scan()
         app.section = QStringLiteral("suggested");
         app.missing = QStringLiteral("no instalada · pacman -S ") + app.package;
         app.appId = id;
+        app.icon = resolveIcon(QString::fromLatin1(s.iconName));
+        if (app.icon.isEmpty()) app.icon = bundledIcon(id);
         m_apps.push_back(app);
     }
 }
@@ -350,6 +365,8 @@ void AppCatalog::publish()
             {QStringLiteral("group"), app.group},
             {QStringLiteral("section"), app.section},
             {QStringLiteral("icon"), app.icon},
+            {QStringLiteral("iconSource"), app.icon.startsWith(QLatin1String("qrc:/archie/assets/app-icons/"))
+                ? QStringLiteral("official_bundle") : app.icon.isEmpty() ? QString() : QStringLiteral("installed")},
             {QStringLiteral("glyph"), app.glyph},
             {QStringLiteral("available"), app.available},
             {QStringLiteral("missing"), app.missing},

@@ -3,8 +3,10 @@
 #include <QDir>
 #include <QFile>
 #include <QGuiApplication>
+#include <QImage>
 #include <QSignalSpy>
 #include <QTemporaryDir>
+#include <QUrl>
 #include <QtTest>
 
 #include <utility>
@@ -111,6 +113,49 @@ private slots:
         QVERIFY(row(catalog.apps(), QStringLiteral("fixture-ide")).value(QStringLiteral("operable")).toBool());
         QVERIFY(row(catalog.apps(), QStringLiteral("fixture-training")).value(QStringLiteral("operable")).toBool());
         QVERIFY(row(catalog.property("forgeApps").toList(), QStringLiteral("fixture-training")).isEmpty());
+    }
+
+    void allNineSuggestionsHaveReadableOfficialFallbackIcons()
+    {
+        AppCatalog catalog(QStringList{});
+        for (const char *name : {"org.kicad.kicad", "firefox", "org.kde.kdenlive", "org.freecad.FreeCAD",
+                                "blender", "org.inkscape.Inkscape", "gimp", "com.obsproject.Studio", "libreoffice-startcenter"}) {
+            const auto app = row(catalog.forgeApps(), QString::fromLatin1(name));
+            QCOMPARE(app.value(QStringLiteral("section")).toString(), QStringLiteral("suggested"));
+            const QString icon = app.value(QStringLiteral("icon")).toString();
+            QVERIFY2(icon.startsWith(QLatin1String("qrc:/archie/assets/app-icons/")), qPrintable(icon));
+            QVERIFY(QFile::exists(QLatin1Char(':') + QUrl(icon).path()));
+            QVERIFY2(!QImage(QLatin1Char(':') + QUrl(icon).path()).isNull(), qPrintable(icon));
+            QCOMPARE(app.value(QStringLiteral("iconSource")).toString(), QStringLiteral("official_bundle"));
+            QVERIFY(!app.value(QStringLiteral("available")).toBool());
+        }
+    }
+
+    void installedDesktopIconWinsAndMissingKnownIconFallsBackWithoutChangingAvailability()
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString localIcon = directory.path() + QStringLiteral("/installed.png");
+        QImage image(32, 32, QImage::Format_ARGB32);
+        image.fill(Qt::green);
+        QVERIFY(image.save(localIcon));
+        const auto desktop = [&directory](const QString &icon) {
+            QFile file(directory.path() + QStringLiteral("/firefox.desktop"));
+            if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
+            return file.write((QStringLiteral("[Desktop Entry]\nType=Application\nName=Firefox\nExec=not-an-installed-executable\nIcon=") + icon + QLatin1Char('\n')).toUtf8()) > 0;
+        };
+        QVERIFY(desktop(localIcon));
+        AppCatalog catalog(QStringList{directory.path()});
+        auto app = row(catalog.forgeApps(), QStringLiteral("firefox"));
+        QCOMPARE(app.value(QStringLiteral("icon")).toString(), QUrl::fromLocalFile(localIcon).toString());
+        QCOMPARE(app.value(QStringLiteral("iconSource")).toString(), QStringLiteral("installed"));
+        QVERIFY(!app.value(QStringLiteral("available")).toBool());
+        QVERIFY(desktop(QStringLiteral("missing-fixture-icon")));
+        catalog.refresh();
+        app = row(catalog.forgeApps(), QStringLiteral("firefox"));
+        QCOMPARE(app.value(QStringLiteral("icon")).toString(), QStringLiteral("qrc:/archie/assets/app-icons/firefox.svg"));
+        QCOMPARE(app.value(QStringLiteral("iconSource")).toString(), QStringLiteral("official_bundle"));
+        QVERIFY(!app.value(QStringLiteral("available")).toBool());
     }
 
 private:

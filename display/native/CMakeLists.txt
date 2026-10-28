@@ -122,6 +122,16 @@ qt_add_resources(archie-display "archie-shell-assets"
 file(GLOB archie_presets RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/presets/*.json")
 
+set(ARCHIE_OFFICIAL_APP_ICONS
+    assets/app-icons/kicad.png assets/app-icons/firefox.svg assets/app-icons/kdenlive.png
+    assets/app-icons/freecad.svg assets/app-icons/blender.svg assets/app-icons/inkscape.svg
+    assets/app-icons/gimp.svg assets/app-icons/obs-studio.png assets/app-icons/libreoffice.png
+    assets/app-icons/manifest.json assets/app-icons/README.md)
+file(GLOB ARCHIE_APP_ICON_NOTICES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/assets/app-icons/licenses/*.txt")
+qt_add_resources(archie-display "archie-official-app-icons"
+    PREFIX "/archie" BASE "${CMAKE_CURRENT_SOURCE_DIR}"
+    FILES ${ARCHIE_OFFICIAL_APP_ICONS} ${ARCHIE_APP_ICON_NOTICES})
+
 qt_add_resources(archie-display "archie-native-assets" BIG_RESOURCES
     PREFIX "/archie"
     BASE "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -161,6 +171,8 @@ qt_add_resources(archie-display "archie-native-assets" BIG_RESOURCES
         shaders/neural_cone.vert
         shaders/neural_cone.frag
         shaders/neural_cone_light.frag
+        shaders/neural_atmosphere.vert
+        shaders/neural_atmosphere_light.frag
         assets/xavi/prism-structure-4k.png
         assets/xavi/prism-surface-4k.png
         ${archie_presets}
@@ -255,6 +267,8 @@ if(ARCHIE_NATIVE_BUILD_TESTS)
     target_link_libraries(test_app_catalog PRIVATE Qt6::Gui Qt6::Test)
     qt_add_resources(test_app_catalog "archie-catalog-test-apps" PREFIX "/archie" BASE "${CMAKE_CURRENT_SOURCE_DIR}"
         FILES apps/archie-stage.desktop apps/archie-voice.desktop apps/archie-editor.desktop apps/archie-lienzo.desktop apps/archie-cli.desktop)
+    qt_add_resources(test_app_catalog "archie-catalog-test-icons" PREFIX "/archie" BASE "${CMAKE_CURRENT_SOURCE_DIR}"
+        FILES ${ARCHIE_OFFICIAL_APP_ICONS})
     add_test(NAME app_catalog_contracts COMMAND test_app_catalog)
     qt_add_executable(test_exploration_preview tests/test_exploration_preview.cpp src/ExplorationPreview.cpp)
     target_include_directories(test_exploration_preview PRIVATE src)

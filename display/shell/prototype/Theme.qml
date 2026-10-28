@@ -24,7 +24,7 @@ QtObject {
 
     readonly property real whiteBackdropOpacity: 0.60
     readonly property real surfaceOpacity: opaque ? 1.0 : 0.75
-    readonly property color desktopBase: light ? "#c5ceda" : "#081321"
+    readonly property color desktopBase: light ? "#50657e" : "#081321"
     function composite(foreground, background) {
         return Qt.rgba(foreground.r*foreground.a+background.r*(1-foreground.a),
                        foreground.g*foreground.a+background.g*(1-foreground.a),
@@ -34,25 +34,27 @@ QtObject {
     function toggleColorMode() { colorMode=light ? "dark" : "light" }
 
     // Surfaces: glass / opaque.
-    readonly property color bar: light ? Qt.rgba(1,1,1,surfaceOpacity) : Qt.rgba(.025,.045,.075,surfaceOpacity)
-    readonly property color dock: light ? Qt.rgba(1,1,1,surfaceOpacity) : Qt.rgba(.035,.055,.09,surfaceOpacity)
-    readonly property color win: light ? Qt.rgba(1,1,1,surfaceOpacity) : Qt.rgba(.035,.055,.09,surfaceOpacity)
-    readonly property color side: light ? Qt.rgba(.965,.98,1,surfaceOpacity) : Qt.rgba(.055,.08,.125,surfaceOpacity)
-    readonly property color panel: light ? Qt.rgba(1,1,1,surfaceOpacity) : Qt.rgba(.035,.055,.09,surfaceOpacity)
+    readonly property color bar: light ? Qt.rgba(.86,.90,.95,surfaceOpacity) : Qt.rgba(.025,.045,.075,surfaceOpacity)
+    readonly property color dock: light ? Qt.rgba(.86,.90,.95,surfaceOpacity) : Qt.rgba(.035,.055,.09,surfaceOpacity)
+    readonly property color win: light ? Qt.rgba(.86,.90,.95,surfaceOpacity) : Qt.rgba(.035,.055,.09,surfaceOpacity)
+    readonly property color side: light ? Qt.rgba(.84,.88,.94,surfaceOpacity) : Qt.rgba(.055,.08,.125,surfaceOpacity)
+    readonly property color panel: light ? Qt.rgba(.86,.90,.95,surfaceOpacity) : Qt.rgba(.035,.055,.09,surfaceOpacity)
     // Resolve glass over our canvas for dense reading areas. This avoids ghost
     // text from another window showing through without pretending to blur it.
     readonly property color reading: composite(panel,desktop)
-    readonly property color raised: light ? "#edf2f8" : "#1b2b40"
-    readonly property color hover: light ? "#dce8f4" : "#263b53"
-    readonly property color pressed: light ? "#c7dbef" : "#304b68"
-    readonly property color hair: light ? "#71859d" : "#718ba7"
-    readonly property color inner: light ? Qt.rgba(1,1,1,.9) : Qt.rgba(.6,.75,.9,.18)
+    readonly property color raised: light ? "#c6d3e2" : "#1b2b40"
+    readonly property color hover: light ? "#b8cde0" : "#263b53"
+    readonly property color pressed: light ? "#a1bed7" : "#304b68"
+    readonly property color hair: light ? "#4f6b89" : "#718ba7"
+    readonly property color inner: light ? Qt.rgba(1,1,1,.38) : Qt.rgba(.6,.75,.9,.18)
+    readonly property color iconSurface: light ? "#d2dce8" : "#bbcbdc"
+    readonly property color iconInk: "#16324c"
     readonly property color sel: light ? "#c6e4fa" : "#184c6a"
 
     // Text.
     readonly property color t1: light ? "#142236" : "#f5f8ff"
-    readonly property color t2: light ? "#263b52" : "#dfe9f5"
-    readonly property color t3: light ? "#32455a" : "#c4d2e3"
+    readonly property color t2: light ? "#22374f" : "#dfe9f5"
+    readonly property color t3: light ? "#293d53" : "#c4d2e3"
     readonly property color tdis: light ? "#425368" : "#91a5bd"
 
     // Accents and states. A state is never colour alone: icon + word always.
