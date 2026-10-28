@@ -14,6 +14,10 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../visual archie-visual)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../osm archie-osm)
 
 find_package(Qt6 6.6 REQUIRED COMPONENTS Quick QuickControls2 Quick3D Network Concurrent)
+# Position-independent everywhere: Qt 6.12 on Linux exports protected data symbols, and the
+# objects BIG_RESOURCES generates otherwise link with a copy relocation ld refuses
+# (qt_resourceFeatureZstd).
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 qt_standard_project_setup(REQUIRES 6.6)
 
 # The delivered visual decisions are Rust; Qt remains the renderer/World host.
@@ -93,7 +97,7 @@ qt_add_qml_module(archie-display
         qml/LumenScene.qml
         qml/OrbHud.qml
         qml/WorldHud.qml
-        qml/WorldDetails.qml qml/WorldTools.js
+        qml/WorldDetails.qml qml/WorldTools.js qml/WorldSky.qml qml/WorldStars.js
         qml/WorldBeacons.qml
         qml/WorldImageryMaterial.qml
         qml/Exploration.js

@@ -1,4 +1,5 @@
 #include "ShellRuntime.h"
+#include <QCoreApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -13,6 +14,13 @@ constexpr qsizetype maximumErrorBytes = 4096;
 ShellRuntime::ShellRuntime(QString program, QString lanFile, QString workspacesRoot,
                            quint16 projectionPort, QObject *parent)
     : QObject(parent) {
+    // A bare name is looked up on PATH and then beside this executable, where a build or an
+    // install puts archie-shell-bridge next to archie-display.
+    if (!program.contains(QLatin1Char('/')) && !program.contains(QLatin1Char('\\'))
+        && QStandardPaths::findExecutable(program).isEmpty()) {
+        const QString beside = QStandardPaths::findExecutable(program, {QCoreApplication::applicationDirPath()});
+        if (!beside.isEmpty()) program = beside;
+    }
     m_process.setProgram(program);
     m_process.setArguments({QStringLiteral("watch"), QStringLiteral("--lan-file"), lanFile,
                            QStringLiteral("--workspaces-root"), workspacesRoot,

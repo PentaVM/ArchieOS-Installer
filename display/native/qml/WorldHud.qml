@@ -288,7 +288,7 @@ Item {
         objectName: "world.console"
         visible: hud.panel === "console"
         anchors.left: parent.left; anchors.right: rail.left; anchors.margins: 16
-        anchors.bottom: parent.bottom; anchors.bottomMargin: 88
+        anchors.bottom: parent.bottom; anchors.bottomMargin: 112
         height: Math.min(320, hud.height * 0.42); radius: Shell.Theme.rCard
         color: Shell.Theme.reading; border.color: Shell.Theme.hair
         ColumnLayout {
@@ -334,7 +334,7 @@ Item {
     Rectangle {
         visible: !!hud.below
         anchors.right: parent.right; anchors.rightMargin: 16
-        anchors.bottom: parent.bottom; anchors.bottomMargin: 88
+        anchors.bottom: parent.bottom; anchors.bottomMargin: 112
         width: where.implicitWidth + 24; height: 30; radius: 15
         color: Shell.Theme.reading; border.color: Shell.Theme.hair
         Text {

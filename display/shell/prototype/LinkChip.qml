@@ -5,6 +5,8 @@ import QtQuick
 Chip {
     id: c
     property var bridge
+    // The local bridge process could not start or stopped: its reason, in place of a link state.
+    property string hostError: ""
     readonly property var spec: ({
         waiting:            { t: "conectando…",               i: "waiting",    k: "info" },
         live:               { t: "archied en vivo",           i: "ok",         k: "ok" },
@@ -12,9 +14,11 @@ Chip {
         daemon_unreachable: { t: "archied no responde",       i: "bad",        k: "bad" },
         displayd_offline:   { t: "displayd sin respuesta",    i: "displayoff", k: "bad" },
         invalid:            { t: "respuesta no válida",       i: "warn",       k: "warn" },
-        bridge_silent:      { t: "bridge sin datos",          i: "linkoff",    k: "warn" }
+        bridge_silent:      { t: "bridge sin datos",          i: "linkoff",    k: "warn" },
+        host_stopped:       { t: "puente local detenido",     i: "linkoff",    k: "warn" }
     })
-    readonly property var s: spec[bridge.link]
+    readonly property var s: spec[hostError !== "" ? "host_stopped" : bridge.link]
+    Accessible.description: hostError
     function ageText(ms) {
         var s = Math.round(ms / 1000)
         return s < 60 ? s + " s" : Math.round(s / 60) + " min"

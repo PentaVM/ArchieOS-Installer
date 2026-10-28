@@ -19,6 +19,8 @@ Item {
     property color borderColor: lightMode ? "#71859d" : "#718ba7"
     property rect modelActivityBounds: Qt.rect(0,0,0,0)
     property string rootLabel: ""
+    // Whether Core is publishing model activity to this view (shown in Details only).
+    property bool telemetryKnown: true
     property bool navigationEnabled: true
     // Advances whenever the sphere or the camera moved, so projections are taken again.
     property int frame: 0
@@ -122,6 +124,12 @@ Item {
                 color: hud.mutedColor; font.family: hud.family; font.pixelSize: 11; wrapMode: Text.Wrap
             }
             Text { width: parent.width; visible: text.length > 0; text: hud.field.error; textFormat: Text.PlainText; color: hud.errorColor; font.family: hud.family; font.pixelSize: 11; wrapMode: Text.Wrap }
+            Text {
+                objectName: "neuralDetails.telemetry"
+                width: parent.width
+                text: hud.telemetryKnown ? "Actividad de modelos: publicada por Core" : "Actividad de modelos: sin telemetría de Core todavía"
+                color: hud.mutedColor; font.family: hud.family; font.pixelSize: 11; wrapMode: Text.Wrap
+            }
             Button {
                 text: "Actualizar"
                 enabled: hud.navigationEnabled && !hud.field.loading

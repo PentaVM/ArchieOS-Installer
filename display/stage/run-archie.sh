@@ -140,9 +140,14 @@ if [ "${DESKTOP:-0}" = 1 ]; then
     set -- --world-context "\"${WORLD_CONTEXT:-personal/owner}\"" \
         --stage-socket "$RUN_DIR/control.sock" --stage-key-file "$RUN_DIR/key" --stage-policy "$POLICY"
     [ -n "${ARCHIE_ROOT:-}" ] && set -- "$@" --archie-root "$ARCHIE_ROOT"
+    # Sentry's LAN inventory, when the node has one (escanear-lan.bat hands it over).
+    [ -n "${ARCHIE_ROOT:-}" ] && [ -s "$ARCHIE_ROOT/var/lib/sentry/lan.json" ] \
+        && set -- "$@" --lan-file "$ARCHIE_ROOT/var/lib/sentry/lan.json"
     if [ -n "${WORLD_BIN_DIR:-}" ]; then
         # globe_demo.py hands each of them on to the shell.
         for arg do set -- "$@" "--native-arg=$arg"; shift; done
+        # displayd reads the same Core node, so the shell sees archied live and its telemetry.
+        [ -n "${ARCHIE_ROOT:-}" ] && set -- --core-root "$ARCHIE_ROOT" "$@"
         # World's daemons and its owner session, with the shell as their window. Their own
         # loopback ports (17666/17667); the shell keeps the visual controls on 7668.
         XDG_RUNTIME_DIR="$RUN_DIR/xdg" WAYLAND_DISPLAY="$SOCKET_NAME" QT_QPA_PLATFORM=wayland \

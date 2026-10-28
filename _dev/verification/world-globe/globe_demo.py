@@ -40,6 +40,9 @@ def main():
     parser.add_argument('--native-port', type=int, default=17668)
     parser.add_argument('--keep', action='store_true')
     # Host-only settings for the shell's World console (archie-display --archie-root etc.).
+    # The Core node displayd reads (archied --root): without it the shell sees no archied,
+    # no machine telemetry and no model activity, and says so.
+    parser.add_argument('--core-root', type=Path)
     parser.add_argument('--native-arg', action='append', default=[], metavar='ARG',
                         help='one more argument for archie-display, repeatable')
     parser.add_argument('--shell', action='store_true',
@@ -103,7 +106,8 @@ def main():
             if time.monotonic() > deadline or any(p.poll() is not None for p in processes):
                 raise RuntimeError('Private daemon did not start; inspect retained logs')
             time.sleep(0.1)
-        start('archie-displayd', ['--bind', '127.0.0.1:' + str(args.display_port),
+        core = ['--root', str(args.core_root)] if args.core_root else []
+        start('archie-displayd', [*core, '--bind', '127.0.0.1:' + str(args.display_port),
               '--orb-socket', str(runtime / 'orb.sock'), '--world-poll-ms', '60000'])
         active_navigation = navigate()
         accepted = dict(navigation=active_navigation)

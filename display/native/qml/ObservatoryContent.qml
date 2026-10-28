@@ -456,7 +456,8 @@ Item {
                     layer.effect: HologramGrade { look: lumen.look; postProcessing: !!archieBridge.frame.postProcessing }
                     environment: ExtendedSceneEnvironment {
                         backgroundMode: SceneEnvironment.Color
-                        clearColor: Shell.Theme.light ? Shell.Theme.desktop : root.scene === "orb" ? lumen.look.background : Shell.Theme.desktop
+                        // World is the Earth in space in both themes; WorldSky draws the real stars.
+                        clearColor: root.scene === "world" ? "#03060c" : Shell.Theme.light ? Shell.Theme.desktop : root.scene === "orb" ? lumen.look.background : Shell.Theme.desktop
                         // The budget is not a caption. Under real memory or CPU pressure
                         // the observatory spends less GPU, because it is the largest
                         // discretionary consumer on a node that has other work to do.
@@ -554,25 +555,9 @@ Item {
                             Math.asin(Math.max(-1, Math.min(1, toSun.y))) * 180 / Math.PI,
                             Math.atan2(toSun.x, toSun.z) * 180 / Math.PI,
                             0)
-                        brightness: Shell.Theme.light && root.scene === "world" ? 1.65 : 2.3
+                        brightness: 2.3
                         color: "#fff4e6"
                         castsShadow: false
-                    }
-
-                    // The sky. A large sphere drawn from the inside, procedural stars on a
-                    // near-black ground, so the planet sits in space rather than on a flat
-                    // fill. Off under memory pressure and in the Orb scene, where
-                    // the reference's black stage keeps the data paths legible.
-                    Model {
-                        source: "#Sphere"
-                        scale: Qt.vector3d(7, 7, 7)
-                        visible: !Shell.Theme.light && root.scene !== "orb" && !root.budgetReduced()
-                        materials: CustomMaterial {
-                            shadingMode: CustomMaterial.Unshaded
-                            cullMode: Material.NoCulling
-                            vertexShader: "qrc:/archie/shaders/star.vert"
-                            fragmentShader: "qrc:/archie/shaders/star.frag"
-                        }
                     }
 
                     Node {
@@ -608,7 +593,7 @@ Item {
                                 // day map.
                                 emissiveMap: earthTexture
                                 // Theme reading light on the same basemap, not city/night-light observations.
-                                emissiveFactor: Shell.Theme.light ? Qt.vector3d(0.14,0.15,0.17) : Qt.vector3d(0.02,0.022,0.028)
+                                emissiveFactor: Qt.vector3d(0.02,0.022,0.028)
                                 // The ocean is not a blackboard. A little specular gives the
                                 // sea a moving highlight under the sun and, at the
                                 // terminator, the thin gold line that says this is water.
@@ -623,14 +608,14 @@ Item {
                             visible: !root.budgetReduced() && !root.localTerrainPreview
                             materials: CustomMaterial {
                                 shadingMode: CustomMaterial.Unshaded
-                                sourceBlend: Shell.Theme.light ? CustomMaterial.One : CustomMaterial.SrcAlpha
+                                sourceBlend: CustomMaterial.SrcAlpha
                                 destinationBlend: CustomMaterial.OneMinusSrcAlpha
                                 // Handed to the shader as a uniform: the same real sun the
                                 // light uses, so the warm dusk band on the limb lands
                                 // exactly where the terminator crosses the surface.
                                 property vector3d sunDirection: root.sunDirection
                                 vertexShader: "qrc:/archie/shaders/atmosphere.vert"
-                                fragmentShader: Shell.Theme.light ? "qrc:/archie/shaders/atmosphere_light.frag" : "qrc:/archie/shaders/atmosphere.frag"
+                                fragmentShader: "qrc:/archie/shaders/atmosphere.frag"
                             }
                         }
 
@@ -868,6 +853,11 @@ Item {
                     visible: root.scene === "forge"
                 }
 
+                WorldSky {
+                    anchors.fill:parent
+                    controller:archieBridge
+                    active:root.scene === "world" && root.visible && !root.budgetReduced()
+                }
                 WorldBeacons {
                     id:worldBeacons;anchors.fill:parent;visible:root.scene === "world"
                     controller:archieBridge;view:view;selectedId:worldHud.selectedPointId
@@ -880,14 +870,15 @@ Item {
                         }
                     }
                 }
-                Rectangle {
-                    visible:root.scene === "world";anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom;anchors.margins:16
-                    height:provenance.implicitHeight+20;radius:Shell.Theme.rCard;color:Shell.Theme.panel;border.color:Shell.Theme.hair
-                    Column {
-                        id:provenance;anchors.left:parent.left;anchors.right:parent.right;anchors.margins:12;anchors.verticalCenter:parent.verticalCenter;spacing:4
-                        Text {textFormat:Text.PlainText;width:parent.width;text:worldHud.imageryCaption;color:Shell.Theme.t1;font.family:Shell.Theme.font;font.pixelSize:11;wrapMode:Text.Wrap}
-                        Text {width:parent.width;text:"Arrastrar · órbita   Rueda · escala   Puntos · datos   Esc · volver  ·  Balizas: ayuda visual, no tamaño físico";color:Shell.Theme.t3;font.family:Shell.Theme.font;font.pixelSize:10;wrapMode:Text.Wrap}
-                    }
+                // Credit only where a source's terms ask for it (Google, Copernicus): one quiet
+                // line in the corner, as Google Earth does. Open NASA imagery needs none.
+                Text {
+                    objectName:"world.attribution"
+                    readonly property var source:worldHud.activeImage
+                    visible:root.scene === "world" && !!source && (source.source_id==="google_satellite" || source.source_id==="sentinel2")
+                    anchors.left:parent.left;anchors.bottom:parent.bottom;anchors.leftMargin:18;anchors.bottomMargin:10
+                    text:source ? (source.attribution || (source.source_id==="google_satellite" ? "Imágenes © Google" : "Contiene datos Copernicus Sentinel")) : ""
+                    textFormat:Text.PlainText;color:Qt.rgba(1,1,1,0.55);font.family:Shell.Theme.font;font.pixelSize:10
                 }
                 // World's minimal HUD floats over the globe: search, navigation rail and
                 // panels that open only when asked. Above the globe's hands, it only takes
@@ -940,14 +931,6 @@ Item {
                     }
                 }
 
-                Rectangle {
-                    visible: archieBridge.error.length > 0
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    anchors.bottom: parent.bottom; anchors.bottomMargin: 18
-                    width: Math.min(errorText.implicitWidth + 26, parent.width - 50); height: 34; radius: 4
-                    color: Shell.Theme.tint(Shell.Theme.bad, 0.10); border.color: root.red
-                    Text { id: errorText; anchors.centerIn: parent; text: archieBridge.error; color: root.red; font.pixelSize: 10; elide: Text.ElideRight; width: parent.width - 20 }
-                }
             }
 
             Rectangle {

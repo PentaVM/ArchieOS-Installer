@@ -151,6 +151,7 @@ Item {
         modelActivityBounds: modelStatusHud.visible ? Qt.rect(modelStatusHud.x,modelStatusHud.y,modelStatusHud.width,modelStatusHud.height) : Qt.rect(0,0,0,0)
         lightMode: viewport.lightMode
         rootLabel: neural.sourceRoot
+        telemetryKnown: Array.isArray(viewport.modelActivity)
         navigationEnabled: viewport.navigationEnabled && viewport.drawing
     }
 
@@ -159,7 +160,8 @@ Item {
         z: 3
         anchors.left: parent.left; anchors.top: parent.top; anchors.margins: 18
         width: Math.min(300, Math.max(0, parent.width - 150))
-        visible: viewport.hudVisible
+        // Shown when Core publishes model activity; when it does not, Details says so.
+        visible: viewport.hudVisible && Array.isArray(viewport.modelActivity)
         models: viewport.modelActivity
         panelColor: viewport.panelColor
         borderColor: viewport.borderColor

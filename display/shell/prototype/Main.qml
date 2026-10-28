@@ -190,11 +190,12 @@ Item {
     }
 
     Background { anchors.fill: parent; nodes: !Demo.orbShow || !live.ok }
-    LiveOrb { id: live; anchors.fill: parent; anchors.topMargin:root.hostError.length ? 96 : 32; visible: root.activeSpace === "orb" && (Demo.orbShow || Demo.orbNav) }
+    LiveOrb { id: live; anchors.fill: parent; anchors.topMargin:32; visible: root.activeSpace === "orb" && (Demo.orbShow || Demo.orbNav) }
     Loader {
         id:worldLoader
         objectName:"worldViewport"
-        anchors.fill:parent; anchors.topMargin:root.hostError.length ? 96 : 32; anchors.bottomMargin:Theme.dockIcon+42
+        // World runs under the bar and the dock, edge to edge, like the globe it is.
+        anchors.fill:parent; anchors.topMargin:32
         active:root.activeSpace === "world"
         sourceComponent:root.worldViewComponent
     }
@@ -234,7 +235,7 @@ Item {
             SentryPanel { objectName: "win.sentry"; bridge: bridgeModel; height:Math.min(700,Math.max(240,root.height-154)); shown: Wm.isShown("sentry"); enterDy: Wm.isMin("sentry") ? 160 : 0; enterScale: Wm.isMin("sentry") ? 0.8 : 0.96 } }
     }
 
-    TopBar { objectName: "bar"; z: 600; width: parent.width; overlay: root.overlay; bridge: bridgeModel; menu: root.overlay === "menu" ? root.menuName : ""
+    TopBar { objectName: "bar"; z: 600; width: parent.width; overlay: root.overlay; bridge: bridgeModel; hostError: root.hostError; menu: root.overlay === "menu" ? root.menuName : ""
         app: Wm.front() === "" && root.activeSpace === "world" ? "World" : Wm.frontTitle()
         onMenuClicked: function(n,x) { if (root.overlay === "menu" && root.menuName === n) root.overlay = ""; else { root.menuName = n; menuDrop.x = x; root.overlay = "menu" } }
         onToggle: function(n) { root.toggle(n) } }
@@ -265,5 +266,4 @@ Item {
         SearchPanel { objectName: "globalSearch"; bridge: bridgeModel; onActivated: function(act) { root.overlay = ""; root.run(act) }; shown: root.overlay === "search"; x: (root.width - width) / 2; y: 140 }
     }
     NoteBox { z: 1200; visible: root.actionNote !== ""; text: root.actionNote; icon: "unknown"; x: 24; y: root.height - height - 100; width: Math.min(720,root.width - 48) }
-    NoteBox { z: 1200; visible: root.hostError !== ""; text: "Bridge local: " + root.hostError; icon: "bad"; x: 24; y: 60; width: Math.min(720,root.width - 48) }
 }

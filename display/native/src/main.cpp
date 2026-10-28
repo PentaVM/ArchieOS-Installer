@@ -10,6 +10,8 @@
 
 #include <QGuiApplication>
 #include <QIcon>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQmlComponent>
@@ -137,7 +139,11 @@ int main(int argc, char *argv[])
     WorldConsole::Config consoleConfig;
     if (arguments.isSet(QStringLiteral("archie-root")))
         consoleConfig.programPrefixArguments={QStringLiteral("--root"),arguments.value(QStringLiteral("archie-root"))};
-    consoleConfig.contextJson=arguments.value(QStringLiteral("world-context"));
+    // A bare personal/owner is the same domain as its JSON string "personal/owner".
+    QString context=arguments.value(QStringLiteral("world-context")).trimmed();
+    if(!context.isEmpty() && !context.startsWith(QLatin1Char('"')))
+        context=QString::fromUtf8(QJsonDocument(QJsonArray{context}).toJson(QJsonDocument::Compact)).mid(1).chopped(1);
+    consoleConfig.contextJson=context;
     consoleConfig.stageSocket=arguments.value(QStringLiteral("stage-socket"));
     consoleConfig.stageKeyFile=arguments.value(QStringLiteral("stage-key-file"));
     consoleConfig.stagePolicy=arguments.value(QStringLiteral("stage-policy"));
@@ -154,6 +160,11 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("displayControl"), &displayControl);
     engine.rootContext()->setContextProperty(QStringLiteral("shellRuntime"), &shellRuntime);
     engine.rootContext()->setContextProperty(QStringLiteral("worldConsole"), &worldConsole);
+    // The bar's domain chip shows the context the host chose for this desktop, and nothing
+    // when it chose none. Core still validates it on every operation.
+    const auto contextValue=QJsonDocument::fromJson("[" + consoleConfig.contextJson.toUtf8() + "]").array();
+    engine.rootContext()->setContextProperty(QStringLiteral("hostDomain"),
+        contextValue.size()==1 && contextValue.first().isString() ? contextValue.first().toString().left(160) : QString());
     // Run as the Archie Stage's desktop (display/stage/run-archie.sh DESKTOP=1): the stage
     // frames the applications Archie uses over this shell, so the shell starts bare.
     engine.rootContext()->setContextProperty(QStringLiteral("insideStage"),

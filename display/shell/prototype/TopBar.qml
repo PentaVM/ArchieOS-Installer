@@ -9,6 +9,10 @@ Rectangle {
     property string overlay: ""
     property string app: "Vault"
     property var bridge
+    // Why the local bridge process is not running, if it is not (the link chip says so).
+    property string hostError: ""
+    // The context domain this desktop's host was started with (`--world-context`), if any.
+    readonly property string domain: typeof hostDomain !== "undefined" ? hostDomain : ""
     signal toggle(string name)
     property string menu: ""                 // name of the open drop-down, "" if none
     signal menuClicked(string name, real x)
@@ -57,12 +61,12 @@ Rectangle {
     Row {
         anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter; spacing: 6
         ThemeToggle { objectName: "bar.theme"; compact: true; anchors.verticalCenter: parent.verticalCenter }
-        LinkChip { bridge: bar.bridge; anchors.verticalCenter: parent.verticalCenter }
-        // No source is wired for these two yet (GUI-SENTRY-002, GUI-CEREBRA-002): they say so.
-        Chip { text: "Cámara y micro"; sub: "sin lectura"; icon: "unknown"; tone: "unk"; anchors.verticalCenter: parent.verticalCenter }
-        // Opens the workspace menu (decision 5 of the handoff: the selector lives in this chip).
-        Item { objectName: "bar.domain"; width: dom.width; height: dom.height; anchors.verticalCenter: parent.verticalCenter
-            Chip { id: dom; text: "Dominio"; sub: "sin lectura"; icon: "unknown"; tone: "unk" }
+        LinkChip { bridge: bar.bridge; hostError: bar.hostError; anchors.verticalCenter: parent.verticalCenter }
+        // Camera and microphone have no source wired yet (GUI-SENTRY-002): no chip claims one.
+        // The domain is the one the host was started with; with none, the chip is not drawn.
+        // It opens the workspace menu (decision 5 of the handoff: the selector lives in this chip).
+        Item { objectName: "bar.domain"; visible: bar.domain !== ""; width: visible ? dom.width : 0; height: dom.height; anchors.verticalCenter: parent.verticalCenter
+            Chip { id: dom; text: "Dominio"; sub: bar.domain; domain: bar.domain.indexOf("work/") === 0 ? "work" : "personal"; tone: "neutral" }
             MouseArea { anchors.fill: parent; onClicked: bar.toggle("workspace") } }
         Item { width: 13; height: 14; anchors.verticalCenter: parent.verticalCenter
             Rectangle { anchors.centerIn: parent; width: 1; height: 14; color: Theme.hair } }
