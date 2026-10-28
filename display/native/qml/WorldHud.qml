@@ -103,6 +103,7 @@ Shell.Panel {
             Text {textFormat:Text.PlainText;text:"Capas de imagen";color:Shell.Theme.t1;font.family:Shell.Theme.disp;font.pixelSize:14}
             ComboBox {
                 id:imageryPicker
+                indicator: Shell.Icon { name:"chevD";size:16;color:Shell.Theme.t1;x:imageryPicker.width-width-10;y:(imageryPicker.height-height)/2 }
                 Layout.fillWidth:true;model:hud.imageSources;textRole:"label";valueRole:"source_id"
                 enabled:hud.imageSources.length>0
                 font.family:Shell.Theme.font;font.pixelSize:12

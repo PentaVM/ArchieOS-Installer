@@ -45,7 +45,7 @@ Item {
         const job=Exploration.selectedJob(archieBridge.exploration || {})
         const stats=view.renderStats
         if (stats.extendedDataCollectionEnabled !== undefined) stats.extendedDataCollectionEnabled=true
-        return JSON.stringify({scene:root.scene,selectedArea:job ? job.id : "",selectedPoint:worldHud.selectedPointId,selectedImagery:globeStream.sourceId,cameraOwner:worldHud.cameraOwner,stream:globeStream.status,eye:archieBridge.frame.cameraEye,target:archieBridge.frame.cameraTarget,render:{fps:stats.fps,graphics_api:stats.graphicsApiName,draw_calls:stats.drawCallCount,draw_vertices:stats.drawVertexCount}})
+        return JSON.stringify({scene:root.scene,theme:Shell.Theme.colorMode,selectedArea:job ? job.id : "",selectedPoint:worldHud.selectedPointId,selectedImagery:globeStream.sourceId,cameraOwner:worldHud.cameraOwner,stream:globeStream.status,eye:archieBridge.frame.cameraEye,target:archieBridge.frame.cameraTarget,render:{fps:stats.fps,graphics_api:stats.graphicsApiName,draw_calls:stats.drawCallCount,draw_vertices:stats.drawVertexCount}})
     }
 
     function updateNavigation() {
@@ -142,7 +142,7 @@ Item {
     // them; over a poll interval the sun moves a quarter of a degree, so tying it to the
     // real pulse loses nothing and keeps the one rule the whole display is built on.
     Component.onCompleted: {
-        if (!root.worldHost && typeof shellColorMode !== "undefined") Shell.Theme.colorMode = shellColorMode
+        if (!root.worldHost && !root.embedded && typeof shellColorMode !== "undefined") Shell.Theme.colorMode = shellColorMode
         if (!root.worldHost || root.visible) archieBridge.requestMode(displayControl.modeOf(root.scene))
         if (root.scene === "world") archieBridge.enableWorld()
         root.computeSun()
@@ -400,6 +400,7 @@ Item {
                 anchors.right: parent.right; anchors.rightMargin: 28
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 18
+                Shell.ThemeToggle { objectName: "observatory.theme"; anchors.verticalCenter: parent.verticalCenter }
                 Text {
                     visible: archieBridge.busy
                     anchors.verticalCenter: parent.verticalCenter
@@ -562,7 +563,7 @@ Item {
                             Math.asin(Math.max(-1, Math.min(1, toSun.y))) * 180 / Math.PI,
                             Math.atan2(toSun.x, toSun.z) * 180 / Math.PI,
                             0)
-                        brightness: 2.3
+                        brightness: Shell.Theme.light && root.scene === "world" ? 1.65 : 2.3
                         color: "#fff4e6"
                         castsShadow: false
                     }
@@ -574,7 +575,7 @@ Item {
                     Model {
                         source: "#Sphere"
                         scale: Qt.vector3d(7, 7, 7)
-                        visible: root.scene !== "orb" && !root.budgetReduced()
+                        visible: !Shell.Theme.light && root.scene !== "orb" && !root.budgetReduced()
                         materials: CustomMaterial {
                             shadingMode: CustomMaterial.Unshaded
                             cullMode: Material.NoCulling
@@ -615,7 +616,8 @@ Item {
                                 // arrive as their own layer, not as a trick played on the
                                 // day map.
                                 emissiveMap: earthTexture
-                                emissiveFactor: Qt.vector3d(0.02, 0.022, 0.028)
+                                // Theme reading light on the same basemap, not city/night-light observations.
+                                emissiveFactor: Shell.Theme.light ? Qt.vector3d(0.14,0.15,0.17) : Qt.vector3d(0.02,0.022,0.028)
                                 // The ocean is not a blackboard. A little specular gives the
                                 // sea a moving highlight under the sun and, at the
                                 // terminator, the thin gold line that says this is water.
@@ -630,14 +632,14 @@ Item {
                             visible: !root.budgetReduced() && !root.localTerrainPreview
                             materials: CustomMaterial {
                                 shadingMode: CustomMaterial.Unshaded
-                                sourceBlend: CustomMaterial.SrcAlpha
+                                sourceBlend: Shell.Theme.light ? CustomMaterial.One : CustomMaterial.SrcAlpha
                                 destinationBlend: CustomMaterial.OneMinusSrcAlpha
                                 // Handed to the shader as a uniform: the same real sun the
                                 // light uses, so the warm dusk band on the limb lands
                                 // exactly where the terminator crosses the surface.
                                 property vector3d sunDirection: root.sunDirection
                                 vertexShader: "qrc:/archie/shaders/atmosphere.vert"
-                                fragmentShader: "qrc:/archie/shaders/atmosphere.frag"
+                                fragmentShader: Shell.Theme.light ? "qrc:/archie/shaders/atmosphere_light.frag" : "qrc:/archie/shaders/atmosphere.frag"
                             }
                         }
 
@@ -800,6 +802,8 @@ Item {
                 NeuralViewport {
                     id: neuralOrb
                     modelActivity: root.modelActivity
+                    panelColor: Shell.Theme.panel
+                    borderColor: Shell.Theme.hair
                     anchors.fill: parent
                     controller: lumen
                     lightMode: Shell.Theme.light
@@ -1228,6 +1232,7 @@ Item {
     }
 
     component SceneButton: Button {
+        objectName: "scene." + label.toLowerCase()
         property string label: ""
         property bool selected: false
         width: 84; height: 30

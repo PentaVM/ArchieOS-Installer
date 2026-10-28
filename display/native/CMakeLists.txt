@@ -95,7 +95,7 @@ qt_add_qml_module(archie-display
         qml/WorldBeacons.qml
         qml/WorldImageryMaterial.qml
         qml/Exploration.js
-        qml/OrbActions.js qml/NeuralControls.js qml/NeuralCameraMotion.js qml/ModelActivity.js
+        qml/OrbActions.js qml/NeuralControls.js qml/NeuralCameraMotion.js qml/ModelActivity.js qml/NeuralLabelLayout.js
         qml/ForgeView.qml
         qml/OrbViewport.qml
         qml/HologramGrade.qml
@@ -130,6 +130,7 @@ qt_add_resources(archie-display "archie-native-assets" BIG_RESOURCES
         assets/earth-bmng-5400.jpg
         shaders/atmosphere.vert
         shaders/atmosphere.frag
+        shaders/atmosphere_light.frag
         shaders/star.vert
         shaders/star.frag
         shaders/lumen_orb.vert
@@ -211,6 +212,8 @@ option(ARCHIE_NATIVE_BUILD_TESTS "Build native lifecycle and transport tests" OF
 if(ARCHIE_NATIVE_BUILD_TESTS)
     find_program(ARCHIE_NODE_EXECUTABLE NAMES node nodejs)
     if(ARCHIE_NODE_EXECUTABLE)
+        add_test(NAME neural_label_layout_contracts COMMAND "${ARCHIE_NODE_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_neural_label_layout.js")
         add_test(NAME model_activity_contracts COMMAND "${ARCHIE_NODE_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_model_activity.js")
         add_test(NAME neural_camera_contracts COMMAND "${ARCHIE_NODE_EXECUTABLE}"
@@ -219,6 +222,8 @@ if(ARCHIE_NATIVE_BUILD_TESTS)
     find_program(ARCHIE_QMLTESTRUNNER_EXECUTABLE NAMES qmltestrunner qmltestrunner6
         HINTS "${Qt6_DIR}/../../../bin")
     if(ARCHIE_QMLTESTRUNNER_EXECUTABLE)
+        add_test(NAME shared_theme_contracts COMMAND "${ARCHIE_QMLTESTRUNNER_EXECUTABLE}"
+            -input "${CMAKE_CURRENT_SOURCE_DIR}/../shell/prototype/tst_ThemeContrast.qml" -platform offscreen)
         add_test(NAME neural_ui_qml_contracts COMMAND "${ARCHIE_QMLTESTRUNNER_EXECUTABLE}"
             -input "${CMAKE_CURRENT_SOURCE_DIR}/tests/qml" -platform offscreen)
         set_tests_properties(neural_ui_qml_contracts PROPERTIES ENVIRONMENT

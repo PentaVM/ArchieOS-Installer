@@ -49,6 +49,7 @@ Rectangle {
     }
     Row {
         anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter; spacing: 6
+        ThemeToggle { objectName: "bar.theme"; compact: true; anchors.verticalCenter: parent.verticalCenter }
         LinkChip { bridge: bar.bridge; anchors.verticalCenter: parent.verticalCenter }
         // No source is wired for these two yet (GUI-SENTRY-002, GUI-CEREBRA-002): they say so.
         Chip { text: "Cámara y micro"; sub: "sin lectura"; icon: "unknown"; tone: "unk"; anchors.verticalCenter: parent.verticalCenter }

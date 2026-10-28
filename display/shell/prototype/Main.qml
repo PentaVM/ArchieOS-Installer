@@ -248,7 +248,10 @@ Item {
         Text { id: navTxt; anchors.centerIn: parent; text: "Navegando la esfera en 3D · Esc o clic aquí para fijar la cámara"; color: Theme.t2; font.family: Theme.font; font.pixelSize: 12 } }
 
     Item { anchors.fill: parent; z: 1000
-        MouseArea { anchors.fill: parent; enabled: root.overlay !== ""; onClicked: root.overlay = "" }
+        // Popover dismissal covers the desktop, leaving the global bar usable.
+        // A lock overlay keeps its full input boundary.
+        MouseArea { x:0; y:root.overlay === "lock" ? 0 : Theme.barH; width:parent.width; height:parent.height-y
+            enabled: root.overlay !== ""; onClicked: root.overlay = "" }
         ControlCenter { objectName: "panel.control"; bridge: bridgeModel; shown: root.overlay === "control"; enterDy: -8; x: root.width - width - 24; y: 44 }
         ActivityCenter { objectName: "panel.activity"; bridge: bridgeModel; shown: root.overlay === "activity"; enterDy: -8; x: root.width - width - 24; y: 44 }
         CommandPalette { objectName: "panel.palette"; actionContext: root.actionContext(); onActivated: function(act) { root.overlay = ""; root.run(act) }; shown: root.overlay === "palette"; enterDy: -8; durIn: Theme.durPalette; durOut: Theme.durPaletteClose; x: (root.width - width) / 2; y: 140 }

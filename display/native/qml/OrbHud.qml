@@ -1,4 +1,5 @@
 import QtQuick
+import "qrc:/archie/shell/prototype" as Shell
 
 // What sits over the orb: almost nothing. The orb is configured by Cortex, not by
 // panels, so this layer only keeps the hands (drag to turn, scroll to approach, click to
@@ -15,11 +16,11 @@ Item {
     required property var view
     required property var orbScene
     property bool labelsVisible: true
-    property bool lightMode: true
-    property color textColor: "#142236"
-    property color secondaryColor: "#40566b"
-    property color mutedColor: "#566c80"
-    property color errorColor: "#ba263b"
+    property bool lightMode: Shell.Theme.light
+    property color textColor: Shell.Theme.t1
+    property color secondaryColor: Shell.Theme.t2
+    property color mutedColor: Shell.Theme.t3
+    property color errorColor: Shell.Theme.bad
 
     function pickAt(x, y) {
         if (!hud.view.camera) return ""
@@ -33,8 +34,8 @@ Item {
     readonly property string mode: Number(s.speak || 0) > 0.05 ? "Hablando"
                                    : Number(s.think || 0) > 0.05 ? "Pensando"
                                    : Number(s.listen || 0) > 0.05 ? "Escuchando" : "En reposo"
-    readonly property color modeColour: lightMode ? (mode === "Hablando" ? "#006a99" : mode === "Pensando" ? "#885000" : mode === "Escuchando" ? "#047b44" : mutedColor)
-        : (mode === "Hablando" ? "#a9c7ff" : mode === "Pensando" ? "#f2c98f" : mode === "Escuchando" ? "#8fe3d3" : "#6f7785")
+    readonly property color modeColour: mode === "Hablando" ? Shell.Theme.info
+        : mode === "Pensando" ? Shell.Theme.warn : mode === "Escuchando" ? Shell.Theme.ok : mutedColor
 
     HoverHandler {
         id: hover
@@ -112,12 +113,10 @@ Item {
                 y: at.y - height / 2
                 text: String(place.name).toUpperCase()
                 color: hud.textColor
-                opacity: 0.86
                 font.family: hud.family
                 font.pixelSize: 11
                 font.letterSpacing: 0.4
-                style: hud.lightMode ? Text.Normal : Text.Outline
-                styleColor: "#d0000000"
+                Rectangle { anchors.fill: parent; anchors.margins: -3; z: -1; radius: 3; color: Shell.Theme.panel; border.color: Shell.Theme.hair }
             }
         }
         Column {
@@ -134,8 +133,7 @@ Item {
                 font.pixelSize: 13
                 font.weight: Font.DemiBold
                 font.letterSpacing: 0.6
-                style: hud.lightMode ? Text.Normal : Text.Outline
-                styleColor: "#c0000000"
+                Rectangle { anchors.fill: parent; anchors.margins: -3; z: -1; radius: 3; color: Shell.Theme.panel; border.color: Shell.Theme.hair }
             }
             Rectangle { width: 170; height: 1; color: hud.secondaryColor; opacity: 0.55 }
             Text {
@@ -144,8 +142,7 @@ Item {
                 color: hud.secondaryColor
                 font.family: hud.family
                 font.pixelSize: 11
-                style: hud.lightMode ? Text.Normal : Text.Outline
-                styleColor: "#c0000000"
+                Rectangle { anchors.fill: parent; anchors.margins: -3; z: -1; radius: 3; color: Shell.Theme.panel; border.color: Shell.Theme.hair }
             }
         }
     }
@@ -159,12 +156,16 @@ Item {
         color: hud.textColor
         font.pixelSize: 13
         font.weight: Font.Medium
-        style: hud.lightMode ? Text.Normal : Text.Raised
-        styleColor: "#aa000000"
+        Rectangle { anchors.fill: parent; anchors.margins: -6; z: -1; radius: Shell.Theme.rCard; color: Shell.Theme.panel; border.color: Shell.Theme.hair }
     }
 
     // The one line: state, then what is lit and why.
+    Rectangle {
+        anchors.fill: stateLine; anchors.margins: -9; radius: Shell.Theme.rCard
+        visible: stateLine.visible; color: Shell.Theme.panel; border.color: Shell.Theme.hair
+    }
     Row {
+        id: stateLine
         visible: hud.labelsVisible
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
@@ -207,5 +208,6 @@ Item {
         text: "Sin conexión con el observador del sistema"
         color: hud.errorColor
         font.pixelSize: 11
+        Rectangle { anchors.fill: parent; anchors.margins: -4; z: -1; radius: 4; color: Shell.Theme.panel; border.color: Shell.Theme.hair }
     }
 }

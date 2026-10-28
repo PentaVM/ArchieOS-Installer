@@ -88,7 +88,7 @@ int main(int argc, char *argv[])
     arguments.addOption(QCommandLineOption(QStringLiteral("lens"), QStringLiteral("Initial orb lens: architecture, folders, or entities."), QStringLiteral("name"), QStringLiteral("architecture")));
     arguments.addOption(QCommandLineOption(QStringLiteral("preset"), QStringLiteral("Initial look preset, e.g. holograma (Xavi's desktop sphere)."), QStringLiteral("name")));
     arguments.addOption(QCommandLineOption(QStringLiteral("content-root"), QStringLiteral("Folder the content sphere lists (read-only)."), QStringLiteral("path")));
-    arguments.addOption(QCommandLineOption(QStringLiteral("ui-walk"), QStringLiteral("Shell or World: click through the steps in this JSON file and record each click (verification)."), QStringLiteral("steps")));
+    arguments.addOption(QCommandLineOption(QStringLiteral("ui-walk"), QStringLiteral("Click through this JSON's UI steps and record real window captures (verification)."), QStringLiteral("steps")));
     arguments.addOption(QCommandLineOption(QStringLiteral("ui-walk-out"), QStringLiteral("Where --ui-walk writes its screenshots and report.jsonl."), QStringLiteral("dir"), QStringLiteral("ui-walk")));
     arguments.process(app);
     const bool shellMode = !arguments.isSet(QStringLiteral("observatory"));
@@ -184,8 +184,8 @@ int main(int argc, char *argv[])
         QObject::connect(&app, &QCoreApplication::aboutToQuit, &shellRuntime, [&shellRuntime] { shellRuntime.setRunning(false); });
     }
     if (arguments.isSet(QStringLiteral("ui-walk"))) {
-        if (!window || (!shellMode && arguments.value(QStringLiteral("scene"))!=QStringLiteral("world"))) {
-            qCritical("archie-display: --ui-walk needs --shell or --scene world");
+        if (!window) {
+            qCritical("archie-display: --ui-walk needs a display window");
             return EXIT_FAILURE;
         }
         window->setVisibility(QWindow::Windowed);

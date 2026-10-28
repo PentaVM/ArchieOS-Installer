@@ -106,6 +106,8 @@ Item {
         mutedColor: viewport.mutedColor
         errorColor: viewport.errorColor
         modelActivity: viewport.modelActivity
+        panelColor: Shell.Theme.panel
+        borderColor: Shell.Theme.hair
         renderBudget: viewport.bridge.frame
         active: viewport.ownsController && viewport.presented && viewport.neural
         navigationEnabled: viewport.navigationEnabled

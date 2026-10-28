@@ -34,6 +34,27 @@ Node {
     readonly property bool drawGhosts: !!cfg.ghosts && particleLimit >= 1600
     readonly property int pulseLimit: Math.min(requestedPulses,70, Math.max(0, Math.floor((particleLimit - (drawGhosts ? 1600 : 0)) / 5)))
     readonly property vector3d cyan: lightMode ? Qt.vector3d(0.008, 0.085, 0.16) : Qt.vector3d(0.1144, 0.6584, 1.0)
+    property var nodeMarkers: []
+    function refreshNodeMarkers() {
+        if (!field || !field.ready) { nodeMarkers=[]; return }
+        const selected=field.selection("")
+        const selectedId=selected.length ? String(selected[0]) : ""
+        var markers=field.labels().map(function(row) {
+            return {id:row.id,kind:row.kind,x:row.x,y:row.y,z:row.z,selected:row.id===selectedId}
+        })
+        if(selectedId.length && !markers.some(function(row){return row.id===selectedId})) {
+            const lookup=field.lookupPosition(selectedId)
+            if(lookup.found) markers.unshift({id:selectedId,kind:"selected",x:lookup.position.x,y:lookup.position.y,z:lookup.position.z,selected:true})
+        }
+        // These are additional marks for existing nodes, bounded by the same field.
+        nodeMarkers=markers.slice(0,Math.min(32,field.limit || 32))
+    }
+    Connections {
+        target: scene.field
+        function onUpdated() { scene.refreshNodeMarkers() }
+        function onSourceChanged() { scene.refreshNodeMarkers() }
+        function onSelectionChanged() { scene.refreshNodeMarkers() }
+    }
 
     // The orbit about the target: degrees and a distance. HOME in those terms.
     readonly property vector3d home: Qt.vector3d(r * 0.55, r * 0.42, r * 3.55)
@@ -180,14 +201,74 @@ Node {
     Node {
         id: fieldNode
 
+        // A volume at the field's existing origin and radius, never an entity.
+        // Unshaded node/link materials below keep their own category colors.
+        DirectionalLight {
+            eulerRotation: Qt.vector3d(-28,-35,0)
+            color: "#d9f2ff"; ambientColor: "#85a3bb"
+            brightness: 0.8
+        }
+        Model {
+            visible: scene.shellVisible
+            source: "#Sphere"
+            scale: Qt.vector3d(scene.r/50,scene.r/50,scene.r/50)
+            materials: PrincipledMaterial {
+                baseColor: scene.lightMode ? Qt.rgba(0.19,0.54,0.72,0.11) : Qt.rgba(0.12,0.47,0.68,0.09)
+                alphaMode: PrincipledMaterial.Blend
+                roughness: 1; metalness: 0; specularAmount: 0
+                depthDrawMode: Material.NeverDepthDraw
+            }
+        }
+
+        // Real 3D marks bypass D3D's one-pixel point limit. Their coordinates and
+        // IDs are read from native labels/selection; the camera and picking stay native.
+        Repeater3D {
+            model: scene.nodeMarkers.length
+            delegate: Node {
+                required property int index
+                readonly property var marker: scene.nodeMarkers[index]
+                readonly property real radius: marker && marker.selected ? 2.25 : marker && marker.kind==="p" ? 1.85 : 1.6
+                position: marker ? Qt.vector3d(marker.x,marker.y,marker.z) : Qt.vector3d(0,0,0)
+                visible: !!marker
+                Model {
+                    source: "#Sphere"
+                    scale: Qt.vector3d(parent.radius*1.9/50,parent.radius*1.9/50,parent.radius*1.9/50)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        baseColor: scene.lightMode ? Qt.rgba(0.06,0.43,0.65,0.16) : Qt.rgba(0.25,0.77,1,0.18)
+                        alphaMode: PrincipledMaterial.Blend
+                        depthDrawMode: Material.NeverDepthDraw
+                    }
+                }
+                Model {
+                    source: "#Sphere"
+                    scale: Qt.vector3d(parent.radius*1.30/50,parent.radius*1.30/50,parent.radius*1.30/50)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        baseColor: scene.lightMode ? "#ffffff" : "#092737"
+                        cullMode: Material.FrontFaceCulling
+                    }
+                }
+                Model {
+                    source: "#Sphere"
+                    scale: Qt.vector3d(parent.radius/50,parent.radius/50,parent.radius/50)
+                    materials: PrincipledMaterial {
+                        lighting: PrincipledMaterial.NoLighting
+                        baseColor: scene.lightMode ? "#154c73" : "#9ce7ff"
+                        roughness: 1
+                    }
+                }
+            }
+        }
+
         // --- Link layers: 0 skeleton and axons (their opacity is inside the colours), 2..6 the
         // meshes, bridges and the host's links, 7 the selection's hot lines.
-        LineLayer { linkLayer: 0; visible: scene.linksVisible }
-        LineLayer { linkLayer: 2; visible: scene.linksVisible && scene.link(2).on; alpha: scene.link(2).opacity * scene.linkOpacity }
-        LineLayer { linkLayer: 3; visible: scene.linksVisible && scene.link(3).on; alpha: scene.link(3).opacity * scene.linkOpacity }
-        LineLayer { linkLayer: 4; visible: scene.linksVisible && scene.link(4).on; alpha: scene.link(4).opacity * scene.linkOpacity }
-        LineLayer { linkLayer: 5; visible: scene.linksVisible && scene.link(5).on; alpha: scene.link(5).opacity * scene.linkOpacity }
-        LineLayer { linkLayer: 6; visible: scene.linksVisible && scene.link(6).on; alpha: scene.link(6).opacity * scene.linkOpacity }
+        LineLayer { linkLayer: 0; visible: scene.linksVisible; alpha: scene.lightMode ? 0.75 : 1 }
+        LineLayer { linkLayer: 2; visible: scene.linksVisible && scene.link(2).on; alpha: (scene.lightMode ? 0.38 : 1) * scene.link(2).opacity * scene.linkOpacity }
+        LineLayer { linkLayer: 3; visible: scene.linksVisible && scene.link(3).on; alpha: (scene.lightMode ? 0.38 : 1) * scene.link(3).opacity * scene.linkOpacity }
+        LineLayer { linkLayer: 4; visible: scene.linksVisible && scene.link(4).on; alpha: (scene.lightMode ? 0.38 : 1) * scene.link(4).opacity * scene.linkOpacity }
+        LineLayer { linkLayer: 5; visible: scene.linksVisible && scene.link(5).on; alpha: (scene.lightMode ? 0.38 : 1) * scene.link(5).opacity * scene.linkOpacity }
+        LineLayer { linkLayer: 6; visible: scene.linksVisible && scene.link(6).on; alpha: (scene.lightMode ? 0.38 : 1) * scene.link(6).opacity * scene.linkOpacity }
         LineLayer { linkLayer: 7; visible: scene.linksVisible }
 
         // --- The nodes ---
@@ -207,7 +288,7 @@ Node {
                 property real nearDistance: scene.r * 2.4
                 property real farDistance: scene.r * 4.8
                 property real brightness: scene.brightness
-                property real nodeSize: Number(scene.cfg.nodeSize === undefined ? 1 : scene.cfg.nodeSize)
+                property real nodeSize: (scene.lightMode ? 1.7 : 1) * Number(scene.cfg.nodeSize === undefined ? 1 : scene.cfg.nodeSize)
                 vertexShader: "qrc:/archie/shaders/neural_point.vert"
                 fragmentShader: scene.lightMode ? "qrc:/archie/shaders/neural_point_light.frag" : "qrc:/archie/shaders/neural_point.frag"
             }
@@ -235,10 +316,10 @@ Node {
             kind: NeuralGeometry.Ghosts
             visible: scene.drawGhosts
             tint: scene.cyan; vertexColours: 0; gain: 1
-            alpha: 0.22 * Number(scene.cfg.ghostOpacity === undefined ? 1 : scene.cfg.ghostOpacity)
-            pointSize: 1.3 * scene.pixelRatio
+            alpha: (scene.lightMode ? 0.18 : 0.22) * Number(scene.cfg.ghostOpacity === undefined ? 1 : scene.cfg.ghostOpacity)
+            pointSize: (scene.lightMode ? 1.6 : 1.3) * scene.pixelRatio
         }
-        LineLayer { kind: NeuralGeometry.Segments; linkLayer: 1; visible: scene.shellVisible; tint: scene.cyan; vertexColours: 0; gain: 1; alpha: 0.07 }
+        LineLayer { kind: NeuralGeometry.Segments; linkLayer: 1; visible: scene.shellVisible; tint: scene.cyan; vertexColours: 0; gain: 1; alpha: scene.lightMode ? 0.40 : 0.07 }
     }
 
     // --- The projection base, its beam and the tilted orbit ---
@@ -246,7 +327,16 @@ Node {
         visible: !!scene.cfg.base
         Node {
             rotation: scene.field.baseRotation(scene.field.time)
-            LineLayer { kind: NeuralGeometry.Segments; linkLayer: 2; tint: scene.cyan; vertexColours: 0; gain: 1; alpha: 0.12 }
+            Repeater3D {
+                model: 3
+                delegate: LineLayer {
+                    required property int index
+                    kind: NeuralGeometry.Segments; linkLayer: 2
+                    scale: Qt.vector3d(1+(index-1)*0.003,1,1+(index-1)*0.003)
+                    tint: scene.cyan; vertexColours: 0; gain: 1
+                    alpha: scene.lightMode ? 0.32 : 0.20
+                }
+            }
         }
         Model {
             geometry: NeuralGeometry { kind: NeuralGeometry.Cone }
@@ -262,7 +352,16 @@ Node {
         }
         Node {
             rotation: scene.field.orbitRotation(scene.field.time)
-            LineLayer { kind: NeuralGeometry.Segments; linkLayer: 3; tint: scene.cyan; vertexColours: 0; gain: 1; alpha: 0.12 }
+            Repeater3D {
+                model: 3
+                delegate: LineLayer {
+                    required property int index
+                    kind: NeuralGeometry.Segments; linkLayer: 3
+                    scale: Qt.vector3d(1+(index-1)*0.003,1,1+(index-1)*0.003)
+                    tint: scene.cyan; vertexColours: 0; gain: 1
+                    alpha: scene.lightMode ? 0.38 : 0.24
+                }
+            }
         }
     }
 

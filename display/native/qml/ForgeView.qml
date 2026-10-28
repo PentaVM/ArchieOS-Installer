@@ -80,6 +80,7 @@ Item {
         text: forge.notice
         color: Shell.Theme.t2
         font.pixelSize: 12
+        Rectangle { anchors.fill: parent; anchors.margins: -8; z: -1; radius: Shell.Theme.rCard; color: Shell.Theme.panel; border.color: Shell.Theme.hair }
     }
 
     component AppIcon: Item {
@@ -89,12 +90,12 @@ Item {
         readonly property bool ready: !!app.available && appCatalog.canLaunch
         width: 112
         height: 128
-        opacity: faint ? 0.32 : (app.available ? 1.0 : 0.45)
 
         Rectangle {
             id: tile
             anchors.horizontalCenter: parent.horizontalCenter
             width: 76; height: 76; radius: 20
+            opacity: icon.faint ? 0.65 : (icon.app.available ? 1 : 0.75)
             scale: area.pressed ? 0.94 : (area.containsMouse ? 1.05 : 1.0)
             Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
             gradient: Gradient {
@@ -138,7 +139,7 @@ Item {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             text: icon.app.name || ""
-            color: Shell.Theme.t1
+            color: icon.faint || !icon.app.available ? Shell.Theme.t3 : Shell.Theme.t1
             font.pixelSize: 12
             elide: Text.ElideRight
             maximumLineCount: 2
@@ -150,8 +151,13 @@ Item {
             hoverEnabled: true
             onClicked: if (!icon.faint) appCatalog.launch(icon.app.id)
         }
-        ToolTip.visible: area.containsMouse && (!!icon.app.comment || !!icon.app.missing)
-        ToolTip.delay: 600
-        ToolTip.text: icon.app.available ? (icon.app.comment || "") : (icon.app.missing || "")
+        ToolTip {
+            id: appTip
+            visible: area.containsMouse && (!!icon.app.comment || !!icon.app.missing)
+            delay: 600
+            text: icon.app.available ? (icon.app.comment || "") : (icon.app.missing || "")
+            contentItem: Text { text: appTip.text; color: Shell.Theme.t1; font.family: Shell.Theme.font; font.pixelSize: 12; wrapMode: Text.Wrap }
+            background: Rectangle { color: Shell.Theme.panel; border.color: Shell.Theme.hair; radius: Shell.Theme.rCard }
+        }
     }
 }

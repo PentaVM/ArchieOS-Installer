@@ -45,7 +45,7 @@ Panel {
                     Rectangle { anchors.fill: parent; radius: parent.radius; color: "white"
                         opacity: (!Theme.spatial && ma.containsMouse) ? 0.12 : 0
                         Behavior on opacity { NumberAnimation { duration: Theme.durDock } } }
-                    Icon { anchors.centerIn: parent; name: modelData.icon; size: 28; color: "#ffffff" }
+                    Icon { anchors.centerIn: parent; name: modelData.icon; size: 28; color: Theme.dockInk }
                 }
                 // A dot under what is open (the Orb always runs); dimmer while its window is minimised.
                 Rectangle { visible: modelData.id === dock.desktopSpace || Wm.isOpen(modelData.id); width: 4; height: 4; radius: 2; color: Theme.t1

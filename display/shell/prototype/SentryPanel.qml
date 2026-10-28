@@ -29,14 +29,16 @@ Panel {
         property string iconName: "unknown"
         default property alias extra: extraCol.data
         width: parent ? parent.width : 300; height: vc.implicitHeight + 64
-        DashedRect { anchors.fill: parent; radius: 12; color: Qt.rgba(141 / 255, 140 / 255, 156 / 255, 0.45) }
+        Rectangle { anchors.fill: parent; radius: 12; color: Theme.raised }
+        DashedRect { anchors.fill: parent; radius: 12; color: Theme.t3 }
         Column { id: vc; anchors.horizontalCenter: parent.horizontalCenter; y: 34; spacing: 6; width: Math.min(parent.width - 80, 470)
             Item { width: 84; height: 84; anchors.horizontalCenter: parent.horizontalCenter
-                Canvas { anchors.fill: parent
+                Canvas { id:emptyCanvas; anchors.fill: parent
+                    Connections { target:Theme; function onColorModeChanged() { emptyCanvas.requestPaint() } }
                     onPaint: { var c = getContext("2d"); c.clearRect(0, 0, 84, 84); c.lineCap = "round"
-                        c.strokeStyle = "rgba(141,140,156,.55)"; c.lineWidth = 1.5; c.setLineDash([3, 7]); c.beginPath(); c.arc(42, 42, 36, 0, 6.2832); c.stroke()
-                        c.strokeStyle = "rgba(141,140,156,.35)"; c.setLineDash([2, 6]); c.beginPath(); c.arc(42, 42, 20, 0, 6.2832); c.stroke()
-                        c.setLineDash([]); c.strokeStyle = "rgba(185,184,196,.8)"; c.lineWidth = 5; c.beginPath(); c.moveTo(42, 42); c.lineTo(42.01, 42); c.stroke() } } }
+                        c.strokeStyle = Theme.tint(Theme.t3,0.8); c.lineWidth = 1.5; c.setLineDash([3, 7]); c.beginPath(); c.arc(42, 42, 36, 0, 6.2832); c.stroke()
+                        c.strokeStyle = Theme.tint(Theme.t3,0.6); c.setLineDash([2, 6]); c.beginPath(); c.arc(42, 42, 20, 0, 6.2832); c.stroke()
+                        c.setLineDash([]); c.strokeStyle = Theme.t2; c.lineWidth = 5; c.beginPath(); c.moveTo(42, 42); c.lineTo(42.01, 42); c.stroke() } } }
             Item { width: 1; height: 10 }
             Text { text: title; width: parent.width; horizontalAlignment: Text.AlignHCenter; color: Theme.t1; font.family: Theme.disp; font.pixelSize: 17; font.weight: Font.DemiBold }
             Text { text: body; width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; color: Theme.t2; font.family: Theme.font; font.pixelSize: 13; lineHeight: 18; lineHeightMode: Text.FixedHeight }
@@ -48,6 +50,11 @@ Panel {
         TitleDrag { wid:sp.wid }
         Lights { x:16; anchors.verticalCenter:parent.verticalCenter; wid:sp.wid }
         Text { anchors.centerIn:parent; text:"Sentry"; color:Theme.t1; font.family:Theme.disp; font.pixelSize:17 }
+    }
+    Rectangle {
+        x:1; y:tbar.height; width:parent.width-2; height:Math.max(0,parent.height-y-1)
+        bottomLeftRadius:Theme.rWindow-1; bottomRightRadius:Theme.rWindow-1
+        color:Theme.reading
     }
     Flickable {
         objectName:"projectionScroll"; x:0; y:tbar.height; width:parent.width; height:parent.height-tbar.height

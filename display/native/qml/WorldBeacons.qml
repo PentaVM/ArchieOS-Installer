@@ -41,13 +41,14 @@ Item {
                     ctx.fillStyle=Shell.Theme.t1;ctx.beginPath();ctx.arc(9.5,foot-0.5,0.7,0,2*Math.PI);ctx.fill()
                 }
                 Connections {target:marker;function onTintChanged(){beaconCanvas.requestPaint()} function onMetricsChanged(){beaconCanvas.requestPaint()} }
+                Connections {target:Shell.Theme;function onColorModeChanged(){beaconCanvas.requestPaint()} }
             }
             Text {textFormat:Text.PlainText;
                 visible:pick.containsMouse || beacons.selectedId===marker.modelData.id || marker.modelData.kind==="aoi"
                 x:marker.projected.x>beacons.width-270?-250:23;y:marker.metrics.beamHeight+2;width:240
                 text:marker.modelData.label || marker.modelData.id
                 color:Shell.Theme.t1;font.family:Shell.Theme.font;font.pixelSize:11;elide:Text.ElideRight
-                style:Text.Outline;styleColor:Shell.Theme.desktop
+                Rectangle {anchors.fill:parent;anchors.margins:-4;z:-1;radius:4;color:Shell.Theme.panel;border.color:Shell.Theme.hair}
             }
             MouseArea {id:pick;objectName:"world.pick."+marker.modelData.id;anchors.fill:parent;hoverEnabled:true;cursorShape:Qt.PointingHandCursor;onClicked:beacons.chosen(marker.modelData)}
         }

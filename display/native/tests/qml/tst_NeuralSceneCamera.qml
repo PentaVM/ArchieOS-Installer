@@ -10,11 +10,18 @@ Item {
         property var settings: ({})
         property bool still: true
         property bool loading: false
+        property bool ready: false
+        property int limit: 32
+        property var markerRows: []
+        property string selected: ""
         property string root: "/first"
         property vector3d at: Qt.vector3d(80, 20, 0)
         property int advances: 0
         signal sourceChanged()
         signal updated()
+        signal selectionChanged()
+        function labels() { return markerRows }
+        function selection(root) { return selected.length ? [selected] : [] }
         function setNumber(key, value) { return true }
         function lookupPosition(id) { return {found:id === "folder", position:at} }
         function advance(dt) { advances++; return 0 }
@@ -26,6 +33,7 @@ Item {
         readonly property var fieldStub: field
         function init() {
             field.root = "/first"; field.advances = 0; field.still = true
+            field.ready = false; field.markerRows = []; field.selected = ""; field.limit = 32
             var request = new XMLHttpRequest()
             request.open("GET", Qt.resolvedUrl("../../qml/NeuralScene.qml"), false)
             request.send()
@@ -79,6 +87,23 @@ Item {
             wait(80)
             compare(scene.target.x, x)
             compare(scene.yaw, yaw)
+        }
+        function test_node_markers_keep_native_identity_and_position() {
+            field.ready = true
+            field.markerRows = [{id:"folder",kind:"d",x:80,y:20,z:0}]
+            field.selected = "missing"
+            field.updated()
+            compare(scene.nodeMarkers.length,1)
+            compare(scene.nodeMarkers[0].id,"folder")
+            compare(scene.nodeMarkers[0].x,80)
+            // Native lookup refuses a nonexistent selected ID: no origin marker appears.
+            verify(!scene.nodeMarkers.some(function(marker){return marker.id==="missing"}))
+            field.selected = "folder"; field.markerRows = []
+            field.selectionChanged()
+            compare(scene.nodeMarkers.length,1)
+            compare(scene.nodeMarkers[0].id,"folder")
+            compare(scene.nodeMarkers[0].x,field.at.x)
+            verify(scene.nodeMarkers[0].selected)
         }
         function test_reduced_motion_and_root_reset_reach_real_pose() {
             verify(scene.focusNode("folder"))

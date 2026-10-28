@@ -15,6 +15,8 @@ Item {
     property bool reducedMotion: false
     property bool lightMode: true
     property color backgroundColor: "#eef3f8"
+    property color panelColor: lightMode ? Qt.rgba(1,1,1,.75) : Qt.rgba(.035,.055,.09,.75)
+    property color borderColor: lightMode ? "#71859d" : "#718ba7"
     property color textColor: "#142236"
     property color mutedColor: "#566c80"
     property color errorColor: "#ba263b"
@@ -79,7 +81,7 @@ Item {
     function syncSettings() {
         const s=viewport.controller.settings
         const look=Controls.settings(s)
-        neural.setBackground(viewport.lightMode ? String(viewport.backgroundColor) : String(s.background || viewport.backgroundColor))
+        neural.setBackground(String(viewport.backgroundColor))
         neural.setNumber("brightness",look.brightness)
         neural.setNumber("rotationSpeed",look.rotationSpeed)
         neural.setNumber("pulseSpeed",look.pulseSpeed)
@@ -144,17 +146,23 @@ Item {
         mutedColor: viewport.mutedColor
         errorColor: viewport.errorColor
         surfaceColor: viewport.backgroundColor
+        panelColor: viewport.panelColor
+        borderColor: viewport.borderColor
+        modelActivityBounds: modelStatusHud.visible ? Qt.rect(modelStatusHud.x,modelStatusHud.y,modelStatusHud.width,modelStatusHud.height) : Qt.rect(0,0,0,0)
         lightMode: viewport.lightMode
         rootLabel: neural.sourceRoot
         navigationEnabled: viewport.navigationEnabled && viewport.drawing
     }
 
     ModelActivityHud {
+        id: modelStatusHud
         z: 3
         anchors.left: parent.left; anchors.top: parent.top; anchors.margins: 18
         width: Math.min(300, Math.max(0, parent.width - 150))
         visible: viewport.hudVisible
         models: viewport.modelActivity
+        panelColor: viewport.panelColor
+        borderColor: viewport.borderColor
         textColor: viewport.mutedColor
     }
 

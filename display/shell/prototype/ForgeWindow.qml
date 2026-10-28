@@ -40,7 +40,7 @@ AppWindow {
             Repeater { model:fg.apps
                 delegate:Rectangle { objectName:"forge.app." + modelData.id; width:112; height:118; radius:12
                     readonly property bool ready: !!modelData.available && fg.hasCatalog && appCatalog.canLaunch
-                    color:ama.containsMouse && ready ? Theme.hover : "transparent"; opacity: modelData.available ? 1 : 0.5
+                    color:ama.containsMouse && ready ? Theme.hover : "transparent"
                     Rectangle { id:tile; anchors.horizontalCenter:parent.horizontalCenter; y:8; width:60; height:60; radius:16
                         color: modelData.section === "archie" ? Theme.tint(Theme.acc, 0.16) : Theme.raised; border.width:1; border.color:Theme.hair
                         Image { id:img; anchors.centerIn:parent; width:40; height:40; source:modelData.icon || ""; sourceSize:Qt.size(80,80)
@@ -50,7 +50,7 @@ AppWindow {
                         width:5; height:5; radius:2.5; color:Theme.ok }
                     Text { anchors.horizontalCenter:parent.horizontalCenter; y:tile.y + tile.height + 12; width:parent.width - 8
                         horizontalAlignment:Text.AlignHCenter; text:modelData.name || ""; elide:Text.ElideRight; maximumLineCount:2; wrapMode:Text.Wrap
-                        color:Theme.t1; font.family:Theme.font; font.pixelSize:12 }
+                        color:modelData.available ? Theme.t1 : Theme.t3; font.family:Theme.font; font.pixelSize:12 }
                     MouseArea { id:ama; anchors.fill:parent; hoverEnabled:true; enabled:parent.ready; onClicked:fg.launch(modelData.id) } } } }
         Eyebrow { visible:fg.suggested.length>0; text:"Para instalar" }
         Repeater { model:fg.suggested
