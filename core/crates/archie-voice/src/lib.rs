@@ -47,6 +47,8 @@ mod visual;
 pub mod voice;
 pub mod wanda;
 pub mod wav;
+#[cfg(any(feature = "live", test))]
+mod world_response;
 
 pub use act::{decide, Plan, Refusal};
 pub use hands::{Grounding, Hands, Launch, Performed};

@@ -140,6 +140,15 @@ impl Navigation {
 
 #[derive(Debug, Subcommand)]
 pub enum WorldCommand {
+    /// Strict host-scoped console operations admitted by Core; never a shell.
+    Operator {
+        /// JSON ContextDomain string, e.g. "work/org/project".
+        #[arg(long)]
+        context: String,
+        /// Strict JSON operation tagged with op. Scope is fixed by the host.
+        #[arg(long)]
+        request: String,
+    },
     /// Authorize bounded whole-Earth imagery streaming as the viewport moves.
     Navigate(Navigation),
     /// Read metadata for one navigation session.
@@ -188,6 +197,7 @@ pub enum WorldCommand {
 impl WorldCommand {
     fn command(&self) -> Result<ExploreCommand, String> {
         Ok(match self {
+            Self::Operator { .. } => return Err("operator requests use the Core gateway".into()),
             Self::Navigate(navigation) => ExploreCommand::Navigate {
                 request: navigation.request()?,
             },
@@ -251,6 +261,9 @@ impl WorldCommand {
 }
 
 pub async fn run(command: &WorldCommand, json: bool) -> std::process::ExitCode {
+    if let WorldCommand::Operator { context, request } = command {
+        return crate::world_operator::run(context, request).await;
+    }
     let result = match command.command() {
         Ok(request) => archie_worldd::exploration_control::send(request).await,
         Err(error) => Err(error),

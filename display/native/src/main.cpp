@@ -116,7 +116,8 @@ int main(int argc, char *argv[])
     if(arguments.isSet(QStringLiteral("imagery-source"))){bridge.setSelectedImagery(arguments.value(QStringLiteral("imagery-source")));globeStream.setSourceId(arguments.value(QStringLiteral("imagery-source")));}
     displayControl.setShellMode(shellMode);
     ShellRuntime shellRuntime(arguments.value(QStringLiteral("shell-bridge")),
-        arguments.value(QStringLiteral("lan-file")), arguments.value(QStringLiteral("workspaces-root")));
+        arguments.value(QStringLiteral("lan-file")), arguments.value(QStringLiteral("workspaces-root")),
+        static_cast<quint16>(projectionPort));
     QQmlApplicationEngine engine;
     auto *worldImages=new WorldImageProvider;engine.addImageProvider(QStringLiteral("world"),worldImages);bridge.setWorldImageProvider(worldImages);
     auto *globeImages=new WorldImageProvider;engine.addImageProvider(QStringLiteral("globe"),globeImages);globeStream.setImageProvider(globeImages);

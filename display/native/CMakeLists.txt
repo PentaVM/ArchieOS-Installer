@@ -81,6 +81,7 @@ qt_add_executable(archie-display
     src/DisplayControl.h
     src/ShellRuntime.cpp
     src/ShellRuntime.h
+    src/WorldConsole.cpp src/WorldConsole.h
 )
 
 qt_add_qml_module(archie-display
@@ -92,6 +93,7 @@ qt_add_qml_module(archie-display
         qml/LumenScene.qml
         qml/OrbHud.qml
         qml/WorldHud.qml
+        qml/WorldDetails.qml qml/WorldTools.js
         qml/WorldBeacons.qml
         qml/WorldImageryMaterial.qml
         qml/Exploration.js
@@ -310,7 +312,12 @@ if(ARCHIE_NATIVE_BUILD_TESTS)
     qt_add_resources(test_world_hud "world-hud-shell" PREFIX "/archie/shell" BASE "${CMAKE_CURRENT_SOURCE_DIR}/../shell"
         FILES ${ARCHIE_SHELL_QML} ${ARCHIE_SHELL_JS} ${ARCHIE_SHELL_FONTS} "${CMAKE_CURRENT_SOURCE_DIR}/../shell/prototype/qmldir")
     qt_add_resources(test_world_hud "world-hud-component" PREFIX "/world-test" BASE "${CMAKE_CURRENT_SOURCE_DIR}/qml"
-        FILES qml/WorldHud.qml qml/WorldBeacons.qml qml/Exploration.js)
+        FILES qml/WorldHud.qml qml/WorldDetails.qml qml/WorldTools.js qml/WorldBeacons.qml qml/Exploration.js)
+    qt_add_executable(test_world_console tests/test_world_console.cpp src/WorldConsole.cpp src/WorldConsole.h)
+    target_include_directories(test_world_console PRIVATE src)
+    target_link_libraries(test_world_console PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+    set_target_properties(test_world_console PROPERTIES WIN32_EXECUTABLE FALSE)
+    add_test(NAME world_console_contracts COMMAND test_world_console)
     add_test(NAME world_hud_contracts COMMAND test_world_hud)
     set_tests_properties(world_hud_contracts PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     qt_add_executable(test_display_control tests/test_display_control.cpp src/DisplayControl.cpp src/DisplayControl.h

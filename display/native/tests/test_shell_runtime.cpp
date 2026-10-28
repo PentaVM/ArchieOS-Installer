@@ -24,6 +24,11 @@ private slots:
         QCOMPARE(args[0].toString(), QStringLiteral("watch"));
         QCOMPARE(args[2].toString(), QStringLiteral("fixture:frames & literal"));
         QCOMPARE(args[4].toString(), QStringLiteral("/safe workspaces"));
+        QStringList childArguments;
+        for (const auto &arg : args) childArguments.append(arg.toString());
+        const int displaydAt = childArguments.indexOf(QStringLiteral("--displayd"));
+        QVERIFY2(displaydAt >= 0, "the child must receive the host's explicit projection endpoint");
+        QCOMPARE(childArguments.value(displaydAt + 1), QStringLiteral("127.0.0.1:7666"));
         runtime.setRunning(false);
         QTRY_VERIFY(!runtime.running());
         const int count = frames.count();
@@ -37,6 +42,21 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(!runtime.error().isEmpty(), 4000);
         QCOMPARE(frames.count(), 0);
         runtime.setRunning(false);
+    }
+    void customProjectionPortReachesTheBridge() {
+        ShellRuntime runtime(QCoreApplication::applicationFilePath(), QStringLiteral("fixture:frames"),
+                             QString(), 17666);
+        QSignalSpy frames(&runtime, &ShellRuntime::frameReady);
+        runtime.setRunning(true);
+        QTRY_VERIFY_WITH_TIMEOUT(frames.count() >= 2, 4000);
+        const auto args = QJsonDocument::fromJson(frames[1][0].toString().toUtf8()).array();
+        QStringList childArguments;
+        for (const auto &arg : args) childArguments.append(arg.toString());
+        const int displaydAt = childArguments.indexOf(QStringLiteral("--displayd"));
+        QVERIFY(displaydAt >= 0);
+        QCOMPARE(childArguments.value(displaydAt + 1), QStringLiteral("127.0.0.1:17666"));
+        runtime.setRunning(false);
+        QTRY_VERIFY(!runtime.running());
     }
     void missingProgramIsReportedWithoutBlocking() {
         ShellRuntime runtime(QStringLiteral("/missing/archie-shell-bridge"), QString(), QString());

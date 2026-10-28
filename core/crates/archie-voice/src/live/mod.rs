@@ -534,7 +534,7 @@ async fn world_tool(scope: Option<&WorldVoiceScope>, name: &str, raw: &str) -> S
             value["job"]["id"].as_str().unwrap_or("no informado"),
             value["job"]["state"].as_str().unwrap_or("pendiente")),
         Ok(value) if name == "world_plan" => format!("Plan calculado: {} teselas, radio {} metros. No se inició una captura.",
-            value["plan"]["tiles"].as_array().map_or(0, Vec::len), value["plan"]["request"]["radius_m"]),
+            crate::world_response::plan_tile_count(&value), value["plan"]["request"]["radius_m"]),
         Ok(value) if name == "world_resolve" => {
             let places = value["places"].as_array().map(|places| places.iter().take(5).cloned().collect::<Vec<_>>()).unwrap_or_default();
             format!("Lugares candidatos, sin captura iniciada: {}. Confirma lugar, radio y dominio antes de explorar.", json!(places))

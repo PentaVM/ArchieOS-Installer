@@ -10,11 +10,13 @@ constexpr qsizetype maximumFrameBytes = 1024 * 1024;
 constexpr qsizetype maximumErrorBytes = 4096;
 }
 
-ShellRuntime::ShellRuntime(QString program, QString lanFile, QString workspacesRoot, QObject *parent)
+ShellRuntime::ShellRuntime(QString program, QString lanFile, QString workspacesRoot,
+                           quint16 projectionPort, QObject *parent)
     : QObject(parent) {
     m_process.setProgram(program);
     m_process.setArguments({QStringLiteral("watch"), QStringLiteral("--lan-file"), lanFile,
-                           QStringLiteral("--workspaces-root"), workspacesRoot});
+                           QStringLiteral("--workspaces-root"), workspacesRoot,
+                           QStringLiteral("--displayd"), QStringLiteral("127.0.0.1:%1").arg(projectionPort)});
     m_restart.setSingleShot(true);
     m_restart.setInterval(3000);
     m_stop.setSingleShot(true);

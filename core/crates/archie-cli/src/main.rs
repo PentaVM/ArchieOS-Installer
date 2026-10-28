@@ -20,6 +20,7 @@ use std::process::{Command as ProcessCommand, Stdio};
 mod ai;
 mod visual;
 mod world;
+mod world_operator;
 
 #[derive(Debug, Parser)]
 #[command(
