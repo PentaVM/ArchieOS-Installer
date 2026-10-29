@@ -39,7 +39,7 @@ function Read-Settings {
     $defaults = [ordered]@{
         backend = 'wsl'; distro = ''; vm = 'ArchieOS'
         open_gui_on_start = $true; gui_mode = 'shell'; gui_software = $false
-        voice_on_start = $false; voice_always = $false; lang = ''; advanced = $false
+        voice_on_start = $false; voice_always = $false; lang = ''; asr_language = 'es-US'; voice_enabled = $true; headphones = $false; wanda_enabled = $false; advanced = $false
         # At sign-in the window says it is about to start, and waits this long for a "no".
         autostart_delay_s = 10; show_all_models = $false
         # Where Instalar ArchieOS put it (downloads, the WSL disk, its state and logs).
@@ -382,7 +382,20 @@ if (Test-Path $installer) { . $installer }
                   <Button x:Name="InstAnalyze" Content="Analyze" Margin="0,0,8,8"/>
                   <Button x:Name="InstFixDeps" Content="Install requirements" Margin="0,0,8,8"/>
                 </WrapPanel>
-                <TextBlock Style="{StaticResource Label}" Text="6 · COMPONENTS"/>
+                <TextBlock Style="{StaticResource Label}" Text="6 · ARCHIE'S SETTINGS"/>
+                <TextBlock Foreground="#8D8C9C" TextWrapping="Wrap" Margin="0,0,0,6" Text="Written inside ArchieOS; they apply the next time it starts. The local model is chosen in the Local model tab."/>
+                <StackPanel Margin="0,0,0,10">
+                  <TextBlock Text="Listening" Foreground="#8D8C9C" Margin="0,0,0,2"/>
+                  <RadioButton x:Name="InstListenNamed" Content="Only when I call it by name (default)" GroupName="listen"/>
+                  <RadioButton x:Name="InstListenAlways" Content="Everything it hears (always listening)" GroupName="listen"/>
+                  <TextBlock Text="Speech recognition language" Foreground="#8D8C9C" Margin="0,8,0,2"/>
+                  <ComboBox x:Name="InstAsrBox" Width="240" HorizontalAlignment="Left"/>
+                  <CheckBox x:Name="InstVoiceBox" Content="Voice (microphone and speaker)" Margin="0,8,0,0"/>
+                  <CheckBox x:Name="InstHeadphonesBox" Content="Headphones (keeps listening while it speaks)"/>
+                  <CheckBox x:Name="InstWandaBox" Content="Wanda (needs ~/.config/archie/wanda/wanda.toml)"/>
+                  <Button x:Name="InstApplyProfile" Content="Apply settings" HorizontalAlignment="Left" Margin="0,8,0,0"/>
+                </StackPanel>
+                <TextBlock Style="{StaticResource Label}" Text="7 · COMPONENTS"/>
                 <StackPanel x:Name="InstArtifacts" Margin="0,0,0,8"/>
                 <ProgressBar x:Name="InstBar" Visibility="Collapsed" Margin="0,4,0,6"/>
                 <TextBlock x:Name="InstProgressText" Foreground="#B9B8C4" FontSize="12" Margin="0,0,0,8"/>
@@ -1304,6 +1317,30 @@ $ui.InstallLogs.Add_Click({
     if ($st.distro -and (Test-DistroRunning $st.distro)) { Start-Process explorer.exe ("\\wsl.localhost\{0}\home\archie\.local\state\archie-offline" -f $st.distro) }
 })
 
+# Archie's settings (Install tab): listening, speech recognition language, voice, headphones, Wanda.
+$script:asrLanguages = [ordered]@{ 'es-US' = (T 'Spanish (es-US)'); 'es-CL' = (T 'Spanish (es-CL)'); 'en-US' = (T 'English (en-US)'); 'auto' = (T 'Automatic') }
+foreach ($code in $script:asrLanguages.Keys) { [void]$ui.InstAsrBox.Items.Add($script:asrLanguages[$code]) }
+$chosenAsr = if ($script:asrLanguages.Contains([string]$script:cfg.asr_language)) { [string]$script:cfg.asr_language } else { 'es-US' }
+$ui.InstAsrBox.SelectedIndex = [array]::IndexOf(@($script:asrLanguages.Keys), $chosenAsr)
+$ui.InstListenAlways.IsChecked = [bool]$script:cfg.voice_always
+$ui.InstListenNamed.IsChecked = -not [bool]$script:cfg.voice_always
+$ui.InstVoiceBox.IsChecked = [bool]$script:cfg.voice_enabled
+$ui.InstHeadphonesBox.IsChecked = [bool]$script:cfg.headphones
+$ui.InstWandaBox.IsChecked = [bool]$script:cfg.wanda_enabled
+$ui.InstApplyProfile.Add_Click({
+    $script:cfg.asr_language = @($script:asrLanguages.Keys)[[Math]::Max(0, $ui.InstAsrBox.SelectedIndex)]
+    $script:cfg.voice_always = [bool]$ui.InstListenAlways.IsChecked
+    $script:cfg.voice_enabled = [bool]$ui.InstVoiceBox.IsChecked
+    $script:cfg.headphones = [bool]$ui.InstHeadphonesBox.IsChecked
+    $script:cfg.wanda_enabled = [bool]$ui.InstWandaBox.IsChecked
+    Save-Settings
+    $ui.VoiceAlwaysBox.IsChecked = $script:cfg.voice_always
+    $st = $script:installState
+    if ($st -and $st.distro) {
+        Start-InstallerJob 'configure' @('-Root', (Get-InstallRoot)) { param($r) if ($r.ok) { Add-Log (T 'Settings saved: they apply the next time ArchieOS starts.') } else { Add-Log $r.error } }
+    } else { Add-Log (T 'Settings saved: they are written into ArchieOS when it is installed.') }
+})
+
 # Settings controls.
 $ui.AdvancedToggle.IsChecked = [bool]$script:cfg.advanced
 $ui.AutostartBox.IsChecked = Test-Path $startupLink
@@ -1364,7 +1401,7 @@ $ui.UninstallButton.Add_Click({
 })
 $ui.OpenGuiBox.Add_Click({ $script:cfg.open_gui_on_start = [bool]$ui.OpenGuiBox.IsChecked; Save-Settings; Update-View })
 $ui.VoiceOnStartBox.Add_Click({ $script:cfg.voice_on_start = [bool]$ui.VoiceOnStartBox.IsChecked; Save-Settings; Update-View })
-$ui.VoiceAlwaysBox.Add_Click({ $script:cfg.voice_always = [bool]$ui.VoiceAlwaysBox.IsChecked; Save-Settings })
+$ui.VoiceAlwaysBox.Add_Click({ $script:cfg.voice_always = [bool]$ui.VoiceAlwaysBox.IsChecked; Save-Settings; $ui.InstListenAlways.IsChecked = $script:cfg.voice_always; $ui.InstListenNamed.IsChecked = -not $script:cfg.voice_always })
 $ui.GuiShell.Add_Click({ $script:cfg.gui_mode = 'shell'; Save-Settings; Update-View })
 $ui.GuiObservatory.Add_Click({ $script:cfg.gui_mode = 'observatorio'; Save-Settings; Update-View })
 $ui.GuiSoftwareBox.Add_Click({ $script:cfg.gui_software = [bool]$ui.GuiSoftwareBox.IsChecked; Save-Settings })

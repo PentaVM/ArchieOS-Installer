@@ -10,6 +10,7 @@
 #   ArchieOS-Installer.ps1 repair            -Root DIR [-AllowUnregisterBroken]
 #   ArchieOS-Installer.ps1 adopt             -Root DIR -Distro NAME (an existing distribution)
 #   ArchieOS-Installer.ps1 start|stop|health|status -Root DIR
+#   ArchieOS-Installer.ps1 configure         -Root DIR      (writes the settings profile into the distribution)
 #   ArchieOS-Installer.ps1 fix-dependency    -Id wsl|wsl-update [-Root DIR]
 #
 # -OutFile receives the log lines as they come; -ResultFile (else -OutFile, else the output)
@@ -744,6 +745,7 @@ function Start-ArchieRuntime([string]$root) {
     }
     Set-InstallState $root $st 'starting' @{ error = $null }
     Start-KeepAlive $root $st
+    [void](Write-GuestProfile $st.distro)
     Write-Step (T 'archie-offline --background in {0} (the first time it prepares the database)' $($st.distro))
     $r = Invoke-Guest $st.distro $script:GuestUser @('/usr/bin/archie-offline', '--background') 900
     ($r.out + "`n" + $r.err) -split "`r?`n" | ForEach-Object { Write-Step $_ }
@@ -793,6 +795,36 @@ function Get-RuntimeHealth([string]$root) {
 # The steps after a fresh import that the image's own first start (archie-offline-oobe) does
 # when it is installed by double-click: a state folder, a package-signing key of this
 # machine's own, and the check of every model in it.
+# What the person chose (launcher.json: listening, ASR language, voice, headphones, Wanda) goes into
+# the distribution as ~/.config/archie/profile.json; archie-offline reads it each time it starts.
+function Get-UserProfile {
+    $settings = $null
+    try {
+        $file = Join-Path $env:APPDATA 'ArchieOS\launcher.json'
+        if (Test-Path -LiteralPath $file) { $settings = Get-Content -LiteralPath $file -Raw -Encoding UTF8 | ConvertFrom-Json }
+    } catch { }
+    $language = if ($settings -and ([string]$settings.asr_language) -cmatch '^(auto|[a-z]{2}-[A-Z]{2})$') { [string]$settings.asr_language } else { 'es-US' }
+    return [ordered]@{
+        asr_language = $language
+        listen       = $(if ($settings -and $settings.voice_always -eq $true) { 'always' } else { 'named' })
+        voice        = $(if ($settings -and $settings.voice_enabled -eq $false) { $false } else { $true })
+        wanda        = [bool]($settings -and $settings.wanda_enabled -eq $true)
+        headphones   = [bool]($settings -and $settings.headphones -eq $true)
+    }
+}
+function Write-GuestProfile([string]$distro) {
+    $prefs = Get-UserProfile
+    $script_ = 'mkdir -p "$HOME/.config/archie" && cat > "$HOME/.config/archie/profile.json"'
+    $r = Invoke-Guest $distro $script:GuestUser @('/bin/sh', '-c', $script_) 60 ($prefs | ConvertTo-Json -Compress)
+    if ($r.code -ne 0) { Write-Step (T 'Could not write the settings profile: {0}' $(($r.err + $r.out).Trim())); return $false }
+    Write-Step (T 'Settings written: listening {0}, ASR language {1}, voice {2}, Wanda {3}' $prefs.listen $prefs.asr_language $prefs.voice $prefs.wanda)
+    return $true
+}
+function Invoke-Configure([string]$root) {
+    $st = Get-InstalledState $root
+    $ok = Write-GuestProfile $st.distro
+    return @{ state = $st.state; distro = $st.distro; profile_written = $ok }
+}
 function Initialize-Distro([string]$distro) {
     $r = Invoke-Guest $distro 'root' @('/usr/bin/install', '-d', '-o', 'archie', '-g', 'archie', '-m', '0700', '/home/archie/.local/state') 60
     if ($r.code -ne 0) { throw (New-InstallError 'install' (T 'Could not prepare /home/archie/.local/state: {0}' $($r.err.Trim()))) }
@@ -910,6 +942,7 @@ function Invoke-Install([string]$root, $manifest, [string]$distroName = '') {
     Set-Field $st 'checkpoints' $checkpoints; Save-InstallState $root $st
     try {
         Initialize-Distro $distroName
+        [void](Write-GuestProfile $distroName)
         $check = Test-DistroPayload $distroName
     } catch {
         Set-InstallState $root $st 'repairable' @{ error = $_.Exception.Message; error_code = (Get-ErrorCode $_.Exception); job_pid = $null }
@@ -1030,8 +1063,9 @@ if ($Verb) {
             'stop' { Stop-ArchieRuntime $Root }
             'health' { Get-RuntimeHealth $Root }
             'status' { Get-InstallStatus $Root }
+            'configure' { Invoke-Configure $Root }
             'fix-dependency' { Invoke-DependencyFix $Id $Root }
-            default { throw (New-InstallError 'invalid' "Verbo desconocido: $Verb") }
+            default { throw (New-InstallError 'invalid' (T 'Unknown verb: {0}' $Verb)) }
         }
         $result['ok'] = $true
         Write-Result $result
