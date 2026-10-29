@@ -118,7 +118,8 @@ function Get-ArchieRecommendation($machine, $catalog) {
     if ($gpu -and $gpu.unified) { $budget = $machine.ram_mb - 8192; $why += (T '{0} shares {1:N0} GB of memory with the CPU' $gpu.name ($machine.ram_mb / 1024)) }
     elseif ($gpu -and $gpu.vram_mb -gt 0 -and $runtime -ne 'cpu') { $budget = $gpu.vram_mb - 1500; $why += (T '{0} with {1:N0} GB' $gpu.name ($gpu.vram_mb / 1024)) }
     else { $budget = 0; $why += (T 'no GPU the runtime can use: a small model on the CPU') }
-    $usable = @($catalog | Where-Object { $_.arch -notin $script:ArchieUnknownArches })
+    # Decensored variants (Heretic, abliterated) are offered, never recommended.
+    $usable = @($catalog | Where-Object { $_.arch -notin $script:ArchieUnknownArches -and $_.label -notmatch 'uncensored|heretic|abliterated' })
     $model = if ($budget -gt 0) {
         $usable | Where-Object { $_.bytes / 1MB -le $budget } | Sort-Object tier, bytes -Descending | Select-Object -First 1
     } else {

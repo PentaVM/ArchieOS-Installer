@@ -1343,7 +1343,8 @@ $ui.InstWandaBox.IsChecked = [bool]$script:cfg.wanda_enabled
 $script:modelCatalog = @()
 $catalogFile = Join-Path $PSScriptRoot 'local-models.tsv'
 if ((Get-Command Read-ArchieCatalog -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath $catalogFile)) {
-    $script:modelCatalog = @(Read-ArchieCatalog $catalogFile | Sort-Object tier, bytes -Descending)
+    # By name, so each family sits together; what this ArchieOS's runtime cannot run is left out.
+    $script:modelCatalog = @(Read-ArchieCatalog $catalogFile | Where-Object { $_.arch -notin $script:ArchieUnknownArches } | Sort-Object label)
 }
 $script:modelRecommended = ''
 if (-not $script:cfg.local_model -and $script:modelCatalog.Count) {

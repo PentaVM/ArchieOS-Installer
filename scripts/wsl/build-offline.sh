@@ -43,14 +43,15 @@ done
 chown -R 1000:1000 "$models/asr" "$models/piper"
 
 # The voices' runtime, pinned as archie-setup installs it, so the first start needs no network.
-# The wheels are fetched here (the root has no resolver) and installed inside without an index.
-wheels=$rootfs/tmp/voice-wheels
+# The wheels are fetched here (the root has no resolver) and installed inside without an index,
+# from /var/tmp: arch-chroot gives the root an empty /tmp of its own.
+wheels=$rootfs/var/tmp/voice-wheels
 rm -rf "$wheels" && install -d "$wheels"
 python3 -m venv "$wheels.venv"
 "$wheels.venv/bin/pip" download --quiet --dest "$wheels" "piper-tts==1.8.0" "onnxruntime==1.30.0"
 rm -rf "$wheels.venv"
 arch-chroot "$rootfs" bash -c 'rm -rf /opt/archie/voice-venv && python -m venv /opt/archie/voice-venv \
-  && /opt/archie/voice-venv/bin/pip install --quiet --no-index --find-links /tmp/voice-wheels "piper-tts==1.8.0" "onnxruntime==1.30.0" \
+  && /opt/archie/voice-venv/bin/pip install --quiet --no-index --find-links /var/tmp/voice-wheels "piper-tts==1.8.0" "onnxruntime==1.30.0" \
   && /opt/archie/voice-venv/bin/python -c "import onnxruntime, piper"'
 rm -rf "$wheels"
 chown -R 1000:1000 "$rootfs/opt/archie/voice-venv"

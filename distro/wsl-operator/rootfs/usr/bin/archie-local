@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Reasoning models on this machine, run by PrismML's llama.cpp: Bonsai (PrismML), Qwen
-# (Alibaba), Gemma (Google), gpt-oss (OpenAI), Nemotron (NVIDIA), DeepSeek, Kimi (Moonshot)
-# and Flint, in the publishers' or unsloth's GGUF quantizations. With them, what is said to
+# (Alibaba), Gemma (Google), GLM (Z.ai), gpt-oss (OpenAI), Nemotron (NVIDIA), DeepSeek, Kimi
+# (Moonshot), Llama (Meta), Mistral, Phi (Microsoft), LFM (Liquid AI), MiMo (Xiaomi) and Flint,
+# in the publishers' or unsloth's GGUF quantizations, and Heretic/abliterated variants others
+# decensored (offered, never recommended). With them, what is said to
 # Archie does not leave the machine. Several can be kept here; one answers at a time, and
 # changing which one is a single command.
 #
