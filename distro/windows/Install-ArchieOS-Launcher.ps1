@@ -20,7 +20,7 @@ New-Item -ItemType Directory -Force $target | Out-Null
 
 # A launcher already running keeps the old script open: it is asked to close first.
 Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
-    Where-Object { $_.CommandLine -like '*ArchieOS-Launcher.ps1*' } |
+    Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like '*\ArchieOS-Launcher.ps1*' } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
 # Windows PowerShell 5.1 reads a script without a byte order mark as ANSI: each copy is
@@ -31,6 +31,10 @@ foreach ($script in 'ArchieOS-Launcher.ps1', 'Compact-ArchieOS-Disk.ps1', 'Unins
     [System.IO.File]::WriteAllText((Join-Path $target $script), $source, $utf8Bom)
 }
 Copy-Item (Join-Path $PSScriptRoot 'ArchieOS.vbs') $target -Force
+# ArchieOS-Setup.exe brings itself along as ArchieOS.exe: the shortcuts open it, and it opens the
+# launcher (or installs a newer one first).
+$exe = Join-Path $PSScriptRoot 'ArchieOS.exe'
+if (Test-Path -LiteralPath $exe) { Copy-Item -LiteralPath $exe (Join-Path $target 'ArchieOS.exe') -Force }
 # The release manifest and its signature: the installer refuses a manifest that is not signed.
 foreach ($file in 'archieos-manifest.json', 'archieos-manifest.json.sig') { Copy-Item (Join-Path $PSScriptRoot $file) $target -Force }
 # The AI models the Install tab offers (the same catalog archie-local reads inside ArchieOS): in a
@@ -72,7 +76,9 @@ function New-OrbIcon([string]$path) {
     [System.IO.File]::WriteAllBytes($path, $out.ToArray())
 }
 $icon = Join-Path $target 'ArchieOS.ico'
-New-OrbIcon $icon
+# The brand's icon when it travels with the setup; otherwise the orb drawn above.
+$brand = Join-Path $PSScriptRoot 'archieos.ico'
+if (Test-Path -LiteralPath $brand) { Copy-Item -LiteralPath $brand $icon -Force } else { New-OrbIcon $icon }
 
 if ($Distro) {
     $settingsDir = Join-Path $env:APPDATA 'ArchieOS'
@@ -87,8 +93,14 @@ if ($Distro) {
 $shell = New-Object -ComObject WScript.Shell
 function New-Link([string]$path, [string]$arguments, [string]$description) {
     $lnk = $shell.CreateShortcut($path)
-    $lnk.TargetPath = Join-Path $env:WINDIR 'System32\wscript.exe'
-    $lnk.Arguments = ('"{0}" {1}' -f (Join-Path $target 'ArchieOS.vbs'), $arguments).Trim()
+    $app = Join-Path $target 'ArchieOS.exe'
+    if (Test-Path -LiteralPath $app) {
+        $lnk.TargetPath = $app
+        $lnk.Arguments = $arguments
+    } else {
+        $lnk.TargetPath = Join-Path $env:WINDIR 'System32\wscript.exe'
+        $lnk.Arguments = ('"{0}" {1}' -f (Join-Path $target 'ArchieOS.vbs'), $arguments).Trim()
+    }
     $lnk.WorkingDirectory = $target
     $lnk.IconLocation = "$icon,0"
     $lnk.Description = $description
