@@ -1015,10 +1015,14 @@ fn speech_flags(args: &mut Vec<String>) -> Result<SpeechFlags, String> {
             })
             .transpose()?
             .unwrap_or(13),
+        // Measured on NVIDIA's GGUF that embeds its tokenizer (the only kind that boosts):
+        // at 5 the recogniser heard the favoured words everywhere ("Photopeaw the
+        // Photopea", "la mona Sentry"), at 3 still sometimes, at 1.5 it named Archie and
+        // the Mona Lisa in both languages and heard "Sentry" where 5 heard "century".
         name_boost: take(args, "--name-boost")
             .map(|n| n.parse::<f32>().map_err(|_| "--name-boost is a number"))
             .transpose()?
-            .unwrap_or(5.0),
+            .unwrap_or(1.5),
         asr_gpu: take(args, "--asr-gpu")
             .map(|n| {
                 n.parse::<i32>()
@@ -1656,21 +1660,14 @@ fn converse(
         follow_up: archie_voice::listen::FOLLOW_UP_WINDOW,
         steps,
         // The name, and with a desk the names its requests carry, which the recogniser
-        // otherwise writes as other words ("moaner lea" for "Mona Lisa"). Boosting needs
-        // a GGUF that embeds its tokenizer; without one the recogniser says so and hears
-        // the words unbiased.
+        // otherwise writes as other words ("moaner lea" for "Mona Lisa", "century" for
+        // "Sentry"). Only words a person says: favouring "Photopea", "World" or "Forge"
+        // made the recogniser hear them in everything. Boosting needs a GGUF that embeds
+        // its tokenizer; without one the recogniser says so and hears the words unbiased.
         phrases: if desk.is_some() {
-            [
-                "Archie",
-                "Mona Lisa",
-                "Photopea",
-                "Sentry",
-                "Nebius",
-                "World",
-                "Forge",
-            ]
-            .map(String::from)
-            .to_vec()
+            ["Archie", "Mona Lisa", "Sentry", "Nebius"]
+                .map(String::from)
+                .to_vec()
         } else {
             vec!["Archie".into()]
         },

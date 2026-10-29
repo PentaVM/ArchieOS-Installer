@@ -297,7 +297,8 @@ impl Default for Setup {
             follow_up: crate::listen::FOLLOW_UP_WINDOW,
             steps: 6,
             phrases: vec!["Archie".into()],
-            phrase_boost: 5.0,
+            // As `--name-boost`: more than ~2 makes a boosting GGUF hear the phrases anywhere.
+            phrase_boost: 1.5,
             notices: None,
             narration: None,
         }

@@ -220,6 +220,10 @@ fi
 [ -n "${LISTEN_LANGUAGE:-}" ] && set -- "$@" --listen-language "$LISTEN_LANGUAGE"
 [ "${HEADPHONES:-0}" = 1 ] && set -- "$@" --headphones
 [ "${ALWAYS:-0}" = 1 ] && set -- "$@" --always
+# How strongly the recogniser favours the name and the demo's words. Only a GGUF that embeds
+# its tokenizer boosts at all; on one that does, too much makes it hear those words in
+# everything ("Photopeaw the Photopea" at 5).
+[ -n "${NAME_BOOST:-}" ] && set -- "$@" --name-boost "$NAME_BOOST"
 # Clicks by name: what a window declares to the accessibility bus is found with no model
 # (the desktop's dock); the grounding model only looks for what declares nothing.
 [ -n "${GROUND_MODEL:-}" ] && set -- "$@" --ground-model "$GROUND_MODEL"
