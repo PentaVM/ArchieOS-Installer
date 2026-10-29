@@ -207,6 +207,12 @@ refuse_world_writable "$rootfs" || exit 65
 du -sh "$rootfs"
 # Final image packaging.
 python3 "$repo_root/scripts/wsl/image-keyring.py" prepare "$rootfs"
+# ARCHIE_WSL_ROOTFS_ONLY=1: the root stays assembled in the work dir and nothing is packaged,
+# for scripts/wsl/build-offline.sh to add the models to.
+if [[ ${ARCHIE_WSL_ROOTFS_ONLY:-0} == 1 ]]; then
+  echo "build-operator: root assembled in $rootfs (not packaged)"
+  exit 0
+fi
 if [[ $out == - ]]; then
   tar --numeric-owner --xattrs --acls -C "$rootfs" -cf - . | gzip -n -6 >&3
   exit 0

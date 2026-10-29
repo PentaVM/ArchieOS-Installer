@@ -85,7 +85,11 @@ fi
 archie-session down >/dev/null 2>&1 || true
 [ -S /mnt/wslg/runtime-dir/wayland-0 ] || { echo 'archie-talk: WSLg is not running, so there is no screen or sound to use' >&2; exit 1; }
 
-export ASR_MODEL=/var/lib/archie/models/asr/nemotron-3.5-asr-streaming-0.6b.q8_0.gguf
+# NVIDIA's current GGUF carries its tokenizer, so Archie's name can be boosted; the pinned one
+# (scripts/models/install-nemotron-speech.sh) hears the same without it.
+ASR_MODEL=/var/lib/archie/models/asr/nemotron-3.5-asr-streaming-0.6b.q8_0.hf.gguf
+[ -f "$ASR_MODEL" ] || ASR_MODEL=/var/lib/archie/models/asr/nemotron-3.5-asr-streaming-0.6b.q8_0.gguf
+export ASR_MODEL
 export PIPER=/usr/lib/archie/piper-json-bridge.py
 # Piper runs under the Python that has it: the image's voice venv, or IRIS's on a node set
 # up before the voice had its own.

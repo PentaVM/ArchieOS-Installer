@@ -230,7 +230,7 @@ base-url = "http://127.0.0.1:8081/v1"
     if voice:
         spawn('voice', voice_arguments(profile, models),
               dict(gui, CUDA_VISIBLE_DEVICES='', OMP_NUM_THREADS='2', PIPER_THREADS='2',
-                   PATH='/opt/archie/iris-venv/bin:' + os.environ['PATH'],
+                   PATH='/opt/archie/voice-venv/bin:/opt/archie/iris-venv/bin:' + os.environ['PATH'],
                    PULSE_SERVER='unix:/mnt/wslg/PulseServer'))
         time.sleep(1)
         if not owned('voice'):
