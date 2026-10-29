@@ -18,8 +18,9 @@ if (-not $Quiet) {
     if ($answer -notmatch '^[yYsS]') { Write-Host 'Nothing removed.'; exit 0 }
 }
 
+# The launcher only: this script's own name also ends in "ArchieOS-Launcher.ps1".
 Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
-    Where-Object { $_.CommandLine -like '*ArchieOS-Launcher.ps1*' } |
+    Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match '[\\/"\s]ArchieOS-Launcher\.ps1' } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
 foreach ($folder in 'Desktop', 'Programs', 'Startup') {

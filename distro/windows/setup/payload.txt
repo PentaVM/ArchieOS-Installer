@@ -1,0 +1,16 @@
+# The files ArchieOS-Setup.exe carries, as paths from the repository root, each embedded as
+# payload/<its file name> (or the name after the path). Install-ArchieOS-Launcher.ps1, run from
+# them, puts the rest in the launcher's folder.
+distro/windows/Install-ArchieOS-Launcher.ps1
+distro/windows/ArchieOS-Launcher.ps1
+distro/windows/ArchieOS-Installer.ps1
+distro/windows/ArchieOS-i18n.ps1
+distro/windows/ArchieOS-Machine.ps1
+distro/windows/ArchieOS-HostModel.ps1
+distro/windows/Compact-ArchieOS-Disk.ps1
+distro/windows/Uninstall-ArchieOS-Launcher.ps1
+distro/windows/ArchieOS.vbs
+distro/windows/archieos-manifest.json
+distro/windows/archieos-manifest.json.sig
+distro/wsl-operator/rootfs/usr/share/archie/local-models.tsv
+display/shell/brand/archieos.ico ArchieOS.ico

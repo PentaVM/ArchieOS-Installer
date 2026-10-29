@@ -1407,9 +1407,16 @@ function Set-Autostart([bool]$on) {
     if ($on) {
         $shell = New-Object -ComObject WScript.Shell
         $lnk = $shell.CreateShortcut($startupLink)
-        $lnk.TargetPath = Join-Path $env:WINDIR 'System32\wscript.exe'
-        $lnk.Arguments = "`"$(Join-Path $PSScriptRoot 'ArchieOS.vbs')`" -Autostart"
+        # ArchieOS.exe when ArchieOS-Setup.exe installed it, as Install-ArchieOS-Launcher.ps1 does.
+        $exe = Join-Path $PSScriptRoot 'ArchieOS.exe'
+        if (Test-Path -LiteralPath $exe) { $lnk.TargetPath = $exe; $lnk.Arguments = '-Autostart' }
+        else {
+            $lnk.TargetPath = Join-Path $env:WINDIR 'System32\wscript.exe'
+            $lnk.Arguments = "`"$(Join-Path $PSScriptRoot 'ArchieOS.vbs')`" -Autostart"
+        }
         $lnk.WorkingDirectory = $PSScriptRoot
+        $iconPath = Join-Path $PSScriptRoot 'ArchieOS.ico'
+        if (Test-Path -LiteralPath $iconPath) { $lnk.IconLocation = "$iconPath,0" }
         $lnk.Description = (T 'ArchieOS: brings the node up when you sign in to Windows')
         $lnk.Save()
     } else { Remove-Item $startupLink -ErrorAction SilentlyContinue }
