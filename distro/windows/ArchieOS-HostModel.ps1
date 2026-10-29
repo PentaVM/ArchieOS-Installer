@@ -14,12 +14,12 @@
 function Save-Verified([string]$url, [string]$path, [string]$sha256, [scriptblock]$log) {
     if ((Test-Path $path) -and (Get-FileHash $path -Algorithm SHA256).Hash -eq $sha256.ToUpper()) { return }
     New-Item -ItemType Directory -Force (Split-Path $path) | Out-Null
-    & $log "Descargando $(Split-Path $path -Leaf)"
+    & $log (T 'Downloading {0}' (Split-Path $path -Leaf))
     & curl.exe --fail --location --silent --show-error --proto '=https' --tlsv1.2 --continue-at - --output "$path.part" $url
-    if ($LASTEXITCODE -ne 0) { throw "No se pudo descargar $url" }
+    if ($LASTEXITCODE -ne 0) { throw (T 'Could not download {0}' $url) }
     if ((Get-FileHash "$path.part" -Algorithm SHA256).Hash -ne $sha256.ToUpper()) {
         Remove-Item "$path.part" -Force
-        throw "$(Split-Path $path -Leaf) no llegó completo; vuelve a intentarlo"
+        throw (T '{0} did not arrive complete; try again' (Split-Path $path -Leaf))
     }
     Move-Item -Force "$path.part" $path
 }
@@ -37,7 +37,7 @@ function Install-HostRuntime([string]$kind, [scriptblock]$log) {
     }
     # Some releases put the files one folder down.
     $server = Get-ChildItem $dir -Recurse -Filter 'llama-server.exe' | Select-Object -First 1
-    if (-not $server) { throw "El runtime $kind no trae llama-server.exe" }
+    if (-not $server) { throw (T 'The {0} runtime has no llama-server.exe' $kind) }
     if ($server.DirectoryName -ne $dir) {
         Get-ChildItem $server.DirectoryName | Move-Item -Destination $dir -Force
     }
@@ -102,12 +102,12 @@ function Stop-HostModel {
 # window full screen.
 function New-ArchieVm([string]$ova, [string]$name, [int]$cpus, [int]$memoryGb, [string]$baseFolder, $hostModel, [scriptblock]$log) {
     $vbox = Join-Path $env:ProgramFiles 'Oracle\VirtualBox\VBoxManage.exe'
-    & $log "Importando $name en VirtualBox"
+    & $log (T 'Importing {0} into VirtualBox' $name)
     # VBoxManage writes progress to stderr, an error under 'Stop' in Windows PowerShell 5.1:
     # its exit code decides instead.
     $ErrorActionPreference = 'Continue'
     & $vbox import $ova --vsys 0 --vmname $name --cpus $cpus --memory ($memoryGb * 1024) --basefolder $baseFolder 2>&1 | ForEach-Object { & $log "$_" }
-    if ($LASTEXITCODE -ne 0) { throw 'VirtualBox no pudo importar la máquina' }
+    if ($LASTEXITCODE -ne 0) { throw (T 'VirtualBox could not import the machine') }
     # 10.0.2.2 reaches Windows' loopback only with this on (off by default since 7.0).
     & $vbox modifyvm $name --nat-localhostreachable1 on --graphicscontroller vmsvga --vram 128 --accelerate-3d on `
         --clipboard-mode bidirectional --audio-enabled on --audio-in on --audio-out on 2>&1 | ForEach-Object { & $log "$_" }

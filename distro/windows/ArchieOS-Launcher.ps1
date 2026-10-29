@@ -21,6 +21,15 @@ Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, Sys
 $mutex = New-Object System.Threading.Mutex($false, 'Local\ArchieOS-Launcher')
 if (-not $mutex.WaitOne(0)) { exit 0 }
 
+# Texts: English is the default; ArchieOS-i18n.ps1 holds the other languages (Advanced > Startup).
+$i18nFile = Join-Path $PSScriptRoot 'ArchieOS-i18n.ps1'
+if (Test-Path $i18nFile) { . $i18nFile } else {
+    function T([string]$text) { $text = $text.Replace('\n', "`n"); if ($args.Count) { return ($text -f $args) } return $text }
+    function Initialize-Language([string]$requested = '') { }
+    function Update-UiLanguage($root) { }
+    $script:UiLang = 'en'; $script:Languages = [ordered]@{ en = 'English' }
+}
+
 $settingsDir = Join-Path $env:APPDATA 'ArchieOS'
 $settingsFile = Join-Path $settingsDir 'launcher.json'
 $startupLink = Join-Path ([Environment]::GetFolderPath('Startup')) 'ArchieOS.lnk'
@@ -30,7 +39,7 @@ function Read-Settings {
     $defaults = [ordered]@{
         backend = 'wsl'; distro = ''; vm = 'ArchieOS'
         open_gui_on_start = $true; gui_mode = 'shell'; gui_software = $false
-        voice_on_start = $false; voice_always = $true; advanced = $false
+        voice_on_start = $false; voice_always = $false; lang = ''; advanced = $false
         # At sign-in the window says it is about to start, and waits this long for a "no".
         autostart_delay_s = 10; show_all_models = $false
         # Where Instalar ArchieOS put it (downloads, the WSL disk, its state and logs).
@@ -81,13 +90,14 @@ function Get-VBoxVms {
 }
 
 $script:cfg = Read-Settings
+Initialize-Language $script:cfg.lang
 # For a VirtualBox machine the model runs on Windows; those functions live beside this file.
 foreach ($module in 'ArchieOS-Machine.ps1', 'ArchieOS-HostModel.ps1') {
     $path = Join-Path $PSScriptRoot $module
     if (Test-Path $path) { . $path }
 }
 if (-not (Get-Command Start-HostModel -ErrorAction SilentlyContinue)) {
-    function Start-HostModel($hostModel) { throw 'falta ArchieOS-HostModel.ps1 junto al lanzador' }
+    function Start-HostModel($hostModel) { throw (T 'ArchieOS-HostModel.ps1 is missing next to the launcher') }
     function Test-HostModel($hostModel) { return $false }
     function Stop-HostModel { }
 }
@@ -226,10 +236,10 @@ if (Test-Path $installer) { . $installer }
       <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
         <TextBlock Text="ArchieOS" FontSize="24" FontWeight="SemiBold"/>
         <Border x:Name="StatePill" CornerRadius="11" BorderThickness="1" Padding="10,3" Margin="14,4,0,0" Background="#2C2D36" VerticalAlignment="Center">
-          <TextBlock x:Name="StateText" Text="Leyendo…" FontSize="12" FontWeight="SemiBold"/>
+          <TextBlock x:Name="StateText" Text="Reading…" FontSize="12" FontWeight="SemiBold"/>
         </Border>
       </StackPanel>
-      <CheckBox x:Name="AdvancedToggle" Content="Avanzado" DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+      <CheckBox x:Name="AdvancedToggle" Content="Advanced" DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center"/>
     </DockPanel>
 
     <Grid Grid.Row="1">
@@ -241,9 +251,9 @@ if (Test-Path $installer) { . $installer }
           <StackPanel>
             <TextBlock x:Name="AutostartText" FontWeight="SemiBold" Margin="0,0,0,10"/>
             <WrapPanel>
-              <Button x:Name="AutostartNow" Content="Iniciar ahora" Background="#6FC8F5" Foreground="#06151D" BorderBrush="#6FC8F5" Margin="0,0,8,8"/>
-              <Button x:Name="AutostartSkip" Content="No iniciar esta vez" Margin="0,0,8,8"/>
-              <Button x:Name="AutostartNever" Content="No iniciar con Windows" Margin="0,0,8,8"/>
+              <Button x:Name="AutostartNow" Content="Start now" Background="#6FC8F5" Foreground="#06151D" BorderBrush="#6FC8F5" Margin="0,0,8,8"/>
+              <Button x:Name="AutostartSkip" Content="Do not start this time" Margin="0,0,8,8"/>
+              <Button x:Name="AutostartNever" Content="Do not start with Windows" Margin="0,0,8,8"/>
             </WrapPanel>
           </StackPanel>
         </Border>
@@ -254,36 +264,36 @@ if (Test-Path $installer) { . $installer }
             <TextBlock x:Name="InstallSummary" Foreground="#8D8C9C" Margin="0,0,0,10"/>
             <ProgressBar x:Name="InstallBar" Visibility="Collapsed" Margin="0,0,0,6"/>
             <TextBlock x:Name="InstallProgressText" Visibility="Collapsed" Foreground="#B9B8C4" FontSize="12" Margin="0,0,0,10"/>
-            <Button x:Name="InstallStart" Content="Iniciar ArchieOS" FontSize="16" FontWeight="SemiBold" Padding="18,12"
+            <Button x:Name="InstallStart" Content="Start ArchieOS" FontSize="16" FontWeight="SemiBold" Padding="18,12"
                     Background="#6FC8F5" Foreground="#06151D" BorderBrush="#6FC8F5" Margin="0,0,0,10" HorizontalAlignment="Stretch"/>
             <WrapPanel>
-              <Button x:Name="InstallOpen" Content="Instalar ArchieOS" Margin="0,0,8,8"/>
-              <Button x:Name="InstallStop" Content="Detener" Margin="0,0,8,8"/>
-              <Button x:Name="InstallVerify" Content="Verificar/Reparar" Margin="0,0,8,8"/>
-              <Button x:Name="InstallCancel" Content="Cancelar" Visibility="Collapsed" Margin="0,0,8,8"/>
-              <Button x:Name="InstallLogs" Content="Registros" Margin="0,0,8,8"/>
+              <Button x:Name="InstallOpen" Content="Install ArchieOS" Margin="0,0,8,8"/>
+              <Button x:Name="InstallStop" Content="Stop" Margin="0,0,8,8"/>
+              <Button x:Name="InstallVerify" Content="Verify/Repair" Margin="0,0,8,8"/>
+              <Button x:Name="InstallCancel" Content="Cancel" Visibility="Collapsed" Margin="0,0,8,8"/>
+              <Button x:Name="InstallLogs" Content="Logs" Margin="0,0,8,8"/>
             </WrapPanel>
           </StackPanel>
         </Border>
         <Border Style="{StaticResource Card}">
           <StackPanel>
-            <TextBlock Style="{StaticResource Label}" Text="NODO"/>
+            <TextBlock Style="{StaticResource Label}" Text="NODE"/>
             <TextBlock x:Name="StateDetail" Text="" Foreground="#8D8C9C" Margin="0,0,0,14"/>
-            <Button x:Name="PrimaryButton" Content="Iniciar" FontSize="16" FontWeight="SemiBold" Padding="18,12"
+            <Button x:Name="PrimaryButton" Content="Start" FontSize="16" FontWeight="SemiBold" Padding="18,12"
                     Background="#6FC8F5" Foreground="#06151D" BorderBrush="#6FC8F5" Margin="0,0,0,10" HorizontalAlignment="Stretch"/>
             <WrapPanel>
-              <Button x:Name="GuiButton" Content="Abrir GUI" Margin="0,0,8,8"/>
-              <Button x:Name="TalkButton" Content="Hablar con Archie" Margin="0,0,8,8"/>
-              <Button x:Name="StopButton" Content="Detener" Margin="0,0,8,8"/>
+              <Button x:Name="GuiButton" Content="Open GUI" Margin="0,0,8,8"/>
+              <Button x:Name="TalkButton" Content="Talk to Archie" Margin="0,0,8,8"/>
+              <Button x:Name="StopButton" Content="Stop" Margin="0,0,8,8"/>
             </WrapPanel>
-            <CheckBox x:Name="StartupToggle" Content="Iniciar ArchieOS al entrar a Windows" Margin="0,6,0,0"/>
+            <CheckBox x:Name="StartupToggle" Content="Start ArchieOS when I sign in to Windows" Margin="0,6,0,0"/>
             <TextBlock x:Name="DiskWarning" Visibility="Collapsed" Foreground="#F0B429" FontSize="12" Margin="0,10,0,6"/>
-            <Button x:Name="DiskButton" Visibility="Collapsed" Content="Liberar espacio en disco" HorizontalAlignment="Left"/>
+            <Button x:Name="DiskButton" Visibility="Collapsed" Content="Free up disk space" HorizontalAlignment="Left"/>
           </StackPanel>
         </Border>
         <Border Style="{StaticResource Card}">
           <StackPanel>
-            <TextBlock Style="{StaticResource Label}" Text="SERVICIOS"/>
+            <TextBlock Style="{StaticResource Label}" Text="SERVICES"/>
             <ItemsControl x:Name="ServiceList"/>
           </StackPanel>
         </Border>
@@ -294,12 +304,12 @@ if (Test-Path $installer) { . $installer }
         <Border x:Name="PreviewCard" Style="{StaticResource Card}">
           <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel>
-              <TextBlock Style="{StaticResource Label}" Text="CONFIGURACIÓN"/>
+              <TextBlock Style="{StaticResource Label}" Text="SETTINGS"/>
               <Grid x:Name="PreviewGrid">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="150"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
               </Grid>
               <TextBlock Margin="0,14,0,0" Foreground="#8D8C9C" FontSize="12"
-                Text="Avanzado muestra el asistente del modelo local, el inicio con Windows, el destino (WSL o VirtualBox) y el registro."/>
+                Text="Advanced shows the local model wizard, the start with Windows, the target (WSL or VirtualBox) and the log."/>
             </StackPanel>
           </ScrollViewer>
         </Border>
@@ -329,96 +339,98 @@ if (Test-Path $installer) { . $installer }
               </Setter>
             </Style>
           </TabControl.Resources>
-          <TabItem x:Name="ModelTab" Header="Modelo local">
+          <TabItem x:Name="ModelTab" Header="Local model">
             <DockPanel Margin="12" TextElement.Foreground="#F2F1EE">
               <TextBlock DockPanel.Dock="Top" x:Name="ModelIntro" Foreground="#8D8C9C" Margin="0,0,0,6"/>
-              <CheckBox DockPanel.Dock="Top" x:Name="ShowAllModels" Content="Mostrar también los que no caben en este equipo" Margin="0,0,0,8"/>
+              <CheckBox DockPanel.Dock="Top" x:Name="ShowAllModels" Content="Also show the ones that do not fit on this computer" Margin="0,0,0,8"/>
               <DockPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
-                <TextBlock Text="Carpeta de modelos:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                <Button x:Name="ModelsDirApply" Content="Cambiar" DockPanel.Dock="Right" Margin="8,0,0,0"/>
+                <TextBlock Text="Models folder:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <Button x:Name="ModelsDirApply" Content="Change" DockPanel.Dock="Right" Margin="8,0,0,0"/>
                 <TextBox x:Name="ModelsDirBox" Background="#22232A" Foreground="#F2F1EE" BorderBrush="#2C2D36" Padding="4"/>
               </DockPanel>
               <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel x:Name="ModelList"/></ScrollViewer>
             </DockPanel>
           </TabItem>
-          <TabItem x:Name="InstallTab" Header="Instalar">
+          <TabItem x:Name="InstallTab" Header="Install">
             <ScrollViewer VerticalScrollBarVisibility="Auto">
               <StackPanel Margin="12" TextElement.Foreground="#F2F1EE">
-                <TextBlock Style="{StaticResource Label}" Text="1 · SISTEMA"/>
+                <TextBlock Style="{StaticResource Label}" Text="1 · SYSTEM"/>
                 <TextBlock x:Name="InstSystem" Margin="0,0,0,14"/>
-                <TextBlock Style="{StaticResource Label}" Text="2 · MODO"/>
+                <TextBlock Style="{StaticResource Label}" Text="2 · MODE"/>
                 <RadioButton x:Name="InstModeWsl" Content="Operator (WSL2)" GroupName="instmode" IsChecked="True"/>
                 <TextBlock x:Name="InstModeNote" Foreground="#8D8C9C" FontSize="12" Margin="0,4,0,14"/>
-                <TextBlock Style="{StaticResource Label}" Text="3 · CARPETA"/>
+                <TextBlock Style="{StaticResource Label}" Text="3 · FOLDER"/>
                 <DockPanel>
-                  <Button x:Name="InstBrowse" Content="Elegir…" DockPanel.Dock="Right" Margin="8,0,0,0"/>
+                  <Button x:Name="InstBrowse" Content="Choose…" DockPanel.Dock="Right" Margin="8,0,0,0"/>
                   <TextBox x:Name="InstRoot" Padding="4" VerticalContentAlignment="Center"/>
                 </DockPanel>
                 <TextBlock x:Name="InstSpace" Foreground="#8D8C9C" FontSize="12" Margin="0,6,0,8"/>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
-                  <TextBlock Text="Distribución de WSL:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                  <TextBlock Text="WSL distribution:" VerticalAlignment="Center" Margin="0,0,8,0"/>
                   <TextBox x:Name="InstDistro" Width="220" Padding="4"/>
                 </StackPanel>
-                <TextBlock Style="{StaticResource Label}" Text="4 · ACCESO A LA DESCARGA"/>
+                <TextBlock Style="{StaticResource Label}" Text="4 · DOWNLOAD ACCESS"/>
                 <TextBlock x:Name="InstAuthNote" Foreground="#8D8C9C" FontSize="12" Margin="0,0,0,6"/>
                 <DockPanel Margin="0,0,0,14">
-                  <Button x:Name="InstTokenForget" Content="Olvidar" DockPanel.Dock="Right" Margin="8,0,0,0"/>
-                  <Button x:Name="InstTokenSave" Content="Guardar" DockPanel.Dock="Right" Margin="8,0,0,0"/>
+                  <Button x:Name="InstTokenForget" Content="Forget" DockPanel.Dock="Right" Margin="8,0,0,0"/>
+                  <Button x:Name="InstTokenSave" Content="Save" DockPanel.Dock="Right" Margin="8,0,0,0"/>
                   <PasswordBox x:Name="InstToken" Background="#22232A" Foreground="#F2F1EE" BorderBrush="#2C2D36" CaretBrush="#F2F1EE" Padding="4"/>
                 </DockPanel>
-                <TextBlock Style="{StaticResource Label}" Text="5 · REQUISITOS"/>
+                <TextBlock Style="{StaticResource Label}" Text="5 · REQUIREMENTS"/>
                 <StackPanel x:Name="InstDeps" Margin="0,0,0,8"/>
                 <WrapPanel Margin="0,0,0,14">
-                  <Button x:Name="InstAnalyze" Content="Analizar" Margin="0,0,8,8"/>
-                  <Button x:Name="InstFixDeps" Content="Instalar requisitos" Margin="0,0,8,8"/>
+                  <Button x:Name="InstAnalyze" Content="Analyze" Margin="0,0,8,8"/>
+                  <Button x:Name="InstFixDeps" Content="Install requirements" Margin="0,0,8,8"/>
                 </WrapPanel>
-                <TextBlock Style="{StaticResource Label}" Text="6 · COMPONENTES"/>
+                <TextBlock Style="{StaticResource Label}" Text="6 · COMPONENTS"/>
                 <StackPanel x:Name="InstArtifacts" Margin="0,0,0,8"/>
                 <ProgressBar x:Name="InstBar" Visibility="Collapsed" Margin="0,4,0,6"/>
                 <TextBlock x:Name="InstProgressText" Foreground="#B9B8C4" FontSize="12" Margin="0,0,0,8"/>
                 <WrapPanel>
-                  <Button x:Name="InstGo" Content="Instalar ArchieOS" Background="#6FC8F5" Foreground="#06151D" BorderBrush="#6FC8F5" Margin="0,0,8,8"/>
-                  <Button x:Name="InstCancel" Content="Cancelar" Margin="0,0,8,8"/>
+                  <Button x:Name="InstGo" Content="Install ArchieOS" Background="#6FC8F5" Foreground="#06151D" BorderBrush="#6FC8F5" Margin="0,0,8,8"/>
+                  <Button x:Name="InstCancel" Content="Cancel" Margin="0,0,8,8"/>
                 </WrapPanel>
               </StackPanel>
             </ScrollViewer>
           </TabItem>
-          <TabItem Header="Inicio">
+          <TabItem Header="Startup">
             <StackPanel Margin="12" TextElement.Foreground="#F2F1EE">
-              <CheckBox x:Name="AutostartBox" Content="Iniciar ArchieOS al entrar a Windows"/>
-              <CheckBox x:Name="OpenGuiBox" Content="Abrir la GUI cuando el nodo está en marcha"/>
-              <CheckBox x:Name="VoiceOnStartBox" Content="Abrir la voz al iniciar"/>
-              <CheckBox x:Name="VoiceAlwaysBox" Content="La voz responde a todo lo que oye (sin decir «Archie»)"/>
+              <CheckBox x:Name="AutostartBox" Content="Start ArchieOS when I sign in to Windows"/>
+              <CheckBox x:Name="OpenGuiBox" Content="Open the GUI when the node is running"/>
+              <CheckBox x:Name="VoiceOnStartBox" Content="Open the voice on start"/>
+              <CheckBox x:Name="VoiceAlwaysBox" Content="The voice answers everything it hears (without saying &quot;Archie&quot;)"/>
               <TextBlock Text="GUI" Margin="0,14,0,4" Foreground="#8D8C9C"/>
               <StackPanel Orientation="Horizontal">
-                <RadioButton x:Name="GuiShell" Content="Escritorio (shell)" GroupName="gui"/>
-                <RadioButton x:Name="GuiObservatory" Content="Observatorio" GroupName="gui"/>
+                <RadioButton x:Name="GuiShell" Content="Desktop (shell)" GroupName="gui"/>
+                <RadioButton x:Name="GuiObservatory" Content="Observatory" GroupName="gui"/>
               </StackPanel>
-              <CheckBox x:Name="GuiSoftwareBox" Content="Dibujar con la CPU (si la GPU está ocupada o la GUI se congela)"/>
-              <TextBlock Text="Segundos de aviso antes de iniciar al entrar a Windows" Margin="0,14,0,4" Foreground="#8D8C9C"/>
+              <CheckBox x:Name="GuiSoftwareBox" Content="Draw with the CPU (if the GPU is busy or the GUI freezes)"/>
+              <TextBlock Text="Seconds of warning before starting at Windows sign-in" Margin="0,14,0,4" Foreground="#8D8C9C"/>
               <ComboBox x:Name="DelayBox" Width="120" HorizontalAlignment="Left"/>
+              <TextBlock Text="Language" Margin="0,14,0,4" Foreground="#8D8C9C"/>
+              <ComboBox x:Name="LangBox" Width="160" HorizontalAlignment="Left"/>
               <WrapPanel Margin="0,16,0,0">
-                <Button x:Name="SetupButton" Content="Asistente de instalación (voz y clave)" Margin="0,0,8,8"/>
-                <Button x:Name="LogsButton" Content="Abrir registros" Margin="0,0,8,8"/>
-                <Button x:Name="CompactButton" Content="Liberar espacio en disco" Margin="0,0,8,8"/>
-                <Button x:Name="UninstallButton" Content="Desinstalar el lanzador" Margin="0,0,8,8"/>
+                <Button x:Name="SetupButton" Content="Setup wizard (voice and key)" Margin="0,0,8,8"/>
+                <Button x:Name="LogsButton" Content="Open logs" Margin="0,0,8,8"/>
+                <Button x:Name="CompactButton" Content="Free up disk space" Margin="0,0,8,8"/>
+                <Button x:Name="UninstallButton" Content="Uninstall the launcher" Margin="0,0,8,8"/>
               </WrapPanel>
             </StackPanel>
           </TabItem>
-          <TabItem Header="Destino">
+          <TabItem Header="Target">
             <StackPanel Margin="12" TextElement.Foreground="#F2F1EE">
               <StackPanel Orientation="Horizontal">
                 <RadioButton x:Name="BackendWsl" Content="WSL" GroupName="backend"/>
                 <RadioButton x:Name="BackendVbox" Content="VirtualBox" GroupName="backend"/>
               </StackPanel>
-              <TextBlock Text="Distribución de WSL" Margin="0,12,0,4" Foreground="#8D8C9C"/>
+              <TextBlock Text="WSL distribution" Margin="0,12,0,4" Foreground="#8D8C9C"/>
               <ComboBox x:Name="DistroBox" Width="360" HorizontalAlignment="Left"/>
-              <TextBlock Text="Máquina de VirtualBox" Margin="0,12,0,4" Foreground="#8D8C9C"/>
+              <TextBlock Text="VirtualBox machine" Margin="0,12,0,4" Foreground="#8D8C9C"/>
               <ComboBox x:Name="VmBox" Width="360" HorizontalAlignment="Left"/>
               <TextBlock x:Name="VboxNote" Margin="0,8,0,0" Foreground="#8D8C9C"/>
             </StackPanel>
           </TabItem>
-          <TabItem Header="Registro">
+          <TabItem Header="Log">
             <TextBox x:Name="LogBox" Margin="8" IsReadOnly="True" FontFamily="Consolas" FontSize="12"
                      Background="#12131A" Foreground="#B9B8C4" BorderBrush="#2C2D36"
                      VerticalScrollBarVisibility="Auto" TextWrapping="Wrap"/>
@@ -437,6 +449,20 @@ $xaml.SelectNodes('//*[@*[local-name()="Name"]]') | ForEach-Object {
     $name = $_.Attributes | Where-Object { $_.LocalName -eq 'Name' } | Select-Object -First 1 -ExpandProperty Value
     $ui[$name] = $window.FindName($name)
 }
+
+Update-UiLanguage $window
+foreach ($code in $script:Languages.Keys) { [void]$ui.LangBox.Items.Add($script:Languages[$code]) }
+$ui.LangBox.SelectedIndex = [array]::IndexOf(@($script:Languages.Keys), $script:UiLang)
+# Changing the language opens the launcher again in it: every text is drawn once, in one language.
+$ui.LangBox.Add_SelectionChanged({
+    $code = @($script:Languages.Keys)[$ui.LangBox.SelectedIndex]
+    if ($code -and $code -ne $script:UiLang) {
+        $script:cfg.lang = $code; Save-Settings
+        $vbs = Join-Path $PSScriptRoot 'ArchieOS.vbs'
+        Start-Process powershell.exe -WindowStyle Hidden -ArgumentList '-NoProfile', '-Command', "Start-Sleep 2; Start-Process wscript.exe '`"$vbs`"'"
+        $script:quit = $true; $window.Close()
+    }
+})
 
 function Add-Log([string]$text) {
     if (-not $text) { return }
@@ -471,7 +497,7 @@ function Wsl([string]$command, [scriptblock]$then, [switch]$root, [string]$label
     $user = if ($root) { '-u root' } else { '' }
     # Unquoted: through cmd.exe a quoted name reaches wsl.exe with its quotes and is not found.
     # WSL's own names have no spaces; anything else is refused here.
-    if ($script:cfg.distro -notmatch '^[A-Za-z0-9._-]+$') { Add-Log "Nombre de distribución no válido: $($script:cfg.distro)"; return }
+    if ($script:cfg.distro -notmatch '^[A-Za-z0-9._-]+$') { Add-Log (T 'Invalid distribution name: {0}' $($script:cfg.distro)); return }
     Start-Command 'wsl.exe' ("-d {0} {1} -- {2}" -f $script:cfg.distro, $user, $command) $then $label $data
 }
 $pump = New-Object System.Windows.Threading.DispatcherTimer
@@ -489,7 +515,7 @@ $pump.Add_Tick({
             # An error in what comes next goes to the log; uncaught, it would close the window.
             if ($job.then) {
                 try { & $job.then $text $job.process.ExitCode $job.data }
-                catch { Add-Log "Error: $($_.Exception.Message) (línea $($_.InvocationInfo.ScriptLineNumber))"; $script:refreshing = $false; $script:busy = '' }
+                catch { Add-Log (T 'Error: {0} (line {1})' $($_.Exception.Message) $($_.InvocationInfo.ScriptLineNumber)); $script:refreshing = $false; $script:busy = '' }
             }
         }
     }
@@ -501,7 +527,7 @@ $script:status = $null      # archie-node status --json
 $script:config = $null      # archie-node config --json
 $script:models = @()        # archie-local list --json
 $script:busy = ''           # what is under way: '', 'start', 'restart', 'stop', 'model'
-$serviceNames = [ordered]@{ model = 'Modelo local'; archied = 'Core (archied)'; displayd = 'displayd'; worldd = 'worldd'; wanda = 'Wanda'; postgres = 'PostgreSQL'; gui = 'GUI' }
+$serviceNames = [ordered]@{ model = (T 'Local model'); archied = (T 'Core (archied)'); displayd = 'displayd'; worldd = 'worldd'; wanda = 'Wanda'; postgres = 'PostgreSQL'; gui = 'GUI' }
 
 function Get-NodeState {
     if ($script:cfg.backend -eq 'virtualbox') {
@@ -523,7 +549,7 @@ function Get-NodeState {
 
 function Update-View {
     $state = Get-NodeState
-    $labels = @{ running = 'En marcha'; stopped = 'Detenido'; partial = 'En marcha a medias'; unavailable = 'Sin destino' }
+    $labels = @{ running = (T 'Running'); stopped = (T 'Stopped'); partial = (T 'Partly running'); unavailable = (T 'No target') }
     # Chip de estado: fondo, borde y texto por estado (solo atención y fallo llevan tinte).
     $chip = @{
         running     = @('#22232A', '#2C2D36', '#47D18B')
@@ -532,19 +558,19 @@ function Update-View {
         unavailable = @('#21F2626B', '#66F2626B', '#F2626B')
     }
     $busyChip = @('#1F6FE3F5', '#406FE3F5', '#6FE3F5')
-    $busyText = @{ start = 'Iniciando…'; restart = 'Reiniciando…'; stop = 'Deteniendo…'; model = 'Cambiando de modelo…'; gui = 'Abriendo la GUI…'; compact = 'Liberando espacio…' }
+    $busyText = @{ start = (T 'Starting…'); restart = (T 'Restarting…'); stop = (T 'Stopping…'); model = (T 'Switching model…'); gui = (T 'Opening the GUI…'); compact = (T 'Freeing space…') }
     if ($script:busy) { $ui.StateText.Text = $busyText[$script:busy]; $c = $busyChip }
     else { $ui.StateText.Text = $labels[$state]; $c = $chip[$state] }
     $ui.StatePill.Background = Brush $c[0]; $ui.StatePill.BorderBrush = Brush $c[1]; $ui.StateText.Foreground = Brush $c[2]
-    $target = if ($script:cfg.backend -eq 'virtualbox') { "VirtualBox · $($script:cfg.vm)" } else { "WSL · $($script:cfg.distro)" }
+    $target = if ($script:cfg.backend -eq 'virtualbox') { (T 'VirtualBox · {0}' $($script:cfg.vm)) } else { (T 'WSL · {0}' $($script:cfg.distro)) }
     $detail = @{
-        running = 'Todo responde. Reiniciar lo apaga y lo vuelve a levantar.'
-        stopped = 'Nada corre todavía. Iniciar levanta la base de datos, el modelo local, Core, Wanda y la vista.'
-        partial = 'Algunos servicios no responden (abajo). Reiniciar los vuelve a levantar.'
-        unavailable = 'No encuentro la distribución o la máquina virtual. Elígela en Avanzado → Destino.'
+        running = (T 'Everything responds. Restart shuts it down and brings it up again.')
+        stopped = (T 'Nothing is running yet. Start brings up the database, the local model, Core, Wanda and the view.')
+        partial = (T 'Some services do not respond (below). Restart brings them up again.')
+        unavailable = (T 'Cannot find the distribution or the virtual machine. Choose it in Advanced → Target.')
     }
     $ui.StateDetail.Text = "$target`n$($detail[$state])"
-    $ui.PrimaryButton.Content = if ($state -eq 'stopped') { 'Iniciar' } else { 'Reiniciar' }
+    $ui.PrimaryButton.Content = if ($state -eq 'stopped') { (T 'Start') } else { (T 'Restart') }
     $idle = -not $script:busy
     $ui.PrimaryButton.IsEnabled = $idle -and $state -ne 'unavailable'
     $ui.StopButton.IsEnabled = $idle -and ($state -eq 'running' -or $state -eq 'partial')
@@ -562,14 +588,14 @@ function Update-View {
         $dot.Fill = if ($up) { Brush '#47D18B' } else { Brush '#8D8C9C' }
         $name = New-Object System.Windows.Controls.TextBlock
         $name.Text = $serviceNames[$key]
-        if ($key -eq 'model' -and $script:status -and $script:status.model) { $name.Text = "Modelo local · $($script:status.model.name)" }
+        if ($key -eq 'model' -and $script:status -and $script:status.model) { $name.Text = (T 'Local model · {0}' $($script:status.model.name)) }
         [void]$row.Children.Add($dot); [void]$row.Children.Add($name)
         [void]$ui.ServiceList.Items.Add($row)
     }
     Update-Preview
     Update-Disk
     $ui.StartupToggle.IsChecked = Test-Path $startupLink
-    $ui.Footer.Text = "Ajustes: $settingsFile · Inicio con Windows: $(if (Test-Path $startupLink) { 'sí' } else { 'no' })"
+    $ui.Footer.Text = (T 'Settings: {0} · Start with Windows: {1}' $settingsFile $(if (Test-Path $startupLink) { (T 'yes') } else { (T 'no') }))
 }
 
 # Says when the virtual disk holds much more than the distribution uses, or the drive it is
@@ -582,10 +608,10 @@ function Update-Disk {
         $used = if ($script:config -and $script:config.disk_used_bytes) { [double]$script:config.disk_used_bytes } else { 0 }
         $spare = [double]$disk.bytes - $used
         if ($used -gt 0 -and $spare -gt 20e9) {
-            $text = ("El disco de WSL ocupa {0} en {1}: y Linux usa {2}. Liberar espacio devuelve unos {3} a Windows (detiene el nodo unos minutos)." -f `
+            $text = ((T 'The WSL disk takes {0} on {1}: and Linux uses {2}. Freeing space returns about {3} to Windows (it stops the node for a few minutes).') -f `
                 (Format-Bytes $disk.bytes), $disk.drive, (Format-Bytes $used), (Format-Bytes $spare))
         } elseif ($disk.free -lt 8e9) {
-            $text = ("Quedan {0} libres en {1}:. Con el disco lleno WSL se congela; libera espacio en Windows o compacta el disco de WSL." -f (Format-Bytes $disk.free), $disk.drive)
+            $text = ((T 'Only {0} left on {1}:. With a full disk WSL freezes; free up space in Windows or compact the WSL disk.') -f (Format-Bytes $disk.free), $disk.drive)
         }
     }
     $ui.DiskWarning.Text = $text
@@ -601,31 +627,31 @@ function Update-Preview {
     $grid = $ui.PreviewGrid
     $grid.Children.Clear(); $grid.RowDefinitions.Clear()
     $rows = New-Object System.Collections.ArrayList
-    $target = if ($script:cfg.backend -eq 'virtualbox') { "VirtualBox: $($script:cfg.vm)" } else { "WSL: $($script:cfg.distro)" }
-    [void]$rows.Add(@('Destino', $target))
+    $target = if ($script:cfg.backend -eq 'virtualbox') { (T 'VirtualBox: {0}' $($script:cfg.vm)) } else { (T 'WSL: {0}' $($script:cfg.distro)) }
+    [void]$rows.Add(@((T 'Target'), $target))
     $c = $script:config
     $l = if ($c) { $c.local } else { $null }
     if ($script:status -and $script:status.model) {
-        [void]$rows.Add(@('Modelo local', "$($script:status.model.name) · $($script:status.model.endpoint)"))
-    } elseif ($l) { [void]$rows.Add(@('Modelo local', "$($l.chosen) (detenido)")) }
+        [void]$rows.Add(@((T 'Local model'), "$($script:status.model.name) · $($script:status.model.endpoint)"))
+    } elseif ($l) { [void]$rows.Add(@((T 'Local model'), "$($l.chosen) (detenido)")) }
     if ($l) {
-        [void]$rows.Add(@('GPU', ("{0} · {1:N1} de {2:N1} GB en uso" -f $l.gpu, ($l.vram_used_mb / 1024), ($l.vram_total_mb / 1024))))
-        [void]$rows.Add(@('Memoria de WSL', ('{0:N1} GB' -f ($l.ram_total_mb / 1024))))
-        [void]$rows.Add(@('Modelos en', "$($l.models_dir) · $(Format-Bytes $l.free_bytes) libres de verdad"))
+        [void]$rows.Add(@('GPU', ((T '{0} · {1:N1} of {2:N1} GB in use') -f $l.gpu, ($l.vram_used_mb / 1024), ($l.vram_total_mb / 1024))))
+        [void]$rows.Add(@((T 'WSL memory'), ('{0:N1} GB' -f ($l.ram_total_mb / 1024))))
+        [void]$rows.Add(@((T 'Models in'), (T '{0} · {1} truly free' $($l.models_dir) $(Format-Bytes $l.free_bytes))))
         [void]$rows.Add(@('Runtime', $l.runtime))
     }
     if ($c) {
         [void]$rows.Add(@('Core', $c.node_root))
-        [void]$rows.Add(@('Wanda', $(if ($c.wanda_dir) { $c.wanda_dir } else { 'no configurada' })))
-        [void]$rows.Add(@('Voces', ($c.voices -replace ',', ', ')))
-        [void]$rows.Add(@('Escucha', 'español e inglés (auto); responde en el idioma que oye'))
+        [void]$rows.Add(@('Wanda', $(if ($c.wanda_dir) { $c.wanda_dir } else { (T 'not configured') })))
+        [void]$rows.Add(@((T 'Voices'), ($c.voices -replace ',', ', ')))
+        [void]$rows.Add(@((T 'Listening'), (T 'Spanish and English (automatic); it answers in the language it hears')))
     }
     if ($script:status) {
-        [void]$rows.Add(@('Pausa de la IA', $(if ($script:status.ai_paused -eq $true) { 'en pausa' } elseif ($script:status.ai_paused -eq $false) { 'no' } else { 'sin lectura' })))
+        [void]$rows.Add(@((T 'AI pause'), $(if ($script:status.ai_paused -eq $true) { (T 'paused') } elseif ($script:status.ai_paused -eq $false) { (T 'no') } else { (T 'no reading') })))
     }
-    [void]$rows.Add(@('Al iniciar', ("{0}{1}" -f $(if ($script:cfg.open_gui_on_start) { "abre la GUI ($($script:cfg.gui_mode))" } else { 'no abre la GUI' }), $(if ($script:cfg.voice_on_start) { ' y la voz' } else { '' }))))
-    [void]$rows.Add(@('Inicio con Windows', $(if (Test-Path $startupLink) { 'sí' } else { 'no' })))
-    if (-not $c) { [void]$rows.Add(@('', 'El resto aparece cuando el nodo responde.')) }
+    [void]$rows.Add(@((T 'On start'), ("{0}{1}" -f $(if ($script:cfg.open_gui_on_start) { (T 'opens the GUI ({0})' $($script:cfg.gui_mode)) } else { (T 'does not open the GUI') }), $(if ($script:cfg.voice_on_start) { (T ' and the voice') } else { '' }))))
+    [void]$rows.Add(@((T 'Start with Windows'), $(if (Test-Path $startupLink) { (T 'yes') } else { (T 'no') })))
+    if (-not $c) { [void]$rows.Add(@('', (T 'The rest appears when the node responds.'))) }
     $i = 0
     foreach ($r in $rows) {
         $grid.RowDefinitions.Add((New-Object System.Windows.Controls.RowDefinition))
@@ -643,30 +669,30 @@ function Update-Preview {
 # its cache and for Windows; measured on the RTX 3070: Bonsai 2 27B (5.9 GB) put 63 of 64
 # layers on the 8 GB card. A runtime that does not know the architecture cannot run it.
 function Get-Fit($m, $l) {
-    if (-not $m.runnable) { return @('Este runtime no lo soporta todavía', '#F2626B') }
+    if (-not $m.runnable) { return @((T 'This runtime does not support it yet'), '#F2626B') }
     $sizeMb = $m.bytes / 1MB
     $vram = [double]$l.vram_total_mb
     $ram = [double]$l.ram_total_mb
     # One memory for CPU and GPU (DGX Spark, RTX Spark): the model, its cache and the system
     # share it, so 8 GB stay for the rest.
     if ($l.unified_memory -eq $true) {
-        if ($sizeMb + 8192 -le $vram) { return @('Cabe en la memoria unificada', '#47D18B') }
-        return @('No cabe en este equipo', '#F2626B')
+        if ($sizeMb + 8192 -le $vram) { return @((T 'Fits in the unified memory'), '#47D18B') }
+        return @((T 'Does not fit on this computer'), '#F2626B')
     }
-    if ($vram -gt 0 -and $sizeMb + 1500 -le $vram) { return @('Cabe en la GPU', '#47D18B') }
-    if ($vram -gt 0 -and $sizeMb + 1500 -le $vram + 0.5 * $ram) { return @('GPU y CPU, más lento', '#F0B429') }
-    if ($vram -le 0 -and $sizeMb -le 0.5 * $ram) { return @('Solo CPU, lento', '#F0B429') }
-    return @('No cabe en este equipo', '#F2626B')
+    if ($vram -gt 0 -and $sizeMb + 1500 -le $vram) { return @((T 'Fits on the GPU'), '#47D18B') }
+    if ($vram -gt 0 -and $sizeMb + 1500 -le $vram + 0.5 * $ram) { return @((T 'GPU and CPU, slower'), '#F0B429') }
+    if ($vram -le 0 -and $sizeMb -le 0.5 * $ram) { return @((T 'CPU only, slow'), '#F0B429') }
+    return @((T 'Does not fit on this computer'), '#F2626B')
 }
 function Update-Models {
     $ui.ModelList.Children.Clear()
     $l = if ($script:config) { $script:config.local } else { $null }
     if (-not $l -or -not $script:models) {
-        $ui.ModelIntro.Text = 'La lista aparece cuando la distribución responde (Iniciar).'
+        $ui.ModelIntro.Text = (T 'The list appears when the distribution responds (Start).')
         return
     }
-    $memory = if ($l.unified_memory -eq $true) { '{0:N0} GB de memoria unificada' -f ($l.vram_total_mb / 1024) } `
-              else { '{0:N1} GB de GPU · {1:N1} GB de memoria en WSL' -f ($l.vram_total_mb / 1024), ($l.ram_total_mb / 1024) }
+    $memory = if ($l.unified_memory -eq $true) { (T '{0:N0} GB of unified memory') -f ($l.vram_total_mb / 1024) } `
+              else { (T '{0:N1} GB of GPU · {1:N1} GB of WSL memory') -f ($l.vram_total_mb / 1024), ($l.ram_total_mb / 1024) }
     $hidden = 0
     if (-not $ui.ModelsDirBox.IsKeyboardFocused) { $ui.ModelsDirBox.Text = $l.models_dir }
     foreach ($m in $script:models) {
@@ -685,10 +711,10 @@ function Update-Models {
         $title.Text = "$($m.label)  ·  $(Format-Bytes $m.bytes)"; $title.FontWeight = 'SemiBold'
         $sub = New-Object System.Windows.Controls.TextBlock
         $sub.Foreground = Brush '#8D8C9C'; $sub.FontSize = 12
-        $where = if ($m.answering) { "responde en :$($m.port)" } elseif ($m.here) { 'en este equipo' } `
-                 elseif ($m.fetched -gt 0) { ('descargando · {0:P0}' -f ($m.fetched / $m.bytes)) } else { 'no descargado' }
-        $licence = if ($m.license) { " · licencia $($m.license)" } else { '' }
-        $pieces = if ($m.parts -gt 1) { " · $($m.parts) partes" } else { '' }
+        $where = if ($m.answering) { (T 'answers on :{0}' $($m.port)) } elseif ($m.here) { (T 'on this computer') } `
+                 elseif ($m.fetched -gt 0) { ((T 'downloading · {0:P0}') -f ($m.fetched / $m.bytes)) } else { (T 'not downloaded') }
+        $licence = if ($m.license) { (T ' · license {0}' $($m.license)) } else { '' }
+        $pieces = if ($m.parts -gt 1) { (T ' · {0} parts' $($m.parts)) } else { '' }
         $sub.Text = "$($m.repo)$licence$pieces · $where"
         $badge = New-Object System.Windows.Controls.TextBlock
         $badge.Text = $fit[0]; $badge.Foreground = Brush $fit[1]; $badge.FontSize = 12; $badge.FontWeight = 'SemiBold'
@@ -696,14 +722,14 @@ function Update-Models {
         $name = $m.name
         if ($m.here) {
             $use = New-Object System.Windows.Controls.Button
-            $use.Content = $(if ($m.answering) { 'En uso' } else { 'Usar' })
-            $use.IsEnabled = (-not $m.answering) -and $m.runnable -and -not $script:busy -and $fit[0] -ne 'No cabe en este equipo'
+            $use.Content = $(if ($m.answering) { (T 'In use') } else { (T 'Use') })
+            $use.IsEnabled = (-not $m.answering) -and $m.runnable -and -not $script:busy -and $fit[0] -ne (T 'Does not fit on this computer')
             $use.Tag = $name
             $use.Add_Click({ param($sender) Invoke-UseModel $sender.Tag })
             [void]$buttons.Children.Add($use)
             if (-not $m.answering) {
                 $rm = New-Object System.Windows.Controls.Button
-                $rm.Content = 'Borrar'; $rm.IsEnabled = -not $script:busy
+                $rm.Content = (T 'Delete'); $rm.IsEnabled = -not $script:busy
                 $rm.Tag = $name
                 $rm.Add_Click({ param($sender) Invoke-RemoveModel $sender.Tag })
                 [void]$buttons.Children.Add($rm)
@@ -713,7 +739,7 @@ function Update-Models {
             # Only what is still to come needs room; a download cut short resumes.
             $room = [double]$l.free_bytes -gt ([double]$m.bytes - [double]$m.fetched + 1e9)
             $fetching = $script:fetching.ContainsKey($name)
-            $dl.Content = $(if ($fetching) { 'Descargando…' } elseif (-not $room) { 'Sin espacio' } elseif ($m.fetched -gt 0) { 'Continuar descarga' } else { 'Descargar' })
+            $dl.Content = $(if ($fetching) { (T 'Downloading…') } elseif (-not $room) { (T 'No space') } elseif ($m.fetched -gt 0) { (T 'Resume download') } else { (T 'Download') })
             $dl.IsEnabled = $room -and $m.runnable -and -not $fetching -and -not $script:busy
             $dl.Tag = $name
             $dl.Add_Click({ param($sender) Invoke-FetchModel $sender.Tag })
@@ -723,8 +749,8 @@ function Update-Models {
         $card.Child = $dock
         [void]$ui.ModelList.Children.Add($card)
     }
-    $ui.ModelIntro.Text = ("Uno responde a la vez. {0} · {1} · {2} libres en la carpeta de modelos.{3}" -f `
-        $l.gpu, $memory, (Format-Bytes $l.free_bytes), $(if ($hidden -gt 0) { " $hidden más no caben en este equipo." } else { '' }))
+    $ui.ModelIntro.Text = ((T 'One answers at a time. {0} · {1} · {2} free in the models folder.{3}') -f `
+        $l.gpu, $memory, (Format-Bytes $l.free_bytes), $(if ($hidden -gt 0) { (T ' {0} more do not fit on this computer.' $hidden) } else { '' }))
 }
 # Core reads its model manifests when it starts: after a model arrives or is chosen, the
 # node installs the manifest of any model that has none yet, and restarts Core if it did.
@@ -736,7 +762,7 @@ function Invoke-UseModel([string]$name) {
     Add-Log "archie-local use $name"
     Wsl "archie-local use $name" { param($out, $code, $model)
         $script:busy = ''
-        if ($code -ne 0) { [System.Windows.MessageBox]::Show("No se pudo cambiar a $model.`n`n$out", 'ArchieOS') | Out-Null }
+        if ($code -ne 0) { [System.Windows.MessageBox]::Show((T 'Could not switch to {0}.\n\n{1}' $model $out), 'ArchieOS') | Out-Null }
         else { Sync-Manifests }
         Refresh-All
     } -label 'model' -data $name
@@ -747,14 +773,14 @@ function Invoke-FetchModel([string]$name) {
     $script:fetching[$name] = $true
     Wsl "archie-local setup $name" { param($out, $code, $model)
         $script:fetching.Remove($model)
-        if ($code -ne 0) { [System.Windows.MessageBox]::Show("La descarga de $model no terminó. Se puede continuar donde quedó.`n`n$out", 'ArchieOS') | Out-Null }
-        else { Sync-Manifests; $tray.ShowBalloonTip(4000, 'ArchieOS', "$model está descargado. Usar lo pone a responder.", 'Info') }
+        if ($code -ne 0) { [System.Windows.MessageBox]::Show((T 'The download of {0} did not finish. It can continue where it left off.\n\n{1}' $model $out), 'ArchieOS') | Out-Null }
+        else { Sync-Manifests; $tray.ShowBalloonTip(4000, 'ArchieOS', (T '{0} is downloaded. Use makes it answer.' $model), 'Info') }
         Refresh-All
     } -label 'fetch' -data $name
     Refresh-All
 }
 function Invoke-RemoveModel([string]$name) {
-    $answer = [System.Windows.MessageBox]::Show("¿Borrar $name de este equipo? Se puede volver a descargar.", 'ArchieOS', 'YesNo', 'Question')
+    $answer = [System.Windows.MessageBox]::Show((T 'Delete {0} from this computer? It can be downloaded again.' $name), 'ArchieOS', 'YesNo', 'Question')
     if ($answer -ne 'Yes') { return }
     Wsl "archie-local remove $name" { param($out, $code) Add-Log $out; Refresh-All }
 }
@@ -815,7 +841,7 @@ function Open-Voice {
     # One voice: a second would hear the first through the speakers and answer it.
     # (archie-talk also refuses a second one; this spares the window it would open.)
     Wsl "pgrep -f '[a]rchie-voice converse'" { param($out, $code)
-        if ($code -eq 0) { Add-Log 'La voz ya está abierta.'; return }
+        if ($code -eq 0) { Add-Log (T 'The voice is already open.'); return }
         $always = if ($script:cfg.voice_always) { ' --always' } else { ' --named' }
         Start-Process wsl.exe -ArgumentList "-d $($script:cfg.distro) -- archie-talk --local$always"
     }
@@ -832,8 +858,8 @@ function Start-Node([string]$verb) {
     if ($script:cfg.backend -eq 'virtualbox') {
         # The model first, on Windows' GPU: the machine asks it as soon as it is up.
         if ($script:cfg.host_model) {
-            try { Start-HostModel $script:cfg.host_model; Add-Log "Modelo local en Windows: $($script:cfg.host_model.name) en :$($script:cfg.host_model.port)" }
-            catch { Add-Log "El modelo local no arrancó: $($_.Exception.Message)" }
+            try { Start-HostModel $script:cfg.host_model; Add-Log (T 'Local model on Windows: {0} on :{1}' $($script:cfg.host_model.name) $($script:cfg.host_model.port)) }
+            catch { Add-Log (T 'The local model did not start: {0}' $($_.Exception.Message)) }
         }
         # The machine's own window is ArchieOS, full screen; without the GUI, it runs unseen.
         $type = if ($script:cfg.open_gui_on_start) { 'gui' } else { 'headless' }
@@ -841,11 +867,11 @@ function Start-Node([string]$verb) {
         else { Start-Command $vbox "startvm `"$($script:cfg.vm)`" --type $type" { param($o, $c) Add-Log $o; $script:busy = ''; Update-View } 'vbox' }
         return
     }
-    Add-Log "archie-node $verb en $($script:cfg.distro)"
+    Add-Log (T 'archie-node {0} in {1}' $verb $($script:cfg.distro))
     $next = if ($verb -eq 'restart') { 'restart' } else { 'up' }
     Wsl 'archie-node db' { param($out, $code, $then)
         Wsl "archie-node $then" { param($out, $code)
-            if ($code -ne 0) { Add-Log 'Algún servicio no levantó: ver arriba.' }
+            if ($code -ne 0) { Add-Log (T 'A service did not come up: see above.') }
             After-Start
         } -label 'node'
     } -root -label 'db' -data $next
@@ -854,15 +880,15 @@ function Start-Node([string]$verb) {
 # its own window, and the node comes back up after it.
 function Invoke-Compact {
     $script_ = Join-Path $PSScriptRoot 'Compact-ArchieOS-Disk.ps1'
-    if (-not (Test-Path $script_)) { [System.Windows.MessageBox]::Show("No encuentro $script_.", 'ArchieOS') | Out-Null; return }
-    $answer = [System.Windows.MessageBox]::Show("Liberar espacio detiene el nodo y WSL unos minutos, compacta su disco y lo vuelve a iniciar. Windows pedirá permiso de administrador.`n`n¿Seguir?", 'ArchieOS', 'YesNo', 'Question')
+    if (-not (Test-Path $script_)) { [System.Windows.MessageBox]::Show((T 'Cannot find {0}.' $script_), 'ArchieOS') | Out-Null; return }
+    $answer = [System.Windows.MessageBox]::Show((T 'Freeing space stops the node and WSL for a few minutes, compacts its disk and starts it again. Windows will ask for administrator permission.\n\nContinue?'), 'ArchieOS', 'YesNo', 'Question')
     if ($answer -ne 'Yes') { return }
     $script:busy = 'compact'; Update-View
-    Add-Log 'Liberando espacio: compactando el disco de WSL'
+    Add-Log (T 'Freeing space: compacting the WSL disk')
     try {
         $script:compact = Start-Process powershell.exe -Verb RunAs -PassThru -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$script_`"", '-Distro', $script:cfg.distro
     } catch {
-        Add-Log 'No se dio el permiso de administrador: no se compactó nada.'
+        Add-Log (T 'Administrator permission was not given: nothing was compacted.')
         $script:busy = ''; Update-View; return
     }
     $wait = New-Object System.Windows.Threading.DispatcherTimer
@@ -872,7 +898,7 @@ function Invoke-Compact {
         $this.Stop()
         $script:busy = ''
         $drive = if ($script:disk) { $script:disk.drive } else { 'C' }
-        Add-Log ('Compactación terminada. {0}: tiene {1} libres.' -f $drive, (Format-Bytes (Get-PSDrive $drive).Free))
+        Add-Log ((T 'Compaction finished. {0}: has {1} free.') -f $drive, (Format-Bytes (Get-PSDrive $drive).Free))
         Start-Node 'up'
     })
     $wait.Start()
@@ -892,11 +918,11 @@ $ui.GuiButton.Add_Click({
     if ($script:cfg.backend -eq 'virtualbox') { Start-Process $vbox -ArgumentList "startvm `"$($script:cfg.vm)`" --type separate" } else { Open-Gui }
 })
 $ui.TalkButton.Add_Click({ Open-Voice })
-$ui.SetupButton.Add_Click({ Start-Process wsl.exe -ArgumentList "-d $($script:cfg.distro) -- bash -lc `"archie-setup; read -p 'Enter para cerrar'`"" })
+$ui.SetupButton.Add_Click({ Start-Process wsl.exe -ArgumentList "-d $($script:cfg.distro) -- bash -lc `"archie-setup; read -p 'Press Enter to close'`"" })
 $ui.LogsButton.Add_Click({ Start-Process explorer.exe ("\\wsl$\{0}\var\tmp\archie-logs" -f $script:cfg.distro) })
 $ui.ModelsDirApply.Add_Click({
     $dir = $ui.ModelsDirBox.Text.Trim()
-    if (-not $dir.StartsWith('/')) { [System.Windows.MessageBox]::Show('La carpeta es una ruta de Linux, como /mnt/d/ArchieLocal/models.', 'ArchieOS') | Out-Null; return }
+    if (-not $dir.StartsWith('/')) { [System.Windows.MessageBox]::Show((T 'The folder is a Linux path, like /mnt/d/ArchieLocal/models.'), 'ArchieOS') | Out-Null; return }
     Wsl "archie-local config models-dir '$dir'" { param($out, $code) Add-Log $out; Refresh-All } -root
 })
 
@@ -913,9 +939,9 @@ if (Get-Command Read-ReleaseManifest -ErrorAction SilentlyContinue) {
     try { $script:installManifest = Read-ReleaseManifest } catch { $script:installManifestError = $_.Exception.Message }
 }
 $installLabels = @{
-    not_installed = 'Sin instalar'; checking = 'Comprobando…'; needs_dependencies = 'Faltan requisitos'; downloading = 'Descargando…'
-    verifying = 'Verificando…'; installing = 'Instalando…'; needs_reboot = 'Reinicia Windows'; installed = 'ArchieOS instalado'
-    starting = 'Iniciando…'; running = 'En ejecución'; stopped = 'Detenido'; error = 'Error'; repairable = 'Necesita reparación'
+    not_installed = (T 'Not installed'); checking = (T 'Checking…'); needs_dependencies = (T 'Missing requirements'); downloading = (T 'Downloading…')
+    verifying = (T 'Verifying…'); installing = (T 'Installing…'); needs_reboot = (T 'Restart Windows'); installed = (T 'ArchieOS installed')
+    starting = (T 'Starting…'); running = (T 'Running'); stopped = (T 'Stopped'); error = (T 'Error'); repairable = (T 'Needs repair')
 }
 $statusColors = @{ installed = '#47D18B'; warning = '#F0B429'; outdated = '#F0B429'; reboot_required = '#F0B429'; missing = '#F2626B'; unsupported = '#F2626B' }
 
@@ -938,7 +964,7 @@ function Get-InstallDistro {
 function Start-InstallerJob([string]$verb, [string[]]$more, [scriptblock]$then) {
     $out = [System.IO.Path]::GetTempFileName()
     $result = [System.IO.Path]::GetTempFileName()
-    $argv = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $installer, $verb, '-OutFile', $out, '-ResultFile', $result) + $more
+    $argv = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $installer, $verb, '-OutFile', $out, '-ResultFile', $result, '-Lang', $script:UiLang) + $more
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = 'powershell.exe'
     $psi.Arguments = ConvertTo-ArgumentString $argv
@@ -952,7 +978,7 @@ function Start-InstallerJob([string]$verb, [string[]]$more, [scriptblock]$then) 
             $script:installBusy = ''
             $r = Get-LastJsonLine (Read-Output $d.result)
             Remove-Item $d.result -ErrorAction SilentlyContinue
-            if (-not $r) { $r = [pscustomobject]@{ ok = $false; error = "El instalador terminó sin respuesta (código $code)."; code = 'unexpected' } }
+            if (-not $r) { $r = [pscustomobject]@{ ok = $false; error = (T 'The installer ended without a response (code {0}).' $code); code = 'unexpected' } }
             try { if ($d.then) { & $d.then $r } } finally { Update-InstallView }
         } })
 }
@@ -971,21 +997,21 @@ function New-TextBlock([string]$text, [string]$color = '', [int]$size = 0, [stri
 function Update-InstallSpace {
     if (-not $script:installManifest) { return }
     $root = $ui.InstRoot.Text.Trim()
-    if (-not $root -or -not [System.IO.Path]::IsPathRooted($root)) { $ui.InstSpace.Text = 'Elige una carpeta (una ruta completa, como X:\ArchieOS).'; return }
+    if (-not $root -or -not [System.IO.Path]::IsPathRooted($root)) { $ui.InstSpace.Text = (T 'Choose a folder (a full path, like X:\ArchieOS).'); return }
     try {
         $vol = Get-FolderVolume $root
         $image = Get-ImageArtifact $script:installManifest
         $need = Get-RequiredBytes $root $image (Get-Target $script:installManifest) $script:installState
-        $free = if ($vol.ready) { "En $($vol.root) quedan $(Format-Bytes $vol.free) · " } else { "La unidad $($vol.root) no está disponible · " }
-        $ui.InstSpace.Text = ("{0}hacen falta {1} (descarga {2} + distribución {3}, estimado del release).`nQuedará: {4}\downloads\{5} · {4}\wsl\{6}\ext4.vhdx · {4}\state · {4}\logs" -f `
+        $free = if ($vol.ready) { (T 'On {0} {1} remain · ' $($vol.root) $(Format-Bytes $vol.free)) } else { (T 'Drive {0} is not available · ' $($vol.root)) }
+        $ui.InstSpace.Text = ((T '{0}{1} needed (download {2} + distribution {3}, release estimate).\nIt will be: {4}\downloads\{5} · {4}\wsl\{6}\ext4.vhdx · {4}\state · {4}\logs') -f `
             $free, (Format-Bytes $need.total), (Format-Bytes $need.download), (Format-Bytes $need.install), $root, $image.file, (Get-InstallDistro))
-    } catch { $ui.InstSpace.Text = "No se puede usar esa carpeta: $($_.Exception.Message)" }
+    } catch { $ui.InstSpace.Text = (T 'That folder cannot be used: {0}' $($_.Exception.Message)) }
 }
 
 function Update-InstallView {
     if (-not $script:installManifest) {
-        $ui.InstallTitle.Text = 'Instalador no disponible'
-        $ui.InstallSummary.Text = $(if ($script:installManifestError) { $script:installManifestError } else { 'Faltan ArchieOS-Installer.ps1 y archieos-manifest.json junto al lanzador.' })
+        $ui.InstallTitle.Text = (T 'Installer not available')
+        $ui.InstallSummary.Text = $(if ($script:installManifestError) { $script:installManifestError } else { (T 'The files ArchieOS-Installer.ps1 and archieos-manifest.json are missing next to the launcher.') })
         foreach ($b in 'InstallStart', 'InstallOpen', 'InstallStop', 'InstallVerify', 'InstallLogs', 'InstGo', 'InstAnalyze', 'InstFixDeps', 'InstBrowse', 'InstTokenSave', 'InstTokenForget', 'InstCancel') { $ui[$b].IsEnabled = $false }
         return
     }
@@ -1001,23 +1027,23 @@ function Update-InstallView {
     $interrupted = $active -and -not $busy -and -not $elsewhere
     $installedish = [bool]$st.distro -and (($st.checkpoints -contains 'initialized') -or $st.adopted) -and $state -in @('installed', 'starting', 'running', 'stopped', 'error', 'repairable')
 
-    $ui.InstallTitle.Text = if ($interrupted) { 'Instalación interrumpida' } else { $installLabels[$state] }
+    $ui.InstallTitle.Text = if ($interrupted) { (T 'Installation interrupted') } else { $installLabels[$state] }
     $lines = New-Object System.Collections.ArrayList
     if ($st.distro) { [void]$lines.Add("WSL · $($st.distro)$(if ($st.release) { " · $($st.release)" })") }
     if ($st.location) { [void]$lines.Add($st.location) }
-    if ($interrupted) { [void]$lines.Add('Se cortó a medias. Continuar instalación sigue donde quedó (la descarga se reanuda).') }
-    elseif ($state -eq 'not_installed') { [void]$lines.Add('Descarga ArchieOS desde su release, lo comprueba y lo instala en WSL 2.') }
+    if ($interrupted) { [void]$lines.Add((T 'It was cut off halfway. Continue installation picks up where it left off (the download resumes).')) }
+    elseif ($state -eq 'not_installed') { [void]$lines.Add((T 'Downloads ArchieOS from its release, checks it and installs it in WSL 2.')) }
     elseif ($state -eq 'running' -and $st.health) { [void]$lines.Add($st.health.detail) }
-    elseif ($state -eq 'needs_dependencies') { [void]$lines.Add('Avanzado → Instalar muestra qué falta y cómo resolverlo.') }
-    elseif ($state -eq 'needs_reboot') { [void]$lines.Add('WSL se instaló: reinicia Windows y vuelve a abrir el lanzador para seguir.') }
+    elseif ($state -eq 'needs_dependencies') { [void]$lines.Add((T 'Advanced → Install shows what is missing and how to fix it.')) }
+    elseif ($state -eq 'needs_reboot') { [void]$lines.Add((T 'WSL was installed: restart Windows and open the launcher again to continue.')) }
     if ($st.error -and $state -in @('error', 'repairable', 'needs_dependencies')) { [void]$lines.Add($st.error) }
     $ui.InstallSummary.Text = $lines -join "`n"
 
     $ui.InstallStart.Visibility = if ($installedish) { 'Visible' } else { 'Collapsed' }
     $ui.InstallStart.IsEnabled = -not $busy -and -not $elsewhere -and $state -in @('installed', 'stopped', 'error')
-    $ui.InstallStart.Content = if ($state -eq 'running') { 'ArchieOS en ejecución' } else { 'Iniciar ArchieOS' }
+    $ui.InstallStart.Content = if ($state -eq 'running') { (T 'ArchieOS running') } else { (T 'Start ArchieOS') }
     $ui.InstallOpen.Visibility = if ($installedish) { 'Collapsed' } else { 'Visible' }
-    $ui.InstallOpen.Content = if ($interrupted -or ($state -eq 'error' -and -not $installedish)) { 'Continuar instalación' } else { 'Instalar ArchieOS' }
+    $ui.InstallOpen.Content = if ($interrupted -or ($state -eq 'error' -and -not $installedish)) { (T 'Continue installation') } else { (T 'Install ArchieOS') }
     $primary = -not $installedish
     $ui.InstallOpen.Background = Brush $(if ($primary) { '#6FC8F5' } else { '#2A2B32' })
     $ui.InstallOpen.Foreground = Brush $(if ($primary) { '#06151D' } else { '#F2F1EE' })
@@ -1042,16 +1068,16 @@ function Update-InstallView {
     $ui.InstFixDeps.IsEnabled = -not $busy -and $script:installPlan -and @($script:installPlan | Where-Object { $_.fix_id }).Count -gt 0
     $ui.InstGo.IsEnabled = -not $busy -and -not $elsewhere -and -not $installedish
     $ui.InstGo.Content = $ui.InstallOpen.Content
-    $ui.InstModeNote.Text = 'Windows sigue siendo el anfitrión; ArchieOS (Arch Linux) corre en WSL 2 con su propia lógica, permisos y modelos. ' +
+    $ui.InstModeNote.Text = (T 'Windows remains the host; ArchieOS (Arch Linux) runs in WSL 2 with its own logic, permissions and models. ') +
         (($script:installManifest.unavailable | Where-Object { $_.id -in @('virtualbox', 'linux-native') } | ForEach-Object { $_.reason }) -join ' ')
 
     $image = Get-ImageArtifact $script:installManifest
     if ($image.auth) {
         $saved = Test-ProviderToken $image.auth
-        $ui.InstAuthNote.Text = ("La imagen está en un repositorio privado de {0}: hace falta un token de una cuenta con acceso de lectura. {1}" -f (Get-AuthHost $image.auth),
-            $(if ($saved) { 'Hay un token guardado, cifrado para tu usuario de Windows (DPAPI).' } else { 'No hay ninguno guardado.' }))
+        $ui.InstAuthNote.Text = ((T 'The image is in a private repository on {0}: a token from an account with read access is needed. {1}') -f (Get-AuthHost $image.auth),
+            $(if ($saved) { (T 'A token is saved, encrypted for your Windows user (DPAPI).') } else { (T 'There is none saved.') }))
         $ui.InstTokenForget.IsEnabled = $saved
-    } else { $ui.InstAuthNote.Text = 'La descarga es pública: no hace falta token.'; $ui.InstToken.IsEnabled = $false; $ui.InstTokenSave.IsEnabled = $false; $ui.InstTokenForget.IsEnabled = $false }
+    } else { $ui.InstAuthNote.Text = (T 'The download is public: no token needed.'); $ui.InstToken.IsEnabled = $false; $ui.InstTokenSave.IsEnabled = $false; $ui.InstTokenForget.IsEnabled = $false }
 
     $ui.InstArtifacts.Children.Clear()
     foreach ($a in (Get-Target $script:installManifest).artifacts) {
@@ -1059,18 +1085,18 @@ function Update-InstallView {
         $card.Background = Brush '#22232A'; $card.BorderBrush = Brush '#2C2D36'; $card.BorderThickness = 1; $card.CornerRadius = 8; $card.Padding = '12,8'; $card.Margin = '0,0,0,6'
         $info = New-Object System.Windows.Controls.StackPanel
         [void]$info.Children.Add((New-TextBlock "$($a.id) · $($a.file) · $(Format-Bytes $a.size_bytes)" '' 0 'SemiBold'))
-        $from = if ($a.source) { ([Uri]$a.source).Host } else { "dentro de $($a.embedded_in); se comprueba con archie-offline --check" }
+        $from = if ($a.source) { ([Uri]$a.source).Host } else { (T 'inside {0}; it is checked with archie-offline --check' $($a.embedded_in)) }
         [void]$info.Children.Add((New-TextBlock ("{0} · SHA-256 {1}…{2} · {3} · {4}" -f $a.version, $a.sha256.Substring(0, 8), $a.sha256.Substring(56), $from, $(if ($a.required) { 'obligatorio' } else { 'opcional' })) '#8D8C9C' 12))
         $where = ''
         if ($a.source -and $root) {
             $dest = Join-Path $root "downloads\$($a.file)"
             $done = @($st.artifacts | Where-Object { $_.id -eq $a.id -and $_.verified_at })
-            if ($done.Count) { $where = 'descargado y comprobado' }
-            elseif (Test-Path -LiteralPath $dest) { $where = 'descargado; se comprobará' }
-            elseif (Test-Path -LiteralPath "$dest.part") { $where = ('descarga a medias · {0:P0}' -f ((Get-Item -LiteralPath "$dest.part").Length / [double]$a.size_bytes)) }
-            else { $where = 'no descargado' }
+            if ($done.Count) { $where = (T 'downloaded and checked') }
+            elseif (Test-Path -LiteralPath $dest) { $where = (T 'downloaded; it will be checked') }
+            elseif (Test-Path -LiteralPath "$dest.part") { $where = ((T 'half downloaded · {0:P0}') -f ((Get-Item -LiteralPath "$dest.part").Length / [double]$a.size_bytes)) }
+            else { $where = (T 'not downloaded') }
         } elseif ($a.embedded_in) {
-            $where = if ($st.checkpoints -contains 'initialized') { 'comprobado dentro de la instalación' } else { 'llega con la imagen' }
+            $where = if ($st.checkpoints -contains 'initialized') { (T 'checked inside the installation') } else { (T 'arrives with the image') }
         }
         if ($where) { [void]$info.Children.Add((New-TextBlock $where '#B9B8C4' 12)) }
         $card.Child = $info
@@ -1081,7 +1107,7 @@ function Update-InstallView {
 }
 function Update-InstallDeps {
     $ui.InstDeps.Children.Clear()
-    if (-not $script:installPlan) { [void]$ui.InstDeps.Children.Add((New-TextBlock 'Analizar revisa este equipo: nada se cambia sin preguntar.' '#8D8C9C' 12)); return }
+    if (-not $script:installPlan) { [void]$ui.InstDeps.Children.Add((New-TextBlock (T 'Analyze checks this computer: nothing is changed without asking.') '#8D8C9C' 12)); return }
     foreach ($d in $script:installPlan) {
         $row = New-Object System.Windows.Controls.DockPanel
         $row.Margin = '0,3'
@@ -1105,11 +1131,11 @@ function Update-InstallProgress {
     if ($show -and $p) {
         $text = switch ($p.phase) {
             'downloading' {
-                $eta = if ($p.eta_s) { ' · quedan {0}' -f $(if ($p.eta_s -ge 3600) { '{0:N1} h' -f ($p.eta_s / 3600) } elseif ($p.eta_s -ge 60) { '{0:N0} min' -f ($p.eta_s / 60) } else { "$($p.eta_s) s" }) } else { '' }
-                'Descargando {0} · {1} de {2} · {3}/s{4}' -f $p.file, (Format-Bytes $p.received), (Format-Bytes $p.total), (Format-Bytes $p.speed_bps), $eta
+                $eta = if ($p.eta_s) { (T ' · {0} left') -f $(if ($p.eta_s -ge 3600) { '{0:N1} h' -f ($p.eta_s / 3600) } elseif ($p.eta_s -ge 60) { '{0:N0} min' -f ($p.eta_s / 60) } else { "$($p.eta_s) s" }) } else { '' }
+                (T 'Downloading {0} · {1} of {2} · {3}/s{4}') -f $p.file, (Format-Bytes $p.received), (Format-Bytes $p.total), (Format-Bytes $p.speed_bps), $eta
             }
-            'verifying' { 'Verificando el formato de la imagen' }
-            default { 'Importando en WSL y comprobando cada modelo (unos minutos)' }
+            'verifying' { (T 'Verifying the image format') }
+            default { (T 'Importing into WSL and checking each model (a few minutes)') }
         }
         $value = if ($p.total -gt 0) { [double]$p.received / [double]$p.total } else { 0 }
         foreach ($bar in $ui.InstallBar, $ui.InstBar) { $bar.Visibility = 'Visible'; $bar.IsIndeterminate = $p.phase -ne 'downloading'; $bar.Value = $value }
@@ -1125,17 +1151,17 @@ function Invoke-InstallAnalyze {
     $root = $ui.InstRoot.Text.Trim()
     $more = @('-Distro', (Get-InstallDistro))
     if ($root -and [System.IO.Path]::IsPathRooted($root)) { $more += @('-Root', $root) }
-    Add-Log 'Instalar: analizando este equipo'
+    Add-Log (T 'Install: analyzing this computer')
     Start-InstallerJob 'plan' $more { param($r)
-        if (-not $r.ok) { Add-Log "Instalar: $($r.error)"; return }
+        if (-not $r.ok) { Add-Log (T 'Install: {0}' $($r.error)); return }
         $script:installPlan = @($r.plan)
         $p = $r.probe
         $ui.InstSystem.Text = if ($p.platform -ne 'windows') { "$($p.os) · $($p.arch)" } else {
-            ("{0} · compilación {1} · {2} · {3} · {4}" -f $p.os, $p.build, $(if ($p.arch -eq 'AMD64') { 'x86_64' } else { $p.arch }),
-                $(if ($p.wsl.version) { "WSL $($p.wsl.version)" } else { 'sin WSL' }),
-                $(if ($p.admin) { 'como administrador' } else { 'sin permisos de administrador (se piden solo para instalar requisitos)' })) }
+            ((T '{0} · build {1} · {2} · {3} · {4}') -f $p.os, $p.build, $(if ($p.arch -eq 'AMD64') { 'x86_64' } else { $p.arch }),
+                $(if ($p.wsl.version) { "WSL $($p.wsl.version)" } else { (T 'no WSL') }),
+                $(if ($p.admin) { (T 'as administrator') } else { (T 'without administrator rights (requested only to install requirements)') })) }
         $blocking = @($script:installPlan | Where-Object { $_.blocking })
-        Add-Log $(if ($blocking.Count) { "Instalar: faltan $($blocking.Count) requisitos" } else { 'Instalar: el equipo cumple los requisitos' })
+        Add-Log $(if ($blocking.Count) { (T 'Install: {0} requirements are missing' $($blocking.Count)) } else { (T 'Install: this computer meets the requirements') })
         Update-InstallSpace
     }
 }
@@ -1144,53 +1170,53 @@ function Invoke-InstallFixDeps {
     if (-not $fixes.Count) { return }
     $what = ($script:installPlan | Where-Object { $_.fix_id } | ForEach-Object { "• $($_.name): $($_.fix)" } | Select-Object -Unique) -join "`n"
     $reboot = @($script:installPlan | Where-Object { $_.fix_id -and $_.reboot }).Count -gt 0
-    $answer = Show-Message ("Se va a ejecutar, con permiso de administrador (Windows lo pedirá):`n`n{0}`n`n{1}¿Seguir?" -f $what,
-        $(if ($reboot) { "Después hay que reiniciar Windows; el lanzador sigue donde quedó.`n`n" } else { '' })) 'YesNo' 'Question'
+    $answer = Show-Message ((T 'This will run, with administrator permission (Windows will ask):\n\n{0}\n\n{1}Continue?') -f $what,
+        $(if ($reboot) { (T 'After that Windows has to restart; the launcher continues where it left off.\n\n') } else { '' })) 'YesNo' 'Question'
     if ($answer -ne 'Yes') { return }
     $id = if ($fixes -contains 'wsl') { 'wsl' } else { $fixes[0] }
     $root = $ui.InstRoot.Text.Trim()
     if ($root) { $script:cfg.install_root = $root; Save-Settings }
     Start-InstallerJob 'fix-dependency' (@('-Id', $id) + $(if ($root) { @('-Root', $root) } else { @() })) { param($r)
         if (-not $r.ok) { Show-Message $r.error 'OK' 'Warning' | Out-Null; return }
-        if ($r.reboot) { Show-Message 'WSL está instalado. Reinicia Windows y vuelve a abrir el lanzador para seguir con la instalación.' | Out-Null }
+        if ($r.reboot) { Show-Message (T 'WSL is installed. Restart Windows and open the launcher again to continue the installation.') | Out-Null }
         Invoke-InstallAnalyze
     }
 }
 function Invoke-InstallGo {
     $root = $ui.InstRoot.Text.Trim()
     $distro = Get-InstallDistro
-    if (-not $root -or -not [System.IO.Path]::IsPathRooted($root)) { Show-Message 'Elige una carpeta con su ruta completa, como X:\ArchieOS.' | Out-Null; return }
-    if ($distro -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') { Show-Message 'El nombre de la distribución lleva solo letras, números, punto, guion y guion bajo.' | Out-Null; return }
+    if (-not $root -or -not [System.IO.Path]::IsPathRooted($root)) { Show-Message (T 'Choose a folder with its full path, like X:\ArchieOS.') | Out-Null; return }
+    if ($distro -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') { Show-Message (T 'The distribution name has only letters, numbers, dot, hyphen and underscore.') | Out-Null; return }
     $image = Get-ImageArtifact $script:installManifest
     $cached = Test-Path -LiteralPath (Join-Path $root "downloads\$($image.file)")
     if ($image.auth -and -not $cached -and -not (Test-ProviderToken $image.auth)) {
-        Show-Message ("La imagen está en un repositorio privado de {0}. Guarda primero un token en Avanzado → Instalar → Acceso a la descarga." -f (Get-AuthHost $image.auth)) | Out-Null
+        Show-Message ((T 'The image is in a private repository on {0}. First save a token in Advanced → Install → Download access.') -f (Get-AuthHost $image.auth)) | Out-Null
         return
     }
     $need = Get-RequiredBytes $root $image (Get-Target $script:installManifest) $script:installState
-    $answer = Show-Message ("Instalar ArchieOS {0}:`n`n• Descargar {1} ({2}) de {3}, con su SHA-256 comprobado, a {4}\downloads`n• Importarla en WSL como {5}, con su disco en {4}\wsl\{5}`n• Preparar sus claves y comprobar cada modelo (IRIS incluido)`n`nHacen falta unos {6} libres. No se toca ninguna otra distribución. ¿Seguir?" -f `
+    $answer = Show-Message ((T 'Install ArchieOS {0}:\n\n• Download {1} ({2}) from {3}, with its SHA-256 checked, to {4}\downloads\n• Import it into WSL as {5}, with its disk in {4}\wsl\{5}\n• Prepare its keys and check each model (IRIS included)\n\nAbout {6} free are needed. No other distribution is touched. Continue?') -f `
         $script:installManifest.release, $image.file, (Format-Bytes $need.download), ([Uri]$image.source).Host, $root, $distro, (Format-Bytes $need.total)) 'YesNo' 'Question'
     if ($answer -ne 'Yes') { return }
     $script:cfg.install_root = $root; $script:cfg.install_distro = $distro; Save-Settings
-    Add-Log "Instalar: $root ($distro)"
+    Add-Log (T 'Install: {0} ({1})' $root $distro)
     Start-InstallerJob 'install' @('-Root', $root, '-Distro', $distro) { param($r)
         if ($r.ok -and $r.state -eq 'installed') {
-            $tray.ShowBalloonTip(4000, 'ArchieOS', 'ArchieOS está instalado. Iniciar ArchieOS lo pone en marcha.', 'Info')
-            Show-Message ("ArchieOS instalado.`n`nUbicación: {0}`nVersión: {1}`nDistribución: {2}" -f $r.location, $r.release, $r.distro) | Out-Null
+            $tray.ShowBalloonTip(4000, 'ArchieOS', (T 'ArchieOS is installed. Start ArchieOS brings it up.'), 'Info')
+            Show-Message ((T 'ArchieOS installed.\n\nLocation: {0}\nVersion: {1}\nDistribution: {2}') -f $r.location, $r.release, $r.distro) | Out-Null
         } elseif ($r.ok -and $r.state -in @('needs_dependencies', 'needs_reboot')) {
             $script:installPlan = @($r.plan)
             $ui.AdvancedToggle.IsChecked = $true; $ui.InstallTab.IsSelected = $true
         } elseif ($r.code -eq 'distro_exists') { Invoke-InstallAdoptOffer $r.error }
         elseif ($r.code -eq 'repairable') { Invoke-InstallRepair }
-        elseif ($r.code -ne 'cancelled') { Show-Message "La instalación no terminó.`n`n$($r.error)`n`nRegistro: $(Join-Path $root 'logs\installer.log')" 'OK' 'Warning' | Out-Null }
+        elseif ($r.code -ne 'cancelled') { Show-Message (T 'The installation did not finish.\n\n{0}\n\nLog: {1}' $($r.error) $(Join-Path $root 'logs\installer.log')) 'OK' 'Warning' | Out-Null }
     }
 }
 function Invoke-InstallAdoptOffer([string]$why) {
     $distro = Get-InstallDistro
-    $answer = Show-Message "$why`n`n¿Reutilizar esa distribución? Antes se comprueba con su propio archie-offline --check; no se importa ni se borra nada.`n`n(No: cambia el nombre de la distribución en Avanzado → Instalar para instalar aparte.)" 'YesNo' 'Question'
+    $answer = Show-Message (T '{0}\n\nReuse that distribution? It is first checked with its own archie-offline --check; nothing is imported or deleted.\n\n(No: change the distribution name in Advanced → Install to install separately.)' $why) 'YesNo' 'Question'
     if ($answer -ne 'Yes') { return }
     Start-InstallerJob 'adopt' @('-Root', (Get-InstallRoot), '-Distro', $distro) { param($r)
-        if (-not $r.ok) { Show-Message "No se puede reutilizar: $($r.error)" 'OK' 'Warning' | Out-Null }
+        if (-not $r.ok) { Show-Message (T 'It cannot be reused: {0}' $($r.error)) 'OK' 'Warning' | Out-Null }
     }
 }
 function Invoke-InstallRepair {
@@ -1198,15 +1224,15 @@ function Invoke-InstallRepair {
     $more = @('-Root', (Get-InstallRoot))
     $reg = if ($st.distro) { Get-WslRegistration $st.distro } else { $null }
     if ($reg -and -not $reg.disk_present) {
-        $answer = Show-Message ("{0} está registrada en WSL, pero su disco ya no existe:`n{1}`n`nReparar quita ese registro (wsl --unregister {0}; no queda nada que perder) y vuelve a importar la imagen descargada. ¿Seguir?" -f $st.distro, $reg.vhdx) 'YesNo' 'Warning'
+        $answer = Show-Message ((T '{0} is registered in WSL, but its disk no longer exists:\n{1}\n\nRepair removes that registration (wsl --unregister {0}; nothing is left to lose) and imports the downloaded image again. Continue?') -f $st.distro, $reg.vhdx) 'YesNo' 'Warning'
         if ($answer -ne 'Yes') { return }
         $more += '-AllowUnregisterBroken'
     } else {
-        $answer = Show-Message 'Reparar vuelve a preparar la distribución (claves y carpeta de estado) y comprueba cada modelo; si falta, la reimporta desde la imagen descargada. No borra datos. ¿Seguir?' 'YesNo' 'Question'
+        $answer = Show-Message (T 'Repair prepares the distribution again (keys and state folder) and checks each model; if it is missing, it re-imports it from the downloaded image. It deletes no data. Continue?') 'YesNo' 'Question'
         if ($answer -ne 'Yes') { return }
     }
     Start-InstallerJob 'repair' $more { param($r)
-        Show-Message $(if ($r.ok) { 'Reparado: la instalación pasa su comprobación.' } else { "No se pudo reparar.`n`n$($r.error)" }) | Out-Null
+        Show-Message $(if ($r.ok) { (T 'Repaired: the installation passes its check.') } else { (T 'It could not be repaired.\n\n{0}' $($r.error)) }) | Out-Null
     }
 }
 function Invoke-InstallCancel {
@@ -1214,12 +1240,12 @@ function Invoke-InstallCancel {
     if (-not $root) { return }
     # The download stops at its next block and keeps what it has; an import under way ends first.
     New-Item -ItemType File -Force (Join-Path $root 'state\cancel') | Out-Null
-    Add-Log 'Instalar: cancelando (lo descargado se conserva)'
+    Add-Log (T 'Install: cancelling (what was downloaded is kept)')
 }
 
 $ui.InstallOpen.Add_Click({
     $ui.AdvancedToggle.IsChecked = $true; $ui.InstallTab.IsSelected = $true
-    if ($ui.InstallOpen.Content -eq 'Continuar instalación') { Invoke-InstallGo } elseif (-not $script:installPlan) { Invoke-InstallAnalyze }
+    if ($ui.InstallOpen.Content -eq (T 'Continue installation')) { Invoke-InstallGo } elseif (-not $script:installPlan) { Invoke-InstallAnalyze }
 })
 $ui.InstGo.Add_Click({ Invoke-InstallGo })
 $ui.InstAnalyze.Add_Click({ Invoke-InstallAnalyze })
@@ -1228,7 +1254,7 @@ $ui.InstallCancel.Add_Click({ Invoke-InstallCancel })
 $ui.InstCancel.Add_Click({ Invoke-InstallCancel })
 $ui.InstBrowse.Add_Click({
     $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
-    $dialog.Description = 'Carpeta para ArchieOS: la descarga, el disco de WSL, su estado y sus registros'
+    $dialog.Description = (T 'Folder for ArchieOS: the download, the WSL disk, its state and its logs')
     $dialog.ShowNewFolderButton = $true
     if ($ui.InstRoot.Text -and (Test-Path -LiteralPath $ui.InstRoot.Text)) { $dialog.SelectedPath = $ui.InstRoot.Text }
     if ($dialog.ShowDialog() -eq 'OK') { $ui.InstRoot.Text = $dialog.SelectedPath; Update-InstallSpace }
@@ -1240,31 +1266,31 @@ $ui.InstTokenSave.Add_Click({
     if ($ui.InstToken.SecurePassword.Length -eq 0) { return }
     Save-ProviderToken $image.auth $ui.InstToken.SecurePassword
     $ui.InstToken.Clear()
-    Add-Log "Instalar: token de $(Get-AuthHost $image.auth) guardado (cifrado con DPAPI)"
+    Add-Log (T 'Install: {0} token saved (encrypted with DPAPI)' $(Get-AuthHost $image.auth))
     Update-InstallView
 })
-$ui.InstTokenForget.Add_Click({ Remove-ProviderToken (Get-ImageArtifact $script:installManifest).auth; Add-Log 'Instalar: token olvidado'; Update-InstallView })
+$ui.InstTokenForget.Add_Click({ Remove-ProviderToken (Get-ImageArtifact $script:installManifest).auth; Add-Log (T 'Install: token forgotten'); Update-InstallView })
 $ui.InstallStart.Add_Click({
     Add-Log 'ArchieOS: iniciando'
     Start-InstallerJob 'start' @('-Root', (Get-InstallRoot)) { param($r)
-        if ($r.ok) { Add-Log $(if ($r.already) { 'ArchieOS ya estaba en ejecución.' } else { "ArchieOS en ejecución: $($r.health.detail)" }) }
+        if ($r.ok) { Add-Log $(if ($r.already) { (T 'ArchieOS was already running.') } else { (T 'ArchieOS running: {0}' $($r.health.detail)) }) }
         elseif ($r.code -eq 'repairable') { Invoke-InstallRepair }
-        else { Show-Message "ArchieOS no arrancó.`n`n$($r.error)" 'OK' 'Warning' | Out-Null }
+        else { Show-Message (T 'ArchieOS did not start.\n\n{0}' $($r.error)) 'OK' 'Warning' | Out-Null }
     }
 })
 $ui.InstallStop.Add_Click({
     Start-InstallerJob 'stop' @('-Root', (Get-InstallRoot)) { param($r) if (-not $r.ok) { Show-Message $r.error 'OK' 'Warning' | Out-Null } }
 })
 $ui.InstallVerify.Add_Click({
-    $deep = Show-Message "Verificar comprueba el SHA-256 de cada modelo dentro de la instalación.`n`n¿Cargar también IRIS en la CPU para comprobar que sus pesos se leen? (hasta 10 minutos)" 'YesNoCancel' 'Question'
+    $deep = Show-Message (T 'Verify checks the SHA-256 of each model inside the installation.\n\nAlso load IRIS on the CPU to check that its weights can be read? (up to 10 minutes)') 'YesNoCancel' 'Question'
     if ($deep -eq 'Cancel') { return }
     $more = @('-Root', (Get-InstallRoot)) + $(if ($deep -eq 'Yes') { @('-Deep') } else { @() })
     Start-InstallerJob 'verify' $more { param($r)
         if ($r.ok) {
             $iris = if ($r.iris) { "`nIRIS: $($r.iris.iris)$(if ($r.iris.seconds) { " (respondió en $($r.iris.seconds) s)" } elseif ($r.iris.detail) { " · $($r.iris.detail)" })" } else { '' }
-            Show-Message ("Instalación correcta: {0} modelos comprobados (código {1}).{2}" -f $r.integrity.files, $r.integrity.source_sha, $iris) | Out-Null
+            Show-Message ((T 'Installation correct: {0} models checked (source {1}).{2}') -f $r.integrity.files, $r.integrity.source_sha, $iris) | Out-Null
         } else {
-            $answer = Show-Message "La verificación falló.`n`n$($r.error)`n`n¿Reparar?" 'YesNo' 'Warning'
+            $answer = Show-Message (T 'The verification failed.\n\n{0}\n\nRepair?' $($r.error)) 'YesNo' 'Warning'
             if ($answer -eq 'Yes') { Invoke-InstallRepair }
         }
     }
@@ -1294,9 +1320,9 @@ $ui.DistroBox.SelectedItem = $script:cfg.distro
 $vms = Get-VBoxVms
 foreach ($v in $vms) { [void]$ui.VmBox.Items.Add($v) }
 if ($vms -contains $script:cfg.vm) { $ui.VmBox.SelectedItem = $script:cfg.vm }
-$ui.VboxNote.Text = if (-not (Test-Path $vbox)) { 'VirtualBox no está instalado.' } `
-    elseif ($vms.Count -eq 0) { 'VirtualBox está instalado pero no tiene máquinas. La imagen OVA de ArchieOS aún no se publica; cuando exista, aquí se elige y se enciende, apaga o reinicia.' } `
-    else { 'En VirtualBox el lanzador enciende, apaga y reinicia la máquina; Abrir GUI muestra su pantalla. Los servicios los levanta la propia imagen al arrancar.' }
+$ui.VboxNote.Text = if (-not (Test-Path $vbox)) { (T 'VirtualBox is not installed.') } `
+    elseif ($vms.Count -eq 0) { (T 'VirtualBox is installed but has no machines. The ArchieOS OVA image is not published yet; when it exists, you will choose it here and turn it on, off or restart it.') } `
+    else { (T 'In VirtualBox the launcher turns the machine on, off and restarts it; Open GUI shows its screen. The image itself brings up the services when it boots.') }
 
 function Set-Autostart([bool]$on) {
     if ($on) {
@@ -1305,7 +1331,7 @@ function Set-Autostart([bool]$on) {
         $lnk.TargetPath = Join-Path $env:WINDIR 'System32\wscript.exe'
         $lnk.Arguments = "`"$(Join-Path $PSScriptRoot 'ArchieOS.vbs')`" -Autostart"
         $lnk.WorkingDirectory = $PSScriptRoot
-        $lnk.Description = 'ArchieOS: levanta el nodo al entrar a Windows'
+        $lnk.Description = (T 'ArchieOS: brings the node up when you sign in to Windows')
         $lnk.Save()
     } else { Remove-Item $startupLink -ErrorAction SilentlyContinue }
 }
@@ -1331,7 +1357,7 @@ $ui.DiskButton.Add_Click({ Invoke-Compact })
 $ui.UninstallButton.Add_Click({
     $uninstall = Join-Path $PSScriptRoot 'Uninstall-ArchieOS-Launcher.ps1'
     if (-not (Test-Path $uninstall)) { [System.Windows.MessageBox]::Show("No encuentro $uninstall.", 'ArchieOS') | Out-Null; return }
-    $answer = [System.Windows.MessageBox]::Show("¿Desinstalar el lanzador? Se quitan sus accesos directos, el inicio con Windows y sus ajustes. La distribución de WSL, el nodo y los modelos se quedan.", 'ArchieOS', 'YesNo', 'Question')
+    $answer = [System.Windows.MessageBox]::Show((T 'Uninstall the launcher? Its shortcuts, start with Windows and settings are removed. The WSL distribution, the node and the models stay.'), 'ArchieOS', 'YesNo', 'Question')
     if ($answer -ne 'Yes') { return }
     Start-Process powershell.exe -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$uninstall`"", '-Quiet'
     $script:quit = $true; $window.Close()
@@ -1384,16 +1410,16 @@ if (Test-Path $iconFile) { $window.Icon = [System.Windows.Media.Imaging.BitmapFr
 $tray.Text = 'ArchieOS'
 $tray.Visible = $true
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
-[void]$menu.Items.Add('Abrir ArchieOS', $null, { $window.Show(); $window.WindowState = 'Normal'; $window.Activate() })
-[void]$menu.Items.Add('Abrir GUI', $null, { Open-Gui })
-[void]$menu.Items.Add('Reiniciar el nodo', $null, { Start-Node 'restart' })
-[void]$menu.Items.Add('Detener el nodo', $null, { Stop-Node })
-$startupItem = New-Object System.Windows.Forms.ToolStripMenuItem('Iniciar con Windows')
+[void]$menu.Items.Add((T 'Open ArchieOS'), $null, { $window.Show(); $window.WindowState = 'Normal'; $window.Activate() })
+[void]$menu.Items.Add((T 'Open GUI'), $null, { Open-Gui })
+[void]$menu.Items.Add((T 'Restart the node'), $null, { Start-Node 'restart' })
+[void]$menu.Items.Add((T 'Stop the node'), $null, { Stop-Node })
+$startupItem = New-Object System.Windows.Forms.ToolStripMenuItem((T 'Start with Windows'))
 $startupItem.CheckOnClick = $true
 $startupItem.Add_Click({ Set-Autostart $startupItem.Checked; $ui.AutostartBox.IsChecked = $startupItem.Checked; Update-View })
 $menu.Add_Opening({ $startupItem.Checked = Test-Path $startupLink })
 [void]$menu.Items.Add($startupItem)
-[void]$menu.Items.Add('Salir del lanzador', $null, { $script:quit = $true; $window.Close() })
+[void]$menu.Items.Add((T 'Quit the launcher'), $null, { $script:quit = $true; $window.Close() })
 $tray.ContextMenuStrip = $menu
 $tray.Add_DoubleClick({ $window.Show(); $window.WindowState = 'Normal'; $window.Activate() })
 $script:quit = $false
@@ -1401,7 +1427,7 @@ $window.Add_Closing({ param($s, $e)
     if (-not $script:quit -and (Get-NodeState) -ne 'stopped') {
         # Closing hides it: the node keeps running and the tray brings the window back.
         $e.Cancel = $true; $window.Hide()
-        $tray.ShowBalloonTip(3000, 'ArchieOS', 'Sigue en marcha. El icono de la bandeja lo vuelve a abrir.', 'Info')
+        $tray.ShowBalloonTip(3000, 'ArchieOS', (T 'It keeps running. The tray icon opens it again.'), 'Info')
     }
 })
 $window.Add_Closed({ $tray.Visible = $false; $tray.Dispose(); $mutex.ReleaseMutex() })
@@ -1412,7 +1438,7 @@ function Start-AtSignIn {
     $script:countdown.Stop()
     $ui.AutostartBanner.Visibility = 'Collapsed'
     $window.WindowState = 'Minimized'
-    Add-Log 'Inicio con Windows: levantando el nodo'
+    Add-Log (T 'Start with Windows: bringing the node up')
     if ($script:cfg.backend -eq 'virtualbox' -or -not (Test-DistroRunning $script:cfg.distro) -or (Get-NodeState) -ne 'running') { Start-Node 'up' }
     else { After-Start }
 }
@@ -1421,18 +1447,18 @@ $script:countdown.Interval = [TimeSpan]::FromSeconds(1)
 $script:countdown.Add_Tick({
     $script:left--
     if ($script:left -le 0) { Start-AtSignIn; return }
-    $ui.AutostartText.Text = "ArchieOS se inicia en $($script:left) s"
+    $ui.AutostartText.Text = (T 'ArchieOS starts in {0} s' $($script:left))
 })
 $ui.AutostartNow.Add_Click({ Start-AtSignIn })
 $ui.AutostartSkip.Add_Click({
     $script:countdown.Stop(); $ui.AutostartBanner.Visibility = 'Collapsed'
-    Add-Log 'Inicio con Windows: no se inició esta vez'
+    Add-Log (T 'Start with Windows: it did not start this time')
     Refresh-All
 })
 $ui.AutostartNever.Add_Click({
     $script:countdown.Stop(); $ui.AutostartBanner.Visibility = 'Collapsed'
     Set-Autostart $false; $ui.AutostartBox.IsChecked = $false
-    Add-Log 'Inicio con Windows desactivado. Se vuelve a activar en el panel o en Avanzado → Inicio.'
+    Add-Log (T 'Start with Windows turned off. It is turned on again in the panel or in Advanced → Startup.')
     Update-View; Refresh-All
 })
 
@@ -1441,7 +1467,7 @@ $window.Add_ContentRendered({
     if ($Autostart) {
         $script:left = [int]$script:cfg.autostart_delay_s
         if ($script:left -le 0) { Start-AtSignIn; return }
-        $ui.AutostartText.Text = "ArchieOS se inicia en $($script:left) s"
+        $ui.AutostartText.Text = (T 'ArchieOS starts in {0} s' $($script:left))
         $ui.AutostartBanner.Visibility = 'Visible'
         $window.Activate()
         $script:countdown.Start()

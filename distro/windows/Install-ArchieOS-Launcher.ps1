@@ -26,7 +26,7 @@ Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction Silen
 # Windows PowerShell 5.1 reads a script without a byte order mark as ANSI: each copy is
 # written as UTF-8 with one, so the accents of its Spanish text survive.
 $utf8Bom = New-Object System.Text.UTF8Encoding($true)
-foreach ($script in 'ArchieOS-Launcher.ps1', 'Compact-ArchieOS-Disk.ps1', 'Uninstall-ArchieOS-Launcher.ps1', 'ArchieOS-Machine.ps1', 'ArchieOS-HostModel.ps1', 'ArchieOS-Installer.ps1') {
+foreach ($script in 'ArchieOS-Launcher.ps1', 'Compact-ArchieOS-Disk.ps1', 'Uninstall-ArchieOS-Launcher.ps1', 'ArchieOS-Machine.ps1', 'ArchieOS-HostModel.ps1', 'ArchieOS-Installer.ps1', 'ArchieOS-i18n.ps1') {
     $source = Get-Content (Join-Path $PSScriptRoot $script) -Raw -Encoding UTF8
     [System.IO.File]::WriteAllText((Join-Path $target $script), $source, $utf8Bom)
 }
@@ -89,14 +89,14 @@ function New-Link([string]$path, [string]$arguments, [string]$description) {
     $lnk.Description = $description
     $lnk.Save()
 }
-New-Link (Join-Path ([Environment]::GetFolderPath('Desktop')) 'ArchieOS.lnk') '' 'ArchieOS: iniciar, reiniciar, configurar y abrir la GUI'
-New-Link (Join-Path ([Environment]::GetFolderPath('Programs')) 'ArchieOS.lnk') '' 'ArchieOS: iniciar, reiniciar, configurar y abrir la GUI'
+New-Link (Join-Path ([Environment]::GetFolderPath('Desktop')) 'ArchieOS.lnk') '' 'ArchieOS: start, restart, configure and open the GUI'
+New-Link (Join-Path ([Environment]::GetFolderPath('Programs')) 'ArchieOS.lnk') '' 'ArchieOS: start, restart, configure and open the GUI'
 $startup = Join-Path ([Environment]::GetFolderPath('Startup')) 'ArchieOS.lnk'
 # An update keeps the choice the person made in the launcher: the sign-in shortcut is made
 # on a first install, refreshed if it is there, and left out if it was turned off.
 $firstInstall = -not (Test-Path (Join-Path $env:APPDATA 'ArchieOS\installed'))
 if ($NoAutostart) { Remove-Item $startup -ErrorAction SilentlyContinue }
-elseif ($firstInstall -or (Test-Path $startup)) { New-Link $startup '-Autostart' 'ArchieOS: levanta el nodo al entrar a Windows' }
+elseif ($firstInstall -or (Test-Path $startup)) { New-Link $startup '-Autostart' 'ArchieOS: brings the node up when you sign in to Windows' }
 New-Item -ItemType Directory -Force (Join-Path $env:APPDATA 'ArchieOS') | Out-Null
 Set-Content (Join-Path $env:APPDATA 'ArchieOS\installed') $version -Encoding ASCII
 

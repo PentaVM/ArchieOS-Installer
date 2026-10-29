@@ -26,10 +26,17 @@ param(
     [string]$ManifestPath = '',
     [switch]$Deep,
     [switch]$AllowUnregisterBroken,
-    [switch]$AllowUnsigned
+    [switch]$AllowUnsigned,
+    [string]$Lang = ''
 )
 
 $script:InstallerDir = $PSScriptRoot
+$i18nFile = Join-Path $PSScriptRoot 'ArchieOS-i18n.ps1'
+if (Test-Path $i18nFile) { . $i18nFile } elseif (-not (Get-Command T -ErrorAction SilentlyContinue)) {
+    function T([string]$text) { $text = $text.Replace('\n', "`n"); if ($args.Count) { return ($text -f $args) } return $text }
+    function Initialize-Language([string]$requested = '') { }
+}
+if ($Verb) { Initialize-Language $Lang }
 $script:AllowUnsigned = [bool]$AllowUnsigned
 # The release keys this installer trusts (ECDSA P-256; scripts/release/Sign-Release.ps1 makes and
 # uses them). A manifest not signed by one of them is not read: it names what gets downloaded.
@@ -128,7 +135,7 @@ function Invoke-Native([string]$file, [string[]]$argv, [int]$timeoutSeconds = 12
     if ($null -ne $stdin) { $p.StandardInput.Write($stdin.Replace("`r`n", "`n")); $p.StandardInput.Close() }
     if (-not $p.WaitForExit($timeoutSeconds * 1000)) {
         try { $p.Kill() } catch { }
-        return @{ code = -1; out = ''; err = "sin respuesta en $timeoutSeconds s"; timeout = $true }
+        return @{ code = -1; out = ''; err = (T 'no response in {0} s' $timeoutSeconds); timeout = $true }
     }
     $p.WaitForExit()
     return @{ code = $p.ExitCode; out = ($outTask.Result -replace "`0", ''); err = ($errTask.Result -replace "`0", ''); timeout = $false }
@@ -142,7 +149,7 @@ function Invoke-Guest([string]$distro, [string]$user, [string[]]$command, [int]$
     return Invoke-Wsl (@('-d', $distro, '-u', $user, '--exec') + $command) $timeoutSeconds $stdin
 }
 function Assert-DistroName([string]$name) {
-    if ($name -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') { throw (New-InstallError 'invalid' "Nombre de distribución no válido: $name") }
+    if ($name -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$') { throw (New-InstallError 'invalid' (T 'Invalid distribution name: {0}' $name)) }
 }
 
 # ---- PlatformProbe ---------------------------------------------------------------------------
@@ -241,53 +248,53 @@ function Get-DefaultManifestPath { return (Join-Path $script:InstallerDir 'archi
 # bytes. Without a valid one from a trusted key nothing is read, unless -AllowUnsigned (development).
 function Test-ManifestSignature([string]$path) {
     $sigPath = "$path.sig"
-    if (-not (Test-Path -LiteralPath $sigPath)) { throw (New-InstallError 'signature' 'The release manifest has no signature (archieos-manifest.json.sig).') }
-    try { $s = Get-Content -LiteralPath $sigPath -Raw -Encoding UTF8 | ConvertFrom-Json } catch { throw (New-InstallError 'signature' 'The signature file is not valid JSON.') }
-    if ($s.alg -ne 'ecdsa-p256-sha256') { throw (New-InstallError 'signature' "Unknown signature algorithm: $($s.alg)") }
+    if (-not (Test-Path -LiteralPath $sigPath)) { throw (New-InstallError 'signature' (T 'The release manifest has no signature (archieos-manifest.json.sig).')) }
+    try { $s = Get-Content -LiteralPath $sigPath -Raw -Encoding UTF8 | ConvertFrom-Json } catch { throw (New-InstallError 'signature' (T 'The signature file is not valid JSON.')) }
+    if ($s.alg -ne 'ecdsa-p256-sha256') { throw (New-InstallError 'signature' (T 'Unknown signature algorithm: {0}' $($s.alg))) }
     $blob = $script:TrustedKeys[[string]$s.key_id]
-    if (-not $blob) { throw (New-InstallError 'signature' "The manifest is signed by an unknown key ($($s.key_id)). Download a newer installer.") }
+    if (-not $blob) { throw (New-InstallError 'signature' (T 'The manifest is signed by an unknown key ({0}). Download a newer installer.' $($s.key_id))) }
     try {
         $key = [Security.Cryptography.CngKey]::Import([Convert]::FromBase64String($blob), [Security.Cryptography.CngKeyBlobFormat]::EccPublicBlob)
         $ec = New-Object Security.Cryptography.ECDsaCng $key
         $ec.HashAlgorithm = [Security.Cryptography.CngAlgorithm]::Sha256
         $ok = $ec.VerifyData([IO.File]::ReadAllBytes($path), [Convert]::FromBase64String([string]$s.signature))
     } catch { $ok = $false }
-    if (-not $ok) { throw (New-InstallError 'signature' 'The release manifest signature does not match. It was changed or is not from ArchieOS; nothing was installed.') }
+    if (-not $ok) { throw (New-InstallError 'signature' (T 'The release manifest signature does not match. It was changed or is not from ArchieOS; nothing was installed.')) }
     return [string]$s.key_id
 }
 function Read-ReleaseManifest([string]$path = '') {
     if (-not $path) { $path = Get-DefaultManifestPath }
     if (Test-Path -LiteralPath $path) {
-        if ($script:AllowUnsigned) { Write-Step 'WARNING: signature not checked (-AllowUnsigned).' }
-        else { $keyId = Test-ManifestSignature $path; Write-Step "Manifest signed by key ${keyId}: valid." }
+        if ($script:AllowUnsigned) { Write-Step (T 'WARNING: signature not checked (-AllowUnsigned).') }
+        else { $keyId = Test-ManifestSignature $path; Write-Step (T 'Manifest signed by key {0}: valid.' $keyId) }
     }
-    if (-not (Test-Path -LiteralPath $path)) { throw (New-InstallError 'manifest' "No encuentro el manifiesto $path") }
-    try { $m = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json } catch { throw (New-InstallError 'manifest' "El manifiesto no es JSON válido: $($_.Exception.Message)") }
-    if ($m.schema_version -ne 1) { throw (New-InstallError 'manifest' "Versión de manifiesto no soportada: $($m.schema_version)") }
-    if (-not $m.release -or $m.release -match 'latest') { throw (New-InstallError 'manifest' 'El manifiesto debe fijar una versión, no «latest».') }
+    if (-not (Test-Path -LiteralPath $path)) { throw (New-InstallError 'manifest' (T 'Cannot find the manifest {0}' $path)) }
+    try { $m = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json } catch { throw (New-InstallError 'manifest' (T 'The manifest is not valid JSON: {0}' $($_.Exception.Message))) }
+    if ($m.schema_version -ne 1) { throw (New-InstallError 'manifest' (T 'Unsupported manifest version: {0}' $($m.schema_version))) }
+    if (-not $m.release -or $m.release -match 'latest') { throw (New-InstallError 'manifest' (T 'The manifest must pin a version, not "latest".')) }
     $target = $m.targets.'windows-x86_64-wsl2'
-    if (-not $target) { throw (New-InstallError 'manifest' 'El manifiesto no tiene destino windows-x86_64-wsl2.') }
+    if (-not $target) { throw (New-InstallError 'manifest' (T 'The manifest has no windows-x86_64-wsl2 target.')) }
     Assert-DistroName $target.distro_name
-    if ($target.runtime -ne 'archie-offline') { throw (New-InstallError 'manifest' "Mecanismo de arranque desconocido: $($target.runtime)") }
+    if ($target.runtime -ne 'archie-offline') { throw (New-InstallError 'manifest' (T 'Unknown startup mechanism: {0}' $($target.runtime))) }
     $ids = @{}
     foreach ($a in @($target.artifacts)) {
-        if (-not $a.id -or $ids.ContainsKey($a.id)) { throw (New-InstallError 'manifest' 'Cada artefacto necesita un id único.') }
+        if (-not $a.id -or $ids.ContainsKey($a.id)) { throw (New-InstallError 'manifest' (T 'Every artifact needs a unique id.')) }
         $ids[$a.id] = $a
-        if ([string]$a.sha256 -notmatch '^[0-9a-f]{64}$') { throw (New-InstallError 'manifest' "$($a.id): sin SHA-256 publicado; no se instala lo que no se puede comprobar.") }
-        if (-not ([int64]$a.size_bytes -gt 0)) { throw (New-InstallError 'manifest' "$($a.id): falta el tamaño.") }
+        if ([string]$a.sha256 -notmatch '^[0-9a-f]{64}$') { throw (New-InstallError 'manifest' (T '{0}: no published SHA-256; nothing is installed that cannot be checked.' $($a.id))) }
+        if (-not ([int64]$a.size_bytes -gt 0)) { throw (New-InstallError 'manifest' (T '{0}: the size is missing.' $($a.id))) }
         if ($a.source) {
             $uri = $null
-            if (-not [Uri]::TryCreate([string]$a.source, [UriKind]::Absolute, [ref]$uri) -or $uri.Scheme -ne 'https') { throw (New-InstallError 'manifest' "$($a.id): la fuente debe ser una URL HTTPS.") }
-            if ($uri.AbsolutePath -match '/latest(/|$)') { throw (New-InstallError 'manifest' "$($a.id): la fuente no puede apuntar a «latest».") }
-            if ($a.file -notmatch '^[^\\/:*?"<>|]+$') { throw (New-InstallError 'manifest' "$($a.id): nombre de archivo no válido.") }
-            if ($a.auth -and $a.auth -notin @('huggingface', 'github')) { throw (New-InstallError 'manifest' "$($a.id): autenticación desconocida $($a.auth).") }
-            if ($a.format -ne 'wsl-tar-gzip') { throw (New-InstallError 'manifest' "$($a.id): formato no soportado $($a.format).") }
-        } elseif (-not $a.embedded_in) { throw (New-InstallError 'manifest' "$($a.id): ni fuente ni imagen que lo contenga.") }
+            if (-not [Uri]::TryCreate([string]$a.source, [UriKind]::Absolute, [ref]$uri) -or $uri.Scheme -ne 'https') { throw (New-InstallError 'manifest' (T '{0}: the source must be an HTTPS URL.' $($a.id))) }
+            if ($uri.AbsolutePath -match '/latest(/|$)') { throw (New-InstallError 'manifest' (T '{0}: the source cannot point to "latest".' $($a.id))) }
+            if ($a.file -notmatch '^[^\\/:*?"<>|]+$') { throw (New-InstallError 'manifest' (T '{0}: invalid file name.' $($a.id))) }
+            if ($a.auth -and $a.auth -notin @('huggingface', 'github')) { throw (New-InstallError 'manifest' (T '{0}: unknown authentication {1}.' $($a.id) $($a.auth))) }
+            if ($a.format -ne 'wsl-tar-gzip') { throw (New-InstallError 'manifest' (T '{0}: unsupported format {1}.' $($a.id) $($a.format))) }
+        } elseif (-not $a.embedded_in) { throw (New-InstallError 'manifest' (T '{0}: it has neither a source nor an image that contains it.' $($a.id))) }
     }
     foreach ($a in @($target.artifacts)) {
-        if ($a.embedded_in -and -not $ids.ContainsKey($a.embedded_in)) { throw (New-InstallError 'manifest' "$($a.id): $($a.embedded_in) no está en el manifiesto.") }
+        if ($a.embedded_in -and -not $ids.ContainsKey($a.embedded_in)) { throw (New-InstallError 'manifest' (T '{0}: {1} is not in the manifest.' $($a.id) $($a.embedded_in))) }
     }
-    if (@($target.artifacts | Where-Object { $_.source -and $_.required }).Count -ne 1) { throw (New-InstallError 'manifest' 'El destino necesita exactamente una imagen obligatoria que descargar.') }
+    if (@($target.artifacts | Where-Object { $_.source -and $_.required }).Count -ne 1) { throw (New-InstallError 'manifest' (T 'The target needs exactly one required image to download.')) }
     return $m
 }
 function Get-Target($manifest) { return $manifest.targets.'windows-x86_64-wsl2' }
@@ -349,7 +356,7 @@ function Test-Transition([string]$from, [string]$to) {
     return ($script:Transitions[$from] -contains $to)
 }
 function Set-InstallState([string]$root, $st, [string]$state, [hashtable]$fields = @{}) {
-    if (-not (Test-Transition $st.state $state)) { throw (New-InstallError 'state' "Paso de estado no válido: $($st.state) → $state") }
+    if (-not (Test-Transition $st.state $state)) { throw (New-InstallError 'state' (T 'Invalid state transition: {0} → {1}' $($st.state) $state)) }
     Set-Field $st 'state' $state
     foreach ($k in $fields.Keys) { Set-Field $st $k $fields[$k] }
     Save-InstallState $root $st
@@ -375,48 +382,48 @@ function Get-DependencyPlan($probe, $manifest, [string]$root = '', [string]$dist
     if (-not $distroName) { $distroName = $target.distro_name }
     $plan = New-Object System.Collections.ArrayList
     if ($probe.platform -ne 'windows') {
-        [void]$plan.Add((New-Dependency 'platform' 'Sistema' 'unsupported' "$($probe.os): este lanzador instala ArchieOS en Windows con WSL 2. Para Linux no hay paquete publicado: solo ISOs archiso, que son medios de arranque y no se escriben en discos desde aquí."))
+        [void]$plan.Add((New-Dependency 'platform' (T 'System') 'unsupported' (T '{0}: this launcher installs ArchieOS on Windows with WSL 2. There is no published package for Linux: only archiso ISOs, which are boot media and are not written to disks from here.' $($probe.os))))
         return $plan
     }
-    if ($probe.build -ge 22000) { [void]$plan.Add((New-Dependency 'windows' 'Windows' 'installed' "$($probe.os) (compilación $($probe.build))")) }
-    elseif ($probe.build -ge 19044) { [void]$plan.Add((New-Dependency 'windows' 'Windows' 'installed' "$($probe.os) (compilación $($probe.build)); WSLg llega con el WSL de Microsoft Store")) }
-    else { [void]$plan.Add((New-Dependency 'windows' 'Windows' 'unsupported' "Compilación $($probe.build): WSLg necesita Windows 11, o Windows 10 21H2 (19044) o posterior." 'Actualiza Windows.')) }
+    if ($probe.build -ge 22000) { [void]$plan.Add((New-Dependency 'windows' 'Windows' 'installed' (T '{0} (build {1})' $($probe.os) $($probe.build)))) }
+    elseif ($probe.build -ge 19044) { [void]$plan.Add((New-Dependency 'windows' 'Windows' 'installed' (T '{0} (build {1}); WSLg comes with the Microsoft Store WSL' $($probe.os) $($probe.build)))) }
+    else { [void]$plan.Add((New-Dependency 'windows' 'Windows' 'unsupported' (T 'Build {0}: WSLg needs Windows 11, or Windows 10 21H2 (19044) or later.' $($probe.build)) 'Actualiza Windows.')) }
     if ($probe.arch -eq 'AMD64') { [void]$plan.Add((New-Dependency 'arch' 'Arquitectura' 'installed' 'x86_64')) }
-    else { [void]$plan.Add((New-Dependency 'arch' 'Arquitectura' 'unsupported' "$($probe.arch): la imagen de ArchieOS es x86_64.")) }
+    else { [void]$plan.Add((New-Dependency 'arch' 'Arquitectura' 'unsupported' (T '{0}: the ArchieOS image is x86_64.' $($probe.arch)))) }
     if ($probe.virtualization.hypervisor_present -or $probe.virtualization.firmware_enabled) {
-        [void]$plan.Add((New-Dependency 'virtualization' 'Virtualización' 'installed' $(if ($probe.virtualization.hypervisor_present) { 'hipervisor de Windows activo' } else { 'activada en el firmware' })))
+        [void]$plan.Add((New-Dependency 'virtualization' (T 'Virtualization') 'installed' $(if ($probe.virtualization.hypervisor_present) { (T 'Windows hypervisor active') } else { (T 'enabled in the firmware') })))
     } else {
-        [void]$plan.Add((New-Dependency 'virtualization' 'Virtualización' 'missing' 'La CPU no tiene la virtualización activada.' 'Actívala (Intel VT-x o AMD-V/SVM) en la BIOS/UEFI; no se puede hacer desde Windows.'))
+        [void]$plan.Add((New-Dependency 'virtualization' (T 'Virtualization') 'missing' (T 'Virtualization is not enabled on the CPU.') (T 'Enable it (Intel VT-x or AMD-V/SVM) in the BIOS/UEFI; it cannot be done from Windows.')))
     }
     $wsl = $probe.wsl
     $minWsl = [string]$target.min_wsl_version
     $rebootFirst = $st -and $st.state -eq 'needs_reboot'
     if ($rebootFirst) {
-        [void]$plan.Add((New-Dependency 'wsl' 'WSL 2' 'reboot_required' 'Se instaló WSL: Windows tiene que reiniciarse antes de seguir.' 'Reinicia Windows y vuelve a abrir el lanzador.' '' $false $true))
+        [void]$plan.Add((New-Dependency 'wsl' 'WSL 2' 'reboot_required' (T 'WSL was installed: Windows has to restart before going on.') (T 'Restart Windows and open the launcher again.') '' $false $true))
     } elseif (-not $wsl.present -or -not $wsl.store) {
-        [void]$plan.Add((New-Dependency 'wsl' 'WSL 2' 'missing' 'WSL no está instalado (o es el WSL antiguo integrado en Windows).' 'wsl --install --no-distribution: instala WSL y la Plataforma de máquina virtual, sin ninguna distribución. Pide permiso de administrador y reiniciar.' 'wsl' $true $true))
+        [void]$plan.Add((New-Dependency 'wsl' 'WSL 2' 'missing' (T 'WSL is not installed (or it is the old WSL built into Windows).') (T 'wsl --install --no-distribution: installs WSL and the Virtual Machine Platform, with no distribution. It asks for administrator permission and a restart.') 'wsl' $true $true))
     } elseif ((Compare-Version $wsl.version $minWsl) -lt 0) {
-        [void]$plan.Add((New-Dependency 'wsl' 'WSL 2' 'outdated' "WSL $($wsl.version); la imagen pide $minWsl o posterior." 'wsl --update: actualiza WSL desde Microsoft. Pide permiso de administrador.' 'wsl-update' $true $false))
+        [void]$plan.Add((New-Dependency 'wsl' 'WSL 2' 'outdated' (T 'WSL {0}; the image needs {1} or later.' $($wsl.version) $minWsl) (T 'wsl --update: updates WSL from Microsoft. It asks for administrator permission.') 'wsl-update' $true $false))
     } else {
         [void]$plan.Add((New-Dependency 'wsl' 'WSL 2' 'installed' "WSL $($wsl.version), kernel $($wsl.kernel)"))
     }
     if ($wsl.store -and -not $rebootFirst) {
-        if ($wsl.wslg) { [void]$plan.Add((New-Dependency 'wslg' 'WSLg (pantalla y sonido)' 'installed' 'incluido en este WSL')) }
-        else { [void]$plan.Add((New-Dependency 'wslg' 'WSLg (pantalla y sonido)' 'missing' 'Este WSL no informa WSLg; el escritorio y la voz lo necesitan.' 'wsl --update' 'wsl-update' $true $false)) }
+        if ($wsl.wslg) { [void]$plan.Add((New-Dependency 'wslg' (T 'WSLg (display and sound)') 'installed' (T 'included in this WSL'))) }
+        else { [void]$plan.Add((New-Dependency 'wslg' (T 'WSLg (display and sound)') 'missing' (T 'This WSL does not report WSLg; the desktop and the voice need it.') 'wsl --update' 'wsl-update' $true $false)) }
     }
     if ($probe.reboot_pending) {
-        [void]$plan.Add((New-Dependency 'reboot' 'Reinicio pendiente' 'warning' 'Windows tiene un reinicio pendiente. Si WSL falla al importar, reinicia antes de reintentar.'))
+        [void]$plan.Add((New-Dependency 'reboot' (T 'Pending restart') 'warning' (T 'Windows has a pending restart. If WSL fails to import, restart before trying again.')))
     }
     $min = [int64]$target.min_wsl_memory_bytes
-    if ($probe.wsl_memory_bytes -ge $min) { [void]$plan.Add((New-Dependency 'memory' 'Memoria para WSL' 'installed' (Format-Size $probe.wsl_memory_bytes))) }
+    if ($probe.wsl_memory_bytes -ge $min) { [void]$plan.Add((New-Dependency 'memory' (T 'Memory for WSL') 'installed' (Format-Size $probe.wsl_memory_bytes))) }
     else {
-        [void]$plan.Add((New-Dependency 'memory' 'Memoria para WSL' 'warning' ("WSL tendrá {0}; el release pide {1}. Puede ir lento o no cargar el modelo." -f (Format-Size $probe.wsl_memory_bytes), (Format-Size $min)) 'Si hace falta, pon memory=8GB en la sección [wsl2] de %USERPROFILE%\.wslconfig.'))
+        [void]$plan.Add((New-Dependency 'memory' (T 'Memory for WSL') 'warning' ((T 'WSL will have {0}; the release asks for {1}. It may be slow or fail to load the model.') -f (Format-Size $probe.wsl_memory_bytes), (Format-Size $min)) (T 'If needed, set memory=8GB in the [wsl2] section of %USERPROFILE%\.wslconfig.')))
     }
     $nvidia = @($probe.gpus | Where-Object { $_.nvidia })
-    if ($nvidia.Count) { [void]$plan.Add((New-Dependency 'gpu' 'GPU NVIDIA' 'installed' ("{0}, driver {1}. La imagen arranca en CPU; la GPU no se usa por defecto." -f $nvidia[0].name, $nvidia[0].driver))) }
-    else { [void]$plan.Add((New-Dependency 'gpu' 'GPU NVIDIA' 'warning' 'No hay GPU NVIDIA: ArchieOS corre en CPU, que es su modo por defecto (respuestas de voz lentas).')) }
-    if ($probe.netfx_release -ge 378389) { [void]$plan.Add((New-Dependency 'netfx' '.NET Framework (ventana del lanzador)' 'installed' "4.x, versión $($probe.netfx_release)")) }
-    else { [void]$plan.Add((New-Dependency 'netfx' '.NET Framework (ventana del lanzador)' 'missing' 'La ventana del lanzador necesita .NET Framework 4.5 o posterior.' 'Instálalo desde Windows Update.')) }
+    if ($nvidia.Count) { [void]$plan.Add((New-Dependency 'gpu' 'GPU NVIDIA' 'installed' ((T '{0}, driver {1}. The image starts on CPU; the GPU is not used by default.') -f $nvidia[0].name, $nvidia[0].driver))) }
+    else { [void]$plan.Add((New-Dependency 'gpu' 'GPU NVIDIA' 'warning' (T 'There is no NVIDIA GPU: ArchieOS runs on CPU, its default mode (slow voice answers).'))) }
+    if ($probe.netfx_release -ge 378389) { [void]$plan.Add((New-Dependency 'netfx' (T '.NET Framework (launcher window)') 'installed' (T '4.x, version {0}' $($probe.netfx_release)))) }
+    else { [void]$plan.Add((New-Dependency 'netfx' (T '.NET Framework (launcher window)') 'missing' (T 'The launcher window needs .NET Framework 4.5 or later.') (T 'Install it from Windows Update.'))) }
     if ($root) { [void]$plan.Add((Get-SpaceDependency $root $image $target $distroName $st)) }
     if ($wsl.store -and -not $rebootFirst) { [void]$plan.Add((Get-DistroDependency $root $distroName $st)) }
     return $plan
@@ -436,38 +443,38 @@ function Get-RequiredBytes([string]$root, $image, $target, $st = $null) {
 }
 function Get-SpaceDependency([string]$root, $image, $target, [string]$distroName, $st) {
     $vol = Get-FolderVolume $root
-    if ($vol.network) { return (New-Dependency 'space' 'Carpeta' 'unsupported' "$($vol.path) está en una unidad de red: WSL no guarda su disco ahí." 'Elige una carpeta en un disco local.') }
-    if (-not $vol.ready) { return (New-Dependency 'space' 'Carpeta' 'missing' "La unidad $($vol.root) no está disponible." 'Conecta el disco o elige otra carpeta.') }
-    if ($vol.format -notin @('NTFS', 'ReFS')) { return (New-Dependency 'space' 'Carpeta' 'unsupported' "$($vol.root) es $($vol.format): el disco virtual de WSL necesita NTFS o ReFS (FAT32 y exFAT no sirven)." 'Elige otra unidad.') }
+    if ($vol.network) { return (New-Dependency 'space' (T 'Folder') 'unsupported' (T '{0} is on a network drive: WSL does not keep its disk there.' $($vol.path)) (T 'Choose a folder on a local disk.')) }
+    if (-not $vol.ready) { return (New-Dependency 'space' (T 'Folder') 'missing' (T 'Drive {0} is not available.' $($vol.root)) (T 'Connect the disk or choose another folder.')) }
+    if ($vol.format -notin @('NTFS', 'ReFS')) { return (New-Dependency 'space' (T 'Folder') 'unsupported' (T '{0} is {1}: the WSL virtual disk needs NTFS or ReFS (FAT32 and exFAT will not do).' $($vol.root) $($vol.format)) (T 'Choose another drive.')) }
     if ((Test-Path -LiteralPath $root) -and ((Get-Item -LiteralPath $root).Attributes -band [IO.FileAttributes]::Compressed)) {
-        return (New-Dependency 'space' 'Carpeta' 'unsupported' "$root está comprimida por NTFS: WSL 2 no monta un disco virtual comprimido." 'Quita la compresión de la carpeta o elige otra.')
+        return (New-Dependency 'space' (T 'Folder') 'unsupported' (T '{0} is compressed by NTFS: WSL 2 does not mount a compressed virtual disk.' $root) (T 'Remove the compression from the folder or choose another.'))
     }
     $need = Get-RequiredBytes $root $image $target $st
     $where = "$($vol.root) ($($vol.type))"
     if ($vol.free -lt $need.total) {
-        return (New-Dependency 'space' 'Espacio en disco' 'missing' ("Hacen falta {0} (descarga {1} + distribución {2}) y en {3} quedan {4}." -f (Format-Size $need.total), (Format-Size $need.download), (Format-Size $need.install), $where, (Format-Size $vol.free)) 'Libera espacio o elige otra unidad.')
+        return (New-Dependency 'space' (T 'Disk space') 'missing' ((T '{0} are needed (download {1} + distribution {2}) and {3} has {4} left.') -f (Format-Size $need.total), (Format-Size $need.download), (Format-Size $need.install), $where, (Format-Size $vol.free)) (T 'Free up space or choose another drive.'))
     }
-    return (New-Dependency 'space' 'Espacio en disco' 'installed' ("{0} libres en {1}; hacen falta {2}" -f (Format-Size $vol.free), $where, (Format-Size $need.total)))
+    return (New-Dependency 'space' (T 'Disk space') 'installed' ((T '{0} free on {1}; {2} needed') -f (Format-Size $vol.free), $where, (Format-Size $need.total)))
 }
 # A distribution with the same name: reused only if it is this installation's, never replaced.
 function Get-DistroDependency([string]$root, [string]$name, $st) {
     $reg = Get-WslRegistration $name
-    if (-not $reg) { return (New-Dependency 'distro' "Distribución $name" 'installed' 'libre: se creará al instalar') }
+    if (-not $reg) { return (New-Dependency 'distro' (T 'Distribution {0}' $name) 'installed' (T 'free: it will be created on install')) }
     $ours = $st -and $st.distro -eq $name -and $st.location -and ([IO.Path]::GetFullPath($st.location) -eq [IO.Path]::GetFullPath($reg.base_path))
     if (-not $reg.disk_present) {
-        return (New-Dependency 'distro' "Distribución $name" 'missing' "Está registrada en WSL, pero su disco $($reg.vhdx) no existe." 'Reparar: quitar ese registro roto (no tiene datos que perder) e importar de nuevo; o usar otro nombre.')
+        return (New-Dependency 'distro' (T 'Distribution {0}' $name) 'missing' (T 'It is registered in WSL, but its disk {0} does not exist.' $($reg.vhdx)) (T 'Repair: remove that broken registration (it has no data to lose) and import again; or use another name.'))
     }
-    if ($ours) { return (New-Dependency 'distro' "Distribución $name" 'installed' "instalada por este lanzador en $($reg.base_path)") }
-    return (New-Dependency 'distro' "Distribución $name" 'missing' "Ya existe una distribución $name en $($reg.base_path) que no instaló esta carpeta." 'Reutilizarla (se comprueba antes) o instalar con otro nombre. No se sobrescribe ni se borra.')
+    if ($ours) { return (New-Dependency 'distro' (T 'Distribution {0}' $name) 'installed' (T 'installed by this launcher in {0}' $($reg.base_path))) }
+    return (New-Dependency 'distro' (T 'Distribution {0}' $name) 'missing' (T 'A distribution {0} already exists in {1} that this folder did not install.' $name $($reg.base_path)) (T 'Reuse it (it is checked first) or install under another name. It is not overwritten or deleted.'))
 }
 # The fixes there are: Microsoft's own WSL commands, elevated with the person's consent
 # (Windows asks). Anything else (BIOS, Windows Update, disks) the plan explains.
 function Invoke-DependencyFix([string]$id, [string]$root = '') {
-    $argv = switch ($id) { 'wsl' { @('--install', '--no-distribution') } 'wsl-update' { @('--update') } default { throw (New-InstallError 'invalid' "No hay corrección automática para $id") } }
+    $argv = switch ($id) { 'wsl' { @('--install', '--no-distribution') } 'wsl-update' { @('--update') } default { throw (New-InstallError 'invalid' (T 'There is no automatic fix for {0}' $id)) } }
     Write-Step "wsl.exe $($argv -join ' ') (como administrador)"
     try { $p = Start-Process wsl.exe -ArgumentList $argv -Verb RunAs -Wait -PassThru -WindowStyle Normal }
-    catch { throw (New-InstallError 'elevation' 'No se dio el permiso de administrador: no se cambió nada.') }
-    if ($p.ExitCode -ne 0) { throw (New-InstallError 'dependency' "wsl.exe $($argv -join ' ') terminó con código $($p.ExitCode).") }
+    catch { throw (New-InstallError 'elevation' (T 'Administrator permission was not given: nothing was changed.')) }
+    if ($p.ExitCode -ne 0) { throw (New-InstallError 'dependency' (T 'wsl.exe {0} exited with code {1}.' $($argv -join ' ') $($p.ExitCode))) }
     if ($id -eq 'wsl' -and $root) {
         $st = Read-InstallState $root
         Set-InstallState $root $st 'checking'
@@ -497,12 +504,12 @@ function Test-CancelRequested([string]$root) { return (Test-Path -LiteralPath (J
 function Open-ArtifactResponse([string]$url, [string]$auth, [int64]$from) {
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     $token = if ($auth) { Get-ProviderToken $auth } else { $null }
-    if ($auth -and -not $token) { throw (New-InstallError 'auth' "La descarga necesita acceso a $(Get-AuthHost $auth): guarda un token en Instalar → Acceso.") }
+    if ($auth -and -not $token) { throw (New-InstallError 'auth' (T 'The download needs access to {0}: save a token in Install → Access.' $(Get-AuthHost $auth))) }
     $authHost = Get-AuthHost $auth
     for ($hop = 0; $hop -lt 8; $hop++) {
         $uri = [Uri]$url
         $loopback = $uri.IsLoopback
-        if ($uri.Scheme -ne 'https' -and -not $loopback) { throw (New-InstallError 'insecure' "Redirección a una URL que no es HTTPS: $($uri.Host)") }
+        if ($uri.Scheme -ne 'https' -and -not $loopback) { throw (New-InstallError 'insecure' (T 'Redirect to a URL that is not HTTPS: {0}' $($uri.Host))) }
         $req = [Net.HttpWebRequest]::Create($uri)
         $req.AllowAutoRedirect = $false
         $req.Timeout = 30000
@@ -527,10 +534,10 @@ function Open-ArtifactResponse([string]$url, [string]$auth, [int64]$from) {
             $url = (New-Object Uri($uri, $next)).AbsoluteUri
             continue
         }
-        if ($code -in @(401, 403)) { $resp.Close(); throw (New-InstallError 'auth' "$($uri.Host) respondió $code`: el token no tiene acceso a este archivo (o caducó).") }
-        if ($code -eq 404) { $resp.Close(); throw (New-InstallError 'not_found' "$($uri.Host) respondió 404: el archivo del release no existe en esa dirección.") }
+        if ($code -in @(401, 403)) { $resp.Close(); throw (New-InstallError 'auth' (T '{0} answered {1}: the token has no access to this file (or it expired).' $($uri.Host) $code)) }
+        if ($code -eq 404) { $resp.Close(); throw (New-InstallError 'not_found' (T '{0} answered 404: the release file does not exist at that address.' $($uri.Host))) }
         if ($code -eq 416) { $resp.Close(); return $null }
-        if ($code -ge 400) { $resp.Close(); throw (New-InstallError 'network' "$($uri.Host) respondió $code.") }
+        if ($code -ge 400) { $resp.Close(); throw (New-InstallError 'network' (T '{0} answered {1}.' $($uri.Host) $code)) }
         return $resp
     }
     throw (New-InstallError 'network' 'Demasiadas redirecciones.')
@@ -546,9 +553,9 @@ function Invoke-ArtifactDownload($artifact, [string]$dir, [string]$root, [int]$r
     $part = "$dest.part"
     $total = [int64]$artifact.size_bytes
     if (Test-Path -LiteralPath $dest) {
-        Write-Step "$($artifact.file) ya está descargado: comprobando su SHA-256"
+        Write-Step (T '{0} is already downloaded: checking its SHA-256' $($artifact.file))
         if ((Get-Item -LiteralPath $dest).Length -eq $total -and (Get-FileSha256 $dest) -eq $artifact.sha256) { return $dest }
-        Write-Step 'No coincide con el release: se descarga de nuevo.'
+        Write-Step (T 'It does not match the release: downloading again.')
         Remove-Item -LiteralPath $dest
     }
     $sha = [Security.Cryptography.SHA256]::Create()
@@ -558,21 +565,21 @@ function Invoke-ArtifactDownload($artifact, [string]$dir, [string]$root, [int]$r
         $have = (Get-Item -LiteralPath $part).Length
         if ($have -gt $total) { Remove-Item -LiteralPath $part; $have = 0 }
         else {
-            Write-Step ("Continuando la descarga en {0} de {1}" -f (Format-Size $have), (Format-Size $total))
+            Write-Step ((T 'Resuming the download at {0} of {1}') -f (Format-Size $have), (Format-Size $total))
             $fs = [IO.File]::OpenRead($part)
             try { while (($n = $fs.Read($buffer, 0, $buffer.Length)) -gt 0) { [void]$sha.TransformBlock($buffer, 0, $n, $null, 0) } } finally { $fs.Dispose() }
         }
     }
     $vol = Get-FolderVolume $dir
-    if ($vol.free -lt ($total - $have)) { throw (New-InstallError 'space' ("Faltan {0} libres en {1} para la descarga." -f (Format-Size ($total - $have)), $vol.root)) }
+    if ($vol.free -lt ($total - $have)) { throw (New-InstallError 'space' ((T '{0} more free are needed on {1} for the download.') -f (Format-Size ($total - $have)), $vol.root)) }
     $attempt = 0
     while ($have -lt $total) {
-        if (Test-CancelRequested $root) { throw (New-InstallError 'cancelled' 'Descarga cancelada; lo descargado se conserva y Reintentar continúa.') }
+        if (Test-CancelRequested $root) { throw (New-InstallError 'cancelled' (T 'Download cancelled; what was downloaded is kept and Retry continues.')) }
         try {
             $resp = Open-ArtifactResponse $artifact.source $artifact.auth $have
             if ($null -eq $resp) { break }
             if ($have -gt 0 -and [int]$resp.StatusCode -eq 200) {
-                Write-Step 'El servidor no reanuda descargas: empieza de cero.'
+                Write-Step (T 'The server does not resume downloads: starting from zero.')
                 $sha.Dispose(); $sha = [Security.Cryptography.SHA256]::Create(); $have = 0
                 Remove-Item -LiteralPath $part -ErrorAction SilentlyContinue
             }
@@ -584,13 +591,13 @@ function Invoke-ArtifactDownload($artifact, [string]$dir, [string]$root, [int]$r
                     $out.Write($buffer, 0, $n)
                     [void]$sha.TransformBlock($buffer, 0, $n, $null, 0)
                     $have += $n
-                    if ($have -gt $total) { throw (New-InstallError 'checksum' 'El servidor envía más bytes que los del release.') }
+                    if ($have -gt $total) { throw (New-InstallError 'checksum' (T 'The server sends more bytes than the release has.')) }
                     if ($clock.ElapsedMilliseconds - $last -ge 500) {
                         $last = $clock.ElapsedMilliseconds
                         $speed = [int64](($have - $mark) / [math]::Max(0.001, $clock.Elapsed.TotalSeconds))
                         Write-Progress-File $root @{ phase = 'downloading'; artifact = $artifact.id; file = $artifact.file; received = $have; total = $total; speed_bps = $speed
                             eta_s = $(if ($speed -gt 0) { [int](($total - $have) / $speed) } else { $null }) }
-                        if (Test-CancelRequested $root) { throw (New-InstallError 'cancelled' 'Descarga cancelada; lo descargado se conserva y Reintentar continúa.') }
+                        if (Test-CancelRequested $root) { throw (New-InstallError 'cancelled' (T 'Download cancelled; what was downloaded is kept and Retry continues.')) }
                     }
                 }
             } finally { $out.Dispose(); $in.Dispose(); $resp.Close() }
@@ -603,8 +610,8 @@ function Invoke-ArtifactDownload($artifact, [string]$dir, [string]$root, [int]$r
             for ($e = $_.Exception; $e; $e = $e.InnerException) { if ($e -is [IO.IOException] -or $e -is [Net.WebException]) { $io = $true } }
             if ($code -ne 'network' -and -not ($code -eq 'unexpected' -and $io)) { throw }
             $attempt++
-            if ($attempt -gt $retries) { throw (New-InstallError 'network' "La descarga se cortó $attempt veces: $($_.Exception.Message). Reintentar continúa donde quedó.") }
-            Write-Step "Se cortó la conexión ($($_.Exception.Message)); reintento $attempt de $retries"
+            if ($attempt -gt $retries) { throw (New-InstallError 'network' (T 'The download was cut {0} times: {1}. Retry continues where it left off.' $attempt $($_.Exception.Message))) }
+            Write-Step (T 'The connection dropped ({0}); retry {1} of {2}' $($_.Exception.Message) $attempt $retries)
             Start-Sleep -Seconds ([math]::Min(30, [math]::Pow(2, $attempt)))
         }
     }
@@ -613,7 +620,7 @@ function Invoke-ArtifactDownload($artifact, [string]$dir, [string]$root, [int]$r
     $sha.Dispose()
     if ($have -ne $total -or $digest -ne $artifact.sha256) {
         Remove-Item -LiteralPath $part -ErrorAction SilentlyContinue
-        throw (New-InstallError 'checksum' "$($artifact.file) no coincide con el release (SHA-256 $digest). Se borró lo descargado; Reintentar lo baja de nuevo.")
+        throw (New-InstallError 'checksum' (T '{0} does not match the release (SHA-256 {1}). What was downloaded was deleted; Retry downloads it again.' $($artifact.file) $digest))
     }
     Move-Item -LiteralPath $part -Destination $dest
     Write-Step "$($artifact.file): SHA-256 correcto"
@@ -622,18 +629,18 @@ function Invoke-ArtifactDownload($artifact, [string]$dir, [string]$root, [int]$r
 # What the image is, from its bytes and not its name: a gzip stream holding a tar archive is
 # what wsl --import takes. Returns $null when it is, else why not.
 function Test-ArtifactFormat([string]$path, [string]$format) {
-    if ($format -ne 'wsl-tar-gzip') { return "formato $format no soportado" }
+    if ($format -ne 'wsl-tar-gzip') { return (T 'format {0} not supported' $format) }
     $fs = [IO.File]::OpenRead($path)
     try {
         $magic = New-Object byte[] 2
-        if ($fs.Read($magic, 0, 2) -ne 2 -or $magic[0] -ne 0x1f -or $magic[1] -ne 0x8b) { return 'no es un archivo gzip' }
+        if ($fs.Read($magic, 0, 2) -ne 2 -or $magic[0] -ne 0x1f -or $magic[1] -ne 0x8b) { return (T 'not a gzip file') }
         $fs.Position = 0
         $gz = New-Object IO.Compression.GZipStream($fs, [IO.Compression.CompressionMode]::Decompress, $true)
         $header = New-Object byte[] 512
         $n = 0
         while ($n -lt 512) { $r = $gz.Read($header, $n, 512 - $n); if ($r -le 0) { break }; $n += $r }
-        if ($n -lt 512) { return 'el gzip no contiene un tar completo' }
-        if ([Text.Encoding]::ASCII.GetString($header, 257, 5) -ne 'ustar') { return 'el gzip no contiene un archivo tar' }
+        if ($n -lt 512) { return (T 'the gzip does not contain a complete tar') }
+        if ([Text.Encoding]::ASCII.GetString($header, 257, 5) -ne 'ustar') { return (T 'the gzip does not contain a tar file') }
         return $null
     } finally { $fs.Dispose() }
 }
@@ -678,10 +685,10 @@ function Get-LastJsonLine([string]$text) {
 function Test-ArchieHealth([string]$distro) {
     $running = (Get-WslDistroList -Running) -contains $distro
     $h = [pscustomobject]@{ wsl = $running; ok = $false; components = $null; detail = '' }
-    if (-not $running) { $h.detail = 'la distribución no está en marcha'; return $h }
+    if (-not $running) { $h.detail = (T 'the distribution is not running'); return $h }
     $r = Invoke-Guest $distro $script:GuestUser @('/usr/bin/python3', '-') 40 $script:HealthProbe
     $c = Get-LastJsonLine $r.out
-    if (-not $c) { $h.detail = "no se pudo leer el estado: $($r.err.Trim())"; return $h }
+    if (-not $c) { $h.detail = (T 'could not read the state: {0}' $($r.err.Trim())); return $h }
     $h.components = $c
     $h.ok = $c.core -and $c.core_status -and $c.displayd -and $c.display -and $c.display_api -and $c.bonsai -and $c.bonsai_health
     $missing = @('core', 'core_status', 'displayd', 'display', 'display_api', 'bonsai', 'bonsai_health' | Where-Object { -not $c.$_ })
@@ -716,13 +723,13 @@ function Stop-KeepAlive([string]$root, $st) {
 function Get-InstalledState([string]$root) {
     $st = Read-InstallState $root
     if (-not $st.distro -or $st.state -in @('not_installed', 'checking', 'needs_dependencies', 'downloading', 'verifying', 'installing', 'needs_reboot')) {
-        throw (New-InstallError 'not_installed' 'ArchieOS no está instalado en esta carpeta.')
+        throw (New-InstallError 'not_installed' (T 'ArchieOS is not installed in this folder.'))
     }
     $reg = Get-WslRegistration $st.distro
     if (-not $reg -or -not $reg.disk_present) {
         Set-InstallState $root $st 'checking'
-        Set-InstallState $root $st 'repairable' @{ error = "La distribución $($st.distro) ya no está registrada en WSL o le falta su disco." }
-        throw (New-InstallError 'repairable' "La distribución $($st.distro) ya no está (o le falta su disco): Verificar/Reparar la reimporta.")
+        Set-InstallState $root $st 'repairable' @{ error = (T 'The distribution {0} is no longer registered in WSL or its disk is missing.' $($st.distro)) }
+        throw (New-InstallError 'repairable' (T 'The distribution {0} is gone (or its disk is missing): Verify/Repair re-imports it.' $($st.distro)))
     }
     return $st
 }
@@ -737,13 +744,13 @@ function Start-ArchieRuntime([string]$root) {
     }
     Set-InstallState $root $st 'starting' @{ error = $null }
     Start-KeepAlive $root $st
-    Write-Step "archie-offline --background en $($st.distro) (la primera vez prepara la base de datos)"
+    Write-Step (T 'archie-offline --background in {0} (the first time it prepares the database)' $($st.distro))
     $r = Invoke-Guest $st.distro $script:GuestUser @('/usr/bin/archie-offline', '--background') 900
     ($r.out + "`n" + $r.err) -split "`r?`n" | ForEach-Object { Write-Step $_ }
     if ($r.code -ne 0) {
         $why = (($r.err + $r.out).Trim() -split "`r?`n" | Select-Object -Last 1)
-        Set-InstallState $root $st 'error' @{ error = "No arrancó: $why"; error_code = 'start' }
-        throw (New-InstallError 'start' "ArchieOS no arrancó: $why")
+        Set-InstallState $root $st 'error' @{ error = (T 'It did not start: {0}' $why); error_code = 'start' }
+        throw (New-InstallError 'start' (T 'ArchieOS did not start: {0}' $why))
     }
     # Running is what answers, not what was launched.
     $deadline = (Get-Date).AddSeconds(120)
@@ -753,8 +760,8 @@ function Start-ArchieRuntime([string]$root) {
         Start-Sleep -Seconds 3
     } while ((Get-Date) -lt $deadline)
     if (-not $h.ok) {
-        Set-InstallState $root $st 'error' @{ error = "Arrancó, pero $($h.detail)"; error_code = 'health'; health = $h }
-        throw (New-InstallError 'health' "ArchieOS arrancó, pero $($h.detail). Registros: \\wsl.localhost\$($st.distro)$($script:GuestState -replace '/', '\')")
+        Set-InstallState $root $st 'error' @{ error = (T 'It started, but {0}' $($h.detail)); error_code = 'health'; health = $h }
+        throw (New-InstallError 'health' (T 'ArchieOS started, but {0}. Logs: \\wsl.localhost\{1}{2}' $($h.detail) $($st.distro) $($script:GuestState -replace '/', '\')))
     }
     Set-InstallState $root $st 'running' @{ health = $h; started_at = (Get-Date).ToUniversalTime().ToString('o') }
     return @{ state = 'running'; health = $h }
@@ -788,20 +795,20 @@ function Get-RuntimeHealth([string]$root) {
 # machine's own, and the check of every model in it.
 function Initialize-Distro([string]$distro) {
     $r = Invoke-Guest $distro 'root' @('/usr/bin/install', '-d', '-o', 'archie', '-g', 'archie', '-m', '0700', '/home/archie/.local/state') 60
-    if ($r.code -ne 0) { throw (New-InstallError 'install' "No se pudo preparar /home/archie/.local/state: $($r.err.Trim())") }
-    Write-Step 'Generando las claves de paquetes de esta instalación'
+    if ($r.code -ne 0) { throw (New-InstallError 'install' (T 'Could not prepare /home/archie/.local/state: {0}' $($r.err.Trim()))) }
+    Write-Step (T 'Generating the package keys for this installation')
     $r = Invoke-Guest $distro 'root' @('/usr/lib/archie/init-pacman-keyring') 600
-    if ($r.code -ne 0) { throw (New-InstallError 'install' "init-pacman-keyring falló: $(($r.err + $r.out).Trim())") }
+    if ($r.code -ne 0) { throw (New-InstallError 'install' (T 'init-pacman-keyring failed: {0}' $(($r.err + $r.out).Trim()))) }
 }
 # archie-offline --check: the image hashes every model it carries, IRIS among them.
 function Test-DistroPayload([string]$distro) {
-    Write-Step 'archie-offline --check: comprobando el SHA-256 de cada modelo dentro de la imagen (IRIS incluido)'
+    Write-Step (T 'archie-offline --check: checking the SHA-256 of each model inside the image (IRIS included)')
     $r = Invoke-Guest $distro $script:GuestUser @('/usr/bin/archie-offline', '--check') 1800
     $j = Get-LastJsonLine $r.out
     if ($r.code -ne 0 -or -not $j -or $j.integrity -ne 'ok') {
         throw (New-InstallError 'integrity' "archie-offline --check: $(($r.err + $r.out).Trim())")
     }
-    Write-Step "Integridad correcta: $($j.files) modelos, código $($j.source_sha)"
+    Write-Step (T 'Integrity OK: {0} models, source {1}' $($j.files) $($j.source_sha))
     return $j
 }
 # IRIS loaded for real: its server, with the weights and the text tower the image carries,
@@ -813,10 +820,10 @@ weights = payload['files']['iris']
 tower = pathlib.Path(weights['path']).parent / 'siglip2-text'
 server = '/usr/bin/archie-iris-serve'
 if not os.access(server, os.X_OK) or not tower.is_dir():
-    print(json.dumps({'iris': 'unavailable', 'detail': 'archie-iris-serve o su torre de texto no están en la imagen'})); sys.exit(0)
+    print(json.dumps({'iris': 'unavailable', 'detail': 'archie-iris-serve or its text tower are not in the image'})); sys.exit(0)
 with socket.socket() as probe:
     if probe.connect_ex(('127.0.0.1', 8765)) == 0:
-        print(json.dumps({'iris': 'port_busy', 'detail': 'el puerto 8765 ya lo usa otro proceso'})); sys.exit(0)
+        print(json.dumps({'iris': 'port_busy', 'detail': 'port 8765 is already used by another process'})); sys.exit(0)
 log = open('/tmp/archie-iris-check.log', 'wb')
 child = subprocess.Popen([server, '--weights', weights['path'], '--sha256', weights['sha256'], '--text-tower', str(tower),
                           '--port', '8765', '--device', 'cpu'], stdout=log, stderr=log, start_new_session=True)
@@ -834,7 +841,7 @@ print(json.dumps({'iris': 'ok' if answer is not None else 'failed', 'seconds': s
                   'detail': '' if answer is not None else pathlib.Path('/tmp/archie-iris-check.log').read_text(errors='replace')[-400:]}))
 '@
 function Test-IrisLoad([string]$distro) {
-    Write-Step 'Cargando IRIS en CPU para comprobar que sus pesos se leen (hasta 10 minutos)'
+    Write-Step (T 'Loading IRIS on CPU to check that its weights can be read (up to 10 minutes)')
     $r = Invoke-Guest $distro $script:GuestUser @('/usr/bin/python3', '-') 720 $script:IrisProbe
     $j = Get-LastJsonLine $r.out
     if (-not $j) { return [pscustomobject]@{ iris = 'failed'; detail = ($r.err.Trim()) } }
@@ -844,22 +851,22 @@ function Import-Distro([string]$distro, [string]$location, [string]$image) {
     $reg = Get-WslRegistration $distro
     if ($reg) {
         if ($reg.disk_present -and ([IO.Path]::GetFullPath($reg.base_path) -eq [IO.Path]::GetFullPath($location))) {
-            Write-Step "$distro ya está importada en ${location}: se continúa"
+            Write-Step (T '{0} is already imported at {1}: continuing' $distro $location)
             return
         }
-        if (-not $reg.disk_present) { throw (New-InstallError 'repairable' "$distro está registrada sin su disco ($($reg.vhdx)). Verificar/Reparar puede quitar ese registro roto si lo confirmas.") }
-        throw (New-InstallError 'distro_exists' "Ya existe una distribución $distro en $($reg.base_path). No se sobrescribe: reutilízala o instala con otro nombre.")
+        if (-not $reg.disk_present) { throw (New-InstallError 'repairable' (T '{0} is registered without its disk ({1}). Verify/Repair can remove that broken registration if you confirm.' $distro $($reg.vhdx))) }
+        throw (New-InstallError 'distro_exists' (T 'A distribution {0} already exists in {1}. It is not overwritten: reuse it or install under another name.' $distro $($reg.base_path)))
     }
     if (Test-Path -LiteralPath (Join-Path $location 'ext4.vhdx')) {
-        throw (New-InstallError 'distro_exists' "En $location ya hay un disco ext4.vhdx que WSL no tiene registrado. No se toca: muévelo o elige otra carpeta.")
+        throw (New-InstallError 'distro_exists' (T 'There is already an ext4.vhdx disk in {0} that WSL has not registered. It is not touched: move it or choose another folder.' $location))
     }
     New-Item -ItemType Directory -Force $location | Out-Null
-    Write-Step "wsl --import $distro (unos minutos; el disco virtual queda en $location)"
+    Write-Step (T 'wsl --import {0} (a few minutes; the virtual disk goes to {1})' $distro $location)
     $r = Invoke-Wsl @('--import', $distro, $location, $image, '--version', '2') 7200
     if ($r.code -ne 0) {
         # Nothing was registered: only the folder this step made goes, and only if empty.
         if (-not (Get-ChildItem -LiteralPath $location -Force)) { Remove-Item -LiteralPath $location }
-        throw (New-InstallError 'import' "wsl --import falló: $(($r.err + $r.out).Trim())")
+        throw (New-InstallError 'import' (T 'wsl --import failed: {0}' $(($r.err + $r.out).Trim())))
     }
 }
 function Invoke-Install([string]$root, $manifest, [string]$distroName = '') {
@@ -869,7 +876,7 @@ function Invoke-Install([string]$root, $manifest, [string]$distroName = '') {
     Assert-DistroName $distroName
     $st = Read-InstallState $root
     if ($st.state -in @('installed', 'running', 'stopped', 'starting')) {
-        Write-Step "ArchieOS ya está instalado en $root ($($st.distro))."
+        Write-Step (T 'ArchieOS is already installed in {0} ({1}).' $root $($st.distro))
         return @{ state = $st.state; distro = $st.distro; already = $true }
     }
     Remove-Item -LiteralPath (Join-Path $root 'state\cancel') -ErrorAction SilentlyContinue
@@ -881,7 +888,7 @@ function Invoke-Install([string]$root, $manifest, [string]$distroName = '') {
     if ($blocking.Count) {
         $next = if (@($blocking | Where-Object { $_.status -eq 'reboot_required' }).Count) { 'needs_reboot' } else { 'needs_dependencies' }
         Set-InstallState $root $st $next @{ plan = $plan; job_pid = $null }
-        foreach ($b in $blocking) { Write-Step "falta: $($b.name): $($b.detail)" }
+        foreach ($b in $blocking) { Write-Step (T 'missing: {0}: {1}' $($b.name) $($b.detail)) }
         return @{ state = $next; plan = $plan }
     }
     $checkpoints = New-Object System.Collections.ArrayList
@@ -891,8 +898,8 @@ function Invoke-Install([string]$root, $manifest, [string]$distroName = '') {
     Write-Progress-File $root @{ phase = 'verifying'; artifact = $image.id; received = $image.size_bytes; total = $image.size_bytes }
     Set-InstallState $root $st 'verifying'
     $why = Test-ArtifactFormat $file $image.format
-    if ($why) { throw (New-InstallError 'format' "$($image.file): $why; wsl --import no lo acepta.") }
-    Write-Step "$($image.file): tar comprimido con gzip, importable con wsl --import"
+    if ($why) { throw (New-InstallError 'format' (T '{0}: {1}; wsl --import does not accept it.' $($image.file) $why)) }
+    Write-Step (T '{0}: gzip-compressed tar, importable with wsl --import' $($image.file))
     $artifacts = @([pscustomobject]@{ id = $image.id; file = $file; sha256 = $image.sha256; size_bytes = $image.size_bytes; version = $image.version
         verified_at = (Get-Date).ToUniversalTime().ToString('o') })
     if ($checkpoints -notcontains 'downloaded') { [void]$checkpoints.Add('downloaded') }
@@ -938,12 +945,12 @@ function Invoke-Verify([string]$root, [switch]$Deep) {
 # confirmed) and only after checking again that the disk really is not there.
 function Invoke-Repair([string]$root, $manifest, [switch]$AllowUnregisterBroken) {
     $st = Read-InstallState $root
-    if (-not $st.distro) { throw (New-InstallError 'not_installed' 'No hay ninguna instalación que reparar en esta carpeta.') }
+    if (-not $st.distro) { throw (New-InstallError 'not_installed' (T 'There is no installation to repair in this folder.')) }
     $reg = Get-WslRegistration $st.distro
     if ($reg -and -not $reg.disk_present) {
-        if (-not $AllowUnregisterBroken) { throw (New-InstallError 'confirm' "$($st.distro) está registrada sin su disco ($($reg.vhdx)). Reparar necesita tu confirmación para quitar ese registro.") }
-        if (Test-Path -LiteralPath $reg.vhdx) { throw (New-InstallError 'confirm' 'El disco apareció: no se quita nada.') }
-        Write-Step "wsl --unregister $($st.distro) (registro sin disco, confirmado)"
+        if (-not $AllowUnregisterBroken) { throw (New-InstallError 'confirm' (T '{0} is registered without its disk ({1}). Repair needs your confirmation to remove that registration.' $($st.distro) $($reg.vhdx))) }
+        if (Test-Path -LiteralPath $reg.vhdx) { throw (New-InstallError 'confirm' (T 'The disk appeared: nothing is removed.')) }
+        Write-Step (T 'wsl --unregister {0} (registration without a disk, confirmed)' $($st.distro))
         $u = Invoke-Wsl @('--unregister', $st.distro) 120
         if ($u.code -ne 0) { throw (New-InstallError 'repair' "wsl --unregister: $($u.err.Trim())") }
         $reg = $null
@@ -956,7 +963,7 @@ function Invoke-Repair([string]$root, $manifest, [switch]$AllowUnregisterBroken)
         $file = Invoke-ArtifactDownload $image (Join-Path $root 'downloads') $root
         Import-Distro $st.distro $st.location $file
     } elseif ([IO.Path]::GetFullPath($reg.base_path) -ne [IO.Path]::GetFullPath($st.location) -and -not $st.adopted) {
-        throw (New-InstallError 'distro_exists' "$($st.distro) existe en $($reg.base_path), que no es la de esta instalación. No se toca.")
+        throw (New-InstallError 'distro_exists' (T '{0} exists in {1}, which does not belong to this installation. It is not touched.' $($st.distro) $($reg.base_path)))
     } else {
         Set-InstallState $root $st 'repairable' @{ error = $null }
         Set-InstallState $root $st 'installing'
@@ -971,7 +978,7 @@ function Invoke-Repair([string]$root, $manifest, [switch]$AllowUnregisterBroken)
 function Invoke-Adopt([string]$root, [string]$distro) {
     Assert-DistroName $distro
     $reg = Get-WslRegistration $distro
-    if (-not $reg -or -not $reg.disk_present) { throw (New-InstallError 'not_found' "No hay una distribución $distro utilizable.") }
+    if (-not $reg -or -not $reg.disk_present) { throw (New-InstallError 'not_found' (T 'There is no usable distribution {0}.' $distro)) }
     $st = Read-InstallState $root
     Set-InstallState $root $st 'checking' @{ distro = $distro; location = $reg.base_path; adopted = $true }
     $check = Test-DistroPayload $distro

@@ -115,9 +115,9 @@ function Get-ArchieRecommendation($machine, $catalog) {
     # The memory a model may take: the GPU's, less room for Windows and the GUI; a machine
     # whose GPU shares its memory keeps 8 GB for the rest; without a GPU, the small ones.
     $why = @()
-    if ($gpu -and $gpu.unified) { $budget = $machine.ram_mb - 8192; $why += "$($gpu.name) comparte {0:N0} GB de memoria con la CPU" -f ($machine.ram_mb / 1024) }
-    elseif ($gpu -and $gpu.vram_mb -gt 0 -and $runtime -ne 'cpu') { $budget = $gpu.vram_mb - 1500; $why += "$($gpu.name) con {0:N0} GB" -f ($gpu.vram_mb / 1024) }
-    else { $budget = 0; $why += 'sin GPU que el runtime use: un modelo pequeño en la CPU' }
+    if ($gpu -and $gpu.unified) { $budget = $machine.ram_mb - 8192; $why += (T '{0} shares {1:N0} GB of memory with the CPU' $gpu.name ($machine.ram_mb / 1024)) }
+    elseif ($gpu -and $gpu.vram_mb -gt 0 -and $runtime -ne 'cpu') { $budget = $gpu.vram_mb - 1500; $why += (T '{0} with {1:N0} GB' $gpu.name ($gpu.vram_mb / 1024)) }
+    else { $budget = 0; $why += (T 'no GPU the runtime can use: a small model on the CPU') }
     $usable = @($catalog | Where-Object { $_.arch -notin $script:ArchieUnknownArches })
     $model = if ($budget -gt 0) {
         $usable | Where-Object { $_.bytes / 1MB -le $budget } | Sort-Object tier, bytes -Descending | Select-Object -First 1
@@ -131,7 +131,7 @@ function Get-ArchieRecommendation($machine, $catalog) {
     $wslPossible = $machine.build -ge 19041 -and $machine.arch -eq 'AMD64'
     $vboxPossible = $machine.arch -eq 'AMD64'
     $backend = if ($wslPossible) { 'wsl' } elseif ($vboxPossible) { 'virtualbox' } else { 'none' }
-    if ($machine.arch -ne 'AMD64') { $why += 'ArchieOS aún no tiene imagen para ARM: este equipo no puede instalarlo todavía' }
+    if ($machine.arch -ne 'AMD64') { $why += (T 'ArchieOS has no ARM image yet: this computer cannot install it yet') }
 
     # The drive with the most room, preferring one other than Windows' own when it has
     # enough for the system and the model: a full system drive froze WSL once.
