@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Talk with Archie. It is always listening, and the floor decides when to answer: when it
-# has been given enough and there is a longer pause. It answers aloud in the language it
+# Talk with Archie. By default it answers when it is called by name ("Archie, ..."); the
+# installer's "everything it hears" (or --always) lets the floor weigh whatever it hears, and
+# it answers when it has been given enough and there is a longer pause. It answers aloud in the language it
 # was spoken to, Spanish or English, each with its own male voice, and opens the
 # applications the Stage's policy names (Kdenlive, the browser) when asked.
 #
@@ -12,8 +13,9 @@
 #   archie-talk --cloud         Nemotron on Nebius answers
 #   archie-talk --nemotron      the all-NVIDIA test: Nemotron 3 Nano Omni (served from Windows by
 #                               archie-omni) hears, sees and answers; Magpie speaks
-#   archie-talk --named         only what starts with "Archie" is weighed: for a room with
-#                               other people talking
+#   archie-talk --named         only what starts with "Archie" is weighed (the default): for
+#                               a room with other people talking
+#   archie-talk --always        whatever is heard is weighed, its name or not
 #
 # What you say is recognised on this machine. Which model answers: the one on this
 # machine once its GPU runtime is built (archie-local gpu), and nothing then leaves;
@@ -23,8 +25,15 @@ set -euo pipefail
 KEY=$HOME/.config/archie/nebius.key
 grade=public
 where=auto
-# Always listening: whatever is heard reaches the floor, its name or not.
-export ALWAYS=1
+# How it listens and in which language: what the installer wrote (profile.json, the same file
+# archie-offline reads), else only when called by name and either language. Options win.
+PROFILE=$HOME/.config/archie/profile.json
+export ALWAYS=0
+if [ -f "$PROFILE" ]; then
+  grep -Eq '"listen"[[:space:]]*:[[:space:]]*"always"' "$PROFILE" && export ALWAYS=1
+  asr=$(grep -Eo '"asr_language"[[:space:]]*:[[:space:]]*"[a-z]{2}-[A-Z]{2}"' "$PROFILE" | grep -Eo '[a-z]{2}-[A-Z]{2}' || true)
+  [ -n "$asr" ] && export LISTEN_LANGUAGE=$asr
+fi
 for option in "$@"; do
   case "$option" in
     --headphones) export HEADPHONES=1 ;;
@@ -34,7 +43,7 @@ for option in "$@"; do
     --always) export ALWAYS=1 ;;
     --named) export ALWAYS=0 ;;
     --spanish) export LISTEN_LANGUAGE=es-US ;;
-    *) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
+    *) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
   esac
 done
 # One voice at a time, decided before anything else is touched: two would hear each
