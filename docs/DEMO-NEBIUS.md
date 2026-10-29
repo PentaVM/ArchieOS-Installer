@@ -122,8 +122,28 @@ rechazadas, con subtítulos y caption, lanzado con `archie-voice draw`. Las herr
 voz, la política de la demo y la narración dentro de la conversación tienen tests
 (`cargo test -p archie-voice`).
 
-No verificado aquí: la conversación con micrófono y parlantes reales (no hay NeMo-Speech ni
-audio en el ensayo), el modelo de Nebius eligiendo `draw_picture`/`open_website`/`click`, la
-fotogrametría de Google a nivel de calle dentro del escritorio, y el rendimiento en la RTX 3070
-bajo WSLg.
-Conviene un ensayo completo antes de grabar.
+### En la RTX 3070 del dueño, bajo WSLg (28-oct)
+
+- **Ensayo sin voz** (`REHEARSE="the Mona Lisa"`): escritorio detrás, Photopea enmarcado, 221
+  líneas en dos tintas, 19 comandos, 0 rechazados, 141 s, sin procesos huérfanos al cerrar.
+  Encontró que el clic en el pincel caía en la herramienta Desenfocar (la columna de Photopea
+  se dibuja a otra escala): ahora el pincel se toma con `b`. Y que una toma cortada dejaba los
+  daemons de World en 17666/17667: ahora la limpieza ignora la segunda señal y el lanzador
+  borra los restos.
+- **Voz desde una grabación** (`WAV_IN`, Piper diciendo la frase): Nemotron en Nebius propone
+  `draw_picture` y Archie responde con su voz. Encontró que Piper moría en la primera respuesta
+  (el puente instalado arrancaba con el Python del sistema) y que el reconocedor deforma «Mona
+  Lisa» («moaner lea», «owner leaser»): ambos arreglados. En español el reconocedor se comió
+  «Archie»; para una persona sola en la sala, `ALWAYS=1`.
+- **Apps del dock por turnos escritos** (`STAGE_ONLY=1` + `archie-voice do`): «open Sentry» y
+  «open World» presionan el ícono del dock (encontrado por accesibilidad en 0,4–1,3 s, sin
+  modelo) y «open the Nebius website» abre el sitio. Hizo falta `GROUND_MODEL` (sin modelo de
+  grounding todo clic se rechazaba), que `open_app` presione el dock en vez de buscar un
+  programa, y esperar 1,5 s el repintado del escritorio dibujado por software.
+- La barra del shell dice «archied en vivo» con Core arriba (World's displayd lee su raíz).
+- Un mouse que se mueve sobre el Stage toma el control (prioridad humana): durante una toma no
+  se toca nada; con `--seats shared` Archie tiene puntero y teclado propios.
+
+No verificado: la conversación con el micrófono y la voz del dueño (con `--wav-in` la voz lee
+el archivo más rápido que en tiempo real y se cierra al poco de empezar el dibujo), y la
+fotogrametría de Google a nivel de calle dentro del escritorio.
