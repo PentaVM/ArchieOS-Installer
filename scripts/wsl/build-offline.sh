@@ -50,9 +50,16 @@ done
 chown -R 1000:1000 "$models/asr" "$models/piper" "$models/bonsai"
 
 # The voices' runtime, pinned as archie-setup installs it, so the first start needs no network.
+# The wheels are fetched here (the root has no resolver) and installed inside without an index.
+wheels=$rootfs/tmp/voice-wheels
+rm -rf "$wheels" && install -d "$wheels"
+python3 -m venv "$wheels.venv"
+"$wheels.venv/bin/pip" download --quiet --dest "$wheels" "piper-tts==1.8.0" "onnxruntime==1.30.0"
+rm -rf "$wheels.venv"
 arch-chroot "$rootfs" bash -c 'rm -rf /opt/archie/voice-venv && python -m venv /opt/archie/voice-venv \
-  && /opt/archie/voice-venv/bin/pip install --quiet --no-cache-dir "piper-tts==1.8.0" "onnxruntime==1.30.0" \
+  && /opt/archie/voice-venv/bin/pip install --quiet --no-index --find-links /tmp/voice-wheels "piper-tts==1.8.0" "onnxruntime==1.30.0" \
   && /opt/archie/voice-venv/bin/python -c "import onnxruntime, piper"'
+rm -rf "$wheels"
 chown -R 1000:1000 "$rootfs/opt/archie/voice-venv"
 # archie-offline serves Bonsai with llama.cpp on the CPU; the image carries the CPU build.
 [[ -e $rootfs/opt/archie/llama-cuda ]] || ln -s llama "$rootfs/opt/archie/llama-cuda"
