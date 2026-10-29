@@ -1,5 +1,22 @@
 # ArchieOS on Windows
 
+## ArchieOS-Setup.exe
+
+The one file the downloads page offers. It carries the launcher, its engine and texts, the
+brand icon and the signed release manifest (`setup/payload.txt`). The first run installs the
+launcher for this Windows user (`Install-ArchieOS-Launcher.ps1`, no administrator) and opens it
+on Install; the exe stays as `%LOCALAPPDATA%\ArchieOS\Launcher\ArchieOS.exe`, which the shortcuts
+open. A newer download installs itself over the old one; a missing file is put back the same
+way. `--install` installs with no window (exit code 0 or 1); every install writes
+`%TEMP%\ArchieOS-Setup.log`.
+
+Source: `setup/ArchieOSSetup.cs` (C# 5, .NET Framework 4: the compiler every Windows has).
+`setup/Build-ArchieOS-Setup.ps1` builds it on Windows with that compiler, `setup/build.sh` on
+Linux with the .NET SDK's (deterministic: the same sources give the same exe), and
+`setup/test-setup-exe.sh` checks its logic there against a stand-in for PowerShell. The window
+and what Windows does (the script, the shortcuts, Settings → Apps) are checked on Windows only.
+`scripts/release/New-Release.ps1` builds it with the manifest it has just signed.
+
 ## Installing
 
 `Install-ArchieOS.cmd` (double-click; no console window). It reads the machine, proposes

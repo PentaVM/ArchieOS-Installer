@@ -13,6 +13,7 @@ are in [INSTALLER.es.md](INSTALLER.es.md) (Spanish).
 | `ArchieOS-i18n.ps1` | The texts: English by default; Spanish, Portuguese, French, German |
 | `archieos-manifest.json` + `.sig` | The pinned release, and its signature |
 | `Install-ArchieOS-Launcher.ps1` | Puts all of the above in `%LOCALAPPDATA%\ArchieOS\Launcher` with shortcuts |
+| `setup/ArchieOSSetup.cs` | `ArchieOS-Setup.exe`: all of the above in one file; installs the launcher, then opens it |
 
 ## Signed releases
 

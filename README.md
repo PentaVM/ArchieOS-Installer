@@ -107,7 +107,7 @@ your light or dark theme.
 
 ArchieOS runs as a Linux system: on a PC, in a virtual machine, or under **WSL2 on Windows**.
 
-**Download and install (Windows).** Get `ArchieOS-Setup-0.1.0.exe` from the [downloads page](https://archieos-hub.vercel.app/descargas.html) or the
+**Download and install (Windows).** Get `ArchieOS-Setup.exe` from the [downloads page](https://archieos-hub.vercel.app/descargas.html) or the
 [latest release](https://github.com/PentaVM/ArchieOS-Installer/releases/latest), and run it (no administrator rights). It installs the launcher and opens it on Install: it checks the PC, offers to
 install WSL, downloads the signed system and verifies it; **Advanced** sets the listening mode, the
 speech-recognition language, the voice, Wanda and the local model.

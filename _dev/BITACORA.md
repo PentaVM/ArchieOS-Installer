@@ -1,5 +1,32 @@
 # Bitácora — ArchieOS-Nvidia
 
+## 2026-10-29 — Claude — ArchieOS-Setup.exe: un solo archivo para instalar en Windows
+
+Pedido del dueño: en la web de descargas, solo un exe (el launcher compilado, que la primera vez
+instala), sin zip. `distro/windows/setup/ArchieOSSetup.cs` (C# 5, .NET Framework 4) lleva dentro
+el launcher, su motor, los textos, el ícono de la marca y el manifiesto firmado
+(`setup/payload.txt`). La primera vez corre `Install-ArchieOS-Launcher.ps1` con una ventanita de
+progreso y abre el launcher en Instalar; queda copiado como `Launcher\ArchieOS.exe` y los accesos
+directos lo abren. Otra compilación (otra descarga) se instala encima; un archivo que falta se
+repone igual. `--install` instala sin ventana; el log queda en `%TEMP%\ArchieOS-Setup.log`.
+Manifiesto `asInvoker`: Windows no pide administrador aunque el nombre diga Setup.
+
+- **Bug arreglado** (también estaba en el zip 0.1.0): `Install-ArchieOS-Launcher.ps1` cerraba todo
+  PowerShell cuyo comando contenía `ArchieOS-Launcher.ps1`, y su propio nombre lo contiene: se
+  mataba a sí mismo. Lo mismo `Uninstall-ArchieOS-Launcher.ps1`. Ahora excluyen su `$PID` y
+  piden la ruta exacta del launcher.
+- **Construcción**: `setup/Build-ArchieOS-Setup.ps1` con el `csc.exe` de Windows;
+  `setup/build.sh` en Linux con el Roslyn del SDK de .NET y los ensamblados de referencia de
+  .NET 4.8 (determinista). `New-Release.ps1` arma el exe en lugar del zip.
+- **Verificado aquí (Linux)**: compila con `-langversion:5`; PE32 AnyCPU (corre en 64 bits),
+  manifiesto `asInvoker`, ícono de 7 tamaños, recurso de versión 0.1.0; los 13 archivos que lleva
+  son byte a byte los del repo; `setup/test-setup-exe.sh` corre el exe en .NET 8 contra un
+  PowerShell falso: instalación, reapertura con argumentos, otra compilación, archivo faltante y
+  fallo con su motivo en el log.
+- **Sin verificar**: nada en Windows. Ni la ventana, ni el script real, ni los accesos directos,
+  ni Configuración → Aplicaciones, ni SmartScreen (el exe no está firmado con código: Windows
+  avisa «Windows protegió tu PC» → Más información → Ejecutar de todas formas).
+
 ## 2026-10-21 — Claude — IRIS C2–C10, archie-accel, S-LINKs, ResourceAdvice, slots del LLM
 
 Pedido del dueño: implementar todos los C y las arquitecturas del plan

@@ -3,14 +3,17 @@
 # Start menu, and one in the Startup folder that brings the node up at sign-in, and lists it
 # in Settings → Apps, from where it is uninstalled like any other application.
 #
-#   .\Install-ArchieOS-Launcher.ps1 [-Distro NAME] [-NoAutostart] [-OpenModelWizard]
+#   .\Install-ArchieOS-Launcher.ps1 [-Distro NAME] [-NoAutostart] [-OpenModelWizard] [-SetupExe PATH]
 #
 # Nothing goes outside this user's profile, and no administrator rights are needed. Run it
 # again to update; Uninstall-ArchieOS-Launcher.ps1 (or Settings → Apps) removes it.
+# ArchieOS-Setup.exe (setup/ArchieOSSetup.cs) runs it from the files it carries and passes
+# itself as -SetupExe: it is copied as ArchieOS.exe, and the shortcuts open that.
 param(
     [string]$Distro = '',
     [switch]$NoAutostart,
-    [switch]$OpenModelWizard
+    [switch]$OpenModelWizard,
+    [string]$SetupExe = ''
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
@@ -18,9 +21,10 @@ $version = '0.1.0'
 $target = Join-Path $env:LOCALAPPDATA 'ArchieOS\Launcher'
 New-Item -ItemType Directory -Force $target | Out-Null
 
-# A launcher already running keeps the old script open: it is asked to close first.
+# A launcher already running keeps the old script open: it is asked to close first. Only the
+# launcher: this script's own name, and the uninstaller's, also end in "ArchieOS-Launcher.ps1".
 Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
-    Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like '*\ArchieOS-Launcher.ps1*' } |
+    Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match '[\\/"\s]ArchieOS-Launcher\.ps1' } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
 # Windows PowerShell 5.1 reads a script without a byte order mark as ANSI: each copy is
@@ -31,10 +35,6 @@ foreach ($script in 'ArchieOS-Launcher.ps1', 'Compact-ArchieOS-Disk.ps1', 'Unins
     [System.IO.File]::WriteAllText((Join-Path $target $script), $source, $utf8Bom)
 }
 Copy-Item (Join-Path $PSScriptRoot 'ArchieOS.vbs') $target -Force
-# ArchieOS-Setup.exe brings itself along as ArchieOS.exe: the shortcuts open it, and it opens the
-# launcher (or installs a newer one first).
-$exe = Join-Path $PSScriptRoot 'ArchieOS.exe'
-if (Test-Path -LiteralPath $exe) { Copy-Item -LiteralPath $exe (Join-Path $target 'ArchieOS.exe') -Force }
 # The release manifest and its signature: the installer refuses a manifest that is not signed.
 foreach ($file in 'archieos-manifest.json', 'archieos-manifest.json.sig') { Copy-Item (Join-Path $PSScriptRoot $file) $target -Force }
 # The AI models the Install tab offers (the same catalog archie-local reads inside ArchieOS): in a
@@ -43,8 +43,18 @@ $catalog = Join-Path $PSScriptRoot 'local-models.tsv'
 if (-not (Test-Path $catalog)) { $catalog = Join-Path $PSScriptRoot '..\wsl-operator\rootfs\usr\share\archie\local-models.tsv' }
 Copy-Item $catalog (Join-Path $target 'local-models.tsv') -Force
 
-# The icon: Archie's orb, drawn here rather than shipped as a binary. A 256-pixel PNG inside
-# an .ico, which Windows scales for the taskbar, the tray and the shortcuts.
+# The exe the downloads page offers is the launcher's own entry: it opens the launcher, and a
+# newer one installs itself over this one. The copy drops the download's mark of the Internet,
+# which would otherwise make Windows warn each time a shortcut opens it.
+$exe = Join-Path $target 'ArchieOS.exe'
+if ($SetupExe -and ((Resolve-Path -LiteralPath $SetupExe).Path -ne $exe)) {
+    Copy-Item -LiteralPath $SetupExe $exe -Force
+    Unblock-File -LiteralPath $exe
+}
+
+# The icon: ArchieOS's mark (display/shell/brand/archieos.ico), which ArchieOS-Setup.exe
+# carries beside this script. Without it (a checkout run by hand), Archie's orb is drawn here: a
+# 256-pixel PNG inside an .ico, which Windows scales for the taskbar, the tray and the shortcuts.
 function New-OrbIcon([string]$path) {
     $size = 256
     $bmp = New-Object System.Drawing.Bitmap $size, $size
@@ -76,9 +86,8 @@ function New-OrbIcon([string]$path) {
     [System.IO.File]::WriteAllBytes($path, $out.ToArray())
 }
 $icon = Join-Path $target 'ArchieOS.ico'
-# The brand's icon when it travels with the setup; otherwise the orb drawn above.
-$brand = Join-Path $PSScriptRoot 'archieos.ico'
-if (Test-Path -LiteralPath $brand) { Copy-Item -LiteralPath $brand $icon -Force } else { New-OrbIcon $icon }
+$brandIcon = Join-Path $PSScriptRoot 'ArchieOS.ico'
+if (Test-Path -LiteralPath $brandIcon) { Copy-Item -LiteralPath $brandIcon $icon -Force } else { New-OrbIcon $icon }
 
 if ($Distro) {
     $settingsDir = Join-Path $env:APPDATA 'ArchieOS'
@@ -93,9 +102,8 @@ if ($Distro) {
 $shell = New-Object -ComObject WScript.Shell
 function New-Link([string]$path, [string]$arguments, [string]$description) {
     $lnk = $shell.CreateShortcut($path)
-    $app = Join-Path $target 'ArchieOS.exe'
-    if (Test-Path -LiteralPath $app) {
-        $lnk.TargetPath = $app
+    if (Test-Path -LiteralPath $exe) {
+        $lnk.TargetPath = $exe
         $lnk.Arguments = $arguments
     } else {
         $lnk.TargetPath = Join-Path $env:WINDIR 'System32\wscript.exe'

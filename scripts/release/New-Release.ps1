@@ -1,6 +1,6 @@
 # Assembles an ArchieOS release for Windows from the built images: the release manifest
 # (pinned to the Hugging Face revision the image was uploaded at), its signature, the
-# installer (ArchieOS-Setup-<version>.exe) and SHA256SUMS.
+# installer (ArchieOS-Setup-VERSION.exe, one file) and SHA256SUMS.
 #
 #   .\New-Release.ps1 -Version 0.1.0 -Image D:\...\ArchieOS-0.1.0.wsl -HfRepo PentaVM/ArchieOS `
 #       -HfRevision <commit> -SourceCommit <commit> [-Ova D:\...\ArchieOS-0.1.0.ova] -Out D:\...\dist
@@ -59,10 +59,11 @@ $manifestPath = Join-Path $Out 'archieos-manifest.json'
 & (Join-Path $PSScriptRoot 'Sign-Release.ps1') sign -Manifest $manifestPath
 & (Join-Path $PSScriptRoot 'Sign-Release.ps1') verify -Manifest $manifestPath
 
-# The installer: one exe that carries the launcher, its engine and texts, the model catalog and
-# this signed manifest (Build-Setup.ps1).
-& (Join-Path $PSScriptRoot 'Build-Setup.ps1') -Manifest $manifestPath -Out $Out -Version $Version
+# The installer: one exe that carries the launcher, its engine and texts, the brand icon and the
+# manifest just signed (distro/windows/setup). Its first run installs the launcher and opens it
+# on Install; after that it opens the launcher.
 $setup = Join-Path $Out "ArchieOS-Setup-$Version.exe"
+& (Join-Path $windows 'setup\Build-ArchieOS-Setup.ps1') -Out $setup -Manifest $manifestPath
 
 $sums = @("$(Get-Sha $setup)  $(Split-Path $setup -Leaf)", "$imageSha  $imageFile")
 if ($Ova) { $sums += "$(Get-Sha $Ova)  $(Split-Path $Ova -Leaf)" }
