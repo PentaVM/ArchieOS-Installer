@@ -1,60 +1,51 @@
 {
-  "schema_version": 1,
-  "release": "wsl-offline-61ad39f",
-  "channel": "draft",
-  "provenance": {
-    "release_page": "https://github.com/PentaVM/ArchieOS-Nvidia/releases (draft untagged-ef9f25c5e2aefe8f333d, ArchieOS WSL · Bonsai2 9B + Xavi design · PR41)",
-    "source_commit": "61ad39fe470d216f4e20ed8c9eb4e3819a5d2ac3",
-    "generated_by": "pinned by hand from the release body; the repository CI does not publish artifacts",
-    "signature": null
-  },
-  "targets": {
-    "windows-x86_64-wsl2": {
-      "mode": "operator-wsl2",
-      "distro_name": "ArchieOS-Bonsai-Xavi",
-      "min_wsl_version": "2.4.4",
-      "min_wsl_memory_bytes": 8589934592,
-      "install_bytes_estimate": 40000000000,
-      "runtime": "archie-offline",
-      "artifacts": [
-        {
-          "id": "operator",
-          "file": "ArchieOS-Bonsai2-9B-Xavi-61ad39f.wsl",
-          "source": "https://huggingface.co/PentaVM/ArchieOS-Bonsai2-9B-WSL/resolve/eea2dfd2ea63e48e47d53063403f64caad661681/ArchieOS-Bonsai2-9B-Xavi-61ad39f.wsl",
-          "auth": "huggingface",
-          "version": "61ad39f (revision eea2dfd2ea63e48e47d53063403f64caad661681)",
-          "size_bytes": 11250696964,
-          "sha256": "3634e03a50e9f36ecc2f0b29208c1dc6dcfc3dfa9d2879867b0b12e9579e5dab",
-          "format": "wsl-tar-gzip",
-          "required": true
-        },
-        {
-          "id": "iris-weights",
-          "file": "iris-beta21-step132000.pt",
-          "embedded_in": "operator",
-          "guest_path": "/var/lib/archie/models/iris/iris-beta21-step132000.pt",
-          "release_asset": "https://github.com/PentaVM/archie-iris/releases/tag/iris-beta2.1-2026-09-28",
-          "version": "IRIS Beta 2.1, step 132000",
-          "size_bytes": 1414806323,
-          "sha256": "c6cadb02f5a5bffc4ea3c3348d32b475ef7531f643675c06c65451037e4f3b97",
-          "license": "non-commercial research: /var/lib/archie/models/iris/LICENSE inside the image",
-          "required": true
-        }
-      ]
-    }
-  },
-  "unavailable": [
-    {
-      "id": "ArchieOS-Operator.wsl + SHA256SUMS + install-archie-operator.ps1",
-      "reason": "PentaVM/ArchieOS-Nvidia has no release with assets: scripts/wsl/build-operator.sh exists, but the Operator image was never published."
-    },
-    {
-      "id": "virtualbox",
-      "reason": "No OVA image is published yet."
-    },
-    {
-      "id": "linux-native",
-      "reason": "Only archiso ISOs exist (PentaVM/ArchieOS v0.1.0-alpha.2): they are boot media, not a package that installs on a running Linux."
-    }
-  ]
+    "schema_version":  1,
+    "release":  "0.1.0",
+    "channel":  "alpha",
+    "provenance":  {
+                       "release_page":  "https://github.com/PentaVM/ArchieOS-Installer/releases/tag/v0.1.0",
+                       "source_commit":  "335e106b0f02643295303414fc5180a3c147cf81",
+                       "generated_by":  "scripts/release/New-Release.ps1 from scripts/wsl/build-offline.sh",
+                       "signature":  "archieos-manifest.json.sig (ECDSA P-256, scripts/release/Sign-Release.ps1)"
+                   },
+    "targets":  {
+                    "windows-x86_64-wsl2":  {
+                                                "mode":  "operator-wsl2",
+                                                "distro_name":  "ArchieOS",
+                                                "min_wsl_version":  "2.4.4",
+                                                "min_wsl_memory_bytes":  8589934592,
+                                                "install_bytes_estimate":  40000000000,
+                                                "runtime":  "archie-offline",
+                                                "artifacts":  [
+                                                                  {
+                                                                      "id":  "operator",
+                                                                      "file":  "ArchieOS-0.1.0.wsl",
+                                                                      "source":  "https://huggingface.co/PentaVM/ArchieOS/resolve/d3a1191175203b47100f1271177ac2fad3548b3f/ArchieOS-0.1.0.wsl",
+                                                                      "version":  "0.1.0 (source 335e106, revision d3a1191175203b47100f1271177ac2fad3548b3f)",
+                                                                      "size_bytes":  4405018893,
+                                                                      "sha256":  "780c750d7c361e00b39864c49980b89456b2dc6ad7291b40cdcf821093bbe8e0",
+                                                                      "format":  "wsl-tar-gzip",
+                                                                      "required":  true
+                                                                  },
+                                                                  {
+                                                                      "id":  "iris-weights",
+                                                                      "file":  "iris-beta21-step132000.pt",
+                                                                      "embedded_in":  "operator",
+                                                                      "guest_path":  "/var/lib/archie/models/iris/iris-beta21-step132000.pt",
+                                                                      "release_asset":  "https://github.com/PentaVM/archie-iris/releases/tag/iris-beta2.1-2026-09-28",
+                                                                      "version":  "IRIS Beta 2.1, step 132000",
+                                                                      "size_bytes":  1414806323,
+                                                                      "sha256":  "c6cadb02f5a5bffc4ea3c3348d32b475ef7531f643675c06c65451037e4f3b97",
+                                                                      "license":  "non-commercial research: /var/lib/archie/models/iris/LICENSE inside the image",
+                                                                      "required":  true
+                                                                  }
+                                                              ]
+                                            }
+                },
+    "unavailable":  [
+                        {
+                            "id":  "linux-native",
+                            "reason":  "Only archiso ISOs exist (PentaVM/ArchieOS v0.1.0-alpha.2): they are boot media, not a package that installs on a running Linux."
+                        }
+                    ]
 }
