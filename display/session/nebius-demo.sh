@@ -81,7 +81,14 @@ user_pref("media.autoplay.default", 5);
 user_pref("browser.download.folderList", 2);
 user_pref("browser.download.dir", "$RUN_DIR/downloads");
 user_pref("browser.download.useDownloadDir", true);
+user_pref("browser.crashReports.unsubmittedCheck.enabled", false);
+user_pref("browser.tabs.crashReporting.sendReport", false);
 EOF
+# The browser draws only on the stage: when a take ends the stage goes and the browser loses
+# its display, which Firefox counts as a crash and reports in a window of its own on the
+# person's screen, take after take. It gets no crash reporter, and it is closed when the
+# take ends, before anything else is.
+export MOZ_CRASHREPORTER_DISABLE=1
 
 # The policy this take runs with: the demo's, with this machine's browser and profile.
 POLICY=$RUN_DIR/apps.toml
@@ -115,4 +122,9 @@ if [ -z "${WORLD_BIN_DIR:-}" ] && [ -x "$release/archie" ] && [ -x "$release/arc
     && [ -x "$release/archie-displayd" ]; then
     export WORLD_BIN_DIR=$release
 fi
-exec "$RUN_ARCHIE" public
+# Not exec: once the take ends, however it ends, this take's browser goes too, so none is
+# left drawing to a stage that is gone.
+trap 'pkill -TERM -f -- "--profile $PROFILE" 2>/dev/null || true' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+"$RUN_ARCHIE" public
