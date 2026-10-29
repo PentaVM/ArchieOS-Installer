@@ -12,7 +12,7 @@ class OfflineBundle(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = pathlib.Path(self.tmp.name)
         self.files = {}
-        for role in ['bonsai', 'asr', 'piper_es', 'piper_en', 'iris']:
+        for role in ['asr', 'piper_es', 'piper_en', 'iris']:
             rel = '/var/lib/archie/models/' + role
             path = self.root / rel.lstrip('/')
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -34,18 +34,18 @@ class OfflineBundle(unittest.TestCase):
             self.module.verify_bundle(self.root)
 
     def test_corrupted_model_is_rejected(self):
-        (self.root / self.files['bonsai']['path'].lstrip('/')).write_bytes(b'broken')
-        with self.assertRaisesRegex(ValueError, 'bonsai'):
+        (self.root / self.files['asr']['path'].lstrip('/')).write_bytes(b'broken')
+        with self.assertRaisesRegex(ValueError, 'asr'):
             self.module.verify_bundle(self.root)
 
     def test_path_escape_is_rejected(self):
-        self.files['bonsai']['path'] = '/../../outside'; self.write_manifest()
+        self.files['asr']['path'] = '/../../outside'; self.write_manifest()
         with self.assertRaisesRegex(ValueError, 'path'):
             self.module.verify_bundle(self.root)
 
     def test_symlink_escape_is_rejected(self):
         if not hasattr(pathlib.Path, 'symlink_to'): self.skipTest('no symlinks')
-        path = self.root / self.files['bonsai']['path'].lstrip('/')
+        path = self.root / self.files['asr']['path'].lstrip('/')
         path.unlink()
         try: path.symlink_to(self.root.parent / 'outside')
         except OSError: self.skipTest('symlinks unavailable')
@@ -116,15 +116,37 @@ class OfflineBundle(unittest.TestCase):
 
     def test_voice_command_changes_only_what_the_profile_asks(self):
         models = {k: {'path': '/m/' + k} for k in ['asr', 'piper_es', 'piper_en']}
-        base = self.module.voice_arguments(self.module.PROFILE_DEFAULTS, models)
+        base = self.module.voice_arguments(self.module.PROFILE_DEFAULTS, models, 'http://127.0.0.1:8082/v1', 'bonsai-27b')
+        self.assertEqual(base[base.index('--endpoint') + 1], 'http://127.0.0.1:8082/v1')
+        self.assertEqual(base[base.index('--model') + 1], 'bonsai-27b')
         self.assertNotIn('--always', base)
         self.assertNotIn('--listen-language', base)
         self.assertNotIn('--headphones', base)
         custom = dict(self.module.PROFILE_DEFAULTS, asr_language='en-US', listen='always', headphones=True)
-        command = self.module.voice_arguments(custom, models)
+        command = self.module.voice_arguments(custom, models, 'http://127.0.0.1:8082/v1', 'bonsai-27b')
         self.assertEqual(command[command.index('--listen-language') + 1], 'en-US')
         self.assertIn('--always', command)
         self.assertIn('--headphones', command)
         self.assertEqual(command[:len(base)], base)
+
+    def test_the_image_carries_no_reasoning_model(self):
+        self.assertNotIn('bonsai', self.module.REQUIRED)
+        self.module.verify_bundle(self.root)
+
+    def fake_archie_local(self, models, current='27b http://127.0.0.1:8082/v1 bonsai-27b'):
+        def run(argv, **_):
+            out = json.dumps(models) if argv[1:] == ['list', '--json'] else current + '\n'
+            return subprocess.CompletedProcess(argv, 0, out, '')
+        self.module.subprocess.run, original = run, self.module.subprocess.run
+        self.addCleanup(setattr, self.module.subprocess, 'run', original)
+
+    def test_chosen_model_is_what_answers(self):
+        self.fake_archie_local([{'name': '27b', 'here': True}, {'name': '9b', 'here': False}])
+        self.assertEqual(self.module.local_model(), ('27b', 'http://127.0.0.1:8082/v1', 'bonsai-27b'))
+
+    def test_no_model_installed_says_where_to_choose_one(self):
+        self.fake_archie_local([{'name': '27b', 'here': False}])
+        with self.assertRaisesRegex(ValueError, 'launcher'):
+            self.module.local_model()
 
 if __name__ == '__main__': unittest.main()

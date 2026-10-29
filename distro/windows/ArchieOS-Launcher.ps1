@@ -40,6 +40,9 @@ function Read-Settings {
         backend = 'wsl'; distro = ''; vm = 'ArchieOS'
         open_gui_on_start = $true; gui_mode = 'shell'; gui_software = $false
         voice_on_start = $false; voice_always = $false; lang = ''; asr_language = 'es-US'; voice_enabled = $true; headphones = $false; wanda_enabled = $false; advanced = $false
+        # The AI model the installer fetches (a local-models.tsv name): ArchieOS needs one, and the
+        # image carries none.
+        local_model = ''
         # At sign-in the window says it is about to start, and waits this long for a "no".
         autostart_delay_s = 10; show_all_models = $false
         # Where Instalar ArchieOS put it (downloads, the WSL disk, its state and logs).
@@ -383,7 +386,7 @@ if (Test-Path $installer) { . $installer }
                   <Button x:Name="InstFixDeps" Content="Install requirements" Margin="0,0,8,8"/>
                 </WrapPanel>
                 <TextBlock Style="{StaticResource Label}" Text="6 · ARCHIE'S SETTINGS"/>
-                <TextBlock Foreground="#8D8C9C" TextWrapping="Wrap" Margin="0,0,0,6" Text="Written inside ArchieOS; they apply the next time it starts. The local model is chosen in the Local model tab."/>
+                <TextBlock Foreground="#8D8C9C" TextWrapping="Wrap" Margin="0,0,0,6" Text="Written inside ArchieOS; they apply the next time it starts."/>
                 <StackPanel Margin="0,0,0,10">
                   <TextBlock Text="Listening" Foreground="#8D8C9C" Margin="0,0,0,2"/>
                   <RadioButton x:Name="InstListenNamed" Content="Only when I call it by name (default)" GroupName="listen"/>
@@ -395,7 +398,11 @@ if (Test-Path $installer) { . $installer }
                   <CheckBox x:Name="InstWandaBox" Content="Wanda (needs ~/.config/archie/wanda/wanda.toml)"/>
                   <Button x:Name="InstApplyProfile" Content="Apply settings" HorizontalAlignment="Left" Margin="0,8,0,0"/>
                 </StackPanel>
-                <TextBlock Style="{StaticResource Label}" Text="7 · COMPONENTS"/>
+                <TextBlock Style="{StaticResource Label}" Text="7 · AI MODEL (REQUIRED)"/>
+                <TextBlock Foreground="#8D8C9C" TextWrapping="Wrap" Margin="0,0,0,6" Text="The model that thinks and answers, on this machine. None comes inside the image: the one chosen here is downloaded during the installation. Others can be added or switched later in the Local model tab."/>
+                <ComboBox x:Name="InstModelBox" HorizontalAlignment="Left" MinWidth="380"/>
+                <TextBlock x:Name="InstModelNote" Foreground="#8D8C9C" FontSize="12" TextWrapping="Wrap" Margin="0,6,0,14"/>
+                <TextBlock Style="{StaticResource Label}" Text="8 · COMPONENTS"/>
                 <StackPanel x:Name="InstArtifacts" Margin="0,0,0,8"/>
                 <ProgressBar x:Name="InstBar" Visibility="Collapsed" Margin="0,4,0,6"/>
                 <TextBlock x:Name="InstProgressText" Foreground="#B9B8C4" FontSize="12" Margin="0,0,0,8"/>
@@ -1196,6 +1203,10 @@ function Invoke-InstallFixDeps {
     }
 }
 function Invoke-InstallGo {
+    # What is on screen is what gets installed: the settings and the model, saved first.
+    Save-InstallChoices
+    $model = @($script:modelCatalog | Where-Object { $_.name -eq $script:cfg.local_model })[0]
+    if (-not $model) { Show-Message (T 'Choose the AI model first (7 · AI model): ArchieOS needs one, and none comes inside the image.') | Out-Null; return }
     $root = $ui.InstRoot.Text.Trim()
     $distro = Get-InstallDistro
     if (-not $root -or -not [System.IO.Path]::IsPathRooted($root)) { Show-Message (T 'Choose a folder with its full path, like X:\ArchieOS.') | Out-Null; return }
@@ -1207,8 +1218,8 @@ function Invoke-InstallGo {
         return
     }
     $need = Get-RequiredBytes $root $image (Get-Target $script:installManifest) $script:installState
-    $answer = Show-Message ((T 'Install ArchieOS {0}:\n\n• Download {1} ({2}) from {3}, with its SHA-256 checked, to {4}\downloads\n• Import it into WSL as {5}, with its disk in {4}\wsl\{5}\n• Prepare its keys and check each model (IRIS included)\n\nAbout {6} free are needed. No other distribution is touched. Continue?') -f `
-        $script:installManifest.release, $image.file, (Format-Bytes $need.download), ([Uri]$image.source).Host, $root, $distro, (Format-Bytes $need.total)) 'YesNo' 'Question'
+    $answer = Show-Message (((T 'AI model: {0} ({1}), downloaded and checked during the installation.') -f $model.label, (Format-Bytes $model.bytes)) + "`n`n" + (T 'Install ArchieOS {0}:\n\n• Download {1} ({2}) from {3}, with its SHA-256 checked, to {4}\downloads\n• Import it into WSL as {5}, with its disk in {4}\wsl\{5}\n• Prepare its keys and check each model (IRIS included)\n\nAbout {6} free are needed. No other distribution is touched. Continue?') -f `
+        $script:installManifest.release, $image.file, (Format-Bytes $need.download), ([Uri]$image.source).Host, $root, $distro, (Format-Bytes ($need.total + $model.bytes))) 'YesNo' 'Question'
     if ($answer -ne 'Yes') { return }
     $script:cfg.install_root = $root; $script:cfg.install_distro = $distro; Save-Settings
     Add-Log (T 'Install: {0} ({1})' $root $distro)
@@ -1327,13 +1338,43 @@ $ui.InstListenNamed.IsChecked = -not [bool]$script:cfg.voice_always
 $ui.InstVoiceBox.IsChecked = [bool]$script:cfg.voice_enabled
 $ui.InstHeadphonesBox.IsChecked = [bool]$script:cfg.headphones
 $ui.InstWandaBox.IsChecked = [bool]$script:cfg.wanda_enabled
-$ui.InstApplyProfile.Add_Click({
+# The AI model (Install tab): the catalog that travels beside the launcher, with what fits this
+# PC first (ArchieOS-Machine.ps1); the person's earlier choice wins.
+$script:modelCatalog = @()
+$catalogFile = Join-Path $PSScriptRoot 'local-models.tsv'
+if ((Get-Command Read-ArchieCatalog -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath $catalogFile)) {
+    $script:modelCatalog = @(Read-ArchieCatalog $catalogFile | Sort-Object tier, bytes -Descending)
+}
+$script:modelRecommended = ''
+if (-not $script:cfg.local_model -and $script:modelCatalog.Count) {
+    try { $script:modelRecommended = [string](Get-ArchieRecommendation (Get-ArchieMachine) $script:modelCatalog).model } catch { }
+}
+foreach ($m in $script:modelCatalog) {
+    $tag = if ($m.name -eq $script:modelRecommended) { '  · ' + (T 'recommended for this PC') } else { '' }
+    [void]$ui.InstModelBox.Items.Add(('{0} — {1}{2}' -f $m.label, (Format-Bytes $m.bytes), $tag))
+}
+$preferred = if ($script:cfg.local_model) { $script:cfg.local_model } else { $script:modelRecommended }
+$ui.InstModelBox.SelectedIndex = [array]::IndexOf(@($script:modelCatalog | ForEach-Object { $_.name }), $preferred)
+function Update-ModelNote {
+    $m = if ($ui.InstModelBox.SelectedIndex -ge 0) { $script:modelCatalog[$ui.InstModelBox.SelectedIndex] } else { $null }
+    $ui.InstModelNote.Text = if (-not $script:modelCatalog.Count) { T 'local-models.tsv is missing next to the launcher: reinstall it with Setup-ArchieOS.cmd.' }
+        elseif (-not $m) { T 'Choose one: it is required.' }
+        else { (T '{0}: {1}, licence {2}, from huggingface.co/{3}.') -f $m.label, (Format-Bytes $m.bytes), $m.license, $m.repo }
+}
+$ui.InstModelBox.Add_SelectionChanged({ Update-ModelNote })
+Update-ModelNote
+
+function Save-InstallChoices {
     $script:cfg.asr_language = @($script:asrLanguages.Keys)[[Math]::Max(0, $ui.InstAsrBox.SelectedIndex)]
     $script:cfg.voice_always = [bool]$ui.InstListenAlways.IsChecked
     $script:cfg.voice_enabled = [bool]$ui.InstVoiceBox.IsChecked
     $script:cfg.headphones = [bool]$ui.InstHeadphonesBox.IsChecked
     $script:cfg.wanda_enabled = [bool]$ui.InstWandaBox.IsChecked
+    if ($ui.InstModelBox.SelectedIndex -ge 0) { $script:cfg.local_model = $script:modelCatalog[$ui.InstModelBox.SelectedIndex].name }
     Save-Settings
+}
+$ui.InstApplyProfile.Add_Click({
+    Save-InstallChoices
     $ui.VoiceAlwaysBox.IsChecked = $script:cfg.voice_always
     $st = $script:installState
     if ($st -and $st.distro) {

@@ -40,8 +40,18 @@ Install tab → **Archie's settings** (also saved to `%APPDATA%\ArchieOS\launche
 The installer writes them inside the distribution as `~/.config/archie/profile.json`
 (`ArchieOS-Installer.ps1 configure -Root DIR`), and `archie-offline` reads them each time it starts
 (`distro/wsl-operator/rootfs/usr/lib/archie/offline-session.py`, tested in `scripts/wsl/test_offline_bundle.py`).
-Wanda starts only if `~/.config/archie/wanda/wanda.toml` exists: the image ships none. The local model is
-chosen in the **Local model** tab (`archie-local`).
+Wanda starts only if `~/.config/archie/wanda/wanda.toml` exists: the image ships none.
+
+## The AI model
+
+The image carries **no reasoning model**: nobody should download one only to delete it for another.
+Install tab → **7 · AI model (required)** lists the catalog (`local-models.tsv`, the same one
+`archie-local` reads inside ArchieOS) with the one that fits this PC marked *recommended*
+(`ArchieOS-Machine.ps1`: the GPU's memory, or a small model for the CPU). Install refuses to start
+without one. After the import, the installer fetches the GPU runtime when an NVIDIA GPU is visible
+(`archie-local gpu`), downloads the chosen model checked against its digest (`archie-local setup`)
+and starts it (`archie-local use`); `archie-offline` then serves whatever `archie-local` chose.
+More models can be added, switched or removed later in the **Local model** tab.
 
 **These settings reach a running image only after it is rebuilt with this `offline-session.py`.** An image
 built before it ignores the profile.

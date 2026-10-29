@@ -67,6 +67,7 @@ $files = 'Setup-ArchieOS.cmd', 'Install-ArchieOS-Launcher.ps1', 'Uninstall-Archi
     'ArchieOS-Installer.ps1', 'ArchieOS-i18n.ps1', 'ArchieOS-Machine.ps1', 'ArchieOS-HostModel.ps1',
     'Compact-ArchieOS-Disk.ps1', 'ArchieOS.vbs', 'INSTALLER.md', 'INSTALLER.es.md'
 foreach ($f in $files) { Copy-Item (Join-Path $windows $f) $stage }
+Copy-Item (Join-Path $repo 'distro\wsl-operator\rootfs\usr\share\archie\local-models.tsv') $stage
 # cmd.exe reads batch files line by line: they travel with CRLF.
 $cmd = Join-Path $stage 'Setup-ArchieOS.cmd'
 [IO.File]::WriteAllText($cmd, (([IO.File]::ReadAllText($cmd) -replace "`r`n", "`n") -replace "`n", "`r`n"), (New-Object Text.ASCIIEncoding))

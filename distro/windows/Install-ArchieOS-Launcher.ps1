@@ -33,6 +33,11 @@ foreach ($script in 'ArchieOS-Launcher.ps1', 'Compact-ArchieOS-Disk.ps1', 'Unins
 Copy-Item (Join-Path $PSScriptRoot 'ArchieOS.vbs') $target -Force
 # The release manifest and its signature: the installer refuses a manifest that is not signed.
 foreach ($file in 'archieos-manifest.json', 'archieos-manifest.json.sig') { Copy-Item (Join-Path $PSScriptRoot $file) $target -Force }
+# The AI models the Install tab offers (the same catalog archie-local reads inside ArchieOS): in a
+# release zip it sits beside this script; in a checkout, in the image's tree.
+$catalog = Join-Path $PSScriptRoot 'local-models.tsv'
+if (-not (Test-Path $catalog)) { $catalog = Join-Path $PSScriptRoot '..\wsl-operator\rootfs\usr\share\archie\local-models.tsv' }
+Copy-Item $catalog (Join-Path $target 'local-models.tsv') -Force
 
 # The icon: Archie's orb, drawn here rather than shipped as a binary. A 256-pixel PNG inside
 # an .ico, which Windows scales for the taskbar, the tray and the shortcuts.

@@ -648,7 +648,8 @@ function Test-ArtifactFormat([string]$path, [string]$format) {
 
 # ---- RuntimeController -------------------------------------------------------------------------------------
 # Asked inside the distribution, in one go: the processes archie-offline started and owns
-# (its pid and start time, as it records them), Core's status, the display's API and Bonsai.
+# (its pid and start time, as it records them), Core's status, the display's API and the AI model
+# the person chose, which archie-local serves.
 $script:HealthProbe = @'
 import json, subprocess, urllib.request, pathlib
 state = pathlib.Path('/home/archie/.local/state/archie-offline')
@@ -660,7 +661,7 @@ def owned(name):
         return fields[0] != 'Z' and fields[19] == record['start_ticks']
     except Exception:
         return False
-for name in ['bonsai', 'core', 'displayd', 'display', 'voice']:
+for name in ['core', 'displayd', 'display', 'voice']:
     result[name] = owned(name)
 try:
     result['core_status'] = subprocess.run(['archie', '--root', str(state / 'node'), 'status'], capture_output=True, timeout=5).returncode == 0
@@ -674,8 +675,14 @@ def get(url):
         return None
 lumen = get('http://127.0.0.1:7666/api/orb/lumen')
 result['display_api'] = bool(lumen and lumen.get('root_id'))
-health = get('http://127.0.0.1:8081/health')
-result['bonsai_health'] = bool(health and health.get('status') == 'ok')
+try:
+    models = json.loads(subprocess.run(['archie-local', 'list', '--json'], capture_output=True, text=True, timeout=30).stdout)
+except Exception:
+    models = []
+chosen = [m for m in models if m.get('chosen')]
+result['model_name'] = chosen[0]['name'] if chosen else ''
+result['model'] = bool(chosen and chosen[0].get('here'))
+result['model_health'] = bool(chosen and chosen[0].get('answering'))
 print(json.dumps(result))
 '@
 function Get-LastJsonLine([string]$text) {
@@ -691,9 +698,9 @@ function Test-ArchieHealth([string]$distro) {
     $c = Get-LastJsonLine $r.out
     if (-not $c) { $h.detail = (T 'could not read the state: {0}' $($r.err.Trim())); return $h }
     $h.components = $c
-    $h.ok = $c.core -and $c.core_status -and $c.displayd -and $c.display -and $c.display_api -and $c.bonsai -and $c.bonsai_health
-    $missing = @('core', 'core_status', 'displayd', 'display', 'display_api', 'bonsai', 'bonsai_health' | Where-Object { -not $c.$_ })
-    $h.detail = if ($h.ok) { 'Core, displayd, escritorio y Bonsai responden' } else { 'no responden: ' + ($missing -join ', ') }
+    $h.ok = $c.core -and $c.core_status -and $c.displayd -and $c.display -and $c.display_api -and $c.model -and $c.model_health
+    $missing = @('core', 'core_status', 'displayd', 'display', 'display_api', 'model', 'model_health' | Where-Object { -not $c.$_ })
+    $h.detail = if ($h.ok) { (T 'Core, displayd, the desktop and {0} answer' $c.model_name) } else { (T 'not answering: {0}' ($missing -join ', ')) }
     return $h
 }
 # WSL stops a distribution once no wsl.exe is attached to it, background services and all; a
@@ -901,6 +908,33 @@ function Import-Distro([string]$distro, [string]$location, [string]$image) {
         throw (New-InstallError 'import' (T 'wsl --import failed: {0}' $(($r.err + $r.out).Trim())))
     }
 }
+# The AI model the person chose in the launcher (launcher.json local_model): the image carries
+# none, so nobody downloads one only to delete it. One is required. archie-local fetches it,
+# checked against its digest, and serves it; with an NVIDIA GPU it first fetches the GPU runtime.
+function Get-ChosenModel {
+    try {
+        $file = Join-Path $env:APPDATA 'ArchieOS\launcher.json'
+        if (Test-Path -LiteralPath $file) {
+            $name = [string]((Get-Content -LiteralPath $file -Raw -Encoding UTF8 | ConvertFrom-Json).local_model)
+            if ($name -cmatch '^[a-z0-9][a-z0-9._-]{0,40}$') { return $name }
+        }
+    } catch { }
+    return ''
+}
+function Install-LocalModel([string]$distro, [string]$model) {
+    $gpu = Invoke-Guest $distro 'root' @('/bin/sh', '-c', 'command -v nvidia-smi >/dev/null && nvidia-smi >/dev/null 2>&1') 60
+    if ($gpu.code -eq 0) {
+        Write-Step (T 'NVIDIA GPU found: fetching its runtime (archie-local gpu, about a quarter of a gigabyte)')
+        $r = Invoke-Guest $distro 'root' @('/usr/bin/archie-local', 'gpu') 1800
+        if ($r.code -ne 0) { Write-Step (T 'The GPU runtime could not be installed ({0}); the model runs on the CPU' $((($r.err + $r.out).Trim() -split "`r?`n" | Select-Object -Last 1))) }
+    }
+    Write-Step (T 'Downloading {0} (archie-local setup; checked against its digest)' $model)
+    $r = Invoke-Guest $distro $script:GuestUser @('/usr/bin/archie-local', 'setup', $model) 43200
+    if ($r.code -ne 0) { throw (New-InstallError 'model' (T 'The AI model {0} could not be downloaded: {1}' $model $((($r.err + $r.out).Trim() -split "`r?`n" | Select-Object -Last 1)))) }
+    Write-Step (T 'Starting {0} (archie-local use)' $model)
+    $r = Invoke-Guest $distro $script:GuestUser @('/usr/bin/archie-local', 'use', $model) 3600
+    if ($r.code -ne 0) { throw (New-InstallError 'model' (T 'The AI model {0} did not start: {1}' $model $((($r.err + $r.out).Trim() -split "`r?`n" | Select-Object -Last 1)))) }
+}
 function Invoke-Install([string]$root, $manifest, [string]$distroName = '') {
     $target = Get-Target $manifest
     $image = Get-ImageArtifact $manifest
@@ -911,6 +945,8 @@ function Invoke-Install([string]$root, $manifest, [string]$distroName = '') {
         Write-Step (T 'ArchieOS is already installed in {0} ({1}).' $root $($st.distro))
         return @{ state = $st.state; distro = $st.distro; already = $true }
     }
+    $model = Get-ChosenModel
+    if (-not $model) { throw (New-InstallError 'model' (T 'Choose the AI model first (Install → AI model): ArchieOS needs one, and none comes inside the image.')) }
     Remove-Item -LiteralPath (Join-Path $root 'state\cancel') -ErrorAction SilentlyContinue
     Set-InstallState $root $st 'checking' @{ release = $manifest.release; target = 'windows-x86_64-wsl2'; distro = $distroName
         location = (Join-Path $root "wsl\$distroName"); error = $null; error_code = $null; job_pid = $PID }
@@ -944,6 +980,7 @@ function Invoke-Install([string]$root, $manifest, [string]$distroName = '') {
         Initialize-Distro $distroName
         [void](Write-GuestProfile $distroName)
         $check = Test-DistroPayload $distroName
+        Install-LocalModel $distroName $model
     } catch {
         Set-InstallState $root $st 'repairable' @{ error = $_.Exception.Message; error_code = (Get-ErrorCode $_.Exception); job_pid = $null }
         throw
@@ -951,7 +988,7 @@ function Invoke-Install([string]$root, $manifest, [string]$distroName = '') {
     $embedded = @($target.artifacts | Where-Object { $_.embedded_in } | ForEach-Object {
         [pscustomobject]@{ id = $_.id; guest_path = $_.guest_path; sha256 = $_.sha256; size_bytes = $_.size_bytes; version = $_.version; verified_by = 'archie-offline --check' } })
     [void]$checkpoints.Add('initialized')
-    Set-InstallState $root $st 'installed' @{ embedded = $embedded; source_sha = $check.source_sha; checkpoints = $checkpoints
+    Set-InstallState $root $st 'installed' @{ embedded = $embedded; source_sha = $check.source_sha; checkpoints = $checkpoints; model = $model
         installed_at = (Get-Date).ToUniversalTime().ToString('o'); job_pid = $null }
     Remove-Item -LiteralPath (Join-Path $root 'state\progress.json') -ErrorAction SilentlyContinue
     return @{ state = 'installed'; distro = $distroName; location = $st.location; release = $manifest.release }

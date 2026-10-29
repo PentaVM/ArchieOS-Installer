@@ -12,7 +12,24 @@ import subprocess
 import time
 import urllib.request
 
-REQUIRED = {'bonsai', 'asr', 'piper_es', 'piper_en', 'iris'}
+# What the image carries. The reasoning model is not among them: the person chooses it when
+# installing (the launcher's AI model, archie-local setup) and archie-local serves it.
+REQUIRED = {'asr', 'piper_es', 'piper_en', 'iris'}
+
+def local_model():
+    """The model archie-local serves: its name, endpoint and alias, from `archie-local current`,
+    once it is here. None of them is in the image; without one there is nothing to answer."""
+    try:
+        models = json.loads(subprocess.run(['archie-local', 'list', '--json'], capture_output=True,
+                                           text=True, check=True, timeout=60).stdout)
+        name, endpoint, alias = subprocess.run(['archie-local', 'current'], capture_output=True,
+                                               text=True, check=True, timeout=30).stdout.split()
+    except (OSError, ValueError, subprocess.SubprocessError):
+        raise ValueError('archie-local cannot list the local models')
+    if not any(m.get('name') == name and m.get('here') for m in models):
+        raise ValueError('no AI model is installed yet: choose one in the ArchieOS launcher '
+                         '(Install → AI model), or run archie-local setup <name> and archie-local use <name>')
+    return name, endpoint, alias
 
 def verify_bundle(prefix=Path('/')):
     prefix = prefix.resolve()
@@ -62,11 +79,12 @@ def load_profile(path=None):
             profile[key] = raw[key]
     return profile
 
-def voice_arguments(profile, models):
-    """The archie-voice converse command line for a profile. Always listening is opt-in: by default
-    only what is addressed to Archie reaches the floor."""
+def voice_arguments(profile, models, endpoint, alias):
+    """The archie-voice converse command line for a profile, answered by the chosen local model at
+    endpoint (its alias names it there). Always listening is opt-in: by default only what is
+    addressed to Archie reaches the floor."""
     command = ['archie-voice', 'converse', '--grade', 'internal', '--endpoint',
-               'http://127.0.0.1:8081/v1', '--model', 'bonsai', '--timeout-seconds', '600',
+               endpoint, '--model', alias, '--timeout-seconds', '600',
                '--budget', 'sentence', '--language', 'es-CL', '--asr-model', models['asr']['path'],
                '--voice-engine', 'piper', '--piper', '/usr/lib/archie/piper-json-bridge.py',
                '--piper-model', models['piper_es']['path'], '--piper-model-en', models['piper_en']['path'],
@@ -123,7 +141,7 @@ def start(manifest, voice=True):
 
     # Check all fixed endpoints before starting anything. Existing unowned services
     # are never replaced, adopted or killed, including another WSL distribution.
-    for port, name in [(8081, 'bonsai'), (7666, 'displayd'), (7668, 'display')]:
+    for port, name in [(7666, 'displayd'), (7668, 'display')]:
         with socket.socket() as probe:
             if probe.connect_ex(('127.0.0.1', port)) == 0 and not owned(name):
                 raise ValueError(f'loopback port {port} belongs to another service; it was preserved')
@@ -160,33 +178,16 @@ def start(manifest, voice=True):
         with os.fdopen(fd, 'w') as output:
             json.dump({'connection': 'host=' + str(sock) + ' user=archie dbname=archie_offline',
                        'schema': 'archie_offline'}, output)
-    model = root / 'etc/models/bonsai.toml'
+    # The model the person chose, served by archie-local on its own port, and Core's manifest
+    # for it, written once from archie-local's catalog.
+    name, endpoint, alias = local_model()
+    model = root / 'etc/models' / ('local-' + name + '.toml')
     if not model.exists():
-        model.write_text('''id = "local.bonsai2-9b"
-display_name = "Bonsai2 9B local"
-provider = "open-ai-compatible"
-locality = "local"
-context_window = 4096
-max_output_tokens = 512
-capabilities = ["cognition.response", "cognition.reasoning"]
-max_privacy_grade = "restricted"
-availability = "ready"
-quality_tier = 0
-latency_ema_ms = 0
-[cost]
-input_micros_per_mtok = 0
-output_micros_per_mtok = 0
-[labels]
-provider-model = "bonsai"
-base-url = "http://127.0.0.1:8081/v1"
-''')
+        model.write_text(subprocess.run(['archie-local', 'manifest', name], capture_output=True,
+                                        text=True, check=True).stdout)
+    if subprocess.run(['archie-local', 'up'], stdin=subprocess.DEVNULL).returncode:
+        raise ValueError(name + ' did not start; see ~/.archie/local/' + name + '.log')
     models = manifest['files']
-    # CPU is the conservative offline default; no CUDA process or training is started.
-    spawn('bonsai', ['/opt/archie/llama-cuda/bin/llama-server', '--model', models['bonsai']['path'],
-                    '--host', '127.0.0.1', '--port', '8081', '--alias', 'bonsai', '--jinja',
-                    '--ctx-size', '4096', '--threads', '2', '--threads-batch', '2', '--parallel', '1',
-                    '--n-gpu-layers', '0', '--device', 'none', '--predict', '160'],
-          {'CUDA_VISIBLE_DEVICES': '', 'LD_LIBRARY_PATH': '/opt/archie/llama-cuda/lib'})
     spawn('core', ['archied', '--root', str(root), '--text-logs'])
     spawn('displayd', ['archie-displayd', '--root', str(root), '--orb-socket', str(state / 'orb.sock'),
                        '--disable-world-feed', '--text-logs'])
@@ -218,17 +219,8 @@ base-url = "http://127.0.0.1:8081/v1"
             time.sleep(0.2)
         else:
             raise ValueError('native display did not acknowledge its design; inspect ' + str(state / 'display.log'))
-    for _ in range(60):
-        try:
-            with urllib.request.urlopen('http://127.0.0.1:8081/health', timeout=1) as response:
-                if json.load(response).get('status') == 'ok':
-                    break
-        except (OSError, ValueError):
-            time.sleep(1)
-    else:
-        raise ValueError('Bonsai did not become healthy; inspect ' + str(state / 'bonsai.log'))
     if voice:
-        spawn('voice', voice_arguments(profile, models),
+        spawn('voice', voice_arguments(profile, models, endpoint, alias),
               dict(gui, CUDA_VISIBLE_DEVICES='', OMP_NUM_THREADS='2', PIPER_THREADS='2',
                    PATH='/opt/archie/voice-venv/bin:/opt/archie/iris-venv/bin:' + os.environ['PATH'],
                    PULSE_SERVER='unix:/mnt/wslg/PulseServer'))
