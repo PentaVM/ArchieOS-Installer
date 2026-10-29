@@ -26,11 +26,13 @@ Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction Silen
 # Windows PowerShell 5.1 reads a script without a byte order mark as ANSI: each copy is
 # written as UTF-8 with one, so the accents of its Spanish text survive.
 $utf8Bom = New-Object System.Text.UTF8Encoding($true)
-foreach ($script in 'ArchieOS-Launcher.ps1', 'Compact-ArchieOS-Disk.ps1', 'Uninstall-ArchieOS-Launcher.ps1', 'ArchieOS-Machine.ps1', 'ArchieOS-HostModel.ps1') {
+foreach ($script in 'ArchieOS-Launcher.ps1', 'Compact-ArchieOS-Disk.ps1', 'Uninstall-ArchieOS-Launcher.ps1', 'ArchieOS-Machine.ps1', 'ArchieOS-HostModel.ps1', 'ArchieOS-Installer.ps1') {
     $source = Get-Content (Join-Path $PSScriptRoot $script) -Raw -Encoding UTF8
     [System.IO.File]::WriteAllText((Join-Path $target $script), $source, $utf8Bom)
 }
 Copy-Item (Join-Path $PSScriptRoot 'ArchieOS.vbs') $target -Force
+# The release manifest and its signature: the installer refuses a manifest that is not signed.
+foreach ($file in 'archieos-manifest.json', 'archieos-manifest.json.sig') { Copy-Item (Join-Path $PSScriptRoot $file) $target -Force }
 
 # The icon: Archie's orb, drawn here rather than shipped as a binary. A 256-pixel PNG inside
 # an .ico, which Windows scales for the taskbar, the tray and the shortcuts.
