@@ -62,7 +62,7 @@ cat > "$rootfs/etc/wsl-distribution.conf" <<'EOF'
 [oobe]
 command=/usr/lib/wsl/archie-offline-oobe
 defaultUid=1000
-defaultName=ArchieOS-Bonsai-Xavi
+defaultName=ArchieOS
 
 [shortcut]
 enabled=true

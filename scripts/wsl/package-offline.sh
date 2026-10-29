@@ -17,7 +17,7 @@ if find "$rootfs/etc/pacman.d/gnupg/private-keys-v1.d" "$rootfs/etc/ssh" \
   echo 'private builder key found; refusing to package it' >&2; exit 65
 fi
 grep -q '^command=/usr/lib/wsl/archie-offline-oobe$' "$rootfs/etc/wsl-distribution.conf"
-grep -q '^defaultName=ArchieOS-Bonsai-Xavi$' "$rootfs/etc/wsl-distribution.conf"
+grep -Eq '^defaultName=ArchieOS(-Bonsai-Xavi)?$' "$rootfs/etc/wsl-distribution.conf"
 for file in usr/bin/archie-offline usr/lib/wsl/archie-offline-oobe usr/lib/archie/init-pacman-keyring usr/bin/archie-display usr/bin/archied; do
   test -x "$rootfs/$file"
 done
