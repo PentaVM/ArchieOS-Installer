@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# The local model of an ArchieOS that runs in VirtualBox. VirtualBox cannot give the machine
+# the GPU, so the model runs on Windows, which has it (the launcher starts llama-server
+# there before the machine). The installer tells the machine which model in the guest
+# property /ArchieOS/Model/Name; this, at boot and before archied:
+#
+#   1. reads that name and finds the model in archie-local's catalog (its port and alias),
+#   2. puts Windows' server on this machine's loopback, 127.0.0.1:<port>, through
+#      systemd-socket-proxyd to 10.0.2.2 (Windows, seen from inside VirtualBox's network),
+#      since Core takes a local model only on loopback, and the words never leave this PC,
+#   3. writes Core's manifest for it, ready, in /etc/archie/models/local/host.toml.
+#
+# No property, no model: the machine answers through the providers it has, if any.
+set -euo pipefail
+manifest=/etc/archie/models/local/host.toml
+name=$(VBoxControl --nologo guestproperty get /ArchieOS/Model/Name 2>/dev/null | sed -n 's/^Value: //p' || true)
+if [ -z "$name" ]; then
+  rm -f "$manifest"
+  echo 'archie-host-model: no model named by the host; none is served from Windows'
+  exit 0
+fi
+# Only a name of the catalog: the property comes from outside this machine.
+[[ $name =~ ^[a-z0-9.-]+$ ]] || { echo "archie-host-model: '$name' is not a model name" >&2; exit 65; }
+port=$(archie-local manifest "$name" | sed -n 's#^base-url = "http://127.0.0.1:\([0-9]*\)/v1/"#\1#p')
+[ -n "$port" ] || { echo "archie-host-model: $name is not in the catalog" >&2; exit 65; }
+install -d -m 0755 "$(dirname "$manifest")"
+archie-local manifest "$name" > "$manifest.tmp"
+chmod 0644 "$manifest.tmp"
+mv "$manifest.tmp" "$manifest"
+systemctl start "archie-host-model-proxy@$port.socket"
+echo "archie-host-model: $name from Windows, on 127.0.0.1:$port"

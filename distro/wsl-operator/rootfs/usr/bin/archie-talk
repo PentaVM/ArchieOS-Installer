@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Talk with Archie. Say "Archie" to be heard. It answers aloud in the language it was
-# spoken to, Spanish or English, each with its own voice, and opens the applications the
-# Stage's policy names (Kdenlive, the browser) when asked.
+# Talk with Archie. It is always listening, and the floor decides when to answer: when it
+# has been given enough and there is a longer pause. It answers aloud in the language it
+# was spoken to, Spanish or English, each with its own male voice, and opens the
+# applications the Stage's policy names (Kdenlive, the browser) when asked.
 #
 #   archie-talk                 the microphone goes quiet while Archie speaks
 #   archie-talk --headphones    keeps listening while it speaks, so it can be interrupted
@@ -9,8 +10,10 @@
 #                               archie-local use 27b|9b chose
 #   archie-talk --spanish       listens for Spanish only (by default, either language)
 #   archie-talk --cloud         Nemotron on Nebius answers
-#   archie-talk --always        answers whatever it hears, its name or not: for one person
-#                               alone, since the recogniser often misses "Archie"
+#   archie-talk --nemotron      the all-NVIDIA test: Nemotron 3 Nano Omni (served from Windows by
+#                               archie-omni) hears, sees and answers; Magpie speaks
+#   archie-talk --named         only what starts with "Archie" is weighed: for a room with
+#                               other people talking
 #
 # What you say is recognised on this machine. Which model answers: the one on this
 # machine once its GPU runtime is built (archie-local gpu), and nothing then leaves;
@@ -20,16 +23,38 @@ set -euo pipefail
 KEY=$HOME/.config/archie/nebius.key
 grade=public
 where=auto
+# Always listening: whatever is heard reaches the floor, its name or not.
+export ALWAYS=1
 for option in "$@"; do
   case "$option" in
     --headphones) export HEADPHONES=1 ;;
     --local) where=local ;;
     --cloud) where=cloud ;;
+    --nemotron) where=omni ;;
     --always) export ALWAYS=1 ;;
+    --named) export ALWAYS=0 ;;
     --spanish) export LISTEN_LANGUAGE=es-US ;;
-    *) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
+    *) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
   esac
 done
+# One voice at a time, decided before anything else is touched: two would hear each
+# other through the speakers and answer each other. By the voice's own process, not a
+# lock file: what it leaves running (the model's server) would hold a lock for ever.
+if pgrep -u "$(id -u)" -f '[a]rchie-voice converse' >/dev/null; then
+  echo "archie-talk: Archie's voice is already open" >&2
+  exit 0
+fi
+if [ "$where" = omni ]; then
+  archie-omni up
+  export ARCHIE_VOICE_ENDPOINT=http://127.0.0.1:${OMNI_PORT:-8110}/v1 ARCHIE_VOICE_MODEL=nemotron-omni
+  export ARCHIE_VOICE_GUIDE=/usr/share/archie/skills/voice-local/SKILL.md
+  # The model hears each utterance too, and NVIDIA's Magpie speaks for it.
+  export MODEL_HEARS=1 VOICE_ENGINE=magpie TTS_VOICE=${ARCHIE_MAGPIE_VOICE:-John}
+  { read -r TTS_MODEL; read -r CODEC_MODEL; read -r TTS_TOKENIZER; } < <(archie-omni voice)
+  export TTS_MODEL CODEC_MODEL TTS_TOKENIZER
+  grade=internal
+  echo "archie-talk: Nemotron 3 Nano Omni hears and answers on this machine; Magpie ($TTS_VOICE) speaks" >&2
+fi
 if [ "$where" = auto ]; then
   if archie-local ready; then where=local; else where=cloud; fi
 fi

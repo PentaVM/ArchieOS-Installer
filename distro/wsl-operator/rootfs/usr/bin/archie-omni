@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# Nemotron 3 Nano Omni as Archie's brain, served from Windows (an experiment, beside Bonsai).
+#
+#   archie-omni up       start the bridge here, and wait for the model on Windows to answer
+#   archie-omni down     stop the bridge
+#   archie-omni status   whether it answers, and the bridge
+#   archie-omni bench    one spoken-length answer, timed (tokens per second)
+#   archie-omni voice    print the Magpie files archie-talk --nemotron speaks with
+#
+# One model hears (the Parakeet audio encoder in its projector), sees and reasons; it answers
+# in text, which NVIDIA's Magpie speaks. It is 18.5 GB (unsloth UD-Q2_K_XL: its experts cannot
+# be quantised below ~4.5 bits, so no smaller file exists), more than WSL's 9 GB, so
+# llama-server runs on Windows, on its loopback only, started there by
+# D:\ArchieLocal\scripts\serve-nemotron-omni.ps1 together with omni-agent, which connects
+# from Windows to omni-bridge here (WSL's localhost forwarding) and carries each request: no
+# port is opened in Windows' firewall, and WSL interop stays off.
+#
+# Files, fetched with D:\ArchieLocal\scripts\fetch-nemotron-omni.py and checked by SHA-256:
+#   $OMNI_HOME/models/nemotron-omni/   the model and ggml-org's audio+vision projector
+#   $OMNI_HOME/voices/magpie/          Magpie TTS v2607 q8_0, NanoCodec, and the .nemo the
+#                                      tokenizer is extracted from
+set -euo pipefail
+OMNI_HOME=${OMNI_HOME:-/mnt/d/ArchieLocal}
+PORT=${OMNI_PORT:-8110}              # where ArchieOS asks, in WSL
+AGENT_PORT=${OMNI_AGENT_PORT:-8112}  # where omni-agent on Windows connects from
+SHARE=/usr/share/archie/nemotron-omni
+RUN=$HOME/.archie/omni
+MAGPIE=$OMNI_HOME/voices/magpie
+START='powershell -ExecutionPolicy Bypass -File D:\ArchieLocal\scripts\serve-nemotron-omni.ps1'
+
+healthy() { curl -sf --max-time 3 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; }
+bridge_up() { pgrep -u "$(id -u)" -f "[o]mni-bridge.py $PORT " >/dev/null; }
+
+# The Windows half has to live where Windows can run it.
+windows_scripts() {
+  mkdir -p "$OMNI_HOME/scripts"
+  local f
+  for f in serve-nemotron-omni.ps1 omni-agent.py; do
+    cmp -s "$SHARE/$f" "$OMNI_HOME/scripts/$f" || cp "$SHARE/$f" "$OMNI_HOME/scripts/$f"
+  done
+}
+
+voice_files() {
+  [ -d "$MAGPIE/extracted" ] || {
+    echo "archie-omni: extracting Magpie's tokenizer from its .nemo" >&2
+    mkdir -p "$MAGPIE/extracted.part"
+    tar -xf "$MAGPIE/magpie_tts_multilingual_357m.nemo" -C "$MAGPIE/extracted.part"
+    mv "$MAGPIE/extracted.part" "$MAGPIE/extracted"
+  }
+  echo "$MAGPIE/magpie_tts_multilingual_357m.v2607.q8_0.gguf"
+  echo "$MAGPIE/nemo_nano_codec_22khz_1.89kbps_21.5fps.decoder.f16.gguf"
+  echo "$MAGPIE/extracted"
+}
+
+up() {
+  windows_scripts
+  mkdir -p "$RUN"
+  if ! bridge_up; then
+    setsid nohup python3 /usr/lib/archie/omni-bridge.py "$PORT" "$AGENT_PORT" \
+      > "$RUN/bridge.log" 2>&1 < /dev/null &
+    sleep 0.5
+  fi
+  healthy && return 0
+  echo "archie-omni: if it is not running, start it on Windows: $START" >&2
+  printf 'archie-omni: waiting for Nemotron Omni (18.5 GB to load)' >&2
+  for _ in $(seq 1 900); do
+    if healthy; then echo ' ready' >&2; return 0; fi
+    printf '.' >&2
+    sleep 2
+  done
+  echo >&2; echo "archie-omni: it did not answer; see D:\\ArchieLocal\\logs\\nemotron-omni.log" >&2; exit 1
+}
+
+down() {
+  pkill -u "$(id -u)" -f "[o]mni-bridge.py $PORT " || true
+  echo "archie-omni: the bridge is stopped; on Windows, $START -Stop stops the model" >&2
+}
+
+bench() {
+  healthy || { echo "archie-omni: not running; archie-omni up" >&2; exit 1; }
+  local body='{"model":"nemotron-omni","max_tokens":160,"temperature":0.3,
+    "chat_template_kwargs":{"enable_thinking":false},
+    "messages":[{"role":"user","content":"Explícame en tres frases qué hace un sistema operativo."}]}'
+  curl -s "http://127.0.0.1:$PORT/v1/chat/completions" -H 'Content-Type: application/json' -d "$body" |
+    python3 -c 'import json,sys; r=json.load(sys.stdin); t=r.get("timings",{}); print(r["choices"][0]["message"]["content"].strip()); print("prompt %.1f tok/s, generation %.1f tok/s, %d tokens" % (t.get("prompt_per_second",0), t.get("predicted_per_second",0), t.get("predicted_n",0)))'
+}
+
+case "${1:-}" in
+  up) up ;;
+  down) down ;;
+  status)
+    if healthy; then echo "Nemotron Omni: answering on 127.0.0.1:$PORT"; else echo "Nemotron Omni: not answering"; fi
+    if bridge_up; then echo "bridge: up"; else echo "bridge: down"; fi ;;
+  bench) bench ;;
+  voice) voice_files ;;
+  *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
+esac

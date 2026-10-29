@@ -13,6 +13,9 @@ authors: Xavi (`ByXavi270` / `XaviCottier`) for the design and PentaVM for the n
 implementation in Rust/C++. Credit both. Do not overwrite their uncommitted files. The
 GUI handoff is context for integration; implementation work on it is PentaVM's to direct.
 
+Santiago Rearte (Sheriff) brought in the Nebius Token Factory / Nemotron integration and
+tests the node on his own WSL. Credit him alongside Xavi and PentaVM.
+
 Integrate completed branches using their changes relative to main, preserve other
 agents' worktrees, test the affected paths and record context/results in `_dev`.
 Do not declare hardware, model accuracy, latency or deployment verified by mocks.

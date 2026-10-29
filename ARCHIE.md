@@ -168,9 +168,16 @@ thing that answers `restricted`. The node ships Bonsai for that, in two sizes on
 one answering at a time (`archie-local use 27b|9b`): Ternary Bonsai 2 27B at
 `127.0.0.1:8082`, as `local.bonsai-2-27b` (reasoning at medium effort, for decisions) and
 `local.bonsai-2-27b-fast` (no reasoning, for short answers), and Ternary Bonsai 2 9B at
-`127.0.0.1:8081`, as `local.bonsai-2-9b` and `local.bonsai-2-9b-fast`. The router asks
-whichever one's server answers. They ship offline; a node whose llama-server serves Bonsai
-marks them ready. Any other OpenAI-compatible
+`127.0.0.1:8081`, as `local.bonsai-2-9b` and `local.bonsai-2-9b-fast`. `archie-local` can
+also serve Qwen 3.5 in unsloth's quantizations, answering directly: `local.qwen-3-5-2b`,
+`local.qwen-3-5-4b`, `local.qwen-3-5-9b`, `local.qwen-3-5-27b` and `local.qwen-3-5-35b-a3b`. The
+router asks whichever one's server answers. They ship offline; a node whose llama-server serves Bonsai
+marks them ready. `archie-local list` also offers larger open models, for machines with more
+memory: Qwen 3.8 27B, Qwen 3.6 35B-A3B, Gemma 4, gpt-oss 20B and 120B, Nemotron 3.5,
+Qwen 3.5 122B-A10B, Qwen 3.8 Flash-Next and DeepSeek V4 Flash (up to 128 GB of unified
+memory, a DGX Spark or RTX Spark), DeepSeek V4.1 Flash (256 GB) and Kimi K3 (512 GB). Each is
+fetched against its digests, and `archie-node models` writes its manifest, `local.<name>`
+(`archie-local manifest <name>`), when it is fetched. Any other OpenAI-compatible
 server on the machine (Ollama, vLLM) can be added with a manifest that has
 `provider = "openai-compatible"`, `locality = "local"` and its `base-url`.
 [`docs/ROUTER.md`](docs/ROUTER.md) shows one.

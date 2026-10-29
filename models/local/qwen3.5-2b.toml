@@ -1,0 +1,36 @@
+# Qwen 3.5 2B (Alibaba, Apache-2.0), in unsloth's GGUF quantization: answers directly.
+#
+# https://huggingface.co/unsloth/Qwen3.5-2B-GGUF, served by llama.cpp on loopback with the
+# OpenAI wire format (archie-local use qwen-2b). It never leaves the machine, so it may
+# reason over restricted context; secret context goes to no model.
+#
+# One local model answers at a time (archie-local use ...): the router asks this one only
+# while its server answers /health. Reasoning stays with Bonsai, which has a manifest for it.
+id = "local.qwen-3-5-2b"
+display_name = "Qwen 3.5 2B (direct)"
+provider = "llama-cpp"
+locality = "local"
+
+context_window = 16384
+max_output_tokens = 4096
+
+capabilities = ["cognition.response"]
+max_privacy_grade = "restricted"
+
+# Shipped offline: a node whose llama-server serves these weights sets availability = "ready"
+# in its installed copy.
+availability = "offline"
+
+# Assigned by hand, not measured on a node yet: by size and precision against Bonsai 2 9B
+# (55) and 27B (63). No latency until one is measured.
+quality_tier = 40
+
+[cost]
+input_micros_per_mtok = 0
+output_micros_per_mtok = 0
+
+[labels]
+base-url = "http://127.0.0.1:8085/v1/"
+provider-model = "qwen-2b"
+thinking = "off"
+license = "apache-2.0"

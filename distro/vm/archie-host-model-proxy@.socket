@@ -1,0 +1,6 @@
+[Unit]
+Description=Local model from the Windows host on 127.0.0.1:%i
+
+[Socket]
+# The machine's own loopback: Core takes a local model only there.
+ListenStream=127.0.0.1:%i

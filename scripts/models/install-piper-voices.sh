@@ -52,6 +52,8 @@ download_verified "$es_revision" es/es_MX/ald/medium/MODEL_CARD \
 # and Nemotron ASR wrote back what it heard. es_MX-claude-high and en_US-kristin-medium
 # were heard without a word wrong (ald: 2.8 %, john: 6.7 %) and speak in a third of real
 # time. Claude's dataset is Apache-2.0; Kristin's recordings are LibriVox, public domain.
+# Since 2026-10-25 Archie speaks with the male pair, ald and john; these two stay
+# installed for whoever sets PIPER_MODEL and PIPER_MODEL_EN to them.
 voices_revision=5041a7a49ae5b3a0f30e6837769eb03fdbb231bd
 download_verified "$voices_revision" es/es_MX/claude/high/es_MX-claude-high.onnx \
   es_MX-claude-high.onnx cb1966e0ff20ca3aa010f6c9a0ce296a
@@ -69,22 +71,22 @@ download_verified "$voices_revision" en/en_US/kristin/medium/MODEL_CARD \
 cat > "$voice_dir/archie-voice-attribution.txt" <<EOF
 Archie voice pack, separate local Piper TTS models.
 
-Spanish (Mexico), the default: es_MX-claude-high
+Spanish (Mexico): es_MX-claude-high
   Source: https://huggingface.co/rhasspy/piper-voices/tree/$voices_revision/es/es_MX/claude/high
   Dataset: https://huggingface.co/spaces/HirCoir/Piper-TTS-Spanish; Apache-2.0 (see es_MX-claude-high.MODEL_CARD).
   Revision: $voices_revision
 
-English (US), the default: en_US-kristin-medium
+English (US): en_US-kristin-medium
   Source: https://huggingface.co/rhasspy/piper-voices/tree/$voices_revision/en/en_US/kristin/medium
   Recorded speech dataset: LibriVox; public domain (see en_US-kristin-medium.MODEL_CARD).
   Revision: $voices_revision
 
-English: en_US-john-medium
+English (US), the default: en_US-john-medium
   Source: https://huggingface.co/rhasspy/piper-voices/tree/$en_revision/en/en_US/john/medium
   Recorded speech dataset: LibriVox; public domain (see en_US-john-medium.MODEL_CARD).
   Revision: $en_revision
 
-Spanish (Mexico): es_MX-ald-medium
+Spanish (Mexico), the default: es_MX-ald-medium
   Source: https://huggingface.co/rhasspy/piper-voices/tree/$es_revision/es/es_MX/ald/medium
   Recorded speech dataset: Unlicense (see es_MX-ald-medium.MODEL_CARD).
   Revision: $es_revision

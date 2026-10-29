@@ -14,7 +14,10 @@ Group=archie
 # The only membership that matters: it lets this process open archied's control socket,
 # which is group-gated to `archie`. The renderer account has no such membership.
 SupplementaryGroups=archie
-RuntimeDirectory=archie-display:archie
+# Its own runtime directory, owned by it and group `archie` (Group= above). Not
+# "archie-display:archie": in RuntimeDirectory= that means "and a symlink /run/archie to
+# it", which collides with archied's /run/archie and stops the unit at NAMESPACE.
+RuntimeDirectory=archie-display
 RuntimeDirectoryMode=0770
 ExecStart=/usr/bin/archie-displayd --bind 127.0.0.1:7666
 Restart=on-failure

@@ -945,6 +945,8 @@ struct SpeechFlags {
     listen_language: String,
     always: bool,
     headphones: bool,
+    /// The reasoning model hears the sound of each utterance (Nemotron Omni).
+    model_hears: bool,
     wav_in: Option<String>,
     wav_out: Option<String>,
     threads: i32,
@@ -996,6 +998,7 @@ fn speech_flags(args: &mut Vec<String>) -> Result<SpeechFlags, String> {
         listen_language: take(args, "--listen-language").unwrap_or_else(|| "es-US".into()),
         always: flag(args, "--always"),
         headphones: flag(args, "--headphones"),
+        model_hears: flag(args, "--model-hears"),
         wav_in,
         wav_out: take(args, "--wav-out"),
         threads: take(args, "--threads")
@@ -1430,6 +1433,7 @@ fn live(
         phrase_boost: speech.name_boost,
         notices: speech.notices.clone(),
         narration: desk.as_ref().map(|desk| desk.narration.clone()),
+        model_hears: speech.model_hears,
     };
     println!(
         "{}",
@@ -1529,7 +1533,12 @@ fn converse(
             )
             .map_err(|e| e.to_string())?;
             println!("voices: {}", voice.voices().join(", "));
-            Box::new(voice)
+            // Each reply in the language it is written in, as the two Piper voices do.
+            Box::new(archie_voice::following::FollowingVoice::new(
+                voice,
+                &speech.tts_language,
+                "en-US",
+            ))
         }
         "piper" => {
             let model = speech
@@ -1674,7 +1683,11 @@ fn converse(
         phrase_boost: speech.name_boost,
         notices: speech.notices.clone(),
         narration: desk.as_ref().map(|desk| desk.narration.clone()),
+        model_hears: speech.model_hears,
     };
+    if speech.model_hears {
+        println!("el modelo también oye lo que dices (audio con cada turno)");
+    }
     println!(
         "escuchando ({}{}){}",
         speech.listen_language,

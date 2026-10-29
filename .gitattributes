@@ -27,3 +27,6 @@ distro/**            text eol=lf
 # their first few thousand, so git would otherwise take them for text.
 *.bin                binary
 *.checkpoint         binary
+# Signed bytes: a line-ending conversion would invalidate the release signature.
+distro/windows/archieos-manifest.json -text
+distro/windows/archieos-manifest.json.sig -text

@@ -337,6 +337,7 @@ impl Routed {
             .iter()
             .map(|message| match message {
                 Message::System(t) | Message::User(t) => t.len(),
+                Message::UserHeard { text, .. } => text.len(),
                 Message::Assistant {
                     content,
                     tool_calls,
@@ -394,6 +395,7 @@ impl Routed {
         for message in &request.messages {
             match message {
                 Message::System(t) | Message::User(t) => leaving.push(t.clone()),
+                Message::UserHeard { text, .. } => leaving.push(text.clone()),
                 Message::Assistant {
                     content,
                     tool_calls,
@@ -453,7 +455,11 @@ impl Routed {
                     }
                     Message::System(s)
                 }
-                Message::User(_) => Message::User(covered.next().unwrap_or_default()),
+                // A voice cannot be veiled: what leaves is its veiled transcript, never the
+                // sound. Only a model on this machine hears it.
+                Message::User(_) | Message::UserHeard { .. } => {
+                    Message::User(covered.next().unwrap_or_default())
+                }
                 Message::Assistant {
                     content,
                     tool_calls,

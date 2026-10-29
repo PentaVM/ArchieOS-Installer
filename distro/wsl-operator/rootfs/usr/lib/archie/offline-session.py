@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path, PurePosixPath
 import secrets
 import socket
@@ -36,6 +37,48 @@ def verify_bundle(prefix=Path('/')):
             raise ValueError('payload checksum mismatch: ' + role)
     return manifest
 
+PROFILE_DEFAULTS = {'asr_language': 'es-US', 'listen': 'named', 'voice': True, 'wanda': False, 'headphones': False}
+
+def load_profile(path=None):
+    """What the person chose in the Windows installer (~/.config/archie/profile.json): the language
+    the ASR listens for, whether Archie answers everything it hears or only when called, the voice,
+    headphones and Wanda. A missing, unreadable or out-of-range value is the default, so a bad file
+    never keeps the desktop from starting."""
+    path = path or Path.home() / '.config/archie/profile.json'
+    profile = dict(PROFILE_DEFAULTS)
+    try:
+        raw = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return profile
+    if not isinstance(raw, dict):
+        return profile
+    language = raw.get('asr_language')
+    if isinstance(language, str) and (language == 'auto' or re.fullmatch(r'[a-z]{2}-[A-Z]{2}', language)):
+        profile['asr_language'] = language
+    if raw.get('listen') in ('named', 'always'):
+        profile['listen'] = raw['listen']
+    for key in ('voice', 'wanda', 'headphones'):
+        if isinstance(raw.get(key), bool):
+            profile[key] = raw[key]
+    return profile
+
+def voice_arguments(profile, models):
+    """The archie-voice converse command line for a profile. Always listening is opt-in: by default
+    only what is addressed to Archie reaches the floor."""
+    command = ['archie-voice', 'converse', '--grade', 'internal', '--endpoint',
+               'http://127.0.0.1:8081/v1', '--model', 'bonsai', '--timeout-seconds', '600',
+               '--budget', 'sentence', '--language', 'es-CL', '--asr-model', models['asr']['path'],
+               '--voice-engine', 'piper', '--piper', '/usr/lib/archie/piper-json-bridge.py',
+               '--piper-model', models['piper_es']['path'], '--piper-model-en', models['piper_en']['path'],
+               '--threads', '2']
+    if profile['asr_language'] != PROFILE_DEFAULTS['asr_language']:
+        command += ['--listen-language', profile['asr_language']]
+    if profile['listen'] == 'always':
+        command.append('--always')
+    if profile['headphones']:
+        command.append('--headphones')
+    return command
+
 def identity(pid):
     try:
         # comm may contain spaces or parentheses; fields after its last ')' start at3.
@@ -46,6 +89,8 @@ def identity(pid):
 
 def start(manifest, voice=True):
     import fcntl
+    profile = load_profile()
+    voice = voice and profile['voice']
     if os.geteuid() == 0:
         raise ValueError('run the desktop as archie, never root')
     state = Path.home() / '.local/state/archie-offline'
@@ -183,18 +228,20 @@ base-url = "http://127.0.0.1:8081/v1"
     else:
         raise ValueError('Bonsai did not become healthy; inspect ' + str(state / 'bonsai.log'))
     if voice:
-        spawn('voice', ['archie-voice', 'converse', '--grade', 'internal', '--endpoint',
-                       'http://127.0.0.1:8081/v1', '--model', 'bonsai', '--timeout-seconds', '600',
-                       '--budget', 'sentence', '--language', 'es-CL', '--asr-model', models['asr']['path'],
-                       '--voice-engine', 'piper', '--piper', '/usr/lib/archie/piper-json-bridge.py',
-                       '--piper-model', models['piper_es']['path'], '--piper-model-en', models['piper_en']['path'],
-                       '--threads', '2'],
+        spawn('voice', voice_arguments(profile, models),
               dict(gui, CUDA_VISIBLE_DEVICES='', OMP_NUM_THREADS='2', PIPER_THREADS='2',
                    PATH='/opt/archie/iris-venv/bin:' + os.environ['PATH'],
                    PULSE_SERVER='unix:/mnt/wslg/PulseServer'))
         time.sleep(1)
         if not owned('voice'):
             raise ValueError('voice exited; inspect ' + str(state / 'voice.log'))
+    if profile['wanda']:
+        wanda_dir = Path.home() / '.config/archie/wanda'
+        if (wanda_dir / 'wanda.toml').is_file() and Path('/usr/bin/archie-wanda').exists():
+            spawn('wanda', ['/usr/bin/archie-wanda', '--config', str(wanda_dir / 'wanda.toml'), '--listen', '127.0.0.1:8791'],
+                  {'PWD': str(wanda_dir)})
+        else:
+            print('Wanda is on in the profile, but there is no ' + str(wanda_dir / 'wanda.toml') + ' (or no archie-wanda); it was not started.')
     print('Archie desktop started; say Archie. CPU responses can take several minutes. Logs: ' + str(state))
 
 def main():

@@ -95,4 +95,36 @@ class OfflineBundle(unittest.TestCase):
         target = self.root / 'usr/bin/archie-design'; target.parent.mkdir(parents=True); target.write_text('native entry')
         module.verify_overlay(overlay, self.root)
 
+    def profile(self, text):
+        path = self.root / 'profile.json'
+        path.write_text(text)
+        return self.module.load_profile(path)
+
+    def test_profile_defaults_listen_only_when_called(self):
+        self.assertEqual(self.module.load_profile(self.root / 'absent.json'), self.module.PROFILE_DEFAULTS)
+        self.assertEqual(self.module.PROFILE_DEFAULTS['listen'], 'named')
+        self.assertFalse(self.module.PROFILE_DEFAULTS['wanda'])
+
+    def test_profile_keeps_valid_choices_and_drops_the_rest(self):
+        chosen = self.profile('{"asr_language":"en-US","listen":"always","voice":false,"wanda":true,"headphones":true}')
+        self.assertEqual(chosen, {'asr_language': 'en-US', 'listen': 'always', 'voice': False, 'wanda': True, 'headphones': True})
+        bad = self.profile('{"asr_language":"english; rm -rf /","listen":"yes","voice":"no","wanda":1}')
+        self.assertEqual(bad, self.module.PROFILE_DEFAULTS)
+        self.assertEqual(self.profile('not json'), self.module.PROFILE_DEFAULTS)
+        self.assertEqual(self.profile('[1, 2]'), self.module.PROFILE_DEFAULTS)
+        self.assertEqual(self.profile('{"asr_language":"auto"}')['asr_language'], 'auto')
+
+    def test_voice_command_changes_only_what_the_profile_asks(self):
+        models = {k: {'path': '/m/' + k} for k in ['asr', 'piper_es', 'piper_en']}
+        base = self.module.voice_arguments(self.module.PROFILE_DEFAULTS, models)
+        self.assertNotIn('--always', base)
+        self.assertNotIn('--listen-language', base)
+        self.assertNotIn('--headphones', base)
+        custom = dict(self.module.PROFILE_DEFAULTS, asr_language='en-US', listen='always', headphones=True)
+        command = self.module.voice_arguments(custom, models)
+        self.assertEqual(command[command.index('--listen-language') + 1], 'en-US')
+        self.assertIn('--always', command)
+        self.assertIn('--headphones', command)
+        self.assertEqual(command[:len(base)], base)
+
 if __name__ == '__main__': unittest.main()

@@ -68,7 +68,13 @@ pub struct RoutedSource {
     veil: Arc<Veil>,
     timeout: Duration,
     runtime: tokio::runtime::Handle,
+    /// When a refusal was last said aloud: while the local model is down (loading, say)
+    /// every utterance would get the same seven seconds of refusal.
+    last_refusal: Arc<std::sync::Mutex<Option<Instant>>>,
 }
+
+/// How long one spoken refusal stands before it is said again.
+const REFUSAL_QUIET: Duration = Duration::from_secs(60);
 
 impl RoutedSource {
     pub fn new(
@@ -86,6 +92,7 @@ impl RoutedSource {
             veil,
             timeout,
             runtime,
+            last_refusal: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 }
@@ -98,6 +105,7 @@ impl TurnSource for RoutedSource {
         let privacy = self.privacy;
         let role = self.role;
         let timeout = self.timeout;
+        let last_refusal = self.last_refusal.clone();
 
         let task = self.runtime.spawn(async move {
             // A local server that has stopped is offline here, so the turn goes veiled to
@@ -105,15 +113,29 @@ impl TurnSource for RoutedSource {
             routed.refresh_liveness().await;
             match routed.disclose_chat(&request, privacy, role, &veil) {
                 Err(RoutedError::Withheld(reason)) => {
+                    // The reason goes to the session log: the spoken refusal is the same
+                    // for a model that is loading and for text the veil cannot cover.
+                    eprintln!("[veil] not sent ({privacy:?}): {reason}");
                     let refusal = match privacy {
                         PrivacyGrade::Secret => {
                             "No puedo responder a esto porque los datos son secretos y no deben comunicarse a ningún modelo."
                         }
                         _ => {
-                            "No puedo responder a esto porque los datos son confidenciales y no hay un modelo local en este equipo disponible."
+                            "No puedo responder ahora: el modelo de este equipo no está disponible y esto no puede salir a la nube."
                         }
                     };
-                    let _ = send.send(Update::Event(StreamEvent::Text(refusal.to_string())));
+                    // Said once a minute, not to every utterance while the model is down.
+                    let say = {
+                        let mut last = last_refusal.lock().unwrap_or_else(|p| p.into_inner());
+                        let say = last.is_none_or(|at| at.elapsed() >= REFUSAL_QUIET);
+                        if say {
+                            *last = Some(Instant::now());
+                        }
+                        say
+                    };
+                    if say {
+                        let _ = send.send(Update::Event(StreamEvent::Text(refusal.to_string())));
+                    }
                     let _ = send.send(Update::Event(StreamEvent::Finished {
                         reason: Some(format!("withheld: {reason}")),
                     }));
@@ -297,7 +319,10 @@ horas y las fechas con palabras, como se dicen: son las tres y veinticinco, el v
 septiembre, dos mil veintiséis. No inventes datos que no \
 tienes, como la hora, la fecha o lo que hay en la pantalla: si no están en el contexto, dilo. \
 Cuando la persona pide hacer algo en el computador, usa las herramientas en vez de explicar \
-cómo se haría.";
+cómo se haría. Oyes todo lo que suena cerca del micrófono: otras personas, videos, música. Eres \
+un copiloto, no un chat: si lo que oíste no te lo dijeron a ti, quedó a medias o no pide nada \
+que valga la pena decir, responde solo [silencio] y nada más. Es mejor callar que contestar \
+algo sin sentido.";
 
 /// The most messages of past conversation carried into a turn.
 const MEMORY: usize = 12;
@@ -330,6 +355,9 @@ pub struct NemotronCognitive<S: TurnSource> {
     /// The context goes with the utterance it belongs to instead of the instructions, so
     /// that what the model said earlier never reads as newer than what is true now.
     context_with_utterance: bool,
+    /// The sound of the utterance being answered, as a WAV, for a model that hears it
+    /// (Nemotron Omni); sent only with the first step of the turn.
+    heard_audio: Option<Vec<u8>>,
     history: Vec<ToolChatMessage>,
     turn: Option<Turn>,
     last_request: Option<ToolChatRequest>,
@@ -359,6 +387,7 @@ impl<S: TurnSource> NemotronCognitive<S> {
             tools,
             context: None,
             context_with_utterance: false,
+            heard_audio: None,
             history: Vec::new(),
             turn: None,
             last_request: None,
@@ -449,6 +478,12 @@ impl<S: TurnSource> NemotronCognitive<S> {
 
     /// Facts for the next turns that the model cannot know: the time, the date, which
     /// application is in front. Cerebra knows them; the model only guesses.
+    /// The sound of what the person is about to be answered for, or `None`: a model that
+    /// hears gets it beside the transcript, and can tell what the ears got wrong.
+    pub fn set_heard_audio(&mut self, wav: Option<Vec<u8>>) {
+        self.heard_audio = wav;
+    }
+
     pub fn set_context(&mut self, context: impl Into<String>) {
         let context = context.into();
         self.context = (!context.trim().is_empty()).then_some(context);
@@ -531,6 +566,24 @@ impl<S: TurnSource> NemotronCognitive<S> {
         if english {
             if let Some(ToolChatMessage::User(said)) = messages.get_mut(1 + self.history.len()) {
                 said.push_str("\n\n(Answer in English.)");
+            }
+        }
+        // A model that hears gets the sound with the first step only; the steps after it
+        // are about what the tools answered.
+        if let (Some(wav), 1) = (&self.heard_audio, self.chain.len()) {
+            let at = 1 + self.history.len();
+            if let Some(ToolChatMessage::User(said)) = messages.get(at).cloned() {
+                messages[at] = ToolChatMessage::UserHeard {
+                    text: said,
+                    wav: wav.clone(),
+                };
+                if let Some(ToolChatMessage::System(system)) = messages.first_mut() {
+                    system.push_str(
+                        "\n\nAdemás de la transcripción, recibes el audio de lo que dijo la \
+                         persona. Si la transcripción no calza con lo que oyes, cree al audio; \
+                         y fíjate en el tono.",
+                    );
+                }
             }
         }
         ToolChatRequest {
@@ -1002,6 +1055,33 @@ mod tests {
             cognitive.last_request().is_none(),
             "none of that left the machine"
         );
+    }
+
+    #[test]
+    fn a_model_that_hears_gets_the_sound_with_the_first_step_only() {
+        let mut cognitive = adapter(b"data: [DONE]\n\n");
+        cognitive.set_heard_audio(Some(b"RIFF-wav".to_vec()));
+        cognitive
+            .begin(ask("t1", "abre firefox", SpeechBudget::Full))
+            .unwrap();
+        let sent = &cognitive.last_request().unwrap().messages;
+        assert!(sent.iter().any(|m| matches!(m,
+            ToolChatMessage::UserHeard { text, wav } if text == "abre firefox" && wav == b"RIFF-wav")));
+        assert!(
+            matches!(&sent[0], ToolChatMessage::System(text) if text.contains("recibes el audio"))
+        );
+    }
+
+    #[test]
+    fn without_the_sound_the_request_is_text_as_before() {
+        let mut cognitive = adapter(b"data: [DONE]\n\n");
+        cognitive
+            .begin(ask("t1", "abre firefox", SpeechBudget::Full))
+            .unwrap();
+        let sent = &cognitive.last_request().unwrap().messages;
+        assert!(!sent
+            .iter()
+            .any(|m| matches!(m, ToolChatMessage::UserHeard { .. })));
     }
 
     #[test]

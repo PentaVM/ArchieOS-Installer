@@ -16,6 +16,7 @@
 //! The parser is pure and fed bytes, so every property here is tested against streams
 //! recorded from the real provider rather than against a guess at what it sends.
 
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -44,6 +45,12 @@ pub struct ToolCall {
 pub enum ToolChatMessage {
     System(String),
     User(String),
+    /// What the person said, with the sound of it, for a model that hears (Nemotron Omni):
+    /// the audio goes as `input_audio`, a mono PCM16 WAV, beside its transcript.
+    UserHeard {
+        text: String,
+        wav: Vec<u8>,
+    },
     /// What the model said, and the tools it asked for in the same breath.
     Assistant {
         content: Option<String>,
@@ -61,6 +68,13 @@ impl ToolChatMessage {
         match self {
             Self::System(content) => serde_json::json!({"role": "system", "content": content}),
             Self::User(content) => serde_json::json!({"role": "user", "content": content}),
+            Self::UserHeard { text, wav } => serde_json::json!({"role": "user", "content": [
+                {"type": "text", "text": text},
+                {"type": "input_audio", "input_audio": {
+                    "data": base64::engine::general_purpose::STANDARD.encode(wav),
+                    "format": "wav"
+                }}
+            ]}),
             Self::Assistant {
                 content,
                 tool_calls,
@@ -150,6 +164,10 @@ impl ToolChatRequest {
             match message {
                 ToolChatMessage::System(text) | ToolChatMessage::User(text) => {
                     budget.consume(text.len())?
+                }
+                ToolChatMessage::UserHeard { text, wav } => {
+                    budget.consume(text.len())?;
+                    budget.consume(wav.len().div_ceil(3) * 4)?
                 }
                 ToolChatMessage::Assistant {
                     content,
@@ -473,6 +491,38 @@ fn restore_json(value: &mut Value, unveil: &archie_vault::veil::Unveil) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_heard_utterance_goes_with_its_sound_as_input_audio() {
+        let message = ToolChatMessage::UserHeard {
+            text: "abre firefox".into(),
+            wav: b"RIFF....WAVE".to_vec(),
+        };
+        let json = message.to_json();
+        assert_eq!(json["role"], "user");
+        assert_eq!(json["content"][0]["text"], "abre firefox");
+        assert_eq!(json["content"][1]["type"], "input_audio");
+        assert_eq!(json["content"][1]["input_audio"]["format"], "wav");
+        assert_eq!(
+            json["content"][1]["input_audio"]["data"],
+            "UklGRi4uLi5XQVZF"
+        );
+    }
+
+    #[test]
+    fn the_sound_counts_against_what_a_request_may_carry() {
+        let request = ToolChatRequest {
+            model: "nemotron-omni".into(),
+            messages: vec![ToolChatMessage::UserHeard {
+                text: "hola".into(),
+                wav: vec![0; MAX_STREAM_CONTENT_BYTES],
+            }],
+            tools: vec![],
+            max_tokens: 64,
+            temperature: 0.3,
+        };
+        assert!(request.validate().is_err());
+    }
 
     fn run(bytes: &[u8], piece: usize) -> Vec<StreamEvent> {
         let mut assembler = SseAssembler::new();

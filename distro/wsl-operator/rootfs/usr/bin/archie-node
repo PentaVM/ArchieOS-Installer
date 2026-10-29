@@ -1,0 +1,268 @@
+#!/usr/bin/env bash
+# The ArchieOS node in this WSL distribution, which runs without systemd: after a restart of
+# Windows or of WSL nothing is running, and this brings it back. The Windows launcher
+# (ArchieOS.exe's script, distro/windows) calls it; it can be used by hand as well.
+#
+#   archie-node db                 as root: the node's PostgreSQL (made and provisioned the
+#                                  first time, with the ISO's scripts)
+#   archie-node up | down | restart
+#                                  the chosen local model (archie-local), archied, displayd,
+#                                  worldd and Wanda, each left alone if it already runs
+#   archie-node models [--restart] Core's manifests for the local models here (archie-local
+#                                  manifest); --restart restarts a running archied if any
+#                                  was added, so the router knows the new one
+#   archie-node status [--json]    what runs, with the model and the machine
+#   archie-node config [--json]    what the node is set to (/etc/archie/node.conf)
+#   archie-node gui [shell|observatorio|stop] [--software]
+#                                  Archie's native GUI on the Windows screen (WSLg)
+#
+# /etc/archie/node.conf (shell variables, all optional):
+#   NODE_ROOT    archied's root               default: ~/archie-node
+#   WANDA_DIR    Wanda's folder (wanda.toml)  default: none, Wanda is not started
+#   DISPLAY_BIN  the native GUI               default: /usr/bin/archie-display
+#   PG_DATA, PG_PORT                          default: /var/lib/archie-postgres, 55432
+set -uo pipefail
+CONF=/etc/archie/node.conf
+user_home=$(getent passwd "${SUDO_USER:-archie}" | cut -d: -f6)
+NODE_ROOT="${user_home:-$HOME}/archie-node"
+WANDA_DIR=
+DISPLAY_BIN=/usr/bin/archie-display
+PG_DATA=/var/lib/archie-postgres
+PG_PORT=55432
+# shellcheck disable=SC1090
+[ -r "$CONF" ] && . "$CONF"
+LOG=/var/tmp/archie-logs/node
+# Shared like /var/tmp: `db` runs as root and the rest as the user, and both write here.
+mkdir -p "$LOG" 2>/dev/null && chmod 1777 /var/tmp/archie-logs "$LOG" 2>/dev/null || true
+
+running() { pgrep -f -- "$1" >/dev/null; }
+answers() { curl -fsS -m 2 -o /dev/null "$1" 2>/dev/null; }
+say() { echo "archie-node: $*"; }
+
+db() {
+  [ "$(id -u)" -eq 0 ] || { say 'db: run it as root'; return 1; }
+  command -v pg_ctl >/dev/null || { say 'no PostgreSQL in this image'; return 0; }
+  install -d -o postgres -g postgres -m 0700 /run/archie-postgres
+  mkdir -p /var/tmp/archie-logs && chmod 1777 /var/tmp/archie-logs
+  # The first time, the cluster as the ISO's archie-postgres-init.service makes it:
+  # PostgreSQL 18 on loopback port 55432, TimescaleDB preloaded, durable writes.
+  if [ ! -f "$PG_DATA/PG_VERSION" ] && [ -x /usr/lib/archie/initialize-cluster ]; then
+    install -d -o postgres -g postgres -m 0700 "$PG_DATA"
+    runuser -u postgres -- /usr/lib/archie/initialize-cluster || { say "the database cluster could not be made in $PG_DATA"; return 1; }
+    say "database cluster made in $PG_DATA"
+  fi
+  if pg_isready -q -h 127.0.0.1 -p "$PG_PORT"; then say "postgres :$PG_PORT already up"
+  elif runuser -u postgres -- pg_ctl -D "$PG_DATA" -l /var/tmp/archie-logs/pg-node.log -w start >/dev/null; then
+    say "postgres :$PG_PORT up"
+  else
+    say "postgres :$PG_PORT failed"; tail -5 /var/tmp/archie-logs/pg-node.log; return 1
+  fi
+  # The first time, the node's database, extensions and private credential, as the ISO's
+  # archie-database.service provisions them. A node root that already names its own
+  # database (one set up by hand) is left as it is.
+  if [ ! -f /etc/archie/database.json ] && [ ! -f "$NODE_ROOT/etc/database.json" ] && [ -x /usr/lib/archie/provision-node ]; then
+    /usr/lib/archie/provision-node || { say 'the database could not be provisioned'; return 1; }
+    say 'database provisioned (/etc/archie/database.json)'
+  fi
+}
+
+# The node's root the first time archied starts: the image's settings, modules, providers
+# and model manifests (/etc/archie), and the database credential provisioned by `db`.
+init_root() {
+  [ -e "$NODE_ROOT/etc/database.json" ] && return 0
+  [ -r /etc/archie/database.json ] || { say 'no database yet: archie-node db, as root, makes it'; return 1; }
+  install -d -m 0750 "$NODE_ROOT" "$NODE_ROOT/etc" "$NODE_ROOT/run" "$NODE_ROOT/var"
+  local part
+  for part in models modules providers; do
+    [ -d "/etc/archie/$part" ] && cp -r "/etc/archie/$part" "$NODE_ROOT/etc/"
+  done
+  [ -f /etc/archie/archie.toml ] && cp /etc/archie/archie.toml "$NODE_ROOT/etc/"
+  ln -s /etc/archie/database.json "$NODE_ROOT/etc/database.json"
+  say "node root made in $NODE_ROOT"
+}
+
+# Core reads its model manifests when it starts. A model fetched with archie-local gets one
+# here unless a manifest already names its port (a hand-written one, like Bonsai's, stays as
+# it is). Prints how many it added.
+models() {
+  local dir=$NODE_ROOT/etc/models/local added=0 name port
+  if ! command -v archie-local >/dev/null || [ ! -d "$NODE_ROOT" ]; then echo 0; return 0; fi
+  mkdir -p "$dir" 2>/dev/null
+  [ -w "$dir" ] || { say "cannot write $dir; manifests for new local models are not installed" >&2; echo 0; return 0; }
+  while read -r name port; do
+    grep -qsF "127.0.0.1:$port/" "$dir"/*.toml && continue
+    if archie-local manifest "$name" > "$dir/.$name.toml.tmp"; then
+      mv "$dir/.$name.toml.tmp" "$dir/$name.toml"
+      say "manifest for $name installed" >&2
+      added=$((added + 1))
+    else
+      rm -f "$dir/.$name.toml.tmp"
+    fi
+  done < <(archie-local list --json 2>/dev/null | python3 -c '
+import json, sys
+for m in json.load(sys.stdin):
+    if m["here"]: print(m["name"], m["port"])' 2>/dev/null)
+  echo "$added"
+}
+
+start_archied() {
+  rm -f "$NODE_ROOT/run/archied.sock"
+  setsid nohup /usr/bin/archied --root "$NODE_ROOT" --text-logs > "$LOG/archied.log" 2>&1 < /dev/null &
+  for _ in $(seq 1 60); do [ -S "$NODE_ROOT/run/archied.sock" ] && break; sleep 1; done
+  if [ -S "$NODE_ROOT/run/archied.sock" ]; then say 'archied up'; else say "archied did not come up ($LOG/archied.log)"; return 1; fi
+}
+
+up() {
+  local failed=0
+  init_root || failed=1
+  models >/dev/null
+  if command -v archie-local >/dev/null && archie-local ready; then
+    archie-local up && say "model: $(archie-local current)" || { say 'the local model did not start'; failed=1; }
+  else
+    say 'no local model ready (archie-local setup)'
+  fi
+  if [ -d "$NODE_ROOT" ]; then
+    if [ -S "$NODE_ROOT/run/archied.sock" ] && running "[a]rchied --root $NODE_ROOT"; then
+      say 'archied already up'
+    else
+      start_archied || failed=1
+    fi
+    if running "[a]rchie-displayd --root $NODE_ROOT"; then say 'displayd already up'
+    else
+      setsid nohup /usr/bin/archie-displayd --root "$NODE_ROOT" --bind 127.0.0.1:7666 > "$LOG/displayd.log" 2>&1 < /dev/null &
+      for _ in $(seq 1 20); do answers http://127.0.0.1:7666/api/snapshot && break; sleep 0.5; done
+      answers http://127.0.0.1:7666/api/snapshot && say 'displayd up' || { say "displayd did not answer ($LOG/displayd.log)"; failed=1; }
+    fi
+  else
+    say "no node at $NODE_ROOT (NODE_ROOT in $CONF)"; failed=1
+  fi
+  if running "[a]rchie-worldd"; then say 'worldd already up'
+  else
+    local view=()
+    [ -s "$NODE_ROOT/var/lib/sentry/devices.json" ] && view=(--lan-view "$NODE_ROOT/var/lib/sentry/devices.json")
+    setsid nohup /usr/bin/archie-worldd --bind 127.0.0.1:7667 --text-logs "${view[@]}" > "$LOG/worldd.log" 2>&1 < /dev/null &
+    sleep 1; running "[a]rchie-worldd" && say 'worldd up' || { say "worldd did not start ($LOG/worldd.log)"; failed=1; }
+  fi
+  if [ -n "$WANDA_DIR" ] && [ -f "$WANDA_DIR/wanda.toml" ]; then
+    if running "[a]rchie-wanda --config $WANDA_DIR/wanda.toml"; then say 'Wanda already up'
+    else
+      # A background subshell that becomes Wanda, so this script does not stay waiting on it.
+      (cd "$WANDA_DIR" && exec setsid nohup /usr/bin/archie-wanda --config "$WANDA_DIR/wanda.toml" --listen 127.0.0.1:8791 > "$LOG/wanda.log" 2>&1 < /dev/null) &
+      for _ in $(seq 1 30); do grep -q 'Wanda listening' "$LOG/wanda.log" 2>/dev/null && break; sleep 1; done
+      grep -q 'Wanda listening' "$LOG/wanda.log" && say 'Wanda up' || { say "Wanda did not come up ($LOG/wanda.log)"; failed=1; }
+    fi
+  fi
+  return $failed
+}
+
+down() {
+  gui stop >/dev/null
+  # The voice goes with the node: left open over a restart it outlives the model it asks,
+  # and the launcher opens another when the node is back.
+  pkill -TERM -f '[r]un-archie.sh' 2>/dev/null
+  pkill -TERM -f '[a]rchie-voice converse' 2>/dev/null
+  pkill -TERM -f '[a]rchie-wanda --config' 2>/dev/null
+  pkill -TERM -f '[a]rchie-worldd' 2>/dev/null
+  pkill -TERM -f "[a]rchie-displayd --root $NODE_ROOT" 2>/dev/null
+  pkill -TERM -f "[a]rchied --root $NODE_ROOT" 2>/dev/null
+  for _ in $(seq 1 20); do running "[a]rchied --root $NODE_ROOT" || break; sleep 1; done
+  command -v archie-local >/dev/null && archie-local down
+  say 'down (PostgreSQL stays up)'
+}
+
+gui() {
+  local mode=${1:-shell} software=0
+  [ "${2:-}" = --software ] && software=1
+  # By its path and the end of it: /usr/bin/archie-display is also the start of
+  # /usr/bin/archie-displayd, which must not be stopped with the GUI.
+  pkill -f -- "^$DISPLAY_BIN( |$)" 2>/dev/null
+  [ "$mode" = stop ] && { say 'GUI closed'; return 0; }
+  [ -x "$DISPLAY_BIN" ] || { say "no GUI at $DISPLAY_BIN (DISPLAY_BIN in $CONF)"; return 1; }
+  [ -S /mnt/wslg/runtime-dir/wayland-0 ] || { say 'WSLg is not running: no screen to open the GUI on'; return 1; }
+  export WAYLAND_DISPLAY=/mnt/wslg/runtime-dir/wayland-0 XDG_RUNTIME_DIR=/mnt/wslg/runtime-dir
+  export QT_QPA_PLATFORM=wayland LD_LIBRARY_PATH=/usr/lib/wsl/lib GALLIUM_DRIVER=d3d12 LANG=C.UTF-8
+  export ARCHIE_ROOT=$NODE_ROOT
+  [ "$software" = 1 ] && export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
+  local args=()
+  case "$mode" in
+    shell) args=(--shell --shell-bridge /usr/bin/archie-shell-bridge)
+           [ -s "$NODE_ROOT/var/lib/sentry/lan.json" ] && args+=(--lan-file "$NODE_ROOT/var/lib/sentry/lan.json") ;;
+    observatorio) args=() ;;
+    *) say 'gui shell|observatorio|stop'; return 64 ;;
+  esac
+  setsid nohup "$DISPLAY_BIN" "${args[@]}" > "$LOG/gui-$mode.log" 2>&1 < /dev/null &
+  sleep 3
+  running "^$DISPLAY_BIN( |$)" && say "GUI ($mode) open" || { say "the GUI did not start ($LOG/gui-$mode.log)"; return 1; }
+}
+
+json_bool() { if "$@"; then echo true; else echo false; fi; }
+
+status_json() {
+  local paused=null model=null
+  if [ -S "$NODE_ROOT/run/archied.sock" ]; then
+    paused=$(ARCHIE_ROOT=$NODE_ROOT timeout 10 /usr/bin/archie --json ai status 2>/dev/null | python3 -c 'import json,sys; print(str(json.load(sys.stdin).get("paused")).lower())' 2>/dev/null || echo null)
+  fi
+  command -v archie-local >/dev/null && model=$(archie-local current 2>/dev/null | awk '{ printf "{\"name\":\"%s\",\"endpoint\":\"%s\",\"alias\":\"%s\"}", $1, $2, $3 }')
+  printf '{"distro":"%s","node_root":"%s","services":{"model":%s,"archied":%s,"displayd":%s,"worldd":%s,"wanda":%s,"postgres":%s,"gui":%s},"ai_paused":%s,"model":%s,"wanda_configured":%s,"wslg":%s}\n' \
+    "${WSL_DISTRO_NAME:-}" "$NODE_ROOT" \
+    "$(json_bool bash -c 'p=$(archie-local current 2>/dev/null | sed -E "s#.*:([0-9]+)/v1.*#\1#"); [ -n "$p" ] && curl -fs -m 2 -o /dev/null http://127.0.0.1:$p/health')" \
+    "$(json_bool test -S "$NODE_ROOT/run/archied.sock")" \
+    "$(json_bool answers http://127.0.0.1:7666/api/snapshot)" \
+    "$(json_bool running '[a]rchie-worldd')" \
+    "$(json_bool answers http://127.0.0.1:8791/)" \
+    "$(json_bool bash -c "command -v pg_isready >/dev/null && pg_isready -q -h 127.0.0.1 -p $PG_PORT")" \
+    "$(json_bool running "^$DISPLAY_BIN( |$)")" \
+    "$paused" "${model:-null}" \
+    "$(json_bool test -f "$WANDA_DIR/wanda.toml")" \
+    "$(json_bool test -S /mnt/wslg/runtime-dir/wayland-0)"
+}
+
+status() {
+  if [ "${1:-}" = --json ]; then status_json; return; fi
+  status_json | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+for k, v in d["services"].items(): print(k.ljust(9), "up" if v else "down")
+print("model    ", (d["model"] or {}).get("name"), "paused" if d["ai_paused"] else "")'
+}
+
+config() {
+  local voices
+  voices=$(ls /var/lib/archie/models/piper/*.onnx 2>/dev/null | xargs -n1 basename 2>/dev/null | sed 's/\.onnx$//' | paste -sd, -)
+  if [ "${1:-}" = --json ]; then
+    # What the distribution really holds: its virtual disk on Windows only grows, and the
+    # launcher compares the two to say when compacting it gives space back.
+    printf '{"conf":"%s","node_root":"%s","wanda_dir":"%s","display_bin":"%s","pg_port":%s,"voices":"%s","listen_language":"auto","disk_used_bytes":%s,"local":%s}\n' \
+      "$CONF" "$NODE_ROOT" "$WANDA_DIR" "$DISPLAY_BIN" "$PG_PORT" "$voices" \
+      "$(df --output=used -B1 / 2>/dev/null | tail -1 | tr -dc 0-9 | grep . || echo 0)" \
+      "$(archie-local config --json 2>/dev/null || echo null)"
+    return
+  fi
+  echo "conf:        $CONF"
+  echo "node root:   $NODE_ROOT"
+  echo "wanda:       ${WANDA_DIR:-not configured}"
+  echo "gui:         $DISPLAY_BIN"
+  echo "postgres:    :$PG_PORT ($PG_DATA)"
+  echo "voices:      $voices"
+  archie-local config 2>/dev/null | sed 's/^/local       /'
+}
+
+case "${1:-status}" in
+  db) db ;;
+  up) up ;;
+  down) down ;;
+  restart) down; up ;;
+  models)
+    added=$(models)
+    say "$added manifest(s) added"
+    if [ "$added" -gt 0 ] && [ "${2:-}" = --restart ] && running "[a]rchied --root $NODE_ROOT"; then
+      pkill -TERM -f "[a]rchied --root $NODE_ROOT"
+      for _ in $(seq 1 20); do running "[a]rchied --root $NODE_ROOT" || break; sleep 1; done
+      start_archied
+    fi
+    ;;
+  status) status "${2:-}" ;;
+  config) config "${2:-}" ;;
+  gui) gui "${2:-shell}" "${3:-}" ;;
+  *) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
+esac
