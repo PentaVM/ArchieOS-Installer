@@ -101,7 +101,11 @@ Stage、设置），以及 Archie 在上面打开的内容。它会跟随你的�
 
 ArchieOS 以 Linux 系统的形式运行：在 PC 上、虚拟机里，或 **Windows 上的 WSL2** 中。
 
-**在 Windows（WSL2）上。** 构建镜像并安装：
+**下载并安装（Windows）。** 从[下载页面](https://archieos-hub.vercel.app/descargas.html)或[最新发布](https://github.com/PentaVM/ArchieOS-Installer/releases/latest)获取 `ArchieOS-Setup`，解压后双击
+`Setup-ArchieOS.cmd`。它会检查电脑、提供安装 WSL、下载经过签名的系统并校验；**高级**选项可设置聆听方式、
+语音识别语言、语音、Wanda 和本地模型。
+
+**自行构建（WSL2）。** 构建镜像并安装：
 
 ```bash
 sudo ./scripts/wsl/build-rootfs.sh ./dist

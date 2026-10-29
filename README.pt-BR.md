@@ -108,7 +108,12 @@ lugar ou "lat, lon"), camadas, uma régua e o console do Archie.
 O ArchieOS roda como um sistema Linux: em um PC, em uma máquina virtual ou no **WSL2 no
 Windows**.
 
-**No Windows (WSL2).** Gere a imagem e instale:
+**Baixe e instale (Windows).** Baixe o `ArchieOS-Setup` na [página de downloads](https://archieos-hub.vercel.app/descargas.html) ou na
+[última versão](https://github.com/PentaVM/ArchieOS-Installer/releases/latest), descompacte e clique duas vezes em `Setup-ArchieOS.cmd`. Ele verifica o PC,
+oferece instalar o WSL, baixa o sistema assinado e o confere; **Avançado** ajusta a escuta, o idioma do
+reconhecimento de fala, a voz, a Wanda e o modelo local.
+
+**Gere você mesmo (WSL2).** Gere a imagem e instale:
 
 ```bash
 sudo ./scripts/wsl/build-rootfs.sh ./dist

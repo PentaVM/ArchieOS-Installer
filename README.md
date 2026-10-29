@@ -107,7 +107,12 @@ your light or dark theme.
 
 ArchieOS runs as a Linux system: on a PC, in a virtual machine, or under **WSL2 on Windows**.
 
-**On Windows (WSL2).** Build the image and install it:
+**Download and install (Windows).** Get `ArchieOS-Setup` from the [downloads page](https://archieos-hub.vercel.app/descargas.html) or the
+[latest release](https://github.com/PentaVM/ArchieOS-Installer/releases/latest), unzip it and double-click `Setup-ArchieOS.cmd`. It checks the PC, offers to
+install WSL, downloads the signed system and verifies it; **Advanced** sets the listening mode, the
+speech-recognition language, the voice, Wanda and the local model.
+
+**Build it yourself (WSL2).** Build the image and install it:
 
 ```bash
 sudo ./scripts/wsl/build-rootfs.sh ./dist
