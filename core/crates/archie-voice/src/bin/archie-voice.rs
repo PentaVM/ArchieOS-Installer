@@ -1655,7 +1655,25 @@ fn converse(
         end_after: Duration::from_millis(speech.end_after_ms),
         follow_up: archie_voice::listen::FOLLOW_UP_WINDOW,
         steps,
-        phrases: vec!["Archie".into()],
+        // The name, and with a desk the names its requests carry, which the recogniser
+        // otherwise writes as other words ("moaner lea" for "Mona Lisa"). Boosting needs
+        // a GGUF that embeds its tokenizer; without one the recogniser says so and hears
+        // the words unbiased.
+        phrases: if desk.is_some() {
+            [
+                "Archie",
+                "Mona Lisa",
+                "Photopea",
+                "Sentry",
+                "Nebius",
+                "World",
+                "Forge",
+            ]
+            .map(String::from)
+            .to_vec()
+        } else {
+            vec!["Archie".into()]
+        },
         phrase_boost: speech.name_boost,
         notices: speech.notices.clone(),
         narration: desk.as_ref().map(|desk| desk.narration.clone()),

@@ -106,9 +106,10 @@ pub fn drawing() -> Vec<ToolDefinition> {
                  a painting): abre Photopea, toma el pincel y lo dibuja línea a línea mientras \
                  cuentas en voz alta lo que haces. Tarda unos minutos y sigue solo; la \
                  conversación continúa. Sabes dibujar {}. El reconocimiento de voz deforma \
-                 estos nombres (oye «moaner lisa» u «owner leaser» por «Mona Lisa»): si lo que \
-                 se oyó suena como uno de ellos, dibújalo sin preguntar y pásalo con su nombre \
-                 correcto.",
+                 estos nombres (oye «moaner lisa», «owner leaser», «minner leaser» o «the moon \
+                 or Lisa» por «Mona Lisa»): si lo que se oyó suena como uno de ellos, dibújalo \
+                 sin preguntar y pásalo con su nombre correcto. Pedir dibujar algo con «Lisa» \
+                 es pedir la Mona Lisa.",
                 crate::draw::repertoire(crate::draw::Lang::Es)
             ),
             parameters: json!({

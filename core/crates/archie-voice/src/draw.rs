@@ -143,13 +143,24 @@ pub fn find_work(named: &str) -> Option<&'static Work> {
     if said.is_empty() {
         return None;
     }
-    WORKS.iter().find(|work| {
+    let found = WORKS.iter().find(|work| {
         work.id.replace('-', " ") == said
             || work.aliases.iter().any(|alias| said.contains(alias))
             || plain(work.en).contains(&said)
             || plain(work.es).contains(&said)
+    });
+    // However the first word comes out ("minner", "moon or", "owner", "mother"), the
+    // recogniser keeps something like "Lisa", and no other painting here has it.
+    found.or_else(|| {
+        said.split(' ')
+            .any(|word| LISA.contains(&word))
+            .then(|| WORKS.iter().find(|work| work.id == "mona-lisa"))
+            .flatten()
     })
 }
+
+/// "Lisa" as the recogniser writes it at the end of "Mona Lisa".
+const LISA: &[&str] = &["lisa", "liza", "leaser", "leasa", "leesa", "lisas"];
 
 /// The names of what can be drawn, for the model and for a refusal.
 pub fn repertoire(lang: Lang) -> String {
@@ -723,6 +734,9 @@ mod tests {
             "monalisa",
             "the moaner lea",
             "the owner leaser",
+            "the minner leaser",
+            "the moon or Lisa",
+            "la mona. Lisa",
         ] {
             assert_eq!(find_work(said).map(|w| w.id), Some("mona-lisa"), "{said}");
         }
